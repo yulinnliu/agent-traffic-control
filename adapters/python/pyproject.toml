@@ -1,0 +1,28 @@
+[build-system]
+requires = ["hatchling==1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "atc-python-adapter"
+version = "0.1.0"
+description = "Python reference implementation of the Agent Traffic Control contract tools"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "PyYAML==6.0.2",
+    "jsonschema==4.23.0",
+]
+
+[project.scripts]
+atc = "atc_cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest==8.3.5",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/atc_cli"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q -p no:cacheprovider"

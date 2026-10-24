@@ -1,0 +1,1 @@
+["--policies", "{input}/policy", "--out", "{input}/generated", "--check", "--live-claude", "{input}/live/settings.json", "--live-codex", "{input}/live/default.rules", "--live-hook", "{input}/live/pre-commit"]

@@ -1,0 +1,1 @@
+["--policies", "{input}", "--out", "{out}", "--check"]

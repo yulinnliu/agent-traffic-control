@@ -1,0 +1,36 @@
+# Example only. Each project repository owns its real hard-deny file; this one
+# shows the shape with generic entries most projects want.
+version: 1
+
+capabilities:
+  deny:
+    - id: credential-access
+      reason: secrets are read by humans and CI, never by an agent session
+    - id: persistent-data-mutation
+      reason: accumulated project data is not rebuildable
+
+filesystem:
+  deny:
+    - "**/.env"
+    - "**/.env.*"
+    - "**/*.pem"
+    - "**/id_rsa*"
+    - "~/.ssh/**"
+    - "~/.aws/**"
+    - glob: "~/.claude/hooks/**"
+      modes: [edit, write]
+      reason: hooks run in every session; reading them is harmless
+
+commands:
+  deny:
+    - id: git-push-force
+      argv_prefix: [git, push, --force]
+    - id: git-push-f
+      argv_prefix: [git, push, -f]
+    - id: git-reset-hard
+      argv_prefix: [git, reset, --hard]
+    - id: git-clean-fdx
+      argv_prefix: [git, clean, -fdx]
+    - id: git-worktree-remove
+      argv_prefix: [git, worktree, remove]
+      reason: worktree cleanup goes through the preflight check

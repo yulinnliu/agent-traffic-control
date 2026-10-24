@@ -1,0 +1,6 @@
+version: 1
+presets:
+  ops:
+    capabilities: [repo-inspection, credential-access]
+    filesystem:
+      write: ["**/.env"]

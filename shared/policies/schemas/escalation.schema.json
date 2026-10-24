@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/yulinnliu/agent-traffic-control/shared/policies/schemas/escalation.schema.json",
+  "title": "Escalation gate",
+  "description": "Classifies a delegated change as LOW (ready for a human fast-forward) or HIGH (an independent review must run first). A pure function of changed files and the first review's severity. HIGH always wins. No level auto-merges.",
+  "type": "object",
+  "required": ["version", "high_if_any", "low_only_if"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "const": 1 },
+    "high_if_any": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "path_globs": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+        "changed_files_over": { "type": "integer", "minimum": 1 },
+        "review_severity_at_least": { "enum": ["low", "med", "high"] }
+      }
+    },
+    "low_only_if": {
+      "type": "object",
+      "required": ["every_changed_file_matches"],
+      "additionalProperties": false,
+      "properties": {
+        "every_changed_file_matches": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+        "changed_files_at_most": { "type": "integer", "minimum": 1 }
+      }
+    }
+  }
+}

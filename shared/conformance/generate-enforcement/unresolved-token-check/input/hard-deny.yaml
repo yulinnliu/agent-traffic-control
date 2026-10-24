@@ -1,0 +1,8 @@
+version: 1
+capabilities:
+  deny: []
+filesystem:
+  deny:
+    - "**/.env"
+    - glob: "${PERSISTENT_DATA_ROOT}/**"
+      modes: [write]

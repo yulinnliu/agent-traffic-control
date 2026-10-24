@@ -1,0 +1,5 @@
+version: 1
+high_if_any:
+  path_globs: ["**/.env*"]
+low_only_if:
+  every_changed_file_matches: ["**/*.md"]

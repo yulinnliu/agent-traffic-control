@@ -1,0 +1,1 @@
+{"exit_code": 1, "output_contains": ["schema-violation: hard-deny.yaml: version:", "schema-violation: hard-deny.yaml: capabilities/deny/0: "]}

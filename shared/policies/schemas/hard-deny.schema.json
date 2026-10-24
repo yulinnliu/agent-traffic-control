@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/yulinnliu/agent-traffic-control/shared/policies/schemas/hard-deny.schema.json",
+  "title": "Hard deny",
+  "description": "Capabilities, filesystem paths and command prefixes an executing agent must be technically unable to use. A permission preset can never re-grant anything listed here; a conforming loader rejects such a preset.",
+  "type": "object",
+  "required": ["version", "capabilities"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "const": 1 },
+    "capabilities": {
+      "type": "object",
+      "required": ["deny"],
+      "additionalProperties": false,
+      "properties": {
+        "deny": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/capability" } }
+      }
+    },
+    "filesystem": {
+      "type": "object",
+      "required": ["deny"],
+      "additionalProperties": false,
+      "properties": {
+        "deny": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/filesystemRule" } }
+      }
+    },
+    "commands": {
+      "type": "object",
+      "required": ["deny"],
+      "additionalProperties": false,
+      "properties": {
+        "deny": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "required": ["id", "argv_prefix"],
+            "additionalProperties": false,
+            "properties": {
+              "id": { "$ref": "#/$defs/slug" },
+              "argv_prefix": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+              "reason": { "type": "string" }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "slug": { "type": "string", "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$" },
+    "capability": {
+      "type": "object",
+      "required": ["id"],
+      "additionalProperties": false,
+      "properties": { "id": { "$ref": "#/$defs/slug" }, "reason": { "type": "string" } }
+    },
+    "pathGlob": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Glob relative to the executing checkout, or rooted at ~. Enforcement generation refuses a ${...} token: no harness output can resolve it."
+    },
+    "filesystemRule": {
+      "description": "A bare glob denies every access mode; the object form names a subset of modes and a reason.",
+      "oneOf": [
+        { "$ref": "#/$defs/pathGlob" },
+        {
+          "type": "object",
+          "required": ["glob"],
+          "additionalProperties": false,
+          "properties": {
+            "glob": { "$ref": "#/$defs/pathGlob" },
+            "modes": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "enum": ["read", "edit", "write"] } },
+            "reason": { "type": "string" }
+          }
+        }
+      ]
+    }
+  }
+}

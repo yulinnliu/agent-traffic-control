@@ -1,0 +1,1 @@
+{"exit_code": 1, "output_contains": ["preset-regrants-hard-deny: preset 'ops' grants capability 'credential-access'", "preset-regrants-hard-deny: preset 'ops' writes denied path '**/.env'"]}

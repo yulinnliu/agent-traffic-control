@@ -1,0 +1,1 @@
+{"exit_code": 0, "output_contains": ["HIGH: config/.env.production matches **/.env*"]}

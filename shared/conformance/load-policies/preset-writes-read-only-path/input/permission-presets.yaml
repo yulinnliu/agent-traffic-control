@@ -1,0 +1,6 @@
+version: 1
+presets:
+  runtime:
+    capabilities: [repo-inspection]
+    filesystem:
+      write: ["logs/**"]

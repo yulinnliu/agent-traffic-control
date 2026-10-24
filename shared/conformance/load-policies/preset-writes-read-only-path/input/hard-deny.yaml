@@ -1,0 +1,7 @@
+version: 1
+capabilities:
+  deny: []
+filesystem:
+  deny:
+    - glob: "logs/**"
+      modes: [read]

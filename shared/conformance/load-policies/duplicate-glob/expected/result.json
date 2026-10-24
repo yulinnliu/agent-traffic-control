@@ -1,0 +1,1 @@
+{"exit_code": 1, "output_contains": ["duplicate-glob: filesystem.deny lists 'logs/**' more than once"]}

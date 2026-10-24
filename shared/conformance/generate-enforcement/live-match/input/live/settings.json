@@ -1,0 +1,19 @@
+{
+  "includeCoAuthoredBy": false,
+  "permissions": {
+    "allow": [
+      "Bash(git status:*)"
+    ],
+    "deny": [
+      "Bash(git push --force:*)",
+      "Read(**/.env)",
+      "Edit(**/.env)",
+      "Write(**/.env)",
+      "Edit(~/.claude/hooks/**)",
+      "Write(~/.claude/hooks/**)",
+      "Read(logs/**)",
+      "Edit(authorizations/**)",
+      "Write(authorizations/**)"
+    ]
+  }
+}

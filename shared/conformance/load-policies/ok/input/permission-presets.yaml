@@ -1,0 +1,6 @@
+version: 1
+presets:
+  standard:
+    capabilities: [repo-inspection, source-edit]
+    filesystem:
+      write: ["${WORKSPACE}/**"]

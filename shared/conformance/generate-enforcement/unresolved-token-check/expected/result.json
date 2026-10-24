@@ -1,0 +1,1 @@
+{"exit_code": 1, "output_contains": ["unresolved-token: filesystem.deny[1] \"${PERSISTENT_DATA_ROOT}/**\": Claude Code has no form for ${PERSISTENT_DATA_ROOT}"]}

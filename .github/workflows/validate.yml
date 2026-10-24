@@ -1,0 +1,65 @@
+name: validate contracts
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  schemas:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: policy examples match their schemas
+        run: |
+          for name in hard-deny approval-required permission-presets escalation; do
+            uvx --from check-jsonschema==0.33.0 check-jsonschema \
+              --schemafile "shared/policies/schemas/$name.schema.json" \
+              "shared/policies/examples/$name.yaml"
+          done
+
+  shell-install:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: link-skills installs, check-skills verifies, drift and orphans are caught
+        shell: bash
+        run: |
+          set -eu
+          repo=$(mktemp -d)
+          git -C "$repo" init -q -b main
+          printf '# AGENTS.md\n\nIntro.\n\n## Build\n\nmake.\n' > "$repo/AGENTS.md"
+          sh scripts/link-skills.sh "$repo" hami-worktree
+          sh scripts/check-skills.sh "$repo"
+          grep -qF '<!-- atc:project-policy-reference begin -->' "$repo/AGENTS.md"
+          test -f "$repo/.atc/governance/INDEX.md"
+          grep -q '^managed-by: agent-traffic-control$' "$repo/.atc/governance.yaml"
+          grep -q '^managed-by: agent-traffic-control$' "$repo/.claude/skills/hami-worktree/SKILL.md"
+          if grep -q '\$ATC_ROOT\|\$env:ATC_ROOT' "$repo/.claude/skills/hami-worktree/SKILL.md" "$repo"/.atc/governance/*.md; then echo "installed files point back at the checkout" >&2; exit 1; fi
+          echo '# edited' >> "$repo/.claude/skills/hami-worktree/SKILL.md"
+          echo '# edited' >> "$repo/.atc/governance/CORE.md"
+          mkdir -p "$repo/.agents/skills/gone"
+          printf -- '---\nname: gone\ndescription: x\nmanaged-by: agent-traffic-control\ncanonical: gone\n---\n' > "$repo/.agents/skills/gone/SKILL.md"
+          if sh scripts/check-skills.sh "$repo"; then echo "check-skills missed drift" >&2; exit 1; fi
+          sh scripts/link-skills.sh --prune "$repo" hami-worktree
+          sh scripts/check-skills.sh "$repo"
+
+  python-adapter:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: adapters/python
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv run --locked pytest
+      - run: uv run --locked python scripts/validate_workspace.py
+      - run: uv run --locked python scripts/policies.py check ../../shared/policies/examples

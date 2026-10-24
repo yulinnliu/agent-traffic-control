@@ -1,0 +1,29 @@
+version: 1
+
+capabilities:
+  deny:
+    - id: credential-access
+    - id: persistent-data-mutation
+
+filesystem:
+  deny:
+    - "**/.env"
+    - "**/.env.*"
+    - "**/*.pem"
+    - "**/id_rsa*"
+    - "~/.ssh/**"
+    - "~/.aws/**"
+    - "secrets/**"
+
+commands:
+  deny:
+    - id: git-push-force
+      argv_prefix: [git, push, --force]
+    - id: git-push-f
+      argv_prefix: [git, push, -f]
+    - id: git-reset-hard
+      argv_prefix: [git, reset, --hard]
+    - id: git-clean-fdx
+      argv_prefix: [git, clean, -fdx]
+    - id: git-worktree-remove
+      argv_prefix: [git, worktree, remove]

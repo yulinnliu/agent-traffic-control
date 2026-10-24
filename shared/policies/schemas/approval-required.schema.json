@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/yulinnliu/agent-traffic-control/shared/policies/schemas/approval-required.schema.json",
+  "title": "Approval required",
+  "description": "High-impact actions an executing agent must stop and escalate on. Allowed only after a human says yes. Distinct from hard deny, which must be impossible.",
+  "type": "object",
+  "required": ["version", "approval_required"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "const": 1 },
+    "approval_required": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "required": ["id"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$" },
+          "reason": { "type": "string" }
+        }
+      }
+    }
+  }
+}

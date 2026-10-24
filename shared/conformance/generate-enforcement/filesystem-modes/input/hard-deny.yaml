@@ -1,0 +1,19 @@
+version: 1
+capabilities:
+  deny: []
+filesystem:
+  deny:
+    - "**/.env"
+    - glob: "~/.claude/hooks/**"
+      modes: [edit, write]
+      reason: hooks run in every session; reading them is harmless
+    - glob: "logs/**"
+      modes: [read]
+      reason: logs may hold tokens; writing them is the runtime's job
+    - glob: "authorizations/**"
+      modes: [write, edit]
+      reason: an agent writing one would authorize itself
+commands:
+  deny:
+    - id: git-push-force
+      argv_prefix: [git, push, --force]

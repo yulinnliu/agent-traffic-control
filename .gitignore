@@ -1,0 +1,27 @@
+# Machine-local root map: absolute paths, one copy per machine.
+workspace.yaml
+
+# Machine-local memory router naming this machine's real repos.
+/shared/memory/INDEX.md
+
+# Each project under projects/<name>/ is its own repository, never content of this one.
+/projects/
+
+# Disposable per-topic worktrees.
+/worktrees/
+
+# A project's accumulated, hard-to-regenerate data. This line only keeps it out
+# of commits; the mutation policy in AGENTS.md is what protects it.
+/state/
+
+# Tooling caches
+.venv/
+.tooling/
+.pytest_cache/
+__pycache__/
+**/tests/.tmp*/
+
+# Personal tool settings and OS noise
+.claude/settings.local.json
+.DS_Store
+Thumbs.db

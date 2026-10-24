@@ -1,0 +1,15 @@
+# Example only. Additive grants over an implicit deny-all.
+version: 1
+
+presets:
+  read-only:
+    description: inspection and targeted tests, no edits
+    capabilities: [repo-inspection, targeted-tests]
+    filesystem:
+      write: []
+
+  standard:
+    description: a worker inside its own provisioned worktree
+    capabilities: [repo-inspection, source-edit, targeted-tests, permitted-git]
+    filesystem:
+      write: ["${WORKSPACE}/**"]

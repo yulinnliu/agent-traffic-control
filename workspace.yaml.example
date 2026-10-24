@@ -1,0 +1,38 @@
+# Template for workspace.yaml — the canonical machine-specific root map.
+#
+# Copy this file to workspace.yaml (same directory) and fill in your own
+# values. workspace.yaml is gitignored on purpose: it holds absolute,
+# machine-local filesystem paths, so every clone of this workspace needs its
+# own copy rather than sharing one committed version.
+#
+# This is the one place absolute filesystem paths for the workspace live.
+# Any tool or script working across projects should resolve a *logical*
+# project name (e.g. "my-project" below) to concrete roots through this
+# file, instead of hardcoding machine-specific paths elsewhere.
+#
+# Sub-paths under `projects:` are relative to `workspace_root`. The three
+# lifecycles — repository, disposable worktrees, persistent state — are
+# independent; `repo` and `state` are never nested in one another.
+#
+# state: holds a project's accumulated, often hard-to-regenerate data — see
+# AGENTS.md's "Workspace-root mutation policy" for why destructive
+# operations against this repo's root (git clean -fdx, a recursive delete
+# from above) are forbidden rather than relying on relocating this
+# directory for protection.
+
+version: 1
+
+# Governance repository (<owner>/<repo>) that agents resolve at its canonical
+# `main` tip when no task or project pin names a source. Tracked governance
+# text refers to this key instead of naming an account.
+governance_source: <owner>/agent-traffic-control
+
+workspace_root: /absolute/path/to/this/workspace
+
+projects:
+  # One entry per repo you've placed under projects/<name>/. Add or remove
+  # entries freely — there's no fixed or required project.
+  my-project:
+    repo:      projects/my-project
+    worktrees: worktrees/my-project
+    state:     state/my-project-data

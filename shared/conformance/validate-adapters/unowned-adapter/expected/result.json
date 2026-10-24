@@ -1,0 +1,1 @@
+{"exit_code": 1, "output_contains": [".claude/skills/sample/SKILL.md: name collision", "not explicitly marked managed-by: agent-traffic-control"]}

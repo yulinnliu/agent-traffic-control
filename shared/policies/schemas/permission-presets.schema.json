@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/yulinnliu/agent-traffic-control/shared/policies/schemas/permission-presets.schema.json",
+  "title": "Permission presets",
+  "description": "Named additive grant sets over an implicit deny-all. Names are stable; a harness adapter maps them to its own mechanism. A conforming loader rejects a preset that grants any capability listed in hard deny.",
+  "type": "object",
+  "required": ["version", "presets"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "const": 1 },
+    "presets": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": { "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$" },
+      "additionalProperties": {
+        "type": "object",
+        "required": ["capabilities", "filesystem"],
+        "additionalProperties": false,
+        "properties": {
+          "description": { "type": "string" },
+          "capabilities": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": { "type": "string", "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$" }
+          },
+          "filesystem": {
+            "type": "object",
+            "required": ["write"],
+            "additionalProperties": false,
+            "properties": {
+              "write": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } }
+            }
+          }
+        }
+      }
+    }
+  }
+}

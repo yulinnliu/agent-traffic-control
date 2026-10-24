@@ -1,0 +1,9 @@
+# Example only. Not forbidden, but the agent stops and asks a human first.
+version: 1
+
+approval_required:
+  - id: change-governance-semantics
+  - id: change-permission-presets
+  - id: change-hard-deny
+  - id: cross-repo-structural-change
+  - id: new-external-data-provider

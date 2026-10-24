@@ -1,0 +1,21 @@
+# Example only. LOW = ready for a human fast-forward; HIGH = independent review first.
+version: 1
+
+high_if_any:
+  path_globs:
+    - "policies/**"
+    - "**/hard-deny*"
+    - "**/.env*"
+    - "**/*secret*"
+    - "**/*credential*"
+    - "**/auth*"
+    - "**/settings*.json"
+    - ".github/workflows/**"
+  changed_files_over: 15
+  review_severity_at_least: high
+
+low_only_if:
+  every_changed_file_matches:
+    - "**/*.md"
+    - "**/tests/**"
+  changed_files_at_most: 8
