@@ -46,6 +46,20 @@ jobs:
           if sh scripts/check-skills.sh "$repo"; then echo "check-skills missed drift" >&2; exit 1; fi
           sh scripts/link-skills.sh --prune "$repo" hami-worktree
           sh scripts/check-skills.sh "$repo"
+      - name: a pinned governance revision outside this checkout's history is stale, and link-skills re-pins it
+        shell: bash
+        run: |
+          set -eu
+          repo=$(mktemp -d)
+          git -C "$repo" init -q -b main
+          sh scripts/link-skills.sh "$repo" hami-worktree
+          pin="$repo/.atc/governance.yaml"
+          sed 's/^revision: .*/revision: 0000000000000000000000000000000000000000/' "$pin" > "$pin.tmp" && mv "$pin.tmp" "$pin"
+          if out=$(sh scripts/check-skills.sh "$repo"); then echo "check-skills missed a stale pin" >&2; exit 1; fi
+          echo "$out" | grep -q '^stale      .atc/governance.yaml (revision 0\{40\} not in history)$'
+          sh scripts/link-skills.sh "$repo" hami-worktree
+          sh scripts/check-skills.sh "$repo"
+          grep -q "^revision: $(git rev-parse HEAD)\$" "$pin"
 
   python-adapter:
     strategy:

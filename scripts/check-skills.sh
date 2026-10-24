@@ -8,12 +8,13 @@
 # skills directories that carries a `managed-by` marker, and says whether it
 # is current, drifted (differs from the rendered adapter here), or orphaned
 # (no canonical skill of that name here). Also checks the vendored governance
-# under .atc/governance/, the AGENTS.md policy block version, and CLAUDE.md.
-# Exits 1 on any drift, orphan or stale block; `scripts/link-skills.sh`
+# under .atc/governance/, its pinned revision, the AGENTS.md policy block
+# version, and CLAUDE.md. Exits 1 on any drift, orphan, stale block or a pin
+# whose revision is not in this checkout's history; `scripts/link-skills.sh`
 # repairs all of them.
 set -eu
 
-[ $# -eq 1 ] || { sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+[ $# -eq 1 ] || { sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 REPO=$(CDPATH= cd -- "$1" 2>/dev/null && pwd) || { echo "$1: no such directory" >&2; exit 1; }
 
@@ -47,6 +48,15 @@ done
 if [ -e "$REPO/.atc/governance.yaml" ]; then
   if ! managed "$REPO/.atc/governance.yaml"; then
     echo "differs    .atc/governance.yaml (no ownership marker)"; status=1
+  fi
+  # Same rule as validate_workspace.pin_state: the pinned revision must be in HEAD's history.
+  revision=$(tr -d '\r' < "$REPO/.atc/governance.yaml" | sed -n 's/^revision:[[:space:]]*//p' | sed 's/[[:space:]]*$//' | head -n 1)
+  if [ -z "$revision" ] || [ "$revision" = unknown ] || ! git -C "$ROOT" rev-parse --verify -q HEAD >/dev/null 2>&1; then
+    echo "unpinned   .atc/governance.yaml (revision ${revision:-missing})"
+  elif git -C "$ROOT" merge-base --is-ancestor "$revision" HEAD 2>/dev/null; then
+    echo "current    .atc/governance.yaml"
+  else
+    echo "stale      .atc/governance.yaml (revision $revision not in history)"; status=1
   fi
   for src in "$ROOT"/shared/governance/*.md; do
     name=$(basename -- "$src")

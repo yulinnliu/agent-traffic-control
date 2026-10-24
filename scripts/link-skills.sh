@@ -107,7 +107,11 @@ else
   source=$(git -C "$ROOT" remote get-url origin 2>/dev/null | sed -n 's|.*[:/]\([^/:]*/[^/]*\)$|\1|p' | sed 's/\.git$//')
   revision=$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || true)
   : "${source:=unknown}" "${revision:=unknown}"
-  if [ ! -e "$PIN" ] || [ "$changed" = 1 ] || ! grep -q "^source: $source\$" "$PIN"; then
+  pinned=$( [ -e "$PIN" ] && tr -d '\r' < "$PIN" | sed -n 's/^revision:[[:space:]]*//p' | sed 's/[[:space:]]*$//' | head -n 1 || true)
+  # A pinned revision missing from this checkout's history is re-pinned, as check-skills.sh reports it stale.
+  stale=0
+  if [ "$revision" != unknown ] && [ -n "$pinned" ] && [ "$pinned" != unknown ] && ! git -C "$ROOT" merge-base --is-ancestor "$pinned" HEAD 2>/dev/null; then stale=1; fi
+  if [ ! -e "$PIN" ] || [ "$changed" = 1 ] || [ "$stale" = 1 ] || ! grep -q "^source: $source\$" "$PIN"; then
     printf '# Written by Agent Traffic Control sync; never edited by hand.\nmanaged-by: %s\nsource: %s\nrevision: %s\n' "$MARKER" "$source" "$revision" > "$PIN"
     echo "pinned     .atc/governance.yaml ($source @ $revision)"
   else
