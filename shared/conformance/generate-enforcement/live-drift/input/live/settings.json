@@ -8,11 +8,8 @@
       "Bash(git push --force:*)",
       "Read(**/.env)",
       "Edit(**/.env)",
-      "Write(**/.env)",
       "Edit(~/.claude/hooks/**)",
-      "Write(~/.claude/hooks/**)",
-      "Read(logs/**)",
-      "Edit(authorizations/**)"
+      "Read(logs/**)"
     ]
   }
 }

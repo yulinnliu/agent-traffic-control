@@ -32,15 +32,56 @@ Globs are repository-relative or rooted at `~`. A glob holding a `${...}`
 token is refused with `unresolved-token`, naming the entry, and the generator
 writes nothing: Claude Code has no form for the token, so the rule would look
 like protection without being any. Paths that only the workspace map can name,
-such as a project's state directory, need a separate, untracked, machine-local
-deny generated from the map (for example into `.claude/settings.local.json`);
-that layer does not exist yet.
+such as a project's state directory, come from the machine-local segment
+below.
+
+## Machine-local segment
+
+`--workspace <workspace.yaml>` adds a deny the policy cannot carry: every
+registered project's `state` root, resolved against `workspace_root` to an
+absolute path. `atc enforce` passes `--workspace` itself when the checkout
+root holds `workspace.yaml`. A project without `state`, or no map at all,
+leaves every output and check exactly as without the option.
+
+| File | Consumer | Entries |
+| --- | --- | --- |
+| `claude-code/settings.local.json` under `--local-out` | merged into a project's untracked `.claude/settings.local.json`, key `permissions.deny` | `Edit(<state>/**)`, per root in map order |
+
+Paths use Claude Code's absolute form: `/srv/x` becomes `//srv/x`, and a
+Windows path `C:/Users/x` becomes `//c/Users/x`. That `//` prefix marks the
+segment: policy globs never take it, so a live deny list splits into a policy
+segment and a machine-local segment without any other marker. The output
+holds absolute paths, so `--local-out` must lie outside `--out`;
+`generated/enforcement/` never receives it.
+
+Only `Edit` is rendered. Claude Code checks path rules only for `Edit(path)`
+and `Read(path)`; `Write(path)`, `NotebookEdit(path)` and `MultiEdit(path)`
+rules are accepted but never match, and an `Edit` deny already covers
+`Write` and `NotebookEdit` (see "Write(path), NotebookEdit(path), and
+Glob(path) rules never match" in https://code.claude.com/docs/en/permissions).
+
+On Windows, Claude Code loads `.claude/settings.local.json` from the current
+working directory, not the repository root, so a session inside a worktree
+does not read the copy at the project root. To cover worktrees, merge the
+same deny entries into the user-level `~/.claude/settings.json`;
+`--live-claude-local` compares against whichever file it is given.
+
+Only the file tools are covered. A command deny is an argv prefix, which
+cannot name a path argument in every position, a relative path, or a shell
+redirection, so `rm`, `mv` and `>` into a state root stay outside this
+segment. For the same reason Codex, whose rules are argv prefixes only, gets
+no machine-local block.
 
 ## Mapping
 
 **Claude Code.** In policy order: each command becomes
 `Bash(<argv joined by single spaces>:*)`; each filesystem rule becomes one
-entry per mode, in the order `Read(<glob>)`, `Edit(<glob>)`, `Write(<glob>)`.
+entry per tool, in the order `Read(<glob>)`, `Edit(<glob>)`: `read` renders
+`Read`, and `edit` or `write` renders one `Edit`, not repeated when both are
+present. Claude Code checks path rules only for `Read(path)` and `Edit(path)`,
+and an `Edit` deny covers `Write` and `NotebookEdit`, so a `Write(<glob>)`
+entry would never match (see "Write(path), NotebookEdit(path), and Glob(path)
+rules never match" in https://code.claude.com/docs/en/permissions).
 JSON, two-space indent, trailing newline.
 
 **Codex.** Codex rules are user-global and key on a tokenised argv, so only
@@ -80,7 +121,8 @@ normalisation:
 
 | Option | Compares |
 | --- | --- |
-| `--live-claude PATH` | the file's `permissions.deny` list, in order; other settings are ignored |
+| `--live-claude PATH` | the file's `permissions.deny` list, in order; other settings are ignored; with a machine-local segment, only the policy segment |
+| `--live-claude-local PATH` | the machine-local segment of the file's `permissions.deny` list, in order, against the `--workspace` render |
 | `--live-codex PATH` | the `# BEGIN atc hard-deny` ... `# END atc hard-deny` block, markers included; a file without exactly one block drifts |
 | `--live-hook PATH` | the whole hook file |
 
@@ -88,4 +130,6 @@ normalisation:
 it in CI against its committed copy, and `atc validate --projects` fails a
 project whose `generated/enforcement/` differs from its
 `policies/hard-deny.yaml`, so the enforcement surface changes only through a
-reviewed diff of the policy.
+reviewed diff of the policy. It also reports, without failing or writing, a
+project whose `.claude/settings.local.json` lacks the machine-local segment
+or holds one that differs from the map.

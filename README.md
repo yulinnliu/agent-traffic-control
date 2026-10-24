@@ -141,7 +141,9 @@ Linux and Windows. Files installed into a repository carry no format
 version of their own: they are current when they equal what this release
 renders, and sync replaces them otherwise. `atc enforce` renders hard denies
 per access mode, refuses unresolvable tokens and, with `--check`, compares
-installed copies too; `atc validate --projects` checks each project's
+installed copies too; from `workspace.yaml` it also renders a machine-local
+deny on each project's state root, kept out of `generated/enforcement/`.
+`atc validate --projects` checks each project's
 generated enforcement and, on `main`, that its governance pin is in
 `main`'s history.
 

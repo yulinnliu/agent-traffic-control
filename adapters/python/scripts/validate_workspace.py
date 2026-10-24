@@ -29,6 +29,7 @@ failure printed (not just the first one).
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import subprocess
@@ -485,6 +486,24 @@ def check_project_enforcement(project_path: Path, label: str) -> None:
         fail(f"{label}: generated/enforcement/ differs from policies/hard-deny.yaml: {', '.join(drift)} — run atc enforce")
 
 
+def report_machine_local(project_path: Path, label: str, workspace_yaml: Path) -> None:
+    """Report, never fail: `.claude/settings.local.json` carries the state-root deny `atc enforce` renders."""
+    import generate_enforcement
+    try:
+        roots = generate_enforcement.state_roots(workspace_yaml)
+    except ValueError:
+        return  # load_and_check_workspace_yaml already failed on workspace_root
+    if not roots:
+        return
+    target = project_path / ".claude" / "settings.local.json"
+    expected = json.loads(generate_enforcement.local_settings(roots))["permissions"]["deny"]
+    current = generate_enforcement.machine_local(generate_enforcement.deny_entries(target), keep=True)
+    if not current:
+        print(f"--projects: {label}: machine-local state deny missing from .claude/settings.local.json; run atc enforce --local-out and merge")
+    elif current != expected:
+        print(f"--projects: {label}: machine-local state deny in .claude/settings.local.json differs from {workspace_yaml.name}; run atc enforce --local-out and merge")
+
+
 def check_vendored_governance(project_path: Path, label: str) -> None:
     """The project's `.atc/governance/` equals this checkout's `shared/governance/`."""
     manifest = project_path / GOVERNANCE_MANIFEST
@@ -628,6 +647,7 @@ def check_projects(canonical: dict[str, dict], project_checkouts: dict[str, Path
         check_project_policy_reference(project_path, label=f"projects.{name}")
         check_vendored_governance(project_path, label=f"projects.{name}")
         check_project_enforcement(project_path, label=f"projects.{name}.enforcement")
+        report_machine_local(project_path, f"projects.{name}.machine-local", real_workspace_yaml)
         check_adapter_tree(
             project_path, canonical, label=f"projects.{name}", required=baseline_skills(canonical)
         )

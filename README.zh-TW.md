@@ -129,7 +129,8 @@ uv run atc bootstrap sync --prune                                       # 所有
 Python 測試套件。裝進 repository 的檔案本身沒有格式版本：與這個版本
 render 出來的內容相同就是最新，否則 sync 會直接換掉。`atc enforce` 依
 存取模式產生 hard deny，拒絕無法解析的 token，`--check` 也能比對已安裝的
-設定；`atc validate --projects` 會檢查專案的 enforcement 產物，並在 `main`
+設定；有 `workspace.yaml` 時另依各專案的 state root 產生本機 deny，不進
+`generated/enforcement/`。`atc validate --projects` 會檢查專案的 enforcement 產物，並在 `main`
 上確認 governance pin 仍在 `main` 的歷史裡。
 
 ## 授權

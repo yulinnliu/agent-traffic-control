@@ -11,7 +11,7 @@ Commands map onto the scripts under `adapters/python/scripts/`:
     bootstrap  bootstrap.py       init / add / sync / status
     doctor     doctor.py
     policies   policies.py        check DIR
-    enforce    generate_enforcement.py
+    enforce    generate_enforcement.py   (+ --workspace <root>/workspace.yaml when present)
     classify   classify_change.py
     friction   friction.py
 
@@ -85,4 +85,6 @@ def main(argv: list[str] | None = None) -> int:
         return module.main(root)
     if command == "validate" and "--root" not in rest and not any(a.startswith("--root=") for a in rest):
         rest = [*rest, "--root", str(root)]
+    if command == "enforce" and (root / "workspace.yaml").is_file() and not any(a.split("=", 1)[0] == "--workspace" for a in rest):
+        rest = [*rest, "--workspace", str(root / "workspace.yaml")]
     return module.main(rest)
