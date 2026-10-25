@@ -36,6 +36,17 @@ without confirmation.
      by accreting process history that git/docs already record; cross-check
      that every memory file has an index line and every index line points to
      a file that exists.
+   - When recommending a memory fix, give its shape: a closed topic moves to
+     an archive directory with its file kept and its index line dropped;
+     several files on one topic merge into one rewritten as current state
+     plus next step plus rulings, keeping guard sentences ("do not
+     re-propose X"); every fact that moves is first re-checked against the
+     repo, and a stale one is rewritten to the current value.
+   - The session handoff index (`.agents/handoffs/CURRENT.md`, often local
+     and git-ignored) is read at every session start, so audit it the same
+     way. Fix shape: save the whole file unchanged as a dated snapshot in its
+     `archive/`, then rewrite the index as current state only, one line per
+     closed item with its link.
    - If the active tool's memory is internal/opaque (e.g. a local database,
      not user-editable files), skip this item rather than inventing a
      file-based check that doesn't apply - note it as a known gap only if the
