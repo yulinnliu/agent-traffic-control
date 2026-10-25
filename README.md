@@ -118,6 +118,7 @@ Model-invoked unless marked user-invoked.
 
 - **hami-worktree** creates, resumes, audits and cleans up per-topic worktrees whose identity lives in git.
 - **hami-handoff-reminder** decides whether to hand off, compact or write a handoff note.
+- **hami-review-relay** runs writer/reviewer work the user relays between two sessions: step reports, reviews, verdict blocks.
 - **hami-retro** reviews a session record and proposes improvements.
 - **hami-writing-for-agents** is the reference for writing skills, `AGENTS.md` and pointers.
 - **hami-shared-skill** creates a shared skill and its rendered per-tool copies.
