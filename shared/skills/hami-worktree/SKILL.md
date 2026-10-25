@@ -59,6 +59,13 @@ machine-readable result: `contract`, `command`, and per target `verdict`
 Pick the command from the task: a new task is `create`, continuing one is
 `resume`. There is deliberately no "create or resume".
 
+A topic published from elsewhere (a branch ahead of local `main` with no
+managed worktree yet) has no base option on `create`. Route it as a recorded
+exception: `create` the topic from `main`, then, inside the new worktree,
+`git -C <path> merge --ff-only <published tip>` (it succeeds only when `main`
+is an ancestor of that tip), and report the route and both SHAs to the task
+authority.
+
 | Command | Use | Changes |
 | --- | --- | --- |
 | `create --owner O --topic T [--session S]` | start a new task | adds the worktree on a new branch from local `main`, locked with the reason above |
@@ -92,7 +99,7 @@ usage, environment, permission or contract problem.
 | `MAP_INVALID` | fix `workspace.yaml` at the root `atc` resolved (or the `ATC_ROOT` override, if set) |
 | `UNKNOWN_PROJECT` | fix `--project` |
 | `CONTRACT_INCOMPATIBLE` | stop; report the contract your adapter expects and the one the workspace provides |
-| `PERMISSION_DENIED` | the sandbox, an ACL or a busy directory blocked Git metadata or the worktrees root; leave the directory or get approval, then retry once |
+| `PERMISSION_DENIED` | the sandbox, an ACL or a busy directory blocked Git metadata or the worktrees root. On `create`, `resume` or `audit`: leave the directory or get approval, then retry once. On `cleanup`: Git may already have unregistered the worktree, so run `audit` for the topic before anything else; a missing registration means the cleanup half-completed, and the leftover directory and branch go to the user |
 | `UNSUPPORTED_ENVIRONMENT` | a local capability is missing or unverifiable (Git, `main`, lock-reason support, another tool's worktree root that cannot be read); stop retrying |
 
 In `audit`, `LEGACY_TARGET` is informational; only identity conflicts, a
@@ -101,6 +108,10 @@ missing lock and `PATH_UNSAFE` are findings.
 ## Working in the worktree
 
 - Use the absolute path the CLI printed, and run Git as `git -C <path> ...`.
+- Run `cleanup` from a working directory outside the worktree, as its own
+  call after the last command that ran inside it (a merge step included). A
+  shell still sitting in the tree keeps the directory busy and the removal
+  stops halfway.
 - The lock stays from `create` until `cleanup`. It guards against removal and
   records identity; it is not an edit lock. Never lock, unlock, move, prune or
   remove a worktree by hand.
