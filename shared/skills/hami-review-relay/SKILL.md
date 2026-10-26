@@ -37,7 +37,7 @@ End every completed step with a review request carrying:
 - spec/plan sections in scope and the contract sections the step rewrote;
 - changed-file map;
 - targeted test commands with their exact summary lines;
-- mutants run and every survivor;
+- mutants run, one per guard, launchers and scripts included, and every survivor;
 - deviations, open points, known failures you do not own, deferred items;
 - the specific questions for the reviewer, including the real path to walk.
 
@@ -68,7 +68,10 @@ Work through every step; each ends on the stated criterion.
    proven equal to its Git object again and every surviving mutant is listed
    as a test gap or argued equivalent.
 5. **Search by behaviour.** Look for a guard by its refusal token or the
-   behaviour it produces; a single keyword search misses guards.
+   behaviour it produces; a single keyword search misses guards. Also search
+   the repo for the same mechanism already solved elsewhere (a sibling script,
+   an existing helper, a recent entry under `.agents/handoffs`), and treat a
+   second mechanism for one problem as a finding.
 6. **Check real state read-only.** Host evidence (scheduled tasks, stores,
    logs) is read without writing; credentials are never read.
 7. **Verify delegated verdicts.** A fresh-context reviewer's verdict is
