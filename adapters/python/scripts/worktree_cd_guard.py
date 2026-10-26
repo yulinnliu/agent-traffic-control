@@ -4,7 +4,8 @@
 A Bash `cd`/`pushd` outside a subshell, or any PowerShell `cd`/`Set-Location`/
 `sl`/`Push-Location`, carries into every later call of the session; a shell
 parked inside a managed worktree keeps it busy and `atc worktree cleanup`
-stops halfway. Reads the hook payload on stdin and prints a deny decision;
+stops halfway. A target naming a variable assigned a literal earlier in the
+same command is resolved first. Reads the hook payload on stdin and prints a deny decision;
 anything it cannot parse is allowed.
 """
 
@@ -24,10 +25,21 @@ BASH_CD = {"cd", "pushd"}
 BASH_PREFIX = {"then", "do", "else", "elif", "if", "while", "until", "!", "{", "time", "builtin", "command"}
 PWSH_CD = {"cd", "chdir", "sl", "set-location", "push-location", "pushd"}
 PWSH_PATH_PARAMS = {"-path", "-literalpath", "-lp", "-pspath"}
-PWSH_VALUE_PARAMS = {"-stackname"}
+PWSH_VALUE_PARAMS = {
+    "-erroraction", "-ea", "-warningaction", "-wa", "-informationaction", "-infa",
+    "-errorvariable", "-ev", "-warningvariable", "-wv", "-informationvariable", "-iv",
+    "-outvariable", "-ov", "-outbuffer", "-ob", "-pipelinevariable", "-pv", "-stackname",
+}
+BASH_DECLARE = {"export", "declare", "typeset", "local", "readonly"}
+
+# Lexer marks: EXPAND stands for a `$` that expands, QUOTED opens a PowerShell quoted string.
+EXPAND = "\0"
+QUOTED = "\1"
 
 HEREDOC = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][\w-]*)\1")
-ASSIGNMENT = re.compile(r"^[A-Za-z_]\w*=")
+ASSIGNMENT = re.compile(r"^([A-Za-z_]\w*)(\+?)=")
+VARIABLE = re.compile(r"\0(?:\{([A-Za-z_]\w*)\}|([A-Za-z_]\w*))")
+PWSH_ASSIGNMENT = re.compile(r"\0([A-Za-z_]\w*) ?([^\s\w]?)= ?")
 
 
 def bash_commands(text: str) -> list[tuple[int, list[str]]]:
@@ -80,7 +92,9 @@ def bash_commands(text: str) -> list[tuple[int, list[str]]]:
             while i < n and text[i] != '"':
                 if text[i] == "\\" and i + 1 < n and text[i + 1] in '$`"\\\n':
                     i += 1
-                word.append(text[i])
+                    word.append(text[i])
+                else:
+                    word.append(EXPAND if text[i] == "$" else text[i])
                 i += 1
             in_word = True
             i += 1
@@ -105,12 +119,16 @@ def bash_commands(text: str) -> list[tuple[int, list[str]]]:
             i = n if eol < 0 else eol
             continue
         if c == "`":
+            if in_word and not backtick:
+                word.append(EXPAND)
             end_command()
             backtick = not backtick
             depth = depth + 1 if backtick else max(depth - 1, 0)
             i += 1
             continue
         if c == "(" or (c == "$" and text.startswith("$(", i)):
+            if in_word and c == "$":
+                word.append(EXPAND)
             end_command()
             depth += 1
             i += 2 if c == "$" else 1
@@ -128,18 +146,52 @@ def bash_commands(text: str) -> list[tuple[int, list[str]]]:
             end_word()
             i += 1
             continue
-        word.append(c)
+        word.append(EXPAND if c == "$" else c)
         in_word = True
         i += 1
     end_command()
     return commands
 
 
+def expand(word: str, variables: dict[str, str], fold: bool = False) -> str:
+    """Substitute a leading known variable, then restore every other `$`."""
+    match = VARIABLE.match(word)
+    if match:
+        name = match.group(1) or match.group(2)
+        value = variables.get(name.lower() if fold else name)
+        if value is not None:
+            word = value + word[match.end():]
+    return word.replace(EXPAND, "$")
+
+
+def bash_assign(variables: dict[str, str], words: list[str]) -> None:
+    """Record each `NAME=literal` or `NAME+=literal` onto a known NAME; any other assignment forgets NAME."""
+    for word in words:
+        match = ASSIGNMENT.match(word)
+        if not match:
+            continue
+        name, append, value = match.group(1), match.group(2), word[match.end():]
+        if EXPAND in value or "`" in value or (append and name not in variables):
+            variables.pop(name, None)
+        else:
+            variables[name] = variables[name] + value if append else value
+
+
 def bash_targets(text: str) -> list[str]:
     """Directories a top-level Bash `cd`/`pushd` moves to."""
     targets = []
+    variables: dict[str, str] = {}
     for depth, words in bash_commands(text):
         if depth:
+            continue
+        rest = words
+        while rest and rest[0] in BASH_PREFIX:
+            rest = rest[1:]
+        if rest and rest[0] in BASH_DECLARE:
+            bash_assign(variables, rest[1:])
+            continue
+        if all(ASSIGNMENT.match(w) for w in rest):
+            bash_assign(variables, rest)
             continue
         while words and (words[0] in BASH_PREFIX or ASSIGNMENT.match(words[0])):
             words = words[1:]
@@ -147,7 +199,7 @@ def bash_targets(text: str) -> list[str]:
             continue
         args = [w for w in words[1:] if not (w.startswith("-") and w != "-")]
         if args and args[0] != "-":
-            targets.append(args[0])
+            targets.append(expand(args[0], variables))
     return targets
 
 
@@ -188,6 +240,7 @@ def pwsh_commands(text: str) -> list[list[str]]:
             i = n if eol < 0 else eol
             continue
         if c == "'":
+            word.append(QUOTED)
             i += 1
             while i < n:
                 if text[i] == "'":
@@ -202,11 +255,14 @@ def pwsh_commands(text: str) -> list[list[str]]:
             i += 1
             continue
         if c == '"':
+            word.append(QUOTED)
             i += 1
             while i < n and text[i] != '"':
                 if text[i] == "`" and i + 1 < n:
                     i += 1
-                word.append(text[i])
+                    word.append(text[i])
+                else:
+                    word.append(EXPAND if text[i] == "$" else text[i])
                 i += 1
             in_word = True
             i += 1
@@ -224,17 +280,36 @@ def pwsh_commands(text: str) -> list[list[str]]:
             end_word()
             i += 1
             continue
-        word.append(c)
+        word.append(EXPAND if c == "$" else c)
         in_word = True
         i += 1
     end_command()
     return commands
 
 
+def pwsh_assign(variables: dict[str, str], words: list[str]) -> bool:
+    """Handle a `$name = 'literal'` or `"literal"` command; any other assignment forgets the name."""
+    joined = " ".join(words)
+    match = PWSH_ASSIGNMENT.match(joined)
+    if not match:
+        return False
+    name, value = match.group(1).lower(), joined[match.end():]
+    literal = value.startswith(QUOTED) and value.count(QUOTED) == 1 and EXPAND not in value
+    if match.group(2) or not literal or not words[-1].endswith(value):
+        variables.pop(name, None)
+    else:
+        variables[name] = value[1:]
+    return True
+
+
 def pwsh_targets(text: str) -> list[str]:
     """Directories a PowerShell location change moves to."""
     targets = []
+    variables: dict[str, str] = {}
     for words in pwsh_commands(text):
+        if pwsh_assign(variables, words):
+            continue
+        words = [w.replace(QUOTED, "") for w in words]
         if words[0].lower() not in PWSH_CD:
             continue
         args = iter(words[1:])
@@ -244,14 +319,14 @@ def pwsh_targets(text: str) -> list[str]:
             if name in PWSH_PATH_PARAMS:
                 path = arg[len(name) + 1:] if sep else next(args, None)
                 if path:
-                    targets.append(path)
+                    targets.append(expand(path, variables, fold=True))
                 break
             if lower in PWSH_VALUE_PARAMS:
                 next(args, None)
                 continue
             if arg.startswith("-"):
                 continue
-            targets.append(arg)
+            targets.append(expand(arg, variables, fold=True))
             break
     return targets
 
