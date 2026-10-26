@@ -80,8 +80,9 @@ class Workspace:
     def path(self, owner: str, topic: str) -> Path:
         return self.worktrees / f"{owner}+{topic}"
 
-    def cli(self, capsys: pytest.CaptureFixture[str], *argv: str) -> tuple[int, list[dict]]:
-        status = hw.main([*argv, "--json"], root=self.root, environ=self.environ, home=str(self.home))
+    def cli(self, capsys: pytest.CaptureFixture[str], *argv: str, cwd: Path | None = None) -> tuple[int, list[dict]]:
+        status = hw.main([*argv, "--json"], root=self.root, environ=self.environ, home=str(self.home),
+                         cwd=str(cwd) if cwd is not None else None)
         payload = json.loads(capsys.readouterr().out)
         assert payload["contract"] == hw.CONTRACT
         return status, payload["results"]
@@ -153,6 +154,43 @@ def test_atc_root_override_pointing_elsewhere_is_map_invalid(ws: Workspace, tmp_
 def test_unknown_project(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
     status, results = ws.cli(capsys, "audit", "--project", "missing", "--contract", "1")
     assert (status, single(results)["reason"]) == (2, "UNKNOWN_PROJECT")
+
+
+def two_projects(ws: Workspace) -> Path:
+    other = ws.root / "projects" / "other-project"
+    other.mkdir(parents=True)
+    run_git(other, "init", "-q", "-b", "main")
+    commit(other, "b.txt", "b\n")
+    write_map(ws.root, {PROJECT: demo_entry(), "other-project": demo_entry(
+        repo="projects/other-project", worktrees="worktrees/other-project", state="state/other-project-data")})
+    return other
+
+
+def test_project_is_inferred_from_the_repository_and_its_worktrees(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    two_projects(ws)
+    (ws.repo / "sub").mkdir()
+    status, results = ws.cli(capsys, "create", "--owner", "claude", "--topic", "topic", "--contract", "1", cwd=ws.repo / "sub")
+    assert (status, single(results)["reason"]) == (0, "OK")
+    assert os.path.normcase(single(results)["target"]) == os.path.normcase(str(ws.path("claude", "topic")))
+    status, results = ws.cli(capsys, "audit", "--contract", "1", cwd=ws.path("claude", "topic"))
+    assert status == 0
+    assert [os.path.normcase(r["target"]) for r in results] == [os.path.normcase(str(ws.path("claude", "topic")))]
+
+
+def test_explicit_project_wins_over_the_working_directory(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    other = two_projects(ws)
+    status, results = ws.run(capsys, "create")
+    assert status == 0
+    status, results = ws.cli(capsys, "audit", "--project", "other-project", "--contract", "1", cwd=ws.path("claude", "topic"))
+    assert status == 0
+    assert os.path.normcase(single(results)["target"]) == os.path.normcase(str(other.parents[1] / "worktrees" / "other-project"))
+
+
+def test_uninferable_project_lists_the_registered_names(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    two_projects(ws)
+    status, results = ws.cli(capsys, "audit", "--contract", "1", cwd=ws.root)
+    assert (status, single(results)["reason"]) == (2, "UNKNOWN_PROJECT")
+    assert f"registered: {PROJECT}, other-project" in single(results)["detail"]
 
 
 @pytest.mark.parametrize("topic", ["Upper", "-lead", "a+b", "a_b", "a" * 49, ""])

@@ -8,6 +8,9 @@ worktree registration plus that lock reason is the whole durable record; the
 canonical skill `shared/skills/hami-worktree/SKILL.md` documents each command,
 code and next step.
 
+`--project` may be omitted when the working directory lies under a registered
+project's repository or worktrees root; an explicit value always wins.
+
 Usage:
   hami_worktree.py create  --project P --owner O --topic T --contract 1 [--session S] [--json]
   hami_worktree.py resume  --project P --owner O --topic T --contract 1 [--session S] [--rebind-session] [--json]
@@ -893,7 +896,7 @@ def build_parser() -> argparse.ArgumentParser:
     commands = {name: sub.add_parser(name) for name in ("create", "resume", "audit", "cleanup")}
     for name, p in commands.items():
         identity_required = name != "audit"
-        p.add_argument("--project", required=True)
+        p.add_argument("--project")
         p.add_argument("--owner", choices=OWNERS, required=identity_required)
         p.add_argument("--topic", type=topic_arg, required=identity_required)
         p.add_argument("--contract", type=int, required=True)
@@ -930,14 +933,27 @@ def cleanup_mode(parser: argparse.ArgumentParser, args: argparse.Namespace) -> N
         parser.error("abandoned cleanup requires --abandon, --archive-tag and --expected-head together")
 
 
-def run(args: argparse.Namespace, root: Path, environ: dict[str, str], home: str) -> list[Result]:
+def infer_project(ws: Workspace, cwd: str) -> Project | None:
+    """The project whose repository or worktrees root holds ``cwd``; the deepest root wins."""
+    matches = [(len(key(root)), project) for project in ws.projects.values()
+               for root in (project.repo, project.worktrees) if within(cwd, root)]
+    return max(matches, key=lambda m: m[0])[1] if matches else None
+
+
+def run(args: argparse.Namespace, root: Path, environ: dict[str, str], home: str, cwd: str) -> list[Result]:
     if args.contract != CONTRACT:
-        return [Result("CONTRACT_INCOMPATIBLE", args.project, f"adapter requires {args.contract}, workspace provides {CONTRACT}")]
+        return [Result("CONTRACT_INCOMPATIBLE", args.project or "-", f"adapter requires {args.contract}, workspace provides {CONTRACT}")]
     try:
         ws = load_workspace(root, environ)
-        project = ws.projects.get(args.project)
-        if project is None:
-            return [Result("UNKNOWN_PROJECT", args.project, f"registered: {', '.join(sorted(ws.projects)) or 'none'}")]
+        registered = f"registered: {', '.join(sorted(ws.projects)) or 'none'}"
+        if args.project is None:
+            project = infer_project(ws, cwd)
+            if project is None:
+                return [Result("UNKNOWN_PROJECT", cwd, f"no --project and the working directory is in no registered project; {registered}")]
+        else:
+            project = ws.projects.get(args.project)
+            if project is None:
+                return [Result("UNKNOWN_PROJECT", args.project, registered)]
         ctx = Context(ws, project, external_roots(ws, environ, home))
         if args.command == "audit":
             return cmd_audit(ctx, args.owner, args.topic)
@@ -951,7 +967,7 @@ def run(args: argparse.Namespace, root: Path, environ: dict[str, str], home: str
     except Stop as stop:
         return [stop.result]
     except OSError as exc:
-        return [Result("PERMISSION_DENIED", exc.filename or args.project, f"{type(exc).__name__}: {exc.strerror or exc}")]
+        return [Result("PERMISSION_DENIED", exc.filename or args.project or cwd, f"{type(exc).__name__}: {exc.strerror or exc}")]
 
 
 def verdict(command: str, result: Result) -> str:
@@ -969,7 +985,8 @@ def render(results: list[Result]) -> str:
     return "\n".join(f"{r.code} {r.target}{f' ({r.detail})' if r.detail else ''} - {r.next}" for r in results)
 
 
-def main(argv: list[str] | None = None, root: Path = ROOT, environ: dict[str, str] | None = None, home: str | None = None) -> int:
+def main(argv: list[str] | None = None, root: Path = ROOT, environ: dict[str, str] | None = None, home: str | None = None,
+         cwd: str | None = None) -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(errors="backslashreplace")
     parser = build_parser()
@@ -977,7 +994,7 @@ def main(argv: list[str] | None = None, root: Path = ROOT, environ: dict[str, st
     if args.command == "cleanup":
         cleanup_mode(parser, args)
     environ = dict(os.environ) if environ is None else environ
-    results = run(args, root, environ, home if home is not None else os.path.expanduser("~"))
+    results = run(args, root, environ, home if home is not None else os.path.expanduser("~"), cwd or os.getcwd())
     if args.json:
         payload = {
             "contract": CONTRACT,

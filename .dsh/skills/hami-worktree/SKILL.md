@@ -51,7 +51,9 @@ checkout with `uv tool install -e <checkout>/adapters/python`; if there is
 no such checkout, report that this environment lacks the hami-worktree
 capability and stop. Never substitute raw `git worktree` commands.
 
-Every call passes `--project <name> --contract 1`; add `--json` for a
+Every call passes `--project <name> --contract 1`. With `--project` absent,
+the CLI infers the project whose repository or worktrees root holds the
+working directory; an explicit `--project` always wins. Add `--json` for a
 machine-readable result: `contract`, `command`, and per target `verdict`
 (`OK`, `STOP` for a refusal or finding, `ERROR` for an environment problem),
 `reason` (the code below), `target`, `detail`, `next` and `evidence`.
