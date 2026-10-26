@@ -18,6 +18,9 @@ current session handoff; read them before the first report or review.
 ## Every block you write
 
 - Self-contained: restate every item in full, never "as discussed" or "see above".
+  This covers context the receiver lacks, not what it can read: a reviewer reads
+  the code at the named SHA, so a report gives results, choices to rule on and
+  deviations, and does not narrate the implementation.
 - Inline in the reply as one code block the user pastes whole. Use a file only
   for a prompt that is long and revised repeatedly, or a lasting template.
 - Commands the user runs are pasted as-is, so they carry zero placeholders:
