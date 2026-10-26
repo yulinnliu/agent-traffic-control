@@ -113,9 +113,16 @@ QUANT = "/c" + ROOT[2:].replace("\\", "/") + "/worktrees/hami-quant/claude+signa
     (f"declare -x W='{ROOT}'; cd \"$W/worktrees\"", ROOT),
     (f'W="{ROOT}"; W="{QUANT}"; pushd ${{W}}/docs', ROOT),
     (f'W="{ROOT}"; W+=/worktrees/x; cd "$W"', ROOT),
+    (f'if true; then export W="{QUANT}"; fi; cd "$W"', ROOT),
 ])
 def test_bash_cd_to_a_literal_variable_is_refused(command, cwd):
     assert check("Bash", command, cwd) is not None
+
+
+def test_refusal_names_the_resolved_path_with_later_variables_left_as_written():
+    target = check("Bash", f'W="{QUANT}"; cd "$W/$Y"')
+    assert target == f"{QUANT}/$Y"
+    assert f"{QUANT}/$Y" in guard.reason("Bash", target)
 
 
 @pytest.mark.parametrize("command", [
@@ -125,6 +132,7 @@ def test_bash_cd_to_a_literal_variable_is_refused(command, cwd):
     f'W+="{QUANT}"; cd "$W"',
     'W="$HOME/Hami/worktrees/x"; cd "$W"',
     f"W={TREE}`date`; cd \"$W\"",
+    f'W="{QUANT}`date`"; cd "$W"',
     f"W={TREE}$(date); cd \"$W\"",
     f'W="{QUANT}" git status; cd "$W"',
 ])
@@ -137,6 +145,7 @@ def test_bash_cd_to_a_nested_or_expanded_variable_is_allowed(command):
     f'$w = "{WIN}"\ncd $w',
     f"$W='{WIN}'; Set-Location -Path $w",
     f'$w ="{ROOT}"; sl "$W\\worktrees"',
+    f"[string]$w = '{WIN}'; Set-Location $w",
 ])
 def test_powershell_location_change_to_a_literal_variable_is_refused(command):
     assert check("PowerShell", command) is not None

@@ -39,7 +39,7 @@ QUOTED = "\1"
 HEREDOC = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][\w-]*)\1")
 ASSIGNMENT = re.compile(r"^([A-Za-z_]\w*)(\+?)=")
 VARIABLE = re.compile(r"\0(?:\{([A-Za-z_]\w*)\}|([A-Za-z_]\w*))")
-PWSH_ASSIGNMENT = re.compile(r"\0([A-Za-z_]\w*) ?([^\s\w]?)= ?")
+PWSH_ASSIGNMENT = re.compile(r"(?:\[[^\]\s]+\])*\0([A-Za-z_]\w*) ?([^\s\w]?)= ?")
 
 
 def bash_commands(text: str) -> list[tuple[int, list[str]]]:
