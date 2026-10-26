@@ -83,7 +83,9 @@ Work through every step; each ends on the stated criterion.
 - A PASS includes the integration instruction naming the exact reviewed SHA
   and what not to do (build, install, push) when the project's adopted
   process lets a relayed PASS authorize integration; the user pasting it is
-  that approval. A conditional PASS or FAIL carries no integration
+  that approval. Worktree audit/cleanup commands in a block follow the
+  hami-worktree skill's command form; load it before writing them. A
+  conditional PASS or FAIL carries no integration
   instruction. Anything needing the user's decision (version numbers, spec
   semantics, risk limits, remote deletes) stops for the user.
 - Then the next step's scope and the conditions this step carries into it,
