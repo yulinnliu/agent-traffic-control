@@ -1,0 +1,27 @@
+[
+  {
+    "label": "M1 checksum omits payload field scheduled_exit_utc",
+    "edits": [
+      {
+        "path": "packages/hami-quant-strategies/src/hami_quant/strategies/signal_feed/contract.py",
+        "old": "    require(tag in TAGS)\n    return raw_sha(",
+        "new": "    require(tag in TAGS)\n    if tag == \"payload\":\n        value = {k: v for k, v in value.items() if k != \"scheduled_exit_utc\"}\n    return raw_sha("
+      }
+    ]
+  },
+  {
+    "label": "M2 Origin check and Host check both removed (two edits, one mutant)",
+    "edits": [
+      {
+        "path": "packages/hami-quant-strategies/src/hami_quant/strategies/signal_feed/transport.py",
+        "old": "                require(headers.get(\"origin\", policy[\"origin\"]) == policy[\"origin\"], \"INVALID_REQUEST\")\n",
+        "new": ""
+      },
+      {
+        "path": "packages/hami-quant-strategies/src/hami_quant/strategies/signal_feed/transport.py",
+        "old": "                require(headers.get(\"host\") == authority, \"INVALID_REQUEST\")",
+        "new": "                pass"
+      }
+    ]
+  }
+]

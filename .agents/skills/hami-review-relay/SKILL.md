@@ -68,7 +68,8 @@ Work through every step; each ends on the stated criterion.
    project gate the change touches. One single-string mutant per guard, one
    at a time, restored after each run. Done when every file in the copy is
    proven equal to its Git object again and every surviving mutant is listed
-   as a test gap or argued equivalent.
+   as a test gap or argued equivalent. `shared/skills/hami-review-relay/references/mutants.py`
+   and `run_tests.sh` at the workspace root run steps 2 and 4 from a mutants list.
 5. **Search by behaviour.** Look for a guard by its refusal token or the
    behaviour it produces; a single keyword search misses guards. Also search
    the repo for the same mechanism already solved elsewhere (a sibling script,
