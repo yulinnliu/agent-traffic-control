@@ -12,7 +12,7 @@ for d in "$tree"/packages/*/src "$tree"/src; do
 done
 export PYTHONPATH="${pp#;}"
 cd "$tree" || exit 9
-[ -e .venv ] || echo "NOTE no .venv in $tree: hami-quant-trading process, notifications and observer tests need a .venv junction to the main checkout's .venv"
+[ -e .venv ] || echo "NOTE no .venv in $tree: tests that launch source children need one; prepare it as the project's AGENTS.md \"Test layout\" says (hami-quant-trading: junction for a scripts/-only change, uv sync for packages/*). Git Bash ln -s makes a full copy on this host, not a link."
 # Import every regular package under the tree's src dirs (descending through
 # namespace directories) and require its file to live inside the tree; the dirs
 # come from the tree itself, so a src dir missing from PYTHONPATH is caught.

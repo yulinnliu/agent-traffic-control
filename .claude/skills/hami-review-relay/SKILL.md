@@ -48,6 +48,11 @@ Run targeted tests against the worktree with
 at the workspace root: it isolates the data root, strips `HAMI_*` and proves
 the imports come from the worktree.
 
+A tree that runs source child processes needs a `.venv`:
+- Prepare it as the project's `AGENTS.md` says; never with Git Bash `ln -s`, which copies the whole venv here.
+- Before deleting a copy or worktree holding a `.venv` junction, confirm `.venv` is a ReparsePoint, remove the link alone with `cmd //c rmdir` on its literal path (held in a variable), then delete the rest.
+- Never run PowerShell `Remove-Item -Recurse`, or any recursive delete, on a tree that still holds the link.
+
 After a PASS the reviewed SHA is frozen; fixes go in new commits.
 
 ## Reviewer: the review
@@ -58,7 +63,7 @@ Work through every step; each ends on the stated criterion.
    its stated base. Done when the branch tip equals that SHA.
 2. **Build a scratch copy.** Export that exact tree to a scratch directory
    (`git archive <sha>`), point imports at the copy, isolate data roots and
-   strip ambient credentials; tests and mutants never run in a live worktree.
+   strip ambient credentials; tests and mutants never run in a live worktree. A `.venv` in the scratch copy is prepared and removed per the writer paragraph.
    An exported tree can differ only in line endings, so compare files with
    carriage returns ignored. Done when an import-location guard proves the
    copy, not an installed checkout, is what runs.
