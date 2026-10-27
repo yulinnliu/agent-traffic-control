@@ -104,3 +104,7 @@ The writer reports the new `main` SHA and its parents. Done when the first
 parent is the previous `main`, the second parent is the reviewed SHA, and the
 merge tree equals the reviewed tree; on any mismatch, hand it to the user and
 leave `main` as it is.
+
+Once the reviewer has confirmed the integration and the worktree cleanup has
+reported `cleanup_complete: true`, the writer runs the hami-handoff-reminder
+check before starting the next topic.
