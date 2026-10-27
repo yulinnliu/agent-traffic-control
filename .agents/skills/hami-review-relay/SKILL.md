@@ -43,6 +43,11 @@ End every completed step with a review request carrying:
 - deviations, open points, known failures you do not own, deferred items;
 - the specific questions for the reviewer, including the real path to walk.
 
+Run targeted tests against the worktree with
+`shared/skills/hami-review-relay/references/run_tests.sh <worktree> <scratch> <python> <label> <tests...>`
+at the workspace root: it isolates the data root, strips `HAMI_*` and proves
+the imports come from the worktree.
+
 After a PASS the reviewed SHA is frozen; fixes go in new commits.
 
 ## Reviewer: the review

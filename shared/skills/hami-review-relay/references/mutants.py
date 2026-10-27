@@ -26,7 +26,8 @@ def digest(data):
 
 
 def run_pytest(args, label, pytest_args):
-    run = subprocess.run(["bash", str(RUNNER), args.scratch, args.python, label, *pytest_args],
+    tree = str(Path(args.scratch) / "tree")
+    run = subprocess.run(["bash", str(RUNNER), tree, args.scratch, args.python, label, *pytest_args],
                          capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=900)
     if run.returncode == 8:
         sys.exit(run.stdout.strip() or "COPY_IMPORT_MISMATCH")
