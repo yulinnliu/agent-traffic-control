@@ -25,3 +25,7 @@ Then read `shared/governance/INDEX.md` and `CORE.md` from that exact same revisi
 - Integration, publication and deployment are separately governed actions.
 - Never aim destructive project/worktree tooling at this root. Do not run `git clean -fdx` here or recursively delete `projects/`, `worktrees/`, or `state/` from above.
 - Read back changes, then validate from `adapters/python/` with `uv run atc onboard --sync --root-only` followed by `uv run atc validate` after touching a shared skill or overlay, `uv run atc policies check ../../shared/policies/examples` after touching a schema or example, and `uv run --locked pytest` (reads `shared/conformance/`) after touching a tool or fixture.
+
+## This host
+
+- Taipei time comes from PowerShell `[TimeZoneInfo]::ConvertTimeBySystemTimeZoneId((Get-Date), 'Taipei Standard Time')`; Git Bash ignores `TZ=Asia/Taipei` and still prints GMT.

@@ -184,8 +184,12 @@ def test_hook_prints_a_deny_naming_the_alternatives():
     assert ran.returncode == 0, ran.stderr
     decision = json.loads(ran.stdout)["hookSpecificOutput"]
     assert decision["permissionDecision"] == "deny"
-    for alternative in ("git -C <path>", "absolute", "( cd <path> && ... )"):
+    for alternative in ("git -C <path>", "absolute", "( cd <path> && ... )", "`PYTHONPATH`"):
         assert alternative in decision["permissionDecisionReason"]
+
+
+def test_powershell_refusal_names_the_import_alternative():
+    assert "`PYTHONPATH` to its `packages/*/src`" in guard.reason("PowerShell", WIN)
 
 
 def test_hook_allows_silently_and_fails_open():

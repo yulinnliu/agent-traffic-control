@@ -375,7 +375,8 @@ def reason(tool: str, target: str) -> str:
         f"Refused: changing directory to {target} {where} makes the worktree the session's "
         f"working directory for every later call, which keeps it busy and makes "
         f"`atc worktree cleanup` stop halfway. Run Git as `git -C <path> ...` and pass absolute "
-        f"paths{subshell}."
+        f"paths{subshell}. To prove tests import the worktree's code, set `PYTHONPATH` to its "
+        f"`packages/*/src` directories instead of entering it."
     )
 
 
