@@ -38,6 +38,11 @@ or status may be PARTIALLY_VERIFIED / UNVERIFIED / BLOCKED:
 
 If the task changes canonical governance:
   GOVERNANCE_CHANGES.md
+
+If the task defines or changes how a project's product locates its files,
+settings or other projects at runtime, or makes product code read an
+ATC artifact:
+  PROJECT_RUNTIME.md
 ```
 
 A task may load more than one module when multiple conditions apply.

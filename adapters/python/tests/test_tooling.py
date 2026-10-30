@@ -49,9 +49,9 @@ def make_workspace(tmp_path: Path, *, create_project: bool = True) -> tuple[Path
         project.mkdir(parents=True)
         write(project / "AGENTS.md", "# AGENTS.md\n\nProject intro.\n\n## What this is\n\nDemo.\n")
     write(root / "CLAUDE.md", "Read AGENTS.md.\n")
-    for name in ("CORE.md", "GIT_WORKFLOW.md", "VERIFICATION.md", "DELIVERY.md", "FAILURE_ESCALATION.md", "GOVERNANCE_CHANGES.md"):
+    for name in ("CORE.md", "GIT_WORKFLOW.md", "VERIFICATION.md", "DELIVERY.md", "FAILURE_ESCALATION.md", "GOVERNANCE_CHANGES.md", "PROJECT_RUNTIME.md"):
         write(root / "shared/governance" / name, f"# {name}\n")
-    write(root / "shared/governance/INDEX.md", "# INDEX.md\n" + "\n".join(("CORE.md", "GIT_WORKFLOW.md", "VERIFICATION.md", "DELIVERY.md", "FAILURE_ESCALATION.md", "GOVERNANCE_CHANGES.md")) + "\n")
+    write(root / "shared/governance/INDEX.md", "# INDEX.md\n" + "\n".join(("CORE.md", "GIT_WORKFLOW.md", "VERIFICATION.md", "DELIVERY.md", "FAILURE_ESCALATION.md", "GOVERNANCE_CHANGES.md", "PROJECT_RUNTIME.md")) + "\n")
     write(root / "shared/conventions/ALERT_MESSAGES.md", "# Alerts\n")
     write(
         root / "workspace.yaml",
