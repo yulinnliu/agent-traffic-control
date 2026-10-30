@@ -23,5 +23,6 @@ __pycache__/
 
 # Personal tool settings and OS noise
 .claude/settings.local.json
+.vscode/
 .DS_Store
 Thumbs.db
