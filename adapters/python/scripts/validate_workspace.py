@@ -545,6 +545,9 @@ def check_rules_referenced_in_agents_md() -> None:
             fail(f"{governance_dir / name}: missing canonical governance module")
         if name not in text:
             fail(f"{index}: does not route to {name}")
+    for path in sorted(governance_dir.glob("*.md")):
+        if path.name != "INDEX.md" and path.name not in GOVERNANCE_MODULES:
+            fail(f"{path}: not listed in GOVERNANCE_MODULES, so sync never vendors it")
 
 
 def check_shipped_files_are_self_contained() -> None:

@@ -406,6 +406,16 @@ def test_canonical_governance_validation_does_not_require_legacy_redirects(tmp_p
     validator.check_rules_referenced_in_agents_md()
     assert validator.FAILURES == []
 
+
+def test_unlisted_governance_module_is_rejected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root, _ = make_workspace(tmp_path)
+    write(root / "shared/governance/UNLISTED.md", "# UNLISTED.md\n")
+    monkeypatch.setattr(validator, "ROOT", root)
+    validator.FAILURES.clear()
+    validator.check_rules_referenced_in_agents_md()
+    assert any("UNLISTED.md: not listed in GOVERNANCE_MODULES" in failure for failure in validator.FAILURES)
+    validator.FAILURES.clear()
+
 def test_explicit_candidate_checkout_must_exist(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root, _ = make_workspace(tmp_path)
     monkeypatch.setattr(validator, "ROOT", root)

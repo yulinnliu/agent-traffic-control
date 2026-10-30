@@ -40,8 +40,9 @@ If the task changes canonical governance:
   GOVERNANCE_CHANGES.md
 
 If the task defines or changes how a project's product locates its files,
-settings or other projects at runtime, or makes product code read an
-ATC artifact:
+settings or other projects at runtime, makes product code read an
+ATC artifact, or adds or changes ATC tooling that writes a project's
+locations file:
   PROJECT_RUNTIME.md
 ```
 
