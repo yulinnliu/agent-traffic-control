@@ -221,6 +221,12 @@ For a merge allowed by the table, prepare the merge commit on an authorized
 integration-candidate branch or equivalent isolated execution context. Its first
 parent is the recorded current `main` tip and its second parent is the reviewed
 topic tip; use `merge(<topic>): integrate reviewed changes` as its subject.
+
+`atc integrate` is an authorized integration context for this merge: the table
+admits it only when the preflight finds no conflict and no file changed on both
+sides, and the relayed PASS on the reviewed tip is the verification record; the
+merge commit it produces is the integration revision.
+
 The reviewed topic stays unchanged. Conflict resolutions or source changes
 follow the reconciliation and re-review rules in the table.
 
