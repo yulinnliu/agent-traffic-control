@@ -212,6 +212,23 @@ def test_main_moved_after_preflight_stops(repo: Path, monkeypatch: pytest.Monkey
     assert main_tip(repo) == moved[0]
 
 
+def test_no_ff_parents_mismatch_fails_verification(repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    tip = topic(repo, {"a.txt": "a2\n"})
+    commit(repo, "c.txt", "c\n")
+    real = gi.git
+    moved = []
+
+    def advance_before_merge(repo_arg, *args, **kwargs):
+        if args[:2] == ("merge", "--no-ff"):
+            moved.append(commit(repo, "d.txt", "d\n"))
+        return real(repo_arg, *args, **kwargs)
+
+    monkeypatch.setattr(gi, "git", advance_before_merge)
+    assert integrate(repo, "topic", tip) == 1
+    assert "verification failed: parents" in capsys.readouterr().err
+    assert run_git(repo, "rev-parse", "main^1") == moved[0]
+
+
 def test_failed_merge_is_aborted(repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     tip = topic(repo, {"a.txt": "topic\n"})
     before = commit(repo, "a.txt", "main\n")

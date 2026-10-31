@@ -97,8 +97,10 @@ Work through every step; each ends on the stated criterion.
   process lets a relayed PASS authorize integration; the user pasting it is
   that approval. The instruction is
   `atc integrate --repo <main checkout> --branch <topic branch> --reviewed <full SHA>`
-  with the exact 40-character reviewed SHA written out, plus what not to do
-  (build, install, push). Worktree audit/cleanup commands in a block follow the
+  with every bracket filled in before the block is sent (the main checkout
+  path, the branch name and the exact 40-character reviewed SHA), so the
+  pasted command carries zero placeholders, plus what not to do (build,
+  install, push). Worktree audit/cleanup commands in a block follow the
   hami-worktree skill's command form; load it before writing them. A
   conditional PASS or FAIL carries no integration
   instruction. Anything needing the user's decision (version numbers, spec
