@@ -11,9 +11,10 @@ and the user carries every message between them by pasting. "Writer" is a
 permission boundary, not a component name. Everything you send must work as a
 **cold read**: the receiving session has only what the pasted block says.
 
-Project specifics (integration command, required gates, frozen snapshot
-files, build steps) live in that project's `AGENTS.md`, its runbooks and its
-current session handoff; read them before the first report or review.
+Integration runs through `atc integrate` in every project. Project specifics
+(stricter integration gates, required gates, frozen snapshot files, build
+steps) live in that project's `AGENTS.md`, its runbooks and its current
+session handoff; read them before the first report or review.
 
 ## Every block you write
 
@@ -92,10 +93,12 @@ Work through every step; each ends on the stated criterion.
 
 - First line: `<step> review: PASS.`, conditional PASS or FAIL.
 - A "verified" paragraph: test counts, mutant results, read-only host evidence.
-- A PASS includes the integration instruction naming the exact reviewed SHA
-  and what not to do (build, install, push) when the project's adopted
+- A PASS includes the integration instruction when the project's adopted
   process lets a relayed PASS authorize integration; the user pasting it is
-  that approval. Worktree audit/cleanup commands in a block follow the
+  that approval. The instruction is
+  `atc integrate --repo <main checkout> --branch <topic branch> --reviewed <full SHA>`
+  with the exact 40-character reviewed SHA written out, plus what not to do
+  (build, install, push). Worktree audit/cleanup commands in a block follow the
   hami-worktree skill's command form; load it before writing them. A
   conditional PASS or FAIL carries no integration
   instruction. Anything needing the user's decision (version numbers, spec
@@ -105,10 +108,10 @@ Work through every step; each ends on the stated criterion.
 
 ## Reviewer: after integration
 
-The writer reports the new `main` SHA and its parents. Done when the first
-parent is the previous `main`, the second parent is the reviewed SHA, and the
-merge tree equals the reviewed tree; on any mismatch, hand it to the user and
-leave `main` as it is.
+The writer reports the `atc integrate` result line. Done when it matches its
+verdict: for `FF`, the new `main` equals the reviewed SHA; for `NO_FF`, the
+first parent is the previous `main` and the second parent is the reviewed
+SHA. On any mismatch, hand it to the user and leave `main` as it is.
 
 Once the reviewer has confirmed the integration and the worktree cleanup has
 reported `cleanup_complete: true`, the writer runs the hami-handoff-reminder

@@ -112,6 +112,9 @@ missing lock and `PATH_UNSAFE` are findings.
 ## Working in the worktree
 
 - Use the absolute path the CLI printed, and run Git as `git -C <path> ...`.
+- Integrate the reviewed topic with `atc integrate` against the main
+  checkout; it takes the branch and reviewed SHA, not the worktree. Run
+  `cleanup` after it.
 - Run `cleanup` from a working directory outside the worktree, as its own
   call after the last command that ran inside it (a merge step included). A
   shell still sitting in the tree keeps the directory busy and the removal

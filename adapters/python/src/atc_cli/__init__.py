@@ -6,6 +6,7 @@ Commands map onto the scripts under `adapters/python/scripts/`:
 
     worktree   hami_worktree.py   create / resume / audit / cleanup
     preflight  git_preflight.py   merge / cleanup verdicts
+    integrate  git_integrate.py   advance local main to a reviewed topic
     validate   validate_workspace.py
     onboard    onboard_project.py
     bootstrap  bootstrap.py       init / add / sync / status
@@ -32,6 +33,7 @@ CHECKOUT = SCRIPTS.parents[1]
 COMMANDS = {
     "worktree": "hami_worktree",
     "preflight": "git_preflight",
+    "integrate": "git_integrate",
     "validate": "validate_workspace",
     "onboard": "onboard_project",
     "bootstrap": "bootstrap",

@@ -186,6 +186,10 @@ Complete required verification under `VERIFICATION.md`, including its
 documentation-only exception, before advancing `main`; then recheck the source
 and target refs immediately before the update.
 
+`atc integrate` executes this table: each row maps to one verdict, `STOP`
+with its reason code for a stop row, `FF` for the fast-forward row and `NO_FF`
+for the compatible-merge row.
+
 | State | Action |
 | --- | --- |
 | Tip ≠ reviewed SHA, or reviewed SHA not an ancestor of the tip | Stop: review the delta, or re-review |
