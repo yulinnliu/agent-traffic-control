@@ -9,7 +9,7 @@ adoption: baseline
 Canonical version — shared across every repo in this workspace regardless of
 which agent tool is active.
 
-This capability is Session Handoff only. Cross-environment Revision Delivery / Change-set Handoff is governed by `shared/governance/DELIVERY.md` at the bound revision. Most sessions never get told "you're at a good
+This capability is Session Handoff only. Cross-environment Revision Delivery / Change-set Handoff is governed by `DELIVERY.md` at the bound revision. Most sessions never get told "you're at a good
 breakpoint"; they just keep going until context degrades or a compaction
 happens mid-task. This skill is the check that catches that moment and
 surfaces it to the user instead of staying silent.

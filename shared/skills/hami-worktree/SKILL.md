@@ -120,7 +120,7 @@ missing lock and `PATH_UNSAFE` are findings.
 - The lock stays from `create` until `cleanup`. It guards against removal and
   records identity; it is not an edit lock. Never lock, unlock, move, prune or
   remove a worktree by hand.
-- Revision lifecycle/integration follow the bound `shared/governance/GIT_WORKFLOW.md`; verification follows `VERIFICATION.md`; publication/delivery follows `DELIVERY.md`. Default `cleanup` requires
+- Revision lifecycle/integration follow the bound governance revision's `GIT_WORKFLOW.md`; verification follows `VERIFICATION.md`; publication/delivery follows `DELIVERY.md`. Default `cleanup` requires
   integration. Explicit task-authorized abandonment requires all three options
   `--abandon`, `--archive-tag archive/NAME` and `--expected-head FULL_SHA`; the
   existing local tag must resolve exactly to the authorized 40-character tip.
