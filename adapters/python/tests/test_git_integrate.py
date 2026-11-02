@@ -225,6 +225,19 @@ def test_main_moved_after_preflight_stops(repo: Path, monkeypatch: pytest.Monkey
     assert main_tip(repo) == moved[0]
 
 
+def test_candidate_verification_failure_leaves_main_unchanged(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    tip = topic(repo, {"a.txt": "a2\n"})
+    before = main_tip(repo)
+    fail_command = json.dumps([sys.executable, "-c", "raise SystemExit(9)"])
+    assert integrate(repo, "topic", tip, "--verify-command", fail_command) == 1
+    assert "candidate verification failed" in capsys.readouterr().err
+    assert main_tip(repo) == before
+    assert run_git(repo, "rev-parse", "HEAD") == before
+    assert run_git(repo, "status", "--porcelain") == ""
+    refs = run_git(repo, "for-each-ref", "--format=%(refname)", "refs/atc/integration-candidates")
+    assert refs.startswith("refs/atc/integration-candidates/")
+
+
 def test_no_ff_parents_mismatch_fails_verification(repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     tip = topic(repo, {"a.txt": "a2\n"})
     commit(repo, "c.txt", "c\n")
@@ -269,7 +282,7 @@ def test_json_fields(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     assert data == {
         "command": "integrate", "authority_reference": "test-owner-authorization", "verdict": "FF", "reason": "FAST_FORWARD", "main_before": before,
         "main_after": tip, "reviewed": tip, "source_before": tip, "candidate_sha": tip,
-        "first_parent": None, "second_parent": None, "message": None, "verification": "PASS", "candidate_ref": f"refs/atc/integration-candidates/{tip}",
+        "first_parent": None, "second_parent": None, "message": None, "verification": "PASS", "candidate_ref": None,
     }
 
     second = topic(repo, {"b.txt": "b2\n"}, branch="topic/next")
