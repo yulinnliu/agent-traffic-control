@@ -308,7 +308,12 @@ def integrate(
                 result["candidate_cleanup_warning"] = cleanup_error
             # Keep the immutable candidate ref when integration/verification
             # failed. On success main now retains the commit through its branch.
-            if candidate_ref and result.get("verification") == "PASS" and result.get("main_after") == result.get("candidate_sha"):
+            if (
+                candidate_ref
+                and not result.get("recovery_required")
+                and result.get("verification") == "PASS"
+                and result.get("main_after") == result.get("candidate_sha")
+            ):
                 git(repo, "update-ref", "-d", candidate_ref, check=False)
                 result["candidate_ref"] = None
 
