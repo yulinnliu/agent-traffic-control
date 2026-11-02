@@ -98,7 +98,7 @@ def _verify_candidate(
 
 
 
-def _recover_interrupted_update(repo: Path, main: str) -> tuple[int, dict] | None:
+def _recover_interrupted_update(repo: Path, main: str, authority_reference: str) -> tuple[int, dict] | None:
     """Reconcile a verified candidate already installed on main after a crash."""
     main_tip = rev(repo, main)
     if main_tip is None:
@@ -118,6 +118,7 @@ def _recover_interrupted_update(repo: Path, main: str) -> tuple[int, dict] | Non
     status = git(repo, "status", "--porcelain").stdout.strip()
     result = {
         "command": "integrate",
+        "authority_reference": authority_reference,
         "verdict": "RECOVERED",
         "reason": "CANDIDATE_ALREADY_ON_MAIN",
         "main_before": main_tip,
@@ -155,7 +156,7 @@ def integrate(
         raise Refused("--verify-command is required; main cannot advance without candidate verification")
 
     with IntegrationSlot(repo):
-        recovered = _recover_interrupted_update(repo, main)
+        recovered = _recover_interrupted_update(repo, main, authority_reference or "")
         if recovered is not None:
             return recovered
         report = merge_preflight(repo, branch, reviewed, main)
