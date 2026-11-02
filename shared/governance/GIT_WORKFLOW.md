@@ -190,6 +190,32 @@ and target refs immediately before the update.
 with its reason code for a stop row, `FF` for the fast-forward row and `NO_FF`
 for the compatible-merge row.
 
+The Python integration adapter acquires the repository Integration Slot before
+preflight, prepares the integration revision in an isolated candidate worktree,
+and requires an explicit verification command before updating `main`. Supply
+the full reviewed SHA, a reference to the existing `integrate_main` authority
+record, and the required verification command as a JSON argv array. The command
+runs from the candidate checkout with these environment variables:
+
+- `ATC_INTEGRATION_SHA`: immutable candidate commit SHA;
+- `ATC_CANDIDATE_DIR`: isolated candidate checkout path;
+- `ATC_EXPECTED_MAIN_SHA`: main SHA the candidate was based on;
+- `ATC_REVIEWED_SOURCE_SHA`: reviewed source SHA.
+
+The verifier must test the candidate identified by `ATC_INTEGRATION_SHA`, not
+resolve a moving branch name. A nonzero result, changed candidate HEAD, dirty
+candidate checkout, or source/main drift blocks the update. The adapter records
+the supplied authority reference; the invoking governance layer remains
+responsible for confirming that the reference actually grants `integrate_main`
+for this repository and task. The string is audit evidence, not an
+authentication mechanism.
+
+The OS lock coordinates cooperative ATC integration writers only. Every ATC
+writer to the target mainline must honor the slot; unrelated Git processes can
+bypass it. The final checkout-aware fast-forward is an additional guard against
+incompatible mainline drift, not a claim that arbitrary external writers are
+serialized by the lock.
+
 | State | Action |
 | --- | --- |
 | Tip ≠ reviewed SHA, or reviewed SHA not an ancestor of the tip | Stop: review the delta, or re-review |
