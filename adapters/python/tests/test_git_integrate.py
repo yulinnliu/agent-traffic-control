@@ -257,6 +257,74 @@ def test_crash_after_main_update_is_reconciled_without_reset(repo: Path, monkeyp
     assert run_git(repo, "for-each-ref", "--format=%(refname)", "refs/atc/integration-candidates") == ""
 
 
+
+def test_recovery_ref_from_other_request_does_not_short_circuit_integration(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    first_tip = topic(repo, {"a.txt": "first\n"}, branch="topic-one")
+    real_git = gi.git
+
+    def merge_then_crash(repo_arg, *args, **kwargs):
+        result = real_git(repo_arg, *args, **kwargs)
+        if args[:2] == ("merge", "--ff-only"):
+            raise SystemExit(77)
+        return result
+
+    monkeypatch.setattr(gi, "git", merge_then_crash)
+    with pytest.raises(SystemExit, match="77"):
+        integrate(repo, "topic-one", first_tip)
+    monkeypatch.setattr(gi, "git", real_git)
+    assert main_tip(repo) == first_tip
+
+    # A different reviewed request must not inherit the first request's
+    # RECOVERED success. Its candidate is based on the now-advanced main.
+    run_git(repo, "switch", "-q", "-c", "topic-two", "main")
+    second_tip = commit(repo, "b.txt", "second\n")
+    run_git(repo, "switch", "-q", "main")
+    assert integrate(repo, "topic-two", second_tip, "--json") == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["verdict"] == "FF"
+    assert data["reviewed"] == second_tip
+    assert data["main_after"] == second_tip
+    assert data["recovered_candidates"][0]["candidate_sha"] == first_tip
+    assert main_tip(repo) == second_tip
+
+
+def test_untracked_file_does_not_make_checkout_dirty_for_integration(
+    repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    tip = topic(repo, {"a.txt": "a2\n"})
+    (repo / "local-notes.txt").write_text("keep me\n", encoding="utf-8")
+    assert integrate(repo, "topic", tip) == 0
+    assert main_tip(repo) == tip
+    assert (repo / "local-notes.txt").read_text(encoding="utf-8") == "keep me\n"
+    assert "integration checkout became dirty" not in capsys.readouterr().err
+
+
+def test_verifier_timeout_is_reported_and_main_stays_unchanged(
+    repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    tip = topic(repo, {"a.txt": "a2\n"})
+    before = main_tip(repo)
+    slow = json.dumps([sys.executable, "-c", "import time; time.sleep(2)"])
+    assert integrate(repo, "topic", tip, "--verify-command", slow, "--verify-timeout", "0.05") == 1
+    assert "candidate verification timed out" in capsys.readouterr().err
+    assert main_tip(repo) == before
+
+
+def test_missing_verifier_is_reported_without_traceback(
+    repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    tip = topic(repo, {"a.txt": "a2\n"})
+    before = main_tip(repo)
+    missing = json.dumps(["atc-verifier-command-that-does-not-exist"])
+    assert integrate(repo, "topic", tip, "--verify-command", missing) == 1
+    error = capsys.readouterr().err
+    assert "could not start candidate verifier" in error
+    assert "Traceback" not in error
+    assert main_tip(repo) == before
+
+
 def test_candidate_verification_failure_leaves_main_unchanged(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     tip = topic(repo, {"a.txt": "a2\n"})
     before = main_tip(repo)
