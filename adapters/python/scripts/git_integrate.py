@@ -70,7 +70,8 @@ def _remove_candidate(repo: Path, candidate_dir: Path) -> str | None:
 
 
 def _verify_candidate(
-    command: str, candidate_dir: Path, candidate_sha: str, expected_main: str, reviewed: str
+    command: str, candidate_dir: Path, candidate_sha: str, expected_main: str, reviewed: str,
+    timeout: float,
 ) -> None:
     try:
         argv = json.loads(command)
@@ -85,7 +86,15 @@ def _verify_candidate(
         "ATC_EXPECTED_MAIN_SHA": expected_main,
         "ATC_REVIEWED_SOURCE_SHA": reviewed,
     })
-    result = subprocess.run(argv, cwd=candidate_dir, env=env, capture_output=True, text=True, encoding="utf-8")
+    try:
+        result = subprocess.run(
+            argv, cwd=candidate_dir, env=env, capture_output=True, text=True,
+            encoding="utf-8", timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise Refused(f"candidate verification timed out after {timeout:g}s") from exc
+    except OSError as exc:
+        raise Refused(f"could not start candidate verifier: {exc}") from exc
     if result.returncode:
         detail = (result.stderr or result.stdout).strip()
         raise Refused(
@@ -98,7 +107,10 @@ def _verify_candidate(
 
 
 
-def _recover_interrupted_update(repo: Path, main: str, authority_reference: str) -> tuple[int, dict] | None:
+def _recover_interrupted_update(
+    repo: Path, main: str, branch: str, reviewed: str, authority_reference: str,
+    recovered_candidates: list[dict],
+) -> tuple[int, dict] | None:
     """Reconcile a verified candidate already installed on main after a crash."""
     main_tip = rev(repo, main)
     if main_tip is None:
@@ -114,8 +126,29 @@ def _recover_interrupted_update(repo: Path, main: str, authority_reference: str)
             matching.append(ref_name)
     if not matching:
         return None
+
+    # A recovery ref is evidence of a retained candidate, not proof that this
+    # invocation requested that candidate. Never report another request as ours.
+    reviewed_tip = rev(repo, reviewed)
+    branch_tip = rev(repo, branch)
+    parents = git(repo, "rev-list", "--parents", "-n", "1", main_tip).stdout.split()
+    candidate_matches_request = (
+        reviewed_tip == reviewed
+        and branch_tip == reviewed
+        and (main_tip == reviewed or (len(parents) == 3 and parents[2] == reviewed))
+    )
+    if not candidate_matches_request:
+        for ref_name in matching:
+            git(repo, "update-ref", "-d", ref_name, main_tip, check=False)
+        recovered_candidates.append({
+            "candidate_sha": main_tip,
+            "candidate_refs": matching,
+            "disposition": "main_retains_commit_ref_removed_request_not_matched",
+        })
+        return None
+
     head = rev(repo, "HEAD")
-    status = git(repo, "status", "--porcelain").stdout.strip()
+    status = git(repo, "status", "--porcelain", "--untracked-files=no").stdout.strip()
     result = {
         "command": "integrate",
         "authority_reference": authority_reference,
@@ -148,7 +181,7 @@ def _recover_interrupted_update(repo: Path, main: str, authority_reference: str)
 
 def integrate(
     repo: Path, branch: str, reviewed: str, main: str = "main", verify_command: str | None = None,
-    authority_reference: str | None = None,
+    authority_reference: str | None = None, verify_timeout: float = 300.0,
 ) -> tuple[int, dict]:
     if not authority_reference or not authority_reference.strip():
         raise Refused("--authority-reference is required to record the integrate_main authority source")
@@ -156,7 +189,10 @@ def integrate(
         raise Refused("--verify-command is required; main cannot advance without candidate verification")
 
     with IntegrationSlot(repo):
-        recovered = _recover_interrupted_update(repo, main, authority_reference or "")
+        recovered_candidates: list[dict] = []
+        recovered = _recover_interrupted_update(
+            repo, main, branch, reviewed, authority_reference or "", recovered_candidates
+        )
         if recovered is not None:
             return recovered
         report = merge_preflight(repo, branch, reviewed, main)
@@ -178,6 +214,8 @@ def integrate(
             "verification": "NOT_RUN",
             "candidate_ref": None,
         }
+        if recovered_candidates:
+            result["recovered_candidates"] = recovered_candidates
         if report.verdict == "STOP":
             return 1, {**result, "report": report}
 
@@ -219,7 +257,7 @@ def integrate(
             elif candidate_sha != reviewed:
                 raise Refused(f"FF candidate is {candidate_sha}, expected reviewed SHA {reviewed}")
 
-            _verify_candidate(verify_command, candidate_dir, candidate_sha, main_before, reviewed)
+            _verify_candidate(verify_command, candidate_dir, candidate_sha, main_before, reviewed, verify_timeout)
             result["verification"] = "PASS"
 
             # Final source and target checks are inside the cooperative slot.
@@ -227,7 +265,7 @@ def integrate(
                 raise Refused("source tip changed after candidate verification; main unchanged")
             if rev(repo, main) != main_before or rev(repo, "HEAD") != main_before:
                 raise Refused(f"{main} drifted after candidate verification; main unchanged")
-            if git(repo, "status", "--porcelain").stdout.strip():
+            if git(repo, "status", "--porcelain", "--untracked-files=no").stdout.strip():
                 raise Refused("integration checkout became dirty; main unchanged")
 
             candidate_ref = f"refs/atc/integration-candidates/{candidate_sha}"
@@ -250,7 +288,7 @@ def integrate(
                     f"recovery required: main={main_after}, HEAD={rev(repo, 'HEAD')}, "
                     f"candidate={candidate_sha}; retained {candidate_ref}"
                 )
-            status = git(repo, "status", "--porcelain").stdout.strip()
+            status = git(repo, "status", "--porcelain", "--untracked-files=no").stdout.strip()
             if status:
                 raise Refused(
                     f"recovery required: main advanced to {candidate_sha} but checkout is dirty "
@@ -292,6 +330,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--main", default="main", help="integration branch (default: main)")
     parser.add_argument("--authority-reference", required=True, help="reference to the existing record granting integrate_main authority")
     parser.add_argument("--verify-command", required=True, help="required verification argv as a JSON string array, run in the candidate checkout")
+    parser.add_argument("--verify-timeout", type=float, default=300.0, help="maximum verifier runtime in seconds (default: 300)")
     parser.add_argument("--json", action="store_true", help="print the result as JSON")
     return parser
 
@@ -302,7 +341,12 @@ def main(argv: list[str] | None = None) -> int:
         if not FULL_SHA.fullmatch(args.reviewed):
             raise Refused(f"--reviewed must be a full 40-character lowercase SHA: {args.reviewed}")
         check_checkout(args.repo)
-        code, result = integrate(args.repo, args.branch, args.reviewed, args.main, args.verify_command, args.authority_reference)
+        if args.verify_timeout <= 0:
+            raise Refused("--verify-timeout must be greater than zero")
+        code, result = integrate(
+            args.repo, args.branch, args.reviewed, args.main, args.verify_command,
+            args.authority_reference, args.verify_timeout,
+        )
     except (Refused, GitError, RuntimeError) as exc:
         print(f"ERROR {exc}", file=sys.stderr)
         return 2
