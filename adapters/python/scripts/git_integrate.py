@@ -97,6 +97,54 @@ def _verify_candidate(
         raise Refused("verification command dirtied candidate checkout; refusing integration")
 
 
+
+def _recover_interrupted_update(repo: Path, main: str) -> tuple[int, dict] | None:
+    """Reconcile a verified candidate already installed on main after a crash."""
+    main_tip = rev(repo, main)
+    if main_tip is None:
+        return None
+    refs = git(
+        repo, "for-each-ref", "--format=%(refname) %(objectname)",
+        "refs/atc/integration-candidates",
+    ).stdout.splitlines()
+    matching = []
+    for line in refs:
+        ref_name, _, sha = line.partition(" ")
+        if sha == main_tip:
+            matching.append(ref_name)
+    if not matching:
+        return None
+    head = rev(repo, "HEAD")
+    status = git(repo, "status", "--porcelain").stdout.strip()
+    result = {
+        "command": "integrate",
+        "verdict": "RECOVERED",
+        "reason": "CANDIDATE_ALREADY_ON_MAIN",
+        "main_before": main_tip,
+        "main_after": main_tip,
+        "reviewed": None,
+        "source_before": None,
+        "candidate_sha": main_tip,
+        "first_parent": None,
+        "second_parent": None,
+        "message": None,
+        "verification": "PASS",
+        "candidate_ref": matching[0],
+        "recovery_status": "CONSISTENT",
+    }
+    if head != main_tip or status:
+        result.update(
+            recovery_status="REQUIRES_MANUAL_RECONCILIATION",
+            error=f"candidate is main={main_tip}, but HEAD={head} and status={status!r}; retained recovery ref",
+            recovery_required=True,
+        )
+        return 1, result
+    for ref_name in matching:
+        git(repo, "update-ref", "-d", ref_name, main_tip)
+    result["candidate_ref"] = None
+    return 0, result
+
+
 def integrate(
     repo: Path, branch: str, reviewed: str, main: str = "main", verify_command: str | None = None,
     authority_reference: str | None = None,
@@ -107,6 +155,9 @@ def integrate(
         raise Refused("--verify-command is required; main cannot advance without candidate verification")
 
     with IntegrationSlot(repo):
+        recovered = _recover_interrupted_update(repo, main)
+        if recovered is not None:
+            return recovered
         report = merge_preflight(repo, branch, reviewed, main)
         main_before = report.evidence["main_tip"]
         source_before = report.evidence["topic_tip"]
@@ -159,12 +210,6 @@ def integrate(
             if candidate_sha is None or not FULL_SHA.fullmatch(candidate_sha):
                 raise Refused("candidate did not resolve to a full commit SHA")
             result["candidate_sha"] = candidate_sha
-            candidate_ref = f"refs/atc/integration-candidates/{candidate_sha}"
-            ref_create = git(repo, "update-ref", candidate_ref, candidate_sha, check=False)
-            if ref_create.returncode:
-                raise Refused(f"could not retain candidate recovery ref: {(ref_create.stderr or ref_create.stdout).strip()}")
-            result["candidate_ref"] = candidate_ref
-
             if report.verdict == "NO_FF":
                 first, second = _git_ok(candidate_dir, "rev-parse", f"{candidate_sha}^1", f"{candidate_sha}^2").split()
                 result.update(first_parent=first, second_parent=second)
@@ -183,6 +228,12 @@ def integrate(
                 raise Refused(f"{main} drifted after candidate verification; main unchanged")
             if git(repo, "status", "--porcelain").stdout.strip():
                 raise Refused("integration checkout became dirty; main unchanged")
+
+            candidate_ref = f"refs/atc/integration-candidates/{candidate_sha}"
+            ref_create = git(repo, "update-ref", candidate_ref, candidate_sha, check=False)
+            if ref_create.returncode:
+                raise Refused(f"could not retain candidate recovery ref: {(ref_create.stderr or ref_create.stdout).strip()}")
+            result["candidate_ref"] = candidate_ref
 
             update = git(repo, "merge", "--ff-only", candidate_sha, check=False)
             if update.returncode:
