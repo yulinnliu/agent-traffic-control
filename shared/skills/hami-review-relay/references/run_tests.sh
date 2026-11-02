@@ -3,10 +3,20 @@
 # Runs pytest inside <tree> (a `git archive` copy or a worktree) with an isolated
 # environment: every HAMI_* variable unset, QUANT_DATA_ROOT under <scratch>, and
 # PYTHONPATH on the tree's src dirs, proven by an import guard (exit 8 on a miss).
+# <tree>, <scratch> and a path-form <python> may be relative or absolute; all are
+# resolved against the caller's directory to absolute paths before anything else
+# runs (exit 9 when <tree> or <python> does not resolve). PYTHONPATH_MISSING <dir>
+# (exit 8) reports a PYTHONPATH directory absent after entering <tree>.
 # <scratch> holds the data root and pytest's basetemp, so keep its path short.
-tree="$(cygpath -u "$1")"; scratch="$(cygpath -u "$2")"; py="$(cygpath -u "$3")"; label="$4"; shift 4
+label="$4"
+tree="$(cd "$(cygpath -u "$1")" 2>/dev/null && pwd -P)" || { echo "TREE_NOT_FOUND $1"; exit 9; }
+mkdir -p "$(cygpath -u "$2")/qdr" && scratch="$(cd "$(cygpath -u "$2")" && pwd -P)" || { echo "SCRATCH_NOT_CREATED $2"; exit 9; }
+py="$(cygpath -u "$3")"
+case "$py" in
+  */*) py="$(cd "$(dirname "$py")" 2>/dev/null && pwd -P)/$(basename "$py")"; [ -f "$py" ] || { echo "PYTHON_NOT_FOUND $3"; exit 9; } ;;
+esac
+shift 4
 for v in $(env | grep -o '^HAMI_[A-Za-z0-9_]*'); do unset "$v"; done
-mkdir -p "$scratch/qdr"
 export QUANT_DATA_ROOT="$(cygpath -w "$scratch/qdr")"
 pp=""
 for d in "$tree"/packages/*/src "$tree"/src; do
@@ -14,6 +24,10 @@ for d in "$tree"/packages/*/src "$tree"/src; do
 done
 export PYTHONPATH="${pp#;}"
 cd "$tree" || exit 9
+IFS=';' read -ra ppdirs <<< "$PYTHONPATH"
+for d in "${ppdirs[@]}"; do
+  [ -d "$(cygpath -u "$d")" ] || { echo "PYTHONPATH_MISSING $d"; exit 8; }
+done
 [ -e .venv ] || echo "NOTE no .venv in $tree: tests that launch source children need one; prepare it as the project's AGENTS.md says."
 # Import every regular package under the tree's src dirs (descending through
 # namespace directories) and require its file to live inside the tree; the dirs
@@ -32,7 +46,7 @@ def visit(src, rel):
             bad.append(f"{name}: {exc!r}")
             return
         if not os.path.normcase(os.path.realpath(where)).startswith(tree):
-            bad.append(f"{name}: {where}")
+            bad.append(f"{name}: {where} (tree {tree})")
         return
     for child in sorted(os.listdir(here)):
         if os.path.isdir(os.path.join(here, child)) and not child.startswith((".", "_")):
