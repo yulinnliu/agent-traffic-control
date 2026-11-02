@@ -290,6 +290,20 @@ def test_recovery_ref_from_other_request_does_not_short_circuit_integration(
     assert main_tip(repo) == second_tip
 
 
+def test_stale_candidate_ref_is_reported_without_automatic_deletion(
+    repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    stale_sha = main_tip(repo)
+    tip = topic(repo, {"a.txt": "a2\n"})
+    stale_ref = f"refs/atc/integration-candidates/{stale_sha}"
+    run_git(repo, "update-ref", stale_ref, stale_sha)
+    assert integrate(repo, "topic", tip, "--json") == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["main_after"] == tip
+    assert data["stale_candidate_refs"] == [{"ref": stale_ref, "sha": stale_sha}]
+    assert run_git(repo, "rev-parse", stale_ref) == stale_sha
+
+
 def test_untracked_file_does_not_make_checkout_dirty_for_integration(
     repo: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
