@@ -31,6 +31,10 @@ session handoff; read them before the first report or review.
   must check, then reference the variable.
 - Cite a checklist or spec row by its section and the start of its text; line
   numbers are hints only, because earlier batches shift them.
+- Name the task in the form the project's `AGENTS.md` declares (governance
+  `CORE.md` § Task identity); with no declaration, repository, branch and SHA
+  identify it. A task ID from another project's numbering is dropped and
+  pointed out.
 
 ## Writer: the step report
 
