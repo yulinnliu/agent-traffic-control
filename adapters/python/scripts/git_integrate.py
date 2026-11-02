@@ -220,6 +220,7 @@ def integrate(
             # failed. On success main now retains the commit through its branch.
             if candidate_ref and result.get("verification") == "PASS" and result.get("main_after") == result.get("candidate_sha"):
                 git(repo, "update-ref", "-d", candidate_ref, check=False)
+                result["candidate_ref"] = None
 
 
 def render_result(result: dict) -> str:
