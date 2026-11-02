@@ -9,7 +9,7 @@ Integration Slot and never blindly resets main after a failed update.
 
 Usage:
   git_integrate.py --repo <main checkout> --branch <topic> --reviewed <40-hex sha>
-      --verify-command <command> [--main main] [--json]
+      --authority-reference <record> --verify-command <JSON argv> [--main main] [--json]
 """
 from __future__ import annotations
 
@@ -98,8 +98,11 @@ def _verify_candidate(
 
 
 def integrate(
-    repo: Path, branch: str, reviewed: str, main: str = "main", verify_command: str | None = None
+    repo: Path, branch: str, reviewed: str, main: str = "main", verify_command: str | None = None,
+    authority_reference: str | None = None,
 ) -> tuple[int, dict]:
+    if not authority_reference or not authority_reference.strip():
+        raise Refused("--authority-reference is required to record the integrate_main authority source")
     if not verify_command:
         raise Refused("--verify-command is required; main cannot advance without candidate verification")
 
@@ -109,6 +112,7 @@ def integrate(
         source_before = report.evidence["topic_tip"]
         result = {
             "command": "integrate",
+            "authority_reference": authority_reference,
             "verdict": report.verdict,
             "reason": report.reason,
             "main_before": main_before,
@@ -149,6 +153,7 @@ def integrate(
                     check=False,
                 )
                 if merged.returncode:
+                    git(candidate_dir, "merge", "--abort", check=False)
                     raise Refused(f"candidate merge failed: {(merged.stderr or merged.stdout).strip()}")
             candidate_sha = rev(candidate_dir, "HEAD")
             if candidate_sha is None or not FULL_SHA.fullmatch(candidate_sha):
@@ -232,6 +237,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--branch", required=True, help="reviewed topic branch")
     parser.add_argument("--reviewed", required=True, help="full 40-character SHA named by the review")
     parser.add_argument("--main", default="main", help="integration branch (default: main)")
+    parser.add_argument("--authority-reference", required=True, help="reference to the existing record granting integrate_main authority")
     parser.add_argument("--verify-command", required=True, help="required verification argv as a JSON string array, run in the candidate checkout")
     parser.add_argument("--json", action="store_true", help="print the result as JSON")
     return parser
@@ -243,7 +249,7 @@ def main(argv: list[str] | None = None) -> int:
         if not FULL_SHA.fullmatch(args.reviewed):
             raise Refused(f"--reviewed must be a full 40-character lowercase SHA: {args.reviewed}")
         check_checkout(args.repo)
-        code, result = integrate(args.repo, args.branch, args.reviewed, args.main, args.verify_command)
+        code, result = integrate(args.repo, args.branch, args.reviewed, args.main, args.verify_command, args.authority_reference)
     except (Refused, GitError, RuntimeError) as exc:
         print(f"ERROR {exc}", file=sys.stderr)
         return 2
