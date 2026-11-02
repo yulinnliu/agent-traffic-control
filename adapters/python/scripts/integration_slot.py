@@ -51,8 +51,11 @@ class IntegrationSlot:
             self._local_lock = _LOCAL_LOCKS.setdefault(str(self.path), threading.Lock())
 
     def acquire(self, blocking: bool = True) -> bool:
-        if not self._local_lock.acquire(blocking=blocking):
-            return False
+        if not self._local_lock.acquire(blocking=False):
+            if not blocking:
+                return False
+            print(f"waiting for integration slot held at {self.path}", file=sys.stderr, flush=True)
+            self._local_lock.acquire()
         self._owns_local = True
         flags = os.O_CREAT | os.O_RDWR
         if hasattr(os, "O_BINARY"):
