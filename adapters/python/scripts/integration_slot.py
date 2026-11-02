@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import errno
 import os
+import sys
 import subprocess
 import threading
 import time
@@ -61,6 +62,7 @@ class IntegrationSlot:
             if os.name == "nt":
                 if os.fstat(self.fd).st_size == 0:
                     os.write(self.fd, b"\0")
+                waiting_reported = False
                 while True:
                     os.lseek(self.fd, 0, os.SEEK_SET)
                     try:
@@ -73,10 +75,19 @@ class IntegrationSlot:
                             self._close_fd()
                             self._release_local()
                             return False
+                        if not waiting_reported:
+                            print(f"waiting for integration slot held at {self.path}", file=sys.stderr, flush=True)
+                            waiting_reported = True
                         time.sleep(0.05)
             else:
-                lock_flags = fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB)
-                fcntl.flock(self.fd, lock_flags)
+                if blocking:
+                    try:
+                        fcntl.flock(self.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    except BlockingIOError:
+                        print(f"waiting for integration slot held at {self.path}", file=sys.stderr, flush=True)
+                        fcntl.flock(self.fd, fcntl.LOCK_EX)
+                else:
+                    fcntl.flock(self.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 return True
         except BlockingIOError:
             self._close_fd()
