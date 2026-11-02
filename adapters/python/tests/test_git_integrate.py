@@ -68,7 +68,7 @@ def verify_command() -> str:
 def integrate(repo: Path, branch: str, reviewed: str, *extra: str) -> int:
     return gi.main([
         "--repo", str(repo), "--branch", branch, "--reviewed", reviewed,
-        "--verify-command", verify_command(), *extra
+        "--authority-reference", "test-owner-authorization", "--verify-command", verify_command(), *extra
     ])
 
 
@@ -261,13 +261,13 @@ def test_failed_merge_is_aborted(repo: Path, monkeypatch: pytest.MonkeyPatch, ca
 
 
 def test_json_fields(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    keys = {"command", "verdict", "reason", "main_before", "main_after", "reviewed", "source_before", "candidate_sha", "first_parent", "second_parent", "message", "verification", "candidate_ref"}
+    keys = {"command", "authority_reference", "verdict", "reason", "main_before", "main_after", "reviewed", "source_before", "candidate_sha", "first_parent", "second_parent", "message", "verification", "candidate_ref"}
     before = main_tip(repo)
     tip = topic(repo, {"a.txt": "a2\n"}, branch="first")
     assert integrate(repo, "first", tip, "--json") == 0
     data = json.loads(capsys.readouterr().out)
     assert data == {
-        "command": "integrate", "verdict": "FF", "reason": "FAST_FORWARD", "main_before": before,
+        "command": "integrate", "authority_reference": "test-owner-authorization", "verdict": "FF", "reason": "FAST_FORWARD", "main_before": before,
         "main_after": tip, "reviewed": tip, "source_before": tip, "candidate_sha": tip,
         "first_parent": None, "second_parent": None, "message": None, "verification": "PASS", "candidate_ref": f"refs/atc/integration-candidates/{tip}",
     }
