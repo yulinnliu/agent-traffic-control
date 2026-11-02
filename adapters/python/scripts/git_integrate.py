@@ -189,12 +189,25 @@ def integrate(
         raise Refused("--verify-command is required; main cannot advance without candidate verification")
 
     with IntegrationSlot(repo):
+        main_tip_for_refs = rev(repo, main)
+        ref_lines = git(
+            repo, "for-each-ref", "--format=%(refname) %(objectname)",
+            "refs/atc/integration-candidates",
+        ).stdout.splitlines()
+        stale_candidate_refs = []
+        for line in ref_lines:
+            name, _, sha = line.partition(" ")
+            if sha != main_tip_for_refs:
+                stale_candidate_refs.append({"ref": name, "sha": sha})
         recovered_candidates: list[dict] = []
         recovered = _recover_interrupted_update(
             repo, main, branch, reviewed, authority_reference or "", recovered_candidates
         )
         if recovered is not None:
-            return recovered
+            code, recovered_result = recovered
+            if stale_candidate_refs:
+                recovered_result["stale_candidate_refs"] = stale_candidate_refs
+            return code, recovered_result
         report = merge_preflight(repo, branch, reviewed, main)
         main_before = report.evidence["main_tip"]
         source_before = report.evidence["topic_tip"]
@@ -216,6 +229,8 @@ def integrate(
         }
         if recovered_candidates:
             result["recovered_candidates"] = recovered_candidates
+        if stale_candidate_refs:
+            result["stale_candidate_refs"] = stale_candidate_refs
         if report.verdict == "STOP":
             return 1, {**result, "report": report}
 
