@@ -15,11 +15,10 @@ else:
 
 _LOCAL_LOCKS: dict[str, threading.Lock] = {}
 _LOCAL_LOCKS_GUARD = threading.Lock()
-_SCRUBBED = {key for key in os.environ if key.startswith("GIT_")}
 
 
 def _git(repo: Path, *args: str) -> str:
-    env = {key: value for key, value in os.environ.items() if key not in _SCRUBBED}
+    env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
     env["GIT_OPTIONAL_LOCKS"] = "0"
     result = subprocess.run(
         ["git", "-C", str(repo), *args],
