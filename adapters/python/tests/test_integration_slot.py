@@ -35,11 +35,13 @@ def repo(tmp_path: Path) -> Path:
     return root
 
 
-def _child_hold(repo: str, ready, release) -> None:
+def _child_hold(repo: str, ready) -> None:
     slot = IntegrationSlot(Path(repo))
     slot.acquire()
     ready.set()
-    release.wait(15)
+    # Keep the OS lock held without waiting on a multiprocessing Event.
+    # Terminating this child must not leave a synchronization primitive locked.
+    time.sleep(15)
     slot.release()
 
 
@@ -82,8 +84,8 @@ def test_linked_worktrees_share_lock_identity(repo: Path, tmp_path: Path) -> Non
 
 def test_multiprocess_exclusion_and_process_exit_releases_lock(repo: Path) -> None:
     ctx = mp.get_context("spawn")
-    ready, release = ctx.Event(), ctx.Event()
-    process = ctx.Process(target=_child_hold, args=(str(repo), ready, release))
+    ready = ctx.Event()
+    process = ctx.Process(target=_child_hold, args=(str(repo), ready))
     process.start()
     try:
         assert ready.wait(10)
@@ -93,7 +95,6 @@ def test_multiprocess_exclusion_and_process_exit_releases_lock(repo: Path) -> No
         assert process.exitcode is not None
         assert IntegrationSlot(repo).acquire(blocking=False)
     finally:
-        release.set()
         if process.is_alive():
             process.terminate()
             process.join(5)
