@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import os
 import subprocess
 from pathlib import Path
@@ -55,8 +56,20 @@ def main_tip(repo: Path) -> str:
     return run_git(repo, "rev-parse", "main")
 
 
+def verify_command() -> str:
+    script = (
+        "import os,subprocess; "
+        "assert subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()==os.environ['ATC_INTEGRATION_SHA']; "
+        "assert not subprocess.check_output(['git','status','--porcelain'],text=True).strip()"
+    )
+    return json.dumps([sys.executable, "-c", script])
+
+
 def integrate(repo: Path, branch: str, reviewed: str, *extra: str) -> int:
-    return gi.main(["--repo", str(repo), "--branch", branch, "--reviewed", reviewed, *extra])
+    return gi.main([
+        "--repo", str(repo), "--branch", branch, "--reviewed", reviewed,
+        "--verify-command", verify_command(), *extra
+    ])
 
 
 def test_fast_forward_advances_main_to_reviewed(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -64,7 +77,7 @@ def test_fast_forward_advances_main_to_reviewed(repo: Path, capsys: pytest.Captu
     tip = topic(repo, {"a.txt": "a2\n"})
     assert integrate(repo, "topic", tip) == 0
     assert main_tip(repo) == tip
-    assert capsys.readouterr().out.strip() == f"FF main {before} -> {tip}"
+    assert capsys.readouterr().out.strip().startswith(f"FF main {before} -> {tip} candidate {tip} verification=PASS")
     assert run_git(repo, "status", "--porcelain") == ""
 
 
@@ -75,7 +88,7 @@ def test_no_ff_merges_with_subject_and_parents(repo: Path, capsys: pytest.Captur
     after = main_tip(repo)
     assert run_git(repo, "rev-parse", "main^1", "main^2").split() == [before, tip]
     assert run_git(repo, "log", "-1", "--format=%s", "main") == "merge(demo-topic): integrate reviewed changes"
-    assert capsys.readouterr().out.strip() == f"NO_FF main {before} -> {after} (parents {before} {tip})"
+    assert capsys.readouterr().out.strip().startswith(f"NO_FF main {before} -> {after} candidate ")
 
 
 @pytest.mark.parametrize(("branch", "expected"), [
@@ -226,7 +239,8 @@ def test_no_ff_parents_mismatch_fails_verification(repo: Path, monkeypatch: pyte
     monkeypatch.setattr(gi, "git", advance_before_merge)
     assert integrate(repo, "topic", tip) == 1
     assert "verification failed: parents" in capsys.readouterr().err
-    assert run_git(repo, "rev-parse", "main^1") == moved[0]
+    assert main_tip(repo) == moved[0]
+    assert run_git(repo, "status", "--porcelain") == ""
 
 
 def test_failed_merge_is_aborted(repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
@@ -247,14 +261,15 @@ def test_failed_merge_is_aborted(repo: Path, monkeypatch: pytest.MonkeyPatch, ca
 
 
 def test_json_fields(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    keys = {"command", "verdict", "reason", "main_before", "main_after", "reviewed", "first_parent", "second_parent", "message"}
+    keys = {"command", "verdict", "reason", "main_before", "main_after", "reviewed", "source_before", "candidate_sha", "first_parent", "second_parent", "message", "verification", "candidate_ref"}
     before = main_tip(repo)
     tip = topic(repo, {"a.txt": "a2\n"}, branch="first")
     assert integrate(repo, "first", tip, "--json") == 0
     data = json.loads(capsys.readouterr().out)
     assert data == {
         "command": "integrate", "verdict": "FF", "reason": "FAST_FORWARD", "main_before": before,
-        "main_after": tip, "reviewed": tip, "first_parent": None, "second_parent": None, "message": None,
+        "main_after": tip, "reviewed": tip, "source_before": tip, "candidate_sha": tip,
+        "first_parent": None, "second_parent": None, "message": None, "verification": "PASS", "candidate_ref": f"refs/atc/integration-candidates/{tip}",
     }
 
     second = topic(repo, {"b.txt": "b2\n"}, branch="topic/next")
@@ -263,7 +278,8 @@ def test_json_fields(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     data = json.loads(capsys.readouterr().out)
     assert set(data) == keys
     assert (data["verdict"], data["reason"], data["main_before"]) == ("NO_FF", "COMPATIBLE", base)
-    assert (data["main_after"], data["first_parent"], data["second_parent"]) == (main_tip(repo), base, second)
+    assert (data["main_after"], data["candidate_sha"], data["first_parent"], data["second_parent"]) == (main_tip(repo), main_tip(repo), base, second)
+    assert data["verification"] == "PASS"
     assert data["message"] == "merge(next): integrate reviewed changes"
 
 
