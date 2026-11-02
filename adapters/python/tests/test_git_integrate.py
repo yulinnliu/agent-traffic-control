@@ -225,6 +225,38 @@ def test_main_moved_after_preflight_stops(repo: Path, monkeypatch: pytest.Monkey
     assert main_tip(repo) == moved[0]
 
 
+def test_crash_after_main_update_is_reconciled_without_reset(repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    tip = topic(repo, {"a.txt": "a2\n"})
+    real_git = gi.git
+    crashed = []
+
+    def merge_then_crash(repo_arg, *args, **kwargs):
+        result = real_git(repo_arg, *args, **kwargs)
+        if args[:2] == ("merge", "--ff-only"):
+            crashed.append(args[2])
+            raise SystemExit(77)
+        return result
+
+    monkeypatch.setattr(gi, "git", merge_then_crash)
+    with pytest.raises(SystemExit, match="77"):
+        integrate(repo, "topic", tip)
+    assert main_tip(repo) == tip
+    assert run_git(repo, "rev-parse", "HEAD") == tip
+    assert run_git(repo, "status", "--porcelain") == ""
+    refs = run_git(repo, "for-each-ref", "--format=%(refname) %(objectname)", "refs/atc/integration-candidates")
+    assert f"refs/atc/integration-candidates/{tip} {tip}" in refs
+
+    monkeypatch.setattr(gi, "git", real_git)
+    assert integrate(repo, "topic", tip, "--json") == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["verdict"] == "RECOVERED"
+    assert data["recovery_status"] == "CONSISTENT"
+    assert data["main_after"] == tip
+    assert main_tip(repo) == tip
+    assert run_git(repo, "status", "--porcelain") == ""
+    assert run_git(repo, "for-each-ref", "--format=%(refname)", "refs/atc/integration-candidates") == ""
+
+
 def test_candidate_verification_failure_leaves_main_unchanged(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     tip = topic(repo, {"a.txt": "a2\n"})
     before = main_tip(repo)
