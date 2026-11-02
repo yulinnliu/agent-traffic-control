@@ -338,6 +338,30 @@ def test_candidate_verification_failure_leaves_main_unchanged(repo: Path, capsys
     assert refs == ""
 
 
+
+def test_post_integration_checkout_change_keeps_recovery_ref(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    tip = topic(repo, {"a.txt": "a2\n"})
+    real_git = gi.git
+
+    def dirty_after_ff(repo_arg, *args, **kwargs):
+        result = real_git(repo_arg, *args, **kwargs)
+        if args[:2] == ("merge", "--ff-only"):
+            (repo / "a.txt").write_text("unexpected checkout mutation\n", encoding="utf-8")
+        return result
+
+    monkeypatch.setattr(gi, "git", dirty_after_ff)
+    assert integrate(repo, "topic", tip, "--json") == 1
+    data = json.loads(capsys.readouterr().out)
+    assert data["recovery_required"] is True
+    assert data["main_after"] == tip
+    assert data["candidate_ref"] == f"refs/atc/integration-candidates/{tip}"
+    assert run_git(repo, "for-each-ref", "--format=%(refname)", "refs/atc/integration-candidates") == data["candidate_ref"]
+    monkeypatch.setattr(gi, "git", real_git)
+
+
+
 def test_no_ff_parents_mismatch_fails_verification(repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     tip = topic(repo, {"a.txt": "a2\n"})
     commit(repo, "c.txt", "c\n")
