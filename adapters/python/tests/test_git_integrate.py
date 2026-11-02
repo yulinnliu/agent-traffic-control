@@ -267,7 +267,7 @@ def test_candidate_verification_failure_leaves_main_unchanged(repo: Path, capsys
     assert run_git(repo, "rev-parse", "HEAD") == before
     assert run_git(repo, "status", "--porcelain") == ""
     refs = run_git(repo, "for-each-ref", "--format=%(refname)", "refs/atc/integration-candidates")
-    assert refs.startswith("refs/atc/integration-candidates/")
+    assert refs == ""
 
 
 def test_no_ff_parents_mismatch_fails_verification(repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
