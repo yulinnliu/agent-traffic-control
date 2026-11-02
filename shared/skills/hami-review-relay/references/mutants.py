@@ -1,7 +1,6 @@
 """Apply each mutant alone to the scratch copy, run pytest, restore, prove the bytes equal Git.
 
 usage: mutants.py SCRATCH SHA WORKTREE MUTANTS_JSON --python PY --tests PATH [PATH ...]
-(the target venv needs pytest-xdist: run_tests.sh passes `-n 0`)
 
 SCRATCH/tree is the export of SHA (`git archive SHA | tar -x -C SCRATCH/tree`).
 MUTANTS_JSON is a list of {"label": str, "edits": [{"path", "old", "new"}]}; every

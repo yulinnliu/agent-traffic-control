@@ -115,12 +115,16 @@ Work through every step; each ends on the stated criterion.
   evidence.
 - On a PASS, when the project's adopted process lets a relayed PASS authorize
   integration, the integration instruction. The user pasting it approves
-  integration and then default cleanup of the topic's managed worktree. It
-  carries, with every value filled in:
+  integration and then default cleanup of the topic. It carries, with every
+  value filled in:
   - `atc integrate --repo <main checkout> --branch <topic branch> --reviewed <full SHA>`;
   - for a topic with a managed worktree, the default cleanup command in the
     hami-worktree skill's command form; load that skill before writing any
-    worktree command.
+    worktree command;
+  - for a repository without managed worktrees, where the topic branch lives
+    in the main checkout, `git -C <main checkout> switch main` before the
+    integrate command and `git -C <main checkout> branch -d <topic branch>`
+    after it. `-d` deletes only a branch `main` already contains.
 
   Squash-integrated and abandon cleanups never ride on a PASS; hami-worktree
   states their authority. A conditional PASS or FAIL carries no integration
@@ -134,19 +138,21 @@ Work through every step; each ends on the stated criterion.
 A PASS authorizes only the commands it carries; build, install, push and any
 other action need their own instruction.
 
-1. Run the `atc integrate` command and check its result line. `FF` matches
-   when the new `main` equals the reviewed SHA; `NO_FF` matches when the
-   second parent equals the reviewed SHA and the first parent equals the
-   `main` the line reports as before.
-2. On a match, run the cleanup command under hami-worktree's run rules.
+1. Run the `atc integrate` command (after `switch main`, when the block
+   carries it) and check its result line. `FF` matches when the new `main`
+   equals the reviewed SHA; `NO_FF` matches when the second parent equals the
+   reviewed SHA and the first parent equals the `main` the line reports as
+   before.
+2. On a match, run the cleanup command: the worktree cleanup under
+   hami-worktree's run rules, or the `branch -d`.
 3. Run the hami-handoff-reminder check and report the result lines to the
    user only; the reviewer gets no relay.
 
-Stop on a result mismatch, a cleanup verdict other than `OK`, or
-`cleanup_complete` other than `true`: leave `main` and the worktree as they
-are, take only the read-only next step hami-worktree names for a cleanup
-refusal (such as `audit` after `PERMISSION_DENIED`), and hand the result lines
-to the user for the reviewer.
+Stop on a `switch` failure, a result mismatch, a cleanup verdict other than
+`OK`, `cleanup_complete` other than `true`, or a `branch -d` refusal: leave
+`main`, the worktree and the branch as they are, take only the read-only next
+step hami-worktree names for a cleanup refusal (such as `audit` after
+`PERMISSION_DENIED`), and hand the result lines to the user for the reviewer.
 
-Done when cleanup reported `cleanup_complete: true` (or the topic has no
-managed worktree) and the handoff check ran, or the stop is with the user.
+Done when the cleanup reported `cleanup_complete: true` or deleted the
+branch, and the handoff check ran, or the stop is with the user.
