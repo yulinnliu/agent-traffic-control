@@ -17,10 +17,10 @@ import argparse
 import json
 import os
 import re
-import shlex
 import subprocess
 import sys
 import uuid
+import tempfile
 from dataclasses import asdict
 from pathlib import Path
 
@@ -72,9 +72,12 @@ def _remove_candidate(repo: Path, candidate_dir: Path) -> str | None:
 def _verify_candidate(
     command: str, candidate_dir: Path, candidate_sha: str, expected_main: str, reviewed: str
 ) -> None:
-    argv = shlex.split(command, posix=(os.name != "nt"))
-    if not argv:
-        raise Refused("--verify-command must not be empty")
+    try:
+        argv = json.loads(command)
+    except json.JSONDecodeError as exc:
+        raise Refused("--verify-command must be a JSON array of executable and arguments") from exc
+    if not isinstance(argv, list) or not argv or not all(isinstance(item, str) and item for item in argv):
+        raise Refused("--verify-command must be a non-empty JSON array of strings")
     env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
     env.update({
         "ATC_INTEGRATION_SHA": candidate_sha,
@@ -125,9 +128,10 @@ def integrate(
         if rev(repo, main) != main_before or rev(repo, "HEAD") != main_before:
             return 1, {**result, "error": f"{main} moved after preflight; main unchanged"}
 
-        common_dir = Path(_git_ok(repo, "rev-parse", "--path-format=absolute", "--git-common-dir"))
-        candidate_dir = common_dir / "atc" / "candidates" / uuid.uuid4().hex
-        candidate_dir.parent.mkdir(parents=True, exist_ok=True)
+        candidate_root = Path(tempfile.gettempdir()) / "atc-integration-candidates"
+        candidate_root.mkdir(parents=True, exist_ok=True)
+        repo_id = str(abs(hash(str(repo.resolve()))))
+        candidate_dir = candidate_root / f"{repo_id}-{uuid.uuid4().hex}"
         candidate_created = False
         candidate_ref: str | None = None
         integration_updated = False
@@ -228,7 +232,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--branch", required=True, help="reviewed topic branch")
     parser.add_argument("--reviewed", required=True, help="full 40-character SHA named by the review")
     parser.add_argument("--main", default="main", help="integration branch (default: main)")
-    parser.add_argument("--verify-command", required=True, help="required test/verification command run in the candidate checkout")
+    parser.add_argument("--verify-command", required=True, help="required verification argv as a JSON string array, run in the candidate checkout")
     parser.add_argument("--json", action="store_true", help="print the result as JSON")
     return parser
 
