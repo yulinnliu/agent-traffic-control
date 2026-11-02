@@ -238,7 +238,7 @@ def test_no_ff_parents_mismatch_fails_verification(repo: Path, monkeypatch: pyte
 
     monkeypatch.setattr(gi, "git", advance_before_merge)
     assert integrate(repo, "topic", tip) == 1
-    assert "verification failed: parents" in capsys.readouterr().err
+    assert "main drifted after candidate verification" in capsys.readouterr().err
     assert main_tip(repo) == moved[0]
     assert run_git(repo, "status", "--porcelain") == ""
 
@@ -255,7 +255,7 @@ def test_failed_merge_is_aborted(repo: Path, monkeypatch: pytest.MonkeyPatch, ca
 
     monkeypatch.setattr(gi, "merge_preflight", claims_compatible)
     assert integrate(repo, "topic", tip) == 1
-    assert "merge aborted; main unchanged" in capsys.readouterr().err
+    assert "candidate merge failed" in capsys.readouterr().err
     assert main_tip(repo) == before
     assert run_git(repo, "status", "--porcelain") == ""
 
