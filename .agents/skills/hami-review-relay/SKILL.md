@@ -64,11 +64,12 @@ A tree that runs source child processes needs a `.venv`:
 
 - Prepare it as the project's `AGENTS.md` says; never with Git Bash `ln -s`,
   which copies the whole venv here.
-- Before deleting a copy or worktree holding a `.venv` junction, confirm
-  `.venv` is a ReparsePoint, remove the link alone with `cmd //c rmdir` on its
-  literal path (held in a variable), then delete the rest.
-- Never run PowerShell `Remove-Item -Recurse`, or any recursive delete, on a
-  tree that still holds the link.
+- Delete scratch directories under `%TEMP%\q` with
+  `powershell -NoProfile -ExecutionPolicy Bypass -File shared/skills/hami-review-relay/references/clean_scratch.ps1 <dir>...`
+  from the root of the ATC checkout; it takes links out as links and stops on
+  any link it does not expect. A worktree's `.venv` junction comes out the same
+  way, as the link alone with `cmd //c rmdir` on its literal path, before the
+  worktree's own cleanup.
 
 ## Reviewer: the review
 
@@ -79,10 +80,10 @@ Work through every step; each ends on the stated criterion.
    SHA the request names, against its stated base. Done when the branch tip
    equals that SHA.
 2. **Build a scratch copy.** Export that exact tree to a scratch directory
-   (`git archive <sha>`), point imports at the copy, isolate data roots and
-   strip ambient credentials; tests and mutants never run in a live worktree.
-   Prepare and remove a `.venv` in the copy as "Writer: the step report"
-   says. An exported tree can differ only in line endings, so compare files
+   `%TEMP%\q\<name>` (`git archive <sha>`), point imports at the copy, isolate
+   data roots and strip ambient credentials; tests and mutants never run in a
+   live worktree. Prepare and delete a `.venv` in the copy as "Writer: the
+   step report" says. An exported tree can differ only in line endings, so compare files
    with carriage returns ignored. Done when an import-location guard proves
    the copy, not an installed checkout, is what runs.
 3. **Walk the real path.** Trace from the user-facing entry to the external
@@ -169,3 +170,9 @@ step hami-worktree names for a cleanup refusal (such as `audit` after
 
 Done when the cleanup reported `cleanup_complete: true` or deleted the
 branch, and the handoff check ran, or the stop is with the user.
+
+## Reviewer: after integration
+
+Once you confirm a topic integrated (the `main` position in step 1 of the next
+review), delete that topic's scratch directories with `clean_scratch.ps1`
+right away; `%TEMP%\q\LEDGER.txt` lists the candidates, one scratch per line.

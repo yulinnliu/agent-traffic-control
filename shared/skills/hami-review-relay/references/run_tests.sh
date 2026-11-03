@@ -12,6 +12,9 @@
 # a scratch whose absolute Windows long-name form (8.3 short names expanded, as
 # pytest sees it) exceeds 64 characters is refused with SCRATCH_PATH_TOO_LONG
 # (exit 9) before anything is created.
+# A scratch created inside %TEMP%\q gets a tab-separated line <scratch> <tree>
+# <UTC time> (Windows paths) appended to %TEMP%\q\LEDGER.txt, the candidate list
+# that clean_scratch.ps1 deletes from and prunes.
 label="$4"
 tree="$(cd "$(cygpath -u "$1")" 2>/dev/null && pwd -P)" || { echo "TREE_NOT_FOUND $1"; exit 9; }
 py="$(cygpath -u "$3")"
@@ -22,6 +25,10 @@ esac
 scratch_win="$("$py" -c "import os, sys; print(os.path.realpath(sys.argv[1]))" "$(cygpath -w -a "$2")")" || { echo "SCRATCH_NOT_RESOLVED $2"; exit 9; }
 [ "${#scratch_win}" -le 64 ] || { echo "SCRATCH_PATH_TOO_LONG $scratch_win (${#scratch_win} characters, limit 64): use a short root such as %TEMP%\\q\\<name>"; exit 9; }
 mkdir -p "$(cygpath -u "$2")/qdr" && scratch="$(cd "$(cygpath -u "$2")" && pwd -P)" || { echo "SCRATCH_NOT_CREATED $2"; exit 9; }
+q_win="$("$py" -c "import os, sys; print(os.path.realpath(sys.argv[1]))" "$(cygpath -w "$TEMP")\q")"
+case "${scratch_win,,}" in
+  "${q_win,,}"\\?*) mkdir -p "$(cygpath -u "$q_win")" && printf '%s\t%s\t%s\n' "$scratch_win" "$(cygpath -w "$tree")" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$(cygpath -u "$q_win")/LEDGER.txt" ;;
+esac
 shift 4
 for v in $(env | grep -o '^HAMI_[A-Za-z0-9_]*'); do unset "$v"; done
 export QUANT_DATA_ROOT="$(cygpath -w "$scratch/qdr")"
