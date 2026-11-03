@@ -406,6 +406,13 @@ def test_registered_project_must_name_an_existing_integration_verifier(tmp_path:
     assert any("has no '## Integration verification' section" in f for f in check_registered_projects(root, monkeypatch))
     write(project / "AGENTS.md", agents.replace("`scripts/integration-verify.json`", "`../outside.json`"))
     assert any("must be a path inside the repository" in f for f in check_registered_projects(root, monkeypatch))
+    absolute = "C:/elsewhere/verify.json" if sys.platform == "win32" else "/elsewhere/verify.json"
+    write(project / "AGENTS.md", agents.replace("`scripts/integration-verify.json`", f"`{absolute}`"))
+    assert any(f"verifier argv file {absolute} must be a path inside the repository" in f for f in check_registered_projects(root, monkeypatch))
+    write(project / "AGENTS.md", agents.replace("\nRuns the demo", "\n- Verifier timeout: 0\n\nRuns the demo"))
+    assert any("AGENTS.md verifier timeout must be greater than zero" in f for f in check_registered_projects(root, monkeypatch))
+    write(project / "AGENTS.md", agents.replace("\nRuns the demo", "\n- Verifier timeout: 600\n\nRuns the demo"))
+    assert check_registered_projects(root, monkeypatch) == []
 
 
 def test_hardcoded_governance_source_is_rejected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

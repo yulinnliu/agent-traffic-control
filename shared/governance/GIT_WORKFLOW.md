@@ -370,7 +370,7 @@ The authority reference names the task in the identity form `CORE.md`
   declares, then ` @ ` and the reviewed SHA;
 - work outside a plan or task record: repository, branch and reviewed SHA,
   then `per` the governing document's file and section, as in
-  `yulinnliu/agent-traffic-control impl/integration-concurrency @ <sha> per docs/STATUS.md § Owner decisions`.
+  `yulinnliu/agent-traffic-control impl/integration-concurrency @ b1abaabdfebe8c973b7d3d9b88f7de845016beeb per AGENTS.md § Changing this repo`.
 
 ### Project verification section
 
