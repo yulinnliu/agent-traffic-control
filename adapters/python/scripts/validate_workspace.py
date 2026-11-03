@@ -45,6 +45,7 @@ MANAGED_BY = "agent-traffic-control"
 FORBIDDEN_FALLBACK = re.compile(r"~[\\/]hami(?:[\\/]|\b)", re.IGNORECASE)
 # A canonical skill or a shipped file must not locate this checkout through
 # the environment; that is what makes the managed copies self-contained.
+SUPPORTING_PATH = re.compile(r"[A-Za-z0-9._/-]+")
 WORKSPACE_ENV_REFERENCE = re.compile(r"\$(?:\{)?ATC_ROOT\b|\$env:ATC_ROOT\b")
 HARDCODED_GOVERNANCE_SOURCE = re.compile(r"[A-Za-z0-9_.-]+/agent-traffic-control\b")
 POLICY_BEGIN = "<!-- atc:project-policy-reference begin -->"
@@ -243,6 +244,10 @@ def load_canonical_skills() -> dict[str, dict]:
                 )
             if FORBIDDEN_FALLBACK.search(text):
                 fail(f"{where}: hardcodes a '~/Hami'-style path")
+        try:
+            supporting_files(ROOT, name)
+        except ValueError as exc:
+            fail(str(exc))
         for overlay in overlay_files(canonical_dir):
             if overlay.stem not in TOOL_KEYS.values():
                 fail(f"{overlay}: overlay name must be one of {', '.join(TOOL_KEYS.values())}")
@@ -305,7 +310,59 @@ def render_adapter(root: Path, name: str, tool_dir: str) -> str:
     return rendered
 
 
-def check_one_adapter(adapter_file: Path, name: str, canonical_fm: dict) -> None:
+def supporting_files(root: Path, name: str) -> dict[str, str]:
+    """Files canonical skill ``name`` ships beside its SKILL.md, keyed by POSIX path
+    relative to the skill directory. Every adapter carries them verbatim so a
+    relative link in the body resolves in any repository; the ``adapters/``
+    overlays are rendered into SKILL.md instead. A supporting file is UTF-8 text
+    under a plain path (the shell installers split on whitespace); anything else
+    raises ValueError before a plan writes anything."""
+    canonical_dir = root / "shared" / "skills" / name
+    files: dict[str, str] = {}
+    for path in sorted(canonical_dir.rglob("*")):
+        relative = path.relative_to(canonical_dir)
+        if not path.is_file() or relative.as_posix() == "SKILL.md" or relative.parts[0] == "adapters":
+            continue
+        if "__pycache__" in relative.parts:
+            continue
+        if not SUPPORTING_PATH.fullmatch(relative.as_posix()):
+            raise ValueError(f"{path}: supporting file path must use only letters, digits, '.', '_', '-' and '/'")
+        try:
+            files[relative.as_posix()] = normalise(path.read_text(encoding="utf-8"))
+        except UnicodeDecodeError:
+            raise ValueError(f"{path}: supporting file must be UTF-8 text") from None
+    return files
+
+
+def adapter_extras(adapter_dir: Path, expected: dict[str, str]) -> list[Path]:
+    """Files in a managed adapter directory that neither its SKILL.md nor its
+    canonical supporting files account for."""
+    return sorted(
+        path for path in adapter_dir.rglob("*")
+        if path.is_file()
+        and path.relative_to(adapter_dir).as_posix() != "SKILL.md"
+        and path.relative_to(adapter_dir).as_posix() not in expected
+        and "__pycache__" not in path.relative_to(adapter_dir).parts
+    )
+
+
+def check_supporting_files(adapter_dir: Path, name: str) -> None:
+    try:
+        expected = supporting_files(ROOT, name)
+    except ValueError:
+        return  # reported once against the canonical skill by load_canonical_skills
+    for relative, content in expected.items():
+        target = adapter_dir / relative
+        if not target.is_file():
+            fail(f"{target}: missing supporting file of shared/skills/{name}/ — run sync to copy it")
+        elif normalise(target.read_text(encoding="utf-8")) != content:
+            fail(f"{target}: drifted from shared/skills/{name}/{relative} — run sync to re-copy it")
+    for extra in adapter_extras(adapter_dir, expected):
+        fail(f"{extra}: not in shared/skills/{name}/ — run sync to remove it")
+
+
+def check_one_adapter(adapter_file: Path, name: str, canonical_fm: dict) -> bool:
+    """Check one adapter's SKILL.md; return whether it is managed."""
     adapter_fm, _ = parse_frontmatter(adapter_file)
 
     if not is_managed(adapter_fm):
@@ -314,7 +371,12 @@ def check_one_adapter(adapter_file: Path, name: str, canonical_fm: dict) -> None
             f"shared skill but is not explicitly marked managed-by: {MANAGED_BY}; "
             "sync must not modify it"
         )
-        return
+        return False
+    check_managed_adapter(adapter_file, name, canonical_fm, adapter_fm)
+    return True
+
+
+def check_managed_adapter(adapter_file: Path, name: str, canonical_fm: dict, adapter_fm: dict) -> None:
     if adapter_fm.get("canonical") != name:
         fail(f"{adapter_file}: canonical must be '{name}'")
     if adapter_fm.get("name") != canonical_fm.get("name"):
@@ -389,7 +451,8 @@ def check_adapter_tree(
             if not adapter_file.exists():
                 fail(f"{adapter_file}: directory exists but SKILL.md missing")
                 continue
-            check_one_adapter(adapter_file, name, canonical[name])
+            if check_one_adapter(adapter_file, name, canonical[name]):
+                check_supporting_files(adapter_file.parent, name)
 
 
 def check_policy_template() -> None:

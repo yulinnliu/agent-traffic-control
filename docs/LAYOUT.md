@@ -31,6 +31,8 @@ Operational description of the tree; governance semantics live under
   the `atc` command, with its own `pyproject.toml` and lock file, plus
   `hami-testkit/`, the pytest adapter of the verification contract. Other
   languages add a sibling directory and run the same fixtures.
+- `workspace.yaml.example` — the shape of the machine-local map.
+- `docs/` — operational documentation. `.out-of-scope/` — recorded rejections.
 
 ## Inside a consuming repository
 
@@ -43,8 +45,11 @@ Operational description of the tree; governance semantics live under
 
 All of them are ordinary tracked files; sync rewrites them, people review the
 diff. The repository needs no environment variable and no other checkout.
-- `workspace.yaml.example` — the shape of the machine-local map.
-- `docs/` — operational documentation. `.out-of-scope/` — recorded rejections.
+
+A public repository with infrequent development may instead keep them
+machine-local: `.git/info/exclude` lists `AGENTS.md`, `CLAUDE.md`, `.atc/` and
+the skill directories, governance applies on this machine only, and sync
+rewrites the files in place without a commit.
 
 ## Machine-local, never committed
 

@@ -534,6 +534,101 @@ def test_adapter_from_an_older_release_is_stale_but_still_owned(tmp_path: Path, 
     assert check_registered_projects(root, monkeypatch) == []
 
 
+def test_supporting_files_are_copied_checked_and_pruned_with_the_adapter(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root, project = make_workspace(tmp_path)
+    write(root / "shared/skills/demo-skill/references/guide.md", "# Guide\n")
+    write(root / "shared/skills/demo-skill/adapters/claude.md", "Claude only.\n")
+    onboard_project.apply_plan(onboard_project.root_adapter_plan(root), "sync")
+    assert onboard_project.run("sync", [("demo", project)], root) == 0
+    for base in (root, project):
+        for tool in (".claude", ".agents"):
+            adapter = base / tool / "skills/demo-skill"
+            assert (adapter / "references/guide.md").read_text(encoding="utf-8") == "# Guide\n"
+            assert not (adapter / "adapters").exists()
+    assert check_registered_projects(root, monkeypatch) == []
+    assert not changed(onboard_project.build_plan(project, root))
+
+    copy = project / ".agents/skills/demo-skill/references/guide.md"
+    write(copy, "# Edited\n")
+    write(project / ".agents/skills/demo-skill/references/stale.md", "old\n")
+    (project / ".claude/skills/demo-skill/references/guide.md").unlink()
+    failures = check_registered_projects(root, monkeypatch)
+    assert any("guide.md: drifted from" in failure for failure in failures)
+    assert any("stale.md: not in shared/skills/demo-skill/" in failure for failure in failures)
+    assert any("guide.md: missing supporting file" in failure for failure in failures)
+    assert onboard_project.run("sync", [("demo", project)], root) == 0
+    assert copy.read_text(encoding="utf-8") == "# Guide\n"
+    assert not (project / ".agents/skills/demo-skill/references/stale.md").exists()
+    assert check_registered_projects(root, monkeypatch) == []
+
+
+@pytest.mark.parametrize("where", ["project", "root"])
+def test_adapter_directory_without_a_managed_skill_md_keeps_its_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, where: str) -> None:
+    root, project = make_workspace(tmp_path)
+    write(root / "shared/skills/demo-skill/references/guide.md", "# Guide\n")
+    base = project if where == "project" else root
+    plan_for = (lambda: onboard_project.build_plan(project, root)) if where == "project" else (lambda: onboard_project.root_adapter_plan(root))
+    no_skill_md = base / ".claude/skills/demo-skill"
+    shutil.rmtree(no_skill_md, ignore_errors=True)
+    write(no_skill_md / "notes/mine.md", "mine\n")
+    unmanaged = base / ".agents/skills/demo-skill"
+    shutil.rmtree(unmanaged, ignore_errors=True)
+    write(unmanaged / "SKILL.md", "---\nname: demo-skill\ndescription: local\n---\n\n# Local\n")
+    write(unmanaged / "own.md", "own\n")
+    plan = plan_for()
+    assert any(item.action == "collision" and item.path == no_skill_md / "SKILL.md" for item in plan)
+    assert any(item.action == "collision" and item.path == unmanaged / "SKILL.md" for item in plan)
+    assert not [item for item in plan if item.path.is_relative_to(no_skill_md) or item.path.is_relative_to(unmanaged) if item.action != "collision"]
+    onboard_project.apply_plan(plan, "sync")
+    assert (no_skill_md / "notes/mine.md").is_file() and not (no_skill_md / "SKILL.md").exists()
+    assert (unmanaged / "own.md").is_file() and not (unmanaged / "references").exists()
+    monkeypatch.setattr(validator, "ROOT", root)
+    validator.FAILURES.clear()
+    validator.check_adapter_tree(base, validator.load_canonical_skills(), label="tree", required=set())
+    assert not [failure for failure in validator.FAILURES if "own.md" in failure or "supporting file" in failure]
+    validator.FAILURES.clear()
+
+
+def test_dangling_skill_md_link_is_a_collision_and_never_written_through(tmp_path: Path) -> None:
+    root, project = make_workspace(tmp_path)
+    adapter = project / ".claude/skills/demo-skill"
+    adapter.mkdir(parents=True)
+    moved = tmp_path / "moved/SKILL.md"
+    try:
+        (adapter / "SKILL.md").symlink_to(moved)
+    except OSError:
+        pytest.skip("this host cannot create symlinks")
+    write(adapter / "mine.md", "mine\n")
+    plan = onboard_project.build_plan(project, root)
+    assert any(item.action == "collision" and item.path == adapter / "SKILL.md" for item in plan)
+    onboard_project.apply_plan(plan, "sync")
+    assert (adapter / "mine.md").is_file() and (adapter / "SKILL.md").is_symlink() and not moved.parent.exists()
+
+
+def test_supporting_file_must_be_plain_named_utf8_text_and_caches_are_ignored(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    root, project = make_workspace(tmp_path)
+    cache = root / "shared/skills/demo-skill/__pycache__/helper.cpython-313.pyc"
+    cache.parent.mkdir(parents=True)
+    cache.write_bytes(b"\xff\xfe")
+    assert validator.supporting_files(root, "demo-skill") == {}
+    onboard_project.apply_plan(onboard_project.root_adapter_plan(root), "sync")
+    assert not (root / ".claude/skills/demo-skill/__pycache__").exists()
+
+    for name, content, message in (("logo.bin", b"\xff\xfe", "must be UTF-8 text"), ("a b.md", b"x\n", "path must use only")):
+        bad = root / "shared/skills/demo-skill" / name
+        bad.write_bytes(content)
+        monkeypatch.setattr(validator, "ROOT", root)
+        validator.FAILURES.clear()
+        validator.check_adapter_tree(root, validator.load_canonical_skills(), label="workspace root", required=set())
+        assert len([failure for failure in validator.FAILURES if message in failure]) == 1
+        validator.FAILURES.clear()
+        before = sorted(p for p in root.rglob("*") if ".git" not in p.parts)
+        assert onboard_project.main(["--sync", "--root-only"], root) != 0
+        assert message in capsys.readouterr().err
+        assert sorted(p for p in root.rglob("*") if ".git" not in p.parts) == before
+        bad.unlink()
+
+
 def test_registered_project_must_carry_every_baseline_adapter(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root, project = make_workspace(tmp_path)
     onboard_project.apply_plan(onboard_project.build_plan(project, root), "sync")

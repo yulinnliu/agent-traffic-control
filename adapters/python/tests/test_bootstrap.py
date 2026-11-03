@@ -88,3 +88,15 @@ def test_add_installs_requested_opt_in_adapter(tmp_path: Path) -> None:
     assert (project / ".claude/skills/optional-skill/SKILL.md").read_text(encoding="utf-8") == adapter
     with pytest.raises(SystemExit):
         bootstrap.install_opt_in(root, project, ["no-such-skill"])
+
+
+def test_opt_in_install_carries_supporting_files_and_leaves_an_unowned_directory(tmp_path: Path) -> None:
+    root, project = make_workspace(tmp_path)
+    write(root / "shared/skills/optional-skill/SKILL.md", "---\nname: optional-skill\ndescription: test skill\n---\n\n# Optional\n")
+    write(root / "shared/skills/optional-skill/references/guide.md", "# Guide\n")
+    write(project / ".agents/skills/optional-skill/notes/mine.md", "mine\n")
+    with pytest.raises(SystemExit):
+        bootstrap.install_opt_in(root, project, ["optional-skill"])
+    assert (project / ".claude/skills/optional-skill/references/guide.md").read_text(encoding="utf-8") == "# Guide\n"
+    assert (project / ".agents/skills/optional-skill/notes/mine.md").is_file()
+    assert not (project / ".agents/skills/optional-skill/SKILL.md").exists()
