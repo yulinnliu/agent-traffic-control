@@ -17,6 +17,7 @@ tree="$(cd "$(cygpath -u "$1")" 2>/dev/null && pwd -P)" || { echo "TREE_NOT_FOUN
 py="$(cygpath -u "$3")"
 case "$py" in
   */*) py="$(cd "$(dirname "$py")" 2>/dev/null && pwd -P)/$(basename "$py")"; [ -f "$py" ] || { echo "PYTHON_NOT_FOUND $3"; exit 9; } ;;
+  *) command -v "$py" >/dev/null || { echo "PYTHON_NOT_FOUND $3"; exit 9; } ;;
 esac
 scratch_win="$("$py" -c "import os, sys; print(os.path.realpath(sys.argv[1]))" "$(cygpath -w -a "$2")")" || { echo "SCRATCH_NOT_RESOLVED $2"; exit 9; }
 [ "${#scratch_win}" -le 64 ] || { echo "SCRATCH_PATH_TOO_LONG $scratch_win (${#scratch_win} characters, limit 64): use a short root such as %TEMP%\\q\\<name>"; exit 9; }
