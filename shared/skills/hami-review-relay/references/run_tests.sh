@@ -7,9 +7,14 @@
 # resolved against the caller's directory to absolute paths before anything else
 # runs (exit 9 when <tree> or <python> does not resolve). PYTHONPATH_MISSING <dir>
 # (exit 8) reports a PYTHONPATH directory absent after entering <tree>.
-# <scratch> holds the data root and pytest's basetemp, so keep its path short.
+# <scratch> holds the data root and pytest's basetemp, whose deepest test paths
+# overflow Windows MAX_PATH under a long root and surface as unrelated errors, so
+# a scratch whose absolute Windows form exceeds 64 characters is refused with
+# SCRATCH_PATH_TOO_LONG (exit 9) before anything is created.
 label="$4"
 tree="$(cd "$(cygpath -u "$1")" 2>/dev/null && pwd -P)" || { echo "TREE_NOT_FOUND $1"; exit 9; }
+scratch_win="$(cygpath -w -a "$2")"
+[ "${#scratch_win}" -le 64 ] || { echo "SCRATCH_PATH_TOO_LONG $scratch_win (${#scratch_win} characters, limit 64): use a short root such as %TEMP%\\q\\<name>"; exit 9; }
 mkdir -p "$(cygpath -u "$2")/qdr" && scratch="$(cd "$(cygpath -u "$2")" && pwd -P)" || { echo "SCRATCH_NOT_CREATED $2"; exit 9; }
 py="$(cygpath -u "$3")"
 case "$py" in
