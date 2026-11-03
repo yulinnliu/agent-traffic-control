@@ -352,20 +352,20 @@ Formal evidence follows `VERIFICATION.md`; changing the delivered revision inval
 ## Integration verifier source
 
 `atc integrate` requires an `--authority-reference` and an explicit
-verification argv, given as a JSON string array either in a file
-(`--verify-command-file`, the form relay blocks use because it survives every
-shell's quoting) or inline (`--verify-command`). The adapter records the
-authority reference as provenance and does not authenticate the caller's
-authority. A caller whose project defines no verifier stops and obtains one
-from the owner; it never infers or invents a verifier.
+verification argv, given as a JSON string array in a file
+(`--verify-command-file`) or inline (`--verify-command`). The adapter records
+the authority reference as provenance; the authority itself comes from the
+integration authorization `Integrate` above requires. The verifier comes from
+the project's `AGENTS.md` section below; a caller whose project has none stops
+and obtains one from the owner.
 
 ### Authority reference
 
 The authority reference names the task in the identity form `CORE.md`
 § Task identity gives the project, followed by ` @ ` and the reviewed full SHA:
 
-- plan work: the plan file path, section and step, as in
-  `docs/plans/TRADING_APP_070_PLAN.md §11.3 step 5 @ 9e1242795f028fc49a9119428c45e0e620617276`;
+- plan work: the plan file path, section and step
+  (`<plan path> §<section> step <n> @ <sha>`);
 - a numbered task record: the record in the form the project's `AGENTS.md`
   declares, then ` @ ` and the reviewed SHA;
 - work outside a plan or task record: repository, branch and reviewed SHA,
@@ -378,8 +378,7 @@ Every registered project's `AGENTS.md` carries a section headed exactly
 `## Integration verification`. It lists:
 
 - `Verifier argv file: <repo-relative path>` — the file holding the JSON
-  string array `atc integrate` runs. A relay block passes this path resolved
-  under the main checkout.
+  string array `atc integrate` runs.
 - `Verifier timeout: <seconds>` — only when the verifier needs a bound other
   than the default 300 seconds.
 - What the verification covers, by change class, including the project's
@@ -387,8 +386,8 @@ Every registered project's `AGENTS.md` carries a section headed exactly
 - How the verifier itself applies `VERIFICATION.md` § Documentation-only
   verification: it classifies the `ATC_EXPECTED_MAIN_SHA..ATC_INTEGRATION_SHA`
   diff and runs the content, reference and static checks instead of
-  impact-selected tests when the diff qualifies. The caller never chooses the
-  exception.
+  impact-selected tests when the diff qualifies. The verifier is the sole
+  judge of that exception.
 
 `atc validate --projects` reports a registered project whose `AGENTS.md`
 lacks the section or names a missing or malformed argv file.
