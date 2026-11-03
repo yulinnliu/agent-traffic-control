@@ -67,9 +67,15 @@ for skill in "$@"; do
     if [ -e "$dstdir/SKILL.md" ] && ! same "$srcdir/SKILL.md" "$dstdir/SKILL.md" && ! managed "$dstdir/SKILL.md"; then
       echo "collision  $tool/skills/$skill (project-owned, left alone)"; status=1; continue
     fi
+    if [ ! -e "$dstdir/SKILL.md" ] && [ ! -L "$dstdir/SKILL.md" ] && [ -n "$(adapter_files "$dstdir")" ]; then
+      echo "collision  $tool/skills/$skill (files but no SKILL.md, left alone)"; status=1; continue
+    fi
     # The whole rendered adapter directory: SKILL.md plus the files its body links to.
+    # Split file lists on newlines only, with globbing off, so any file name stays whole.
     result=current
     [ -e "$dstdir/SKILL.md" ] || [ -L "$dstdir/SKILL.md" ] || result=installed
+    set -f; IFS='
+'
     for file in $(adapter_files "$srcdir"); do
       if [ -e "$dstdir/$file" ] || [ -L "$dstdir/$file" ]; then
         same "$srcdir/$file" "$dstdir/$file" && continue
@@ -81,6 +87,7 @@ for skill in "$@"; do
       [ -f "$srcdir/$file" ] && continue
       rm -f "$dstdir/$file"; [ "$result" = installed ] || result=updated
     done
+    set +f; unset IFS
     printf '%-11s%s\n' "$result" "$tool/skills/$skill"
   done
 done

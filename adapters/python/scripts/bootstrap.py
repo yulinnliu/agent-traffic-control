@@ -121,6 +121,9 @@ def install_opt_in(root: Path, project: Path, skills: list[str]) -> None:
             target = project / tool_dir / "skills" / skill / "SKILL.md"
             if target.exists():
                 continue
+            if onboard_project.holds_files(target.parent):
+                print(f"collision {target.relative_to(project).as_posix()}: {onboard_project.UNOWNED_DIRECTORY}")
+                raise SystemExit(1)
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(onboard_project.validator.render_adapter(root, skill, tool_dir), encoding="utf-8", newline="\n")
             onboard_project.apply_plan(onboard_project.supporting_plan(root, skill, target.parent), "sync")

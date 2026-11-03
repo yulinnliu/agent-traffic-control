@@ -27,10 +27,13 @@ adapter_files() { # dir: its files and links, relative, one per line
   (cd "$1" && find . \( -type f -o -type l \) ! -path '*/__pycache__/*' | sed 's|^\./||' | sort)
 }
 # A rendered adapter directory: SKILL.md plus the files its body links to, none missing or extra.
-same_dir() {
+# Runs in a subshell that splits on newlines only, with globbing off.
+same_dir() (
   [ "$(adapter_files "$1")" = "$(adapter_files "$2")" ] || return 1
+  set -f; IFS='
+'
   for file in $(adapter_files "$1"); do same "$1/$file" "$2/$file" || return 1; done
-}
+)
 
 for tool in .claude .agents .dsh; do
   dir="$REPO/$tool/skills"

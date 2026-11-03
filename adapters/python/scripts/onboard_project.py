@@ -213,7 +213,9 @@ def build_plan(project_path: Path, root: Path = ROOT) -> list[PlanItem]:
             if not baseline and not target.exists():
                 continue
             expected = validator.render_adapter(root, skill, tool_dir)
-            if not target.exists():
+            if not target.exists() and holds_files(target.parent):
+                plan.append(PlanItem("collision", target, UNOWNED_DIRECTORY))
+            elif not target.exists():
                 plan.append(PlanItem("create", target, "baseline managed adapter", expected))
             elif not managed_adapter(target, skill):
                 plan.append(
@@ -233,10 +235,18 @@ def build_plan(project_path: Path, root: Path = ROOT) -> list[PlanItem]:
     return plan
 
 
+UNOWNED_DIRECTORY = "directory holds files but no SKILL.md, so nothing marks it managed; refusing to modify"
+
+
+def holds_files(directory: Path) -> bool:
+    return directory.is_dir() and any(path.is_file() for path in directory.rglob("*"))
+
+
 def supporting_plan(root: Path, skill: str, adapter_dir: Path) -> list[PlanItem]:
     """Copy the canonical skill's supporting files into one managed adapter
-    directory; a file there that the canonical skill no longer ships is an
-    update with no content, which sync removes."""
+    directory. Sync owns the whole directory once its SKILL.md is managed, so a
+    file there that the canonical skill does not ship is an update with no
+    content, which sync removes."""
     plan: list[PlanItem] = []
     expected = validator.supporting_files(root, skill)
     for relative, content in expected.items():
@@ -285,7 +295,9 @@ def root_adapter_plan(root: Path = ROOT) -> list[PlanItem]:
         for tool_dir in validator.adapter_dirs(metadata):
             target = root / tool_dir / "skills" / skill / "SKILL.md"
             expected = validator.render_adapter(root, skill, tool_dir)
-            if not target.exists():
+            if not target.exists() and holds_files(target.parent):
+                plan.append(PlanItem("collision", target, UNOWNED_DIRECTORY))
+            elif not target.exists():
                 plan.append(PlanItem("create", target, "rendered adapter", expected))
             elif not managed_adapter(target, skill):
                 plan.append(

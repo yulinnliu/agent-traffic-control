@@ -562,6 +562,57 @@ def test_supporting_files_are_copied_checked_and_pruned_with_the_adapter(tmp_pat
     assert check_registered_projects(root, monkeypatch) == []
 
 
+@pytest.mark.parametrize("where", ["project", "root"])
+def test_adapter_directory_without_a_managed_skill_md_keeps_its_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, where: str) -> None:
+    root, project = make_workspace(tmp_path)
+    write(root / "shared/skills/demo-skill/references/guide.md", "# Guide\n")
+    base = project if where == "project" else root
+    plan_for = (lambda: onboard_project.build_plan(project, root)) if where == "project" else (lambda: onboard_project.root_adapter_plan(root))
+    no_skill_md = base / ".claude/skills/demo-skill"
+    shutil.rmtree(no_skill_md, ignore_errors=True)
+    write(no_skill_md / "notes/mine.md", "mine\n")
+    unmanaged = base / ".agents/skills/demo-skill"
+    shutil.rmtree(unmanaged, ignore_errors=True)
+    write(unmanaged / "SKILL.md", "---\nname: demo-skill\ndescription: local\n---\n\n# Local\n")
+    write(unmanaged / "own.md", "own\n")
+    plan = plan_for()
+    assert any(item.action == "collision" and item.path == no_skill_md / "SKILL.md" for item in plan)
+    assert any(item.action == "collision" and item.path == unmanaged / "SKILL.md" for item in plan)
+    assert not [item for item in plan if item.path.is_relative_to(no_skill_md) or item.path.is_relative_to(unmanaged) if item.action != "collision"]
+    onboard_project.apply_plan(plan, "sync")
+    assert (no_skill_md / "notes/mine.md").is_file() and not (no_skill_md / "SKILL.md").exists()
+    assert (unmanaged / "own.md").is_file() and not (unmanaged / "references").exists()
+    monkeypatch.setattr(validator, "ROOT", root)
+    validator.FAILURES.clear()
+    validator.check_adapter_tree(base, validator.load_canonical_skills(), label="tree", required=set())
+    assert not [failure for failure in validator.FAILURES if "own.md" in failure or "supporting file" in failure]
+    validator.FAILURES.clear()
+
+
+def test_supporting_file_must_be_plain_named_utf8_text_and_caches_are_ignored(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    root, project = make_workspace(tmp_path)
+    cache = root / "shared/skills/demo-skill/__pycache__/helper.cpython-313.pyc"
+    cache.parent.mkdir(parents=True)
+    cache.write_bytes(b"\xff\xfe")
+    assert validator.supporting_files(root, "demo-skill") == {}
+    onboard_project.apply_plan(onboard_project.root_adapter_plan(root), "sync")
+    assert not (root / ".claude/skills/demo-skill/__pycache__").exists()
+
+    for name, content, message in (("logo.bin", b"\xff\xfe", "must be UTF-8 text"), ("a b.md", b"x\n", "path must use only")):
+        bad = root / "shared/skills/demo-skill" / name
+        bad.write_bytes(content)
+        monkeypatch.setattr(validator, "ROOT", root)
+        validator.FAILURES.clear()
+        validator.load_canonical_skills()
+        assert [failure for failure in validator.FAILURES if message in failure]
+        validator.FAILURES.clear()
+        before = sorted(p for p in root.rglob("*") if ".git" not in p.parts)
+        assert onboard_project.main(["--sync", "--root-only"], root) != 0
+        assert message in capsys.readouterr().err
+        assert sorted(p for p in root.rglob("*") if ".git" not in p.parts) == before
+        bad.unlink()
+
+
 def test_registered_project_must_carry_every_baseline_adapter(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root, project = make_workspace(tmp_path)
     onboard_project.apply_plan(onboard_project.build_plan(project, root), "sync")
