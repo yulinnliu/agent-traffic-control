@@ -353,32 +353,92 @@ def pid_alive(pid: int) -> bool:
     return True
 
 
+def descendant_verifier(pid_file: Path, *, reparent: bool, wrapper_exits: bool) -> str:
+    """A verifier whose deepest descendant records its pid and then sleeps.
+
+    reparent: an intermediate process starts the sleeper and exits, so the
+    sleeper's parent pid no longer names a live process.
+    wrapper_exits: the verifier itself returns 0 right away instead of sleeping.
+    """
+    sleeper = "import os,time,sys; open(sys.argv[1],'w').write(str(os.getpid())); time.sleep(60)"
+    spawn_sleeper = f"subprocess.Popen([sys.executable,'-c',{sleeper!r},{str(pid_file)!r}])"
+    if reparent:
+        middle = f"import subprocess,sys; {spawn_sleeper}"
+        spawn = f"subprocess.run([sys.executable,'-c',{middle!r}])"
+    else:
+        spawn = spawn_sleeper
+    # The verifier only ends after the sleeper has recorded its pid, so the
+    # test observes a descendant that was alive when the verifier returned.
+    wait_for_sleeper = f"\nwhile not os.path.exists({str(pid_file)!r}): time.sleep(0.05)\n"
+    tail = "" if wrapper_exits else "time.sleep(60)"
+    return json.dumps([sys.executable, "-c", f"import os,subprocess,sys,time; {spawn}{wait_for_sleeper}{tail}"])
+
+
+def wait_for_pid(pid_file: Path) -> int:
+    deadline = time.monotonic() + 5
+    while not pid_file.exists() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    return int(pid_file.read_text())
+
+
+def assert_pid_ends(pid: int) -> None:
+    deadline = time.monotonic() + 5
+    while pid_alive(pid) and time.monotonic() < deadline:
+        time.sleep(0.1)
+    assert not pid_alive(pid), "verifier descendant survived"
+
+
+@pytest.mark.parametrize("reparent", [False, True], ids=["direct-child", "reparented"])
 def test_verifier_timeout_kills_descendant_processes(
-    repo: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    repo: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str], reparent: bool
 ) -> None:
     tip = topic(repo, {"a.txt": "a2\n"})
     before = main_tip(repo)
-    pid_file = tmp_path / "grandchild.pid"
-    grandchild = "import os,time,sys; open(sys.argv[1],'w').write(str(os.getpid())); time.sleep(60)"
-    wrapper = (
-        "import subprocess,sys,time; "
-        f"subprocess.Popen([sys.executable,'-c',{grandchild!r},{str(pid_file)!r}]); "
-        "time.sleep(60)"
-    )
+    pid_file = tmp_path / "sleeper.pid"
+    verifier = descendant_verifier(pid_file, reparent=reparent, wrapper_exits=False)
     started = time.monotonic()
-    assert integrate(repo, "topic", tip, "--verify-command", json.dumps([sys.executable, "-c", wrapper]),
-                     "--verify-timeout", "1") == 1
+    assert integrate(repo, "topic", tip, "--verify-command", verifier, "--verify-timeout", "1") == 1
     elapsed = time.monotonic() - started
     assert "candidate verification timed out" in capsys.readouterr().err
     assert elapsed < 20, f"timeout was not enforced while a descendant held the verifier open ({elapsed:.1f}s)"
     assert main_tip(repo) == before
-    deadline = time.monotonic() + 5
-    while not pid_file.exists() and time.monotonic() < deadline:
-        time.sleep(0.05)
-    pid = int(pid_file.read_text())
-    while pid_alive(pid) and time.monotonic() < deadline:
-        time.sleep(0.1)
-    assert not pid_alive(pid), "verifier descendant survived the timeout"
+    assert_pid_ends(wait_for_pid(pid_file))
+
+
+def test_verifier_descendants_end_when_verifier_returns(
+    repo: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    tip = topic(repo, {"a.txt": "a2\n"})
+    pid_file = tmp_path / "sleeper.pid"
+    verifier = descendant_verifier(pid_file, reparent=True, wrapper_exits=True)
+    assert integrate(repo, "topic", tip, "--verify-command", verifier) == 0
+    assert main_tip(repo) == tip
+    assert_pid_ends(wait_for_pid(pid_file))
+    assert "candidate worktree retained" not in capsys.readouterr().err
+
+
+def test_verify_command_file_with_bom_is_accepted(repo: Path, tmp_path: Path) -> None:
+    # PowerShell 5.1's Set-Content -Encoding utf8 and Out-File write a BOM.
+    tip = topic(repo, {"a.txt": "a2\n"})
+    argv_file = tmp_path / "verify.json"
+    argv_file.write_bytes(b"\xef\xbb\xbf" + verify_command().encode("utf-8"))
+    assert gi.main([
+        "--repo", str(repo), "--branch", "topic", "--reviewed", tip,
+        "--authority-reference", "test-owner-authorization", "--verify-command-file", str(argv_file),
+    ]) == 0
+    assert main_tip(repo) == tip
+
+
+def test_empty_verify_command_file_is_refused(repo: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    tip = topic(repo, {"a.txt": "a2\n"})
+    argv_file = tmp_path / "verify.json"
+    argv_file.write_text("\n", encoding="utf-8")
+    assert gi.main([
+        "--repo", str(repo), "--branch", "topic", "--reviewed", tip,
+        "--authority-reference", "test-owner-authorization", "--verify-command-file", str(argv_file),
+    ]) == 2
+    assert "--verify-command-file) is required" in capsys.readouterr().err
+    assert main_tip(repo) != tip
 
 
 def test_verify_command_file_supplies_argv(repo: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -411,7 +471,7 @@ def test_malformed_verify_command_is_refused_before_any_candidate_work(
     before = main_tip(repo)
     # PowerShell 5.1 hands a native command '[python,-c,pass]' for '["python","-c","pass"]'.
     assert integrate(repo, "topic", tip, "--verify-command", "[python,-c,pass]") == 2
-    assert "--verify-command must be a JSON array" in capsys.readouterr().err
+    assert "--verify-command-file) must be a JSON array" in capsys.readouterr().err
     assert main_tip(repo) == before
     assert run_git(repo, "worktree", "list").count("\n") == 0
 
@@ -455,9 +515,11 @@ def test_other_request_keeps_recovery_ref_while_checkout_needs_reconciliation(
 def test_candidate_verification_failure_leaves_main_unchanged(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     tip = topic(repo, {"a.txt": "a2\n"})
     before = main_tip(repo)
-    fail_command = json.dumps([sys.executable, "-c", "raise SystemExit(9)"])
+    fail_command = json.dumps([sys.executable, "-c", "import sys; print('verifier diagnostic: 3 failed', file=sys.stderr); raise SystemExit(9)"])
     assert integrate(repo, "topic", tip, "--verify-command", fail_command) == 1
-    assert "candidate verification failed" in capsys.readouterr().err
+    error = capsys.readouterr().err
+    assert "candidate verification failed" in error
+    assert "(exit 9): verifier diagnostic: 3 failed" in error
     assert main_tip(repo) == before
     assert run_git(repo, "rev-parse", "HEAD") == before
     assert run_git(repo, "status", "--porcelain") == ""

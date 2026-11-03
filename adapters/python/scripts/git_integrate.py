@@ -72,60 +72,139 @@ def _remove_candidate(repo: Path, candidate_dir: Path) -> str | None:
     return None
 
 
-def _kill_process_tree(process: subprocess.Popen) -> None:
-    """Terminate the verifier and every descendant it started."""
-    if sys.platform == "win32":
-        subprocess.run(
-            ["taskkill", "/T", "/F", "/PID", str(process.pid)],
-            capture_output=True, check=False,
-        )
-    else:
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-    process.kill()
-    process.wait()
+class _ProcessTree:
+    """Every process the verifier starts, tracked so all of them end together.
+
+    Windows: a Job Object with KILL_ON_JOB_CLOSE, which follows processes
+    through re-parenting. POSIX: the verifier's own session/process group.
+    """
+
+    def __init__(self) -> None:
+        self.job = None
+        if sys.platform == "win32":
+            self.job = _create_kill_on_close_job()
+
+    def popen_kwargs(self) -> dict:
+        if sys.platform == "win32":
+            return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+        return {"start_new_session": True}
+
+    def adopt(self, process: subprocess.Popen) -> None:
+        if self.job is None:
+            return
+        import ctypes
+        if not ctypes.windll.kernel32.AssignProcessToJobObject(self.job, int(process._handle)):
+            ctypes.windll.kernel32.CloseHandle(self.job)
+            self.job = None
+
+    def terminate(self, process: subprocess.Popen) -> None:
+        if sys.platform == "win32":
+            if self.job is not None:
+                import ctypes
+                ctypes.windll.kernel32.TerminateJobObject(self.job, 1)
+            else:
+                subprocess.run(
+                    ["taskkill", "/T", "/F", "/PID", str(process.pid)], capture_output=True, check=False,
+                )
+        else:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        process.kill()
+        process.wait()
+
+    def close(self) -> None:
+        if self.job is not None:
+            import ctypes
+            ctypes.windll.kernel32.CloseHandle(self.job)
+            self.job = None
+
+
+def _create_kill_on_close_job():
+    import ctypes
+    from ctypes import wintypes
+
+    class IoCounters(ctypes.Structure):
+        _fields_ = [(name, ctypes.c_ulonglong) for name in (
+            "ReadOperationCount", "WriteOperationCount", "OtherOperationCount",
+            "ReadTransferCount", "WriteTransferCount", "OtherTransferCount",
+        )]
+
+    class BasicLimit(ctypes.Structure):
+        _fields_ = [
+            ("PerProcessUserTimeLimit", ctypes.c_longlong), ("PerJobUserTimeLimit", ctypes.c_longlong),
+            ("LimitFlags", wintypes.DWORD), ("MinimumWorkingSetSize", ctypes.c_size_t),
+            ("MaximumWorkingSetSize", ctypes.c_size_t), ("ActiveProcessLimit", wintypes.DWORD),
+            ("Affinity", ctypes.c_size_t), ("PriorityClass", wintypes.DWORD),
+            ("SchedulingClass", wintypes.DWORD),
+        ]
+
+    class ExtendedLimit(ctypes.Structure):
+        _fields_ = [
+            ("BasicLimitInformation", BasicLimit), ("IoInfo", IoCounters),
+            ("ProcessMemoryLimit", ctypes.c_size_t), ("JobMemoryLimit", ctypes.c_size_t),
+            ("PeakProcessMemoryUsed", ctypes.c_size_t), ("PeakJobMemoryUsed", ctypes.c_size_t),
+        ]
+
+    kernel32 = ctypes.windll.kernel32
+    kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+    job = kernel32.CreateJobObjectW(None, None)
+    if not job:
+        return None
+    info = ExtendedLimit()
+    info.BasicLimitInformation.LimitFlags = 0x2000  # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+    job_object_extended_limit_information = 9
+    if not kernel32.SetInformationJobObject(
+        job, job_object_extended_limit_information, ctypes.byref(info), ctypes.sizeof(info)
+    ):
+        kernel32.CloseHandle(job)
+        return None
+    return job
 
 
 def _run_verifier(argv: list[str], cwd: Path, env: dict[str, str], timeout: float) -> tuple[int, str, str]:
-    """Run the verifier in its own process group with a bounded wall clock.
+    """Run the verifier with a bounded wall clock and end its whole process tree.
 
     Output goes to temporary files rather than pipes so a descendant that
-    outlives the verifier cannot hold the wait open past the timeout.
+    outlives the verifier cannot hold the wait open past the timeout. When the
+    verifier returns or times out, every process it started is terminated.
     """
-    group_kwargs: dict = (
-        {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
-        if sys.platform == "win32" else {"start_new_session": True}
-    )
-    with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
-        try:
-            process = subprocess.Popen(
-                argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=out, stderr=err, **group_kwargs,
+    tree = _ProcessTree()
+    try:
+        with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
+            try:
+                process = subprocess.Popen(
+                    argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=out, stderr=err,
+                    **tree.popen_kwargs(),
+                )
+            except OSError as exc:
+                raise Refused(f"could not start candidate verifier: {exc}") from exc
+            tree.adopt(process)
+            try:
+                returncode = process.wait(timeout=timeout)
+            except subprocess.TimeoutExpired as exc:
+                tree.terminate(process)
+                raise Refused(f"candidate verification timed out after {timeout:g}s") from exc
+            tree.terminate(process)
+            out.seek(0)
+            err.seek(0)
+            return (
+                returncode,
+                out.read().decode("utf-8", errors="replace"),
+                err.read().decode("utf-8", errors="replace"),
             )
-        except OSError as exc:
-            raise Refused(f"could not start candidate verifier: {exc}") from exc
-        try:
-            returncode = process.wait(timeout=timeout)
-        except subprocess.TimeoutExpired as exc:
-            _kill_process_tree(process)
-            raise Refused(f"candidate verification timed out after {timeout:g}s") from exc
-        out.seek(0)
-        err.seek(0)
-        return (
-            returncode,
-            out.read().decode("utf-8", errors="replace"),
-            err.read().decode("utf-8", errors="replace"),
-        )
+    finally:
+        tree.close()
 
 
 def parse_verify_command(command: str) -> list[str]:
     try:
         argv = json.loads(command)
     except json.JSONDecodeError as exc:
-        raise Refused("--verify-command must be a JSON array of executable and arguments") from exc
+        raise Refused("the verifier argv (--verify-command or --verify-command-file) must be a JSON array of executable and arguments") from exc
     if not isinstance(argv, list) or not argv or not all(isinstance(item, str) and item for item in argv):
-        raise Refused("--verify-command must be a non-empty JSON array of strings")
+        raise Refused("the verifier argv (--verify-command or --verify-command-file) must be a non-empty JSON array of strings")
     return argv
 
 
@@ -243,8 +322,8 @@ def integrate(
 ) -> tuple[int, dict]:
     if not authority_reference or not authority_reference.strip():
         raise Refused("--authority-reference is required to record the integrate_main authority source")
-    if not verify_command:
-        raise Refused("--verify-command is required; main cannot advance without candidate verification")
+    if not verify_command or not verify_command.strip():
+        raise Refused("a verifier argv (--verify-command or --verify-command-file) is required; main cannot advance without candidate verification")
     verify_argv = parse_verify_command(verify_command)
 
     with IntegrationSlot(repo):
@@ -430,7 +509,7 @@ def main(argv: list[str] | None = None) -> int:
         verify_command = args.verify_command
         if args.verify_command_file is not None:
             try:
-                verify_command = args.verify_command_file.read_text(encoding="utf-8")
+                verify_command = args.verify_command_file.read_text(encoding="utf-8-sig")
             except OSError as exc:
                 raise Refused(f"could not read --verify-command-file: {exc}") from exc
         code, result = integrate(
@@ -443,6 +522,8 @@ def main(argv: list[str] | None = None) -> int:
     report = result.pop("report", None)
     error = result.pop("error", None)
     if not args.json:
+        if result.get("candidate_cleanup_warning"):
+            print(f"WARNING {result['candidate_cleanup_warning']}", file=sys.stderr)
         for entry in result.get("recovered_candidates", []):
             print(
                 f"NOTE recovery ref for candidate {entry['candidate_sha']}: {entry['disposition']}"
