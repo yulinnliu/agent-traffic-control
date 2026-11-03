@@ -120,16 +120,17 @@ Work through every step; each ends on the stated criterion.
   integration and then default cleanup of the topic. It carries, with every
   value filled in:
   - `atc integrate --repo <main checkout> --branch <topic branch> --reviewed <full SHA> --authority-reference <authorization record> --verify-command-file <JSON argv file> [--verify-timeout <seconds>]`,
-    with the exact 40-character reviewed SHA and an existing authorization
-    record. The verifier file holds the verification argv as a JSON string
-    array and is named by the project's `AGENTS.md` integration or
-    verification section; if that section does not define one, stop and ask
-    the owner rather than guessing. Pass the argv inline with
-    `--verify-command` only from a shell that preserves embedded double
-    quotes; PowerShell 5.1 strips them, so a pasted inline JSON argv fails
-    there. The verifier runs in an isolated candidate checkout with a default
-    timeout of 300 seconds; set `--verify-timeout` only when the project
-    requires a different bounded duration;
+    with the exact 40-character reviewed SHA. `--authority-reference` takes
+    the task-identity form `GIT_WORKFLOW.md` § Integration verifier source
+    gives: the plan path, section and step, or the project's task record,
+    then ` @ ` and the reviewed SHA. `--verify-command-file` is the path the
+    project's `AGENTS.md` `## Integration verification` section names,
+    resolved under the main checkout, and `--verify-timeout` appears only
+    when that section lists one. When the section is missing, the PASS
+    carries no integration instruction: stop and ask the owner. Pass the
+    argv inline with `--verify-command` only from a shell that preserves
+    embedded double quotes; PowerShell 5.1 strips them, so a pasted inline
+    JSON argv fails there;
   - for a topic with a managed worktree, the default cleanup command in the
     hami-worktree skill's command form; load that skill before writing any
     worktree command;

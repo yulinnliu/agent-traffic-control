@@ -16,6 +16,13 @@ import onboard_project
 import validate_workspace as validator
 
 
+# The AGENTS.md section GIT_WORKFLOW.md § Integration verifier source requires of every registered project.
+VERIFICATION_SECTION = (
+    "## Integration verification\n\n- Verifier argv file: `scripts/integration-verify.json`\n\n"
+    "Runs the demo check on the candidate.\n"
+)
+
+
 def write(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
@@ -47,7 +54,8 @@ def make_workspace(tmp_path: Path, *, create_project: bool = True) -> tuple[Path
     run_git(root, "init", "-q", "-b", "main")
     if create_project:
         project.mkdir(parents=True)
-        write(project / "AGENTS.md", "# AGENTS.md\n\nProject intro.\n\n## What this is\n\nDemo.\n")
+        write(project / "AGENTS.md", "# AGENTS.md\n\nProject intro.\n\n## What this is\n\nDemo.\n\n" + VERIFICATION_SECTION)
+        write(project / "scripts/integration-verify.json", '["python", "-c", "pass"]\n')
     write(root / "CLAUDE.md", "Read AGENTS.md.\n")
     for name in ("CORE.md", "GIT_WORKFLOW.md", "VERIFICATION.md", "DELIVERY.md", "FAILURE_ESCALATION.md", "GOVERNANCE_CHANGES.md", "PROJECT_RUNTIME.md"):
         write(root / "shared/governance" / name, f"# {name}\n")
@@ -373,6 +381,31 @@ def test_project_enforcement_must_match_its_policy(tmp_path: Path, monkeypatch: 
     assert check_registered_projects(root, monkeypatch) == []
     write(project / "policies/hard-deny.yaml", "version: 1\ncapabilities:\n  deny: []\nfilesystem:\n  deny:\n    - \"${DATA}/**\"\n")
     assert any("unresolved-token" in f for f in check_registered_projects(root, monkeypatch))
+
+
+def test_registered_project_must_name_an_existing_integration_verifier(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root, project = make_workspace(tmp_path)
+    assert onboard_project.run("sync", [("demo", project)], root) == 0
+    assert check_registered_projects(root, monkeypatch) == []
+
+    argv_file = project / "scripts/integration-verify.json"
+    argv_file.unlink()
+    assert any(
+        "projects.demo: verifier argv file scripts/integration-verify.json named by AGENTS.md does not exist" in f
+        for f in check_registered_projects(root, monkeypatch)
+    )
+    write(argv_file, "[]\n")
+    assert any("must be a non-empty JSON array of strings" in f for f in check_registered_projects(root, monkeypatch))
+    write(argv_file, "﻿[\"python\", \"-c\", \"pass\"]\n")
+    assert check_registered_projects(root, monkeypatch) == []
+
+    agents = (project / "AGENTS.md").read_text(encoding="utf-8")
+    write(project / "AGENTS.md", agents.replace("- Verifier argv file:", "- Verifier:"))
+    assert any("has no 'Verifier argv file: <repo-relative path>' line" in f for f in check_registered_projects(root, monkeypatch))
+    write(project / "AGENTS.md", agents.replace("## Integration verification", "## Verification notes"))
+    assert any("has no '## Integration verification' section" in f for f in check_registered_projects(root, monkeypatch))
+    write(project / "AGENTS.md", agents.replace("`scripts/integration-verify.json`", "`../outside.json`"))
+    assert any("must be a path inside the repository" in f for f in check_registered_projects(root, monkeypatch))
 
 
 def test_hardcoded_governance_source_is_rejected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

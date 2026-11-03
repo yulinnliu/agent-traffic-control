@@ -193,8 +193,8 @@ for the compatible-merge row.
 The Python integration adapter acquires the repository Integration Slot before
 preflight, prepares the integration revision in an isolated candidate worktree,
 and requires an explicit verification command before updating `main`. Supply
-the full reviewed SHA, a reference to the existing `integrate_main` authority
-record, and the required verification command as a JSON argv array. The command
+the full reviewed SHA, the authority reference and the verification argv in the
+forms `Integration verifier source` below defines. The command
 runs from the candidate checkout with these environment variables:
 
 - `ATC_INTEGRATION_SHA`: immutable candidate commit SHA;
@@ -351,7 +351,80 @@ Formal evidence follows `VERIFICATION.md`; changing the delivered revision inval
 
 ## Integration verifier source
 
-`atc integrate` requires an explicit verification argv, given as a JSON string array either in a file (`--verify-command-file`, the form relay blocks use because it survives every shell's quoting) or inline (`--verify-command`), and an `--authority-reference`. The verification argv is defined by the target project's `AGENTS.md` integration/verification section. If that file does not identify the command, the caller must stop and obtain the command from the owner; it must not infer or invent a verifier. The command runs in the isolated candidate checkout with `ATC_INTEGRATION_SHA`, `ATC_CANDIDATE_DIR`, `ATC_EXPECTED_MAIN_SHA`, and `ATC_REVIEWED_SOURCE_SHA` set by the adapter, inside its own process tree (a Job Object on Windows, a session on POSIX) that the adapter terminates when the verifier returns or times out, so no process the verifier started outlives the verification. The adapter defaults `--verify-timeout` to 300 seconds. The authority reference is recorded as provenance; this adapter does not authenticate the caller's authority.
+`atc integrate` requires an `--authority-reference` and an explicit
+verification argv, given as a JSON string array either in a file
+(`--verify-command-file`, the form relay blocks use because it survives every
+shell's quoting) or inline (`--verify-command`). The adapter records the
+authority reference as provenance and does not authenticate the caller's
+authority. A caller whose project defines no verifier stops and obtains one
+from the owner; it never infers or invents a verifier.
+
+### Authority reference
+
+The authority reference names the task in the identity form `CORE.md`
+§ Task identity gives the project, followed by ` @ ` and the reviewed full SHA:
+
+- plan work: the plan file path, section and step, as in
+  `docs/plans/TRADING_APP_070_PLAN.md §11.3 step 5 @ 9e1242795f028fc49a9119428c45e0e620617276`;
+- a numbered task record: the record in the form the project's `AGENTS.md`
+  declares, then ` @ ` and the reviewed SHA;
+- work outside a plan or task record: repository, branch and reviewed SHA,
+  then `per` the governing document's file and section, as in
+  `yulinnliu/agent-traffic-control impl/integration-concurrency @ <sha> per docs/STATUS.md § Owner decisions`.
+
+### Project verification section
+
+Every registered project's `AGENTS.md` carries a section headed exactly
+`## Integration verification`. It lists:
+
+- `Verifier argv file: <repo-relative path>` — the file holding the JSON
+  string array `atc integrate` runs. A relay block passes this path resolved
+  under the main checkout.
+- `Verifier timeout: <seconds>` — only when the verifier needs a bound other
+  than the default 300 seconds.
+- What the verification covers, by change class, including the project's
+  required gates.
+- How the verifier itself applies `VERIFICATION.md` § Documentation-only
+  verification: it classifies the `ATC_EXPECTED_MAIN_SHA..ATC_INTEGRATION_SHA`
+  diff and runs the content, reference and static checks instead of
+  impact-selected tests when the diff qualifies. The caller never chooses the
+  exception.
+
+`atc validate --projects` reports a registered project whose `AGENTS.md`
+lacks the section or names a missing or malformed argv file.
+
+### Candidate checkout
+
+The verifier runs with the candidate checkout as its working directory. That
+checkout is created by `git worktree add --detach` at the candidate commit: a
+fresh working tree with no virtual environment, no installed packages and
+nothing carried over from the main checkout. The adapter sets
+`ATC_INTEGRATION_SHA`, `ATC_CANDIDATE_DIR`, `ATC_EXPECTED_MAIN_SHA` and
+`ATC_REVIEWED_SOURCE_SHA`. When the verifier returns, the candidate `HEAD`
+must still equal `ATC_INTEGRATION_SHA` and `git status --porcelain` must be
+empty, untracked files included; ignored paths may hold what the verifier
+built. The verifier runs inside its own process tree (a Job Object on Windows,
+a session on POSIX) that the adapter ends when the verifier returns or the
+timeout expires, so no process the verifier started outlives the
+verification.
+
+The verifier therefore:
+
+- builds its environment under an ignored path inside the candidate, or
+  obtains one outside it, without dirtying the tree;
+- proves the code under test is imported from the candidate: an editable
+  install of the main checkout resolves imports back to that checkout's
+  source and fails this proof;
+- selects its checks from the `ATC_EXPECTED_MAIN_SHA..ATC_INTEGRATION_SHA`
+  range plus the project's required gates, and finishes within the timeout;
+- exits nonzero on any failure; its stderr becomes the refusal detail.
+
+### Pin advancement
+
+A project's governance pin in `.atc/governance.yaml` advances to a revision
+carrying this section only when the project's `AGENTS.md` already has its
+`## Integration verification` section and the named argv file exists. Add
+the section and the file in the project first, then sync.
 
 ## Cleanup trigger
 

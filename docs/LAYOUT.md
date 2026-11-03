@@ -45,6 +45,9 @@ Operational description of the tree; governance semantics live under
 
 All of them are ordinary tracked files; sync rewrites them, people review the
 diff. The repository needs no environment variable and no other checkout.
+The pin advances to a revision that requires `## Integration verification`
+in `AGENTS.md` only after that section and its argv file exist
+(`GIT_WORKFLOW.md` § Integration verifier source).
 
 A public repository with infrequent development may instead keep them
 machine-local: `.git/info/exclude` lists `AGENTS.md`, `CLAUDE.md`, `.atc/` and

@@ -62,6 +62,11 @@ GOVERNANCE_MODULES = ("CORE.md", "GIT_WORKFLOW.md", "VERIFICATION.md", "DELIVERY
 VENDORED_GOVERNANCE = Path(".atc") / "governance"
 GOVERNANCE_MANIFEST = Path(".atc") / "governance.yaml"
 VENDORED_INDEX_REFERENCE = ".atc/governance/INDEX.md"
+# GIT_WORKFLOW.md § Integration verifier source: the section every project's
+# AGENTS.md carries and the two fixed lines validate reads out of it.
+VERIFICATION_SECTION = "## Integration verification"
+VERIFIER_FILE_LINE = re.compile(r"^\s*(?:[-*]\s+)?Verifier argv file:\s*`?([^`\s]+)`?\s*$", re.MULTILINE)
+VERIFIER_TIMEOUT_LINE = re.compile(r"^\s*(?:[-*]\s+)?Verifier timeout:\s*`?(\d+(?:\.\d+)?)`?(?:\s*s(?:econds)?)?\s*$", re.MULTILINE)
 # Agent catalogs truncate longer descriptions, which can cut off routing cues.
 MAX_DESCRIPTION = 500
 TOOL_DIRS = (".claude", ".agents", ".dsh")
@@ -501,6 +506,48 @@ def check_project_policy_reference(project_path: Path, label: str) -> None:
         fail(f"{label}: AGENTS.md contains forbidden ~/Hami fallback")
 
 
+def integration_verification_section(text: str) -> str | None:
+    """The body of AGENTS.md's `## Integration verification` section, up to the next `## ` heading."""
+    match = re.search(
+        rf"^{re.escape(VERIFICATION_SECTION)}\s*$(.*?)(?=^## |\Z)", text, re.MULTILINE | re.DOTALL,
+    )
+    return match.group(1) if match else None
+
+
+def check_project_integration_verifier(project_path: Path, label: str) -> None:
+    """AGENTS.md names an existing verifier argv file for `atc integrate` (GIT_WORKFLOW.md § Integration verifier source)."""
+    agents_md = project_path / "AGENTS.md"
+    if not agents_md.is_file():
+        return  # check_project_policy_reference reports the missing file
+    section = integration_verification_section(agents_md.read_text(encoding="utf-8"))
+    if section is None:
+        fail(
+            f"{label}: AGENTS.md has no '{VERIFICATION_SECTION}' section naming the atc integrate "
+            "verifier argv file (GIT_WORKFLOW.md § Integration verifier source)"
+        )
+        return
+    file_match = VERIFIER_FILE_LINE.search(section)
+    if not file_match:
+        fail(f"{label}: AGENTS.md '{VERIFICATION_SECTION}' has no 'Verifier argv file: <repo-relative path>' line")
+        return
+    relative = file_match.group(1)
+    if looks_absolute(relative) or ".." in Path(relative).parts:
+        fail(f"{label}: verifier argv file {relative} must be a path inside the repository")
+        return
+    argv_file = project_path / relative
+    if not argv_file.is_file():
+        fail(f"{label}: verifier argv file {relative} named by AGENTS.md does not exist")
+        return
+    import git_integrate
+    try:
+        git_integrate.parse_verify_command(argv_file.read_text(encoding="utf-8-sig"))
+    except git_integrate.Refused as exc:
+        fail(f"{label}: verifier argv file {relative}: {exc}")
+    timeout = VERIFIER_TIMEOUT_LINE.search(section)
+    if timeout and float(timeout.group(1)) <= 0:
+        fail(f"{label}: AGENTS.md verifier timeout must be greater than zero")
+
+
 def vendored_governance_modules() -> tuple[str, ...]:
     return ("INDEX.md", *GOVERNANCE_MODULES)
 
@@ -712,6 +759,7 @@ def check_projects(canonical: dict[str, dict], project_checkouts: dict[str, Path
             fail(f"projects.{name}.testkit: {problem}")
         check_project_policy_reference(project_path, label=f"projects.{name}")
         check_vendored_governance(project_path, label=f"projects.{name}")
+        check_project_integration_verifier(project_path, label=f"projects.{name}")
         check_project_enforcement(project_path, label=f"projects.{name}.enforcement")
         report_machine_local(project_path, f"projects.{name}.machine-local", real_workspace_yaml)
         check_adapter_tree(
