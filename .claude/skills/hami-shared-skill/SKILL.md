@@ -86,7 +86,8 @@ SKILL.md, so a relative link such as `references/guide.md` resolves in any
 repository. A supporting file is UTF-8 text under a path of letters, digits,
 `.`, `_`, `-` and `/`. Once an adapter's SKILL.md is managed, sync owns its
 whole directory and removes any file the canonical skill does not ship; a
-directory that holds files but no SKILL.md is a collision and left alone.
+directory that holds files but no readable SKILL.md (absent, or a dangling
+link) is a collision and left alone.
 
 ## Step 4 — guard against drift
 

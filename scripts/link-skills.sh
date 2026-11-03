@@ -67,7 +67,8 @@ for skill in "$@"; do
     if [ -e "$dstdir/SKILL.md" ] && ! same "$srcdir/SKILL.md" "$dstdir/SKILL.md" && ! managed "$dstdir/SKILL.md"; then
       echo "collision  $tool/skills/$skill (project-owned, left alone)"; status=1; continue
     fi
-    if [ ! -e "$dstdir/SKILL.md" ] && [ ! -L "$dstdir/SKILL.md" ] && [ -n "$(adapter_files "$dstdir")" ]; then
+    # No readable SKILL.md (absent or a dangling link) beside any other file: nothing proves sync owns them.
+    if [ ! -e "$dstdir/SKILL.md" ] && [ -n "$(adapter_files "$dstdir" | grep -vx 'SKILL.md')" ]; then
       echo "collision  $tool/skills/$skill (files but no SKILL.md, left alone)"; status=1; continue
     fi
     # The whole rendered adapter directory: SKILL.md plus the files its body links to.

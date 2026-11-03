@@ -589,6 +589,22 @@ def test_adapter_directory_without_a_managed_skill_md_keeps_its_files(tmp_path: 
     validator.FAILURES.clear()
 
 
+def test_dangling_skill_md_link_is_a_collision_and_never_written_through(tmp_path: Path) -> None:
+    root, project = make_workspace(tmp_path)
+    adapter = project / ".claude/skills/demo-skill"
+    adapter.mkdir(parents=True)
+    moved = tmp_path / "moved/SKILL.md"
+    try:
+        (adapter / "SKILL.md").symlink_to(moved)
+    except OSError:
+        pytest.skip("this host cannot create symlinks")
+    write(adapter / "mine.md", "mine\n")
+    plan = onboard_project.build_plan(project, root)
+    assert any(item.action == "collision" and item.path == adapter / "SKILL.md" for item in plan)
+    onboard_project.apply_plan(plan, "sync")
+    assert (adapter / "mine.md").is_file() and (adapter / "SKILL.md").is_symlink() and not moved.parent.exists()
+
+
 def test_supporting_file_must_be_plain_named_utf8_text_and_caches_are_ignored(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     root, project = make_workspace(tmp_path)
     cache = root / "shared/skills/demo-skill/__pycache__/helper.cpython-313.pyc"
@@ -603,8 +619,8 @@ def test_supporting_file_must_be_plain_named_utf8_text_and_caches_are_ignored(tm
         bad.write_bytes(content)
         monkeypatch.setattr(validator, "ROOT", root)
         validator.FAILURES.clear()
-        validator.load_canonical_skills()
-        assert [failure for failure in validator.FAILURES if message in failure]
+        validator.check_adapter_tree(root, validator.load_canonical_skills(), label="workspace root", required=set())
+        assert len([failure for failure in validator.FAILURES if message in failure]) == 1
         validator.FAILURES.clear()
         before = sorted(p for p in root.rglob("*") if ".git" not in p.parts)
         assert onboard_project.main(["--sync", "--root-only"], root) != 0

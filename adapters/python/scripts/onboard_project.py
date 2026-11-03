@@ -239,7 +239,7 @@ UNOWNED_DIRECTORY = "directory holds files but no SKILL.md, so nothing marks it 
 
 
 def holds_files(directory: Path) -> bool:
-    return directory.is_dir() and any(path.is_file() for path in directory.rglob("*"))
+    return directory.is_dir() and any(path.is_file() or path.is_symlink() for path in directory.rglob("*"))
 
 
 def supporting_plan(root: Path, skill: str, adapter_dir: Path) -> list[PlanItem]:
