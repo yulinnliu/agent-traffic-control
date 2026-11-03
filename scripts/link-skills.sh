@@ -46,6 +46,11 @@ managed() { grep -q "^managed-by: $MARKER\$" "$1"; }
 # Byte comparison after dropping carriage returns, so a CRLF checkout is not drift.
 same() { [ "$(tr -d '\r' < "$1" | cksum)" = "$(tr -d '\r' < "$2" | cksum)" ]; }
 
+adapter_files() { # dir: its files and links, relative, one per line
+  [ -d "$1" ] || return 0
+  (cd "$1" && find . \( -type f -o -type l \) ! -path '*/__pycache__/*' | sed 's|^\./||' | sort)
+}
+
 place() { # src dst
   mkdir -p "$(dirname -- "$2")"
   if [ "$MODE" = link ]; then ln -s "$1" "$2"; else cp "$1" "$2"; fi
@@ -56,20 +61,27 @@ for skill in "$@"; do
     echo "unknown skill: $skill (see $ROOT/shared/skills/)" >&2; status=1; continue
   fi
   for tool in .claude .agents .dsh; do
-    src="$ROOT/$tool/skills/$skill/SKILL.md"
-    dst="$REPO/$tool/skills/$skill/SKILL.md"
-    [ -f "$src" ] || continue
-    if [ -e "$dst" ] || [ -L "$dst" ]; then
-      if same "$src" "$dst"; then
-        echo "current    $tool/skills/$skill"
-      elif managed "$dst"; then
-        rm -f "$dst"; place "$src" "$dst"; echo "updated    $tool/skills/$skill"
-      else
-        echo "collision  $tool/skills/$skill (project-owned, left alone)"; status=1
-      fi
-    else
-      place "$src" "$dst"; echo "installed  $tool/skills/$skill"
+    srcdir="$ROOT/$tool/skills/$skill"
+    dstdir="$REPO/$tool/skills/$skill"
+    [ -f "$srcdir/SKILL.md" ] || continue
+    if [ -e "$dstdir/SKILL.md" ] && ! same "$srcdir/SKILL.md" "$dstdir/SKILL.md" && ! managed "$dstdir/SKILL.md"; then
+      echo "collision  $tool/skills/$skill (project-owned, left alone)"; status=1; continue
     fi
+    # The whole rendered adapter directory: SKILL.md plus the files its body links to.
+    result=current
+    [ -e "$dstdir/SKILL.md" ] || [ -L "$dstdir/SKILL.md" ] || result=installed
+    for file in $(adapter_files "$srcdir"); do
+      if [ -e "$dstdir/$file" ] || [ -L "$dstdir/$file" ]; then
+        same "$srcdir/$file" "$dstdir/$file" && continue
+        rm -f "$dstdir/$file"
+      fi
+      place "$srcdir/$file" "$dstdir/$file"; [ "$result" = installed ] || result=updated
+    done
+    for file in $(adapter_files "$dstdir"); do
+      [ -f "$srcdir/$file" ] && continue
+      rm -f "$dstdir/$file"; [ "$result" = installed ] || result=updated
+    done
+    printf '%-11s%s\n' "$result" "$tool/skills/$skill"
   done
 done
 

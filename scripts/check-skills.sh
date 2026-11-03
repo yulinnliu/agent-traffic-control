@@ -23,6 +23,14 @@ seen=0
 managed() { grep -q '^managed-by: agent-traffic-control$' "$1"; }
 # Byte comparison after dropping carriage returns, so a CRLF checkout is not drift.
 same() { [ "$(tr -d '\r' < "$1" | cksum)" = "$(tr -d '\r' < "$2" | cksum)" ]; }
+adapter_files() { # dir: its files and links, relative, one per line
+  (cd "$1" && find . \( -type f -o -type l \) ! -path '*/__pycache__/*' | sed 's|^\./||' | sort)
+}
+# A rendered adapter directory: SKILL.md plus the files its body links to, none missing or extra.
+same_dir() {
+  [ "$(adapter_files "$1")" = "$(adapter_files "$2")" ] || return 1
+  for file in $(adapter_files "$1"); do same "$1/$file" "$2/$file" || return 1; done
+}
 
 for tool in .claude .agents .dsh; do
   dir="$REPO/$tool/skills"
@@ -37,7 +45,7 @@ for tool in .claude .agents .dsh; do
       echo "orphaned   $tool/skills/$skill (no canonical skill here)"; status=1
     elif [ ! -f "$src" ]; then
       echo "orphaned   $tool/skills/$skill (no $tool adapter here)"; status=1
-    elif same "$src" "$path"; then
+    elif same_dir "$(dirname -- "$src")" "$(dirname -- "$path")"; then
       echo "current    $tool/skills/$skill"
     else
       echo "drifted    $tool/skills/$skill"; status=1

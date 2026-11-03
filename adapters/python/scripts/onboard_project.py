@@ -227,7 +227,29 @@ def build_plan(project_path: Path, root: Path = ROOT) -> list[PlanItem]:
                 plan.append(PlanItem("update", target, "managed adapter drift", expected))
             else:
                 plan.append(PlanItem("skip", target, "managed adapter is current"))
+            if plan[-1].action != "collision":
+                plan.extend(supporting_plan(root, skill, target.parent))
     plan.extend(orphan_plan(project_path, set(canonical)))
+    return plan
+
+
+def supporting_plan(root: Path, skill: str, adapter_dir: Path) -> list[PlanItem]:
+    """Copy the canonical skill's supporting files into one managed adapter
+    directory; a file there that the canonical skill no longer ships is an
+    update with no content, which sync removes."""
+    plan: list[PlanItem] = []
+    expected = validator.supporting_files(root, skill)
+    for relative, content in expected.items():
+        target = adapter_dir / relative
+        if not target.exists():
+            plan.append(PlanItem("create", target, "supporting file", content))
+        elif validator.normalise(target.read_text(encoding="utf-8")) != content:
+            plan.append(PlanItem("update", target, "supporting file drift", content))
+        else:
+            plan.append(PlanItem("skip", target, "supporting file is current"))
+    if adapter_dir.is_dir():
+        for extra in validator.adapter_extras(adapter_dir, expected):
+            plan.append(PlanItem("update", extra, "no longer in the canonical skill; sync removes it"))
     return plan
 
 
@@ -277,6 +299,8 @@ def root_adapter_plan(root: Path = ROOT) -> list[PlanItem]:
                 plan.append(PlanItem("update", target, "adapter drifted from canonical", expected))
             else:
                 plan.append(PlanItem("skip", target, "managed adapter is current"))
+            if plan[-1].action != "collision":
+                plan.extend(supporting_plan(root, skill, target.parent))
     return plan
 
 
@@ -296,8 +320,9 @@ def apply_plan(plan: list[PlanItem], mode: str, prune: bool = False) -> None:
                 item.path.write_text(item.content, encoding="utf-8", newline="\n")
         elif item.action == "update" and mode == "sync":
             if item.content is None:
-                raise ValueError(f"{item.path}: update has no content")
-            item.path.write_text(item.content, encoding="utf-8", newline="\n")
+                item.path.unlink()
+            else:
+                item.path.write_text(item.content, encoding="utf-8", newline="\n")
 
 
 def print_plan(name: str, project_path: Path, plan: list[PlanItem], mode: str, prune: bool = False) -> None:

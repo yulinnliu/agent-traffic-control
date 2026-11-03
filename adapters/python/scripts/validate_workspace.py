@@ -305,6 +305,47 @@ def render_adapter(root: Path, name: str, tool_dir: str) -> str:
     return rendered
 
 
+def supporting_files(root: Path, name: str) -> dict[str, str]:
+    """Files canonical skill ``name`` ships beside its SKILL.md, keyed by POSIX path
+    relative to the skill directory. Every adapter carries them verbatim so a
+    relative link in the body resolves in any repository; the ``adapters/``
+    overlays are rendered into SKILL.md instead."""
+    canonical_dir = root / "shared" / "skills" / name
+    files: dict[str, str] = {}
+    for path in sorted(canonical_dir.rglob("*")):
+        relative = path.relative_to(canonical_dir)
+        if not path.is_file() or relative.as_posix() == "SKILL.md" or relative.parts[0] == "adapters":
+            continue
+        if "__pycache__" in relative.parts:
+            continue
+        files[relative.as_posix()] = normalise(path.read_text(encoding="utf-8"))
+    return files
+
+
+def adapter_extras(adapter_dir: Path, expected: dict[str, str]) -> list[Path]:
+    """Files in a managed adapter directory that neither its SKILL.md nor its
+    canonical supporting files account for."""
+    return sorted(
+        path for path in adapter_dir.rglob("*")
+        if path.is_file()
+        and path.relative_to(adapter_dir).as_posix() != "SKILL.md"
+        and path.relative_to(adapter_dir).as_posix() not in expected
+        and "__pycache__" not in path.relative_to(adapter_dir).parts
+    )
+
+
+def check_supporting_files(adapter_dir: Path, name: str) -> None:
+    expected = supporting_files(ROOT, name)
+    for relative, content in expected.items():
+        target = adapter_dir / relative
+        if not target.is_file():
+            fail(f"{target}: missing supporting file of shared/skills/{name}/ — run sync to copy it")
+        elif normalise(target.read_text(encoding="utf-8")) != content:
+            fail(f"{target}: drifted from shared/skills/{name}/{relative} — run sync to re-copy it")
+    for extra in adapter_extras(adapter_dir, expected):
+        fail(f"{extra}: not in shared/skills/{name}/ — run sync to remove it")
+
+
 def check_one_adapter(adapter_file: Path, name: str, canonical_fm: dict) -> None:
     adapter_fm, _ = parse_frontmatter(adapter_file)
 
@@ -390,6 +431,8 @@ def check_adapter_tree(
                 fail(f"{adapter_file}: directory exists but SKILL.md missing")
                 continue
             check_one_adapter(adapter_file, name, canonical[name])
+            if is_managed(parse_frontmatter(adapter_file)[0]):
+                check_supporting_files(adapter_file.parent, name)
 
 
 def check_policy_template() -> None:

@@ -123,6 +123,7 @@ def install_opt_in(root: Path, project: Path, skills: list[str]) -> None:
                 continue
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(onboard_project.validator.render_adapter(root, skill, tool_dir), encoding="utf-8", newline="\n")
+            onboard_project.apply_plan(onboard_project.supporting_plan(root, skill, target.parent), "sync")
             print(f"installed opt-in adapter {target.relative_to(project).as_posix()}")
 
 

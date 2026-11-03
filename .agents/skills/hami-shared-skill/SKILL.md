@@ -80,7 +80,10 @@ Each rendered adapter carries `managed-by: agent-traffic-control` and
 `canonical: <name>`. Those fields are the mutation boundary: sync rewrites a
 file that has them and never touches a same-named skill that does not. There
 is no per-file format version; a managed file is current when it equals the
-render, otherwise sync replaces it.
+render, otherwise sync replaces it. Every other file in the canonical
+directory (outside `adapters/`) is copied verbatim beside the adapter's
+SKILL.md, so a relative link such as `references/guide.md` resolves in any
+repository; sync removes a copied file the canonical skill no longer ships.
 
 ## Step 4 — guard against drift
 

@@ -534,6 +534,34 @@ def test_adapter_from_an_older_release_is_stale_but_still_owned(tmp_path: Path, 
     assert check_registered_projects(root, monkeypatch) == []
 
 
+def test_supporting_files_are_copied_checked_and_pruned_with_the_adapter(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root, project = make_workspace(tmp_path)
+    write(root / "shared/skills/demo-skill/references/guide.md", "# Guide\n")
+    write(root / "shared/skills/demo-skill/adapters/claude.md", "Claude only.\n")
+    onboard_project.apply_plan(onboard_project.root_adapter_plan(root), "sync")
+    assert onboard_project.run("sync", [("demo", project)], root) == 0
+    for base in (root, project):
+        for tool in (".claude", ".agents"):
+            adapter = base / tool / "skills/demo-skill"
+            assert (adapter / "references/guide.md").read_text(encoding="utf-8") == "# Guide\n"
+            assert not (adapter / "adapters").exists()
+    assert check_registered_projects(root, monkeypatch) == []
+    assert not changed(onboard_project.build_plan(project, root))
+
+    copy = project / ".agents/skills/demo-skill/references/guide.md"
+    write(copy, "# Edited\n")
+    write(project / ".agents/skills/demo-skill/references/stale.md", "old\n")
+    (project / ".claude/skills/demo-skill/references/guide.md").unlink()
+    failures = check_registered_projects(root, monkeypatch)
+    assert any("guide.md: drifted from" in failure for failure in failures)
+    assert any("stale.md: not in shared/skills/demo-skill/" in failure for failure in failures)
+    assert any("guide.md: missing supporting file" in failure for failure in failures)
+    assert onboard_project.run("sync", [("demo", project)], root) == 0
+    assert copy.read_text(encoding="utf-8") == "# Guide\n"
+    assert not (project / ".agents/skills/demo-skill/references/stale.md").exists()
+    assert check_registered_projects(root, monkeypatch) == []
+
+
 def test_registered_project_must_carry_every_baseline_adapter(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root, project = make_workspace(tmp_path)
     onboard_project.apply_plan(onboard_project.build_plan(project, root), "sync")
