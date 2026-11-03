@@ -4,6 +4,7 @@ import json
 import sys
 import os
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -337,6 +338,118 @@ def test_missing_verifier_is_reported_without_traceback(
     assert "could not start candidate verifier" in error
     assert "Traceback" not in error
     assert main_tip(repo) == before
+
+
+def pid_alive(pid: int) -> bool:
+    if sys.platform == "win32":
+        listing = subprocess.run(
+            ["tasklist", "/FI", f"PID eq {pid}", "/NH"], capture_output=True, text=True, check=False,
+        ).stdout
+        return str(pid) in listing.split()
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+def test_verifier_timeout_kills_descendant_processes(
+    repo: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    tip = topic(repo, {"a.txt": "a2\n"})
+    before = main_tip(repo)
+    pid_file = tmp_path / "grandchild.pid"
+    grandchild = "import os,time,sys; open(sys.argv[1],'w').write(str(os.getpid())); time.sleep(60)"
+    wrapper = (
+        "import subprocess,sys,time; "
+        f"subprocess.Popen([sys.executable,'-c',{grandchild!r},{str(pid_file)!r}]); "
+        "time.sleep(60)"
+    )
+    started = time.monotonic()
+    assert integrate(repo, "topic", tip, "--verify-command", json.dumps([sys.executable, "-c", wrapper]),
+                     "--verify-timeout", "1") == 1
+    elapsed = time.monotonic() - started
+    assert "candidate verification timed out" in capsys.readouterr().err
+    assert elapsed < 20, f"timeout was not enforced while a descendant held the verifier open ({elapsed:.1f}s)"
+    assert main_tip(repo) == before
+    deadline = time.monotonic() + 5
+    while not pid_file.exists() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    pid = int(pid_file.read_text())
+    while pid_alive(pid) and time.monotonic() < deadline:
+        time.sleep(0.1)
+    assert not pid_alive(pid), "verifier descendant survived the timeout"
+
+
+def test_verify_command_file_supplies_argv(repo: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    tip = topic(repo, {"a.txt": "a2\n"})
+    argv_file = tmp_path / "verify.json"
+    argv_file.write_text(verify_command(), encoding="utf-8")
+    assert gi.main([
+        "--repo", str(repo), "--branch", "topic", "--reviewed", tip,
+        "--authority-reference", "test-owner-authorization", "--verify-command-file", str(argv_file),
+    ]) == 0
+    assert main_tip(repo) == tip
+
+
+def test_missing_verify_command_file_is_refused(repo: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    tip = topic(repo, {"a.txt": "a2\n"})
+    before = main_tip(repo)
+    assert gi.main([
+        "--repo", str(repo), "--branch", "topic", "--reviewed", tip,
+        "--authority-reference", "test-owner-authorization",
+        "--verify-command-file", str(tmp_path / "absent.json"),
+    ]) == 2
+    assert "could not read --verify-command-file" in capsys.readouterr().err
+    assert main_tip(repo) == before
+
+
+def test_malformed_verify_command_is_refused_before_any_candidate_work(
+    repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    tip = topic(repo, {"a.txt": "a2\n"})
+    before = main_tip(repo)
+    # PowerShell 5.1 hands a native command '[python,-c,pass]' for '["python","-c","pass"]'.
+    assert integrate(repo, "topic", tip, "--verify-command", "[python,-c,pass]") == 2
+    assert "--verify-command must be a JSON array" in capsys.readouterr().err
+    assert main_tip(repo) == before
+    assert run_git(repo, "worktree", "list").count("\n") == 0
+
+
+def test_verify_command_sources_are_exclusive_and_required(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    tip = topic(repo, {"a.txt": "a2\n"})
+    base = ["--repo", str(repo), "--branch", "topic", "--reviewed", tip, "--authority-reference", "x"]
+    with pytest.raises(SystemExit, match="2"):
+        gi.main(base)
+    with pytest.raises(SystemExit, match="2"):
+        gi.main([*base, "--verify-command", verify_command(), "--verify-command-file", "v.json"])
+
+
+def test_other_request_keeps_recovery_ref_while_checkout_needs_reconciliation(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    first_tip = topic(repo, {"a.txt": "first\n"}, branch="topic-one")
+    second_tip = topic(repo, {"b.txt": "second\n"}, branch="topic-two")
+    real_git = gi.git
+
+    def dirty_after_ff(repo_arg, *args, **kwargs):
+        result = real_git(repo_arg, *args, **kwargs)
+        if args[:2] == ("merge", "--ff-only"):
+            (repo / "a.txt").write_text("unexpected checkout mutation\n", encoding="utf-8")
+        return result
+
+    monkeypatch.setattr(gi, "git", dirty_after_ff)
+    assert integrate(repo, "topic-one", first_tip, "--json") == 1
+    monkeypatch.setattr(gi, "git", real_git)
+    recovery_ref = json.loads(capsys.readouterr().out)["candidate_ref"]
+    assert run_git(repo, "for-each-ref", "--format=%(refname)", "refs/atc/integration-candidates") == recovery_ref
+
+    assert integrate(repo, "topic-two", second_tip) == 1
+    captured = capsys.readouterr()
+    assert "CHECKOUT_DIRTY" in captured.out
+    assert "main_retains_commit_ref_retained_checkout_inconsistent" in captured.err
+    assert run_git(repo, "for-each-ref", "--format=%(refname)", "refs/atc/integration-candidates") == recovery_ref
+    assert main_tip(repo) == first_tip
 
 
 def test_candidate_verification_failure_leaves_main_unchanged(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:

@@ -9,7 +9,9 @@ Integration Slot and never blindly resets main after a failed update.
 
 Usage:
   git_integrate.py --repo <main checkout> --branch <topic> --reviewed <40-hex sha>
-      --authority-reference <record> --verify-command <JSON argv> [--main main] [--json]
+      --authority-reference <record>
+      (--verify-command <JSON argv> | --verify-command-file <JSON argv file>)
+      [--verify-timeout <seconds>] [--main main] [--json]
 """
 from __future__ import annotations
 
@@ -17,6 +19,7 @@ import argparse
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import uuid
@@ -69,16 +72,67 @@ def _remove_candidate(repo: Path, candidate_dir: Path) -> str | None:
     return None
 
 
-def _verify_candidate(
-    command: str, candidate_dir: Path, candidate_sha: str, expected_main: str, reviewed: str,
-    timeout: float,
-) -> None:
+def _kill_process_tree(process: subprocess.Popen) -> None:
+    """Terminate the verifier and every descendant it started."""
+    if sys.platform == "win32":
+        subprocess.run(
+            ["taskkill", "/T", "/F", "/PID", str(process.pid)],
+            capture_output=True, check=False,
+        )
+    else:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    process.kill()
+    process.wait()
+
+
+def _run_verifier(argv: list[str], cwd: Path, env: dict[str, str], timeout: float) -> tuple[int, str, str]:
+    """Run the verifier in its own process group with a bounded wall clock.
+
+    Output goes to temporary files rather than pipes so a descendant that
+    outlives the verifier cannot hold the wait open past the timeout.
+    """
+    group_kwargs: dict = (
+        {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+        if sys.platform == "win32" else {"start_new_session": True}
+    )
+    with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
+        try:
+            process = subprocess.Popen(
+                argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=out, stderr=err, **group_kwargs,
+            )
+        except OSError as exc:
+            raise Refused(f"could not start candidate verifier: {exc}") from exc
+        try:
+            returncode = process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired as exc:
+            _kill_process_tree(process)
+            raise Refused(f"candidate verification timed out after {timeout:g}s") from exc
+        out.seek(0)
+        err.seek(0)
+        return (
+            returncode,
+            out.read().decode("utf-8", errors="replace"),
+            err.read().decode("utf-8", errors="replace"),
+        )
+
+
+def parse_verify_command(command: str) -> list[str]:
     try:
         argv = json.loads(command)
     except json.JSONDecodeError as exc:
         raise Refused("--verify-command must be a JSON array of executable and arguments") from exc
     if not isinstance(argv, list) or not argv or not all(isinstance(item, str) and item for item in argv):
         raise Refused("--verify-command must be a non-empty JSON array of strings")
+    return argv
+
+
+def _verify_candidate(
+    argv: list[str], candidate_dir: Path, candidate_sha: str, expected_main: str, reviewed: str,
+    timeout: float,
+) -> None:
     env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
     env.update({
         "ATC_INTEGRATION_SHA": candidate_sha,
@@ -86,19 +140,11 @@ def _verify_candidate(
         "ATC_EXPECTED_MAIN_SHA": expected_main,
         "ATC_REVIEWED_SOURCE_SHA": reviewed,
     })
-    try:
-        result = subprocess.run(
-            argv, cwd=candidate_dir, env=env, capture_output=True, text=True,
-            encoding="utf-8", timeout=timeout,
-        )
-    except subprocess.TimeoutExpired as exc:
-        raise Refused(f"candidate verification timed out after {timeout:g}s") from exc
-    except OSError as exc:
-        raise Refused(f"could not start candidate verifier: {exc}") from exc
-    if result.returncode:
-        detail = (result.stderr or result.stdout).strip()
+    returncode, stdout, stderr = _run_verifier(argv, candidate_dir, env, timeout)
+    if returncode:
+        detail = (stderr or stdout).strip()
         raise Refused(
-            f"candidate verification failed for {candidate_sha} (exit {result.returncode}): {detail}"
+            f"candidate verification failed for {candidate_sha} (exit {returncode}): {detail}"
         )
     if rev(candidate_dir, "HEAD") != candidate_sha:
         raise Refused("verification command changed candidate HEAD; candidate SHA is no longer bound")
@@ -137,18 +183,30 @@ def _recover_interrupted_update(
         and branch_tip == reviewed
         and (main_tip == reviewed or (len(parents) == 3 and parents[2] == reviewed))
     )
+    head = rev(repo, "HEAD")
+    status = git(repo, "status", "--porcelain", "--untracked-files=no").stdout.strip()
     if not candidate_matches_request:
-        for ref_name in matching:
-            git(repo, "update-ref", "-d", ref_name, main_tip, check=False)
+        # A ref retained because the checkout needs manual reconciliation is
+        # evidence for that reconciliation; only a consistent checkout lets
+        # another request release it.
+        if head != main_tip or status:
+            disposition = "main_retains_commit_ref_retained_checkout_inconsistent"
+        else:
+            removed = [
+                git(repo, "update-ref", "-d", ref_name, main_tip, check=False).returncode == 0
+                for ref_name in matching
+            ]
+            disposition = (
+                "main_retains_commit_ref_removed_request_not_matched" if all(removed)
+                else "main_retains_commit_ref_removal_failed_request_not_matched"
+            )
         recovered_candidates.append({
             "candidate_sha": main_tip,
             "candidate_refs": matching,
-            "disposition": "main_retains_commit_ref_removed_request_not_matched",
+            "disposition": disposition,
         })
         return None
 
-    head = rev(repo, "HEAD")
-    status = git(repo, "status", "--porcelain", "--untracked-files=no").stdout.strip()
     result = {
         "command": "integrate",
         "authority_reference": authority_reference,
@@ -187,6 +245,7 @@ def integrate(
         raise Refused("--authority-reference is required to record the integrate_main authority source")
     if not verify_command:
         raise Refused("--verify-command is required; main cannot advance without candidate verification")
+    verify_argv = parse_verify_command(verify_command)
 
     with IntegrationSlot(repo):
         main_tip_for_refs = rev(repo, main)
@@ -272,7 +331,7 @@ def integrate(
             elif candidate_sha != reviewed:
                 raise Refused(f"FF candidate is {candidate_sha}, expected reviewed SHA {reviewed}")
 
-            _verify_candidate(verify_command, candidate_dir, candidate_sha, main_before, reviewed, verify_timeout)
+            _verify_candidate(verify_argv, candidate_dir, candidate_sha, main_before, reviewed, verify_timeout)
             result["verification"] = "PASS"
 
             # Final source and target checks are inside the cooperative slot.
@@ -349,7 +408,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--reviewed", required=True, help="full 40-character SHA named by the review")
     parser.add_argument("--main", default="main", help="integration branch (default: main)")
     parser.add_argument("--authority-reference", required=True, help="reference to the existing record granting integrate_main authority")
-    parser.add_argument("--verify-command", required=True, help="required verification argv as a JSON string array, run in the candidate checkout")
+    verifier = parser.add_mutually_exclusive_group(required=True)
+    verifier.add_argument("--verify-command", help="verification argv as a JSON string array, run in the candidate checkout")
+    verifier.add_argument(
+        "--verify-command-file", type=Path,
+        help="file holding the verification argv as a JSON string array (shell-quoting safe)",
+    )
     parser.add_argument("--verify-timeout", type=float, default=300.0, help="maximum verifier runtime in seconds (default: 300)")
     parser.add_argument("--json", action="store_true", help="print the result as JSON")
     return parser
@@ -363,8 +427,14 @@ def main(argv: list[str] | None = None) -> int:
         check_checkout(args.repo)
         if args.verify_timeout <= 0:
             raise Refused("--verify-timeout must be greater than zero")
+        verify_command = args.verify_command
+        if args.verify_command_file is not None:
+            try:
+                verify_command = args.verify_command_file.read_text(encoding="utf-8")
+            except OSError as exc:
+                raise Refused(f"could not read --verify-command-file: {exc}") from exc
         code, result = integrate(
-            args.repo, args.branch, args.reviewed, args.main, args.verify_command,
+            args.repo, args.branch, args.reviewed, args.main, verify_command,
             args.authority_reference, args.verify_timeout,
         )
     except (Refused, GitError, RuntimeError) as exc:
@@ -372,6 +442,13 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     report = result.pop("report", None)
     error = result.pop("error", None)
+    if not args.json:
+        for entry in result.get("recovered_candidates", []):
+            print(
+                f"NOTE recovery ref for candidate {entry['candidate_sha']}: {entry['disposition']}"
+                f" ({', '.join(entry['candidate_refs'])})",
+                file=sys.stderr,
+            )
     if report is not None:
         print(json.dumps({**result, "preflight": asdict(report)}, indent=2) if args.json else render(report))
     elif error is not None:

@@ -96,13 +96,17 @@ Work through every step; each ends on the stated criterion.
 - A PASS includes the integration instruction when the project's adopted
   process lets a relayed PASS authorize integration; the user pasting it is
   that approval. The instruction is
-  `atc integrate --repo <main checkout> --branch <topic branch> --reviewed <full SHA> --authority-reference <authorization record> --verify-command <JSON argv> [--verify-timeout <seconds>]`
+  `atc integrate --repo <main checkout> --branch <topic branch> --reviewed <full SHA> --authority-reference <authorization record> --verify-command-file <JSON argv file> [--verify-timeout <seconds>]`
   with every bracket filled in before the block is sent (the main checkout
   path, branch, exact 40-character reviewed SHA, existing authorization record,
-  and verification argv), so the pasted command carries zero placeholders.
-  Obtain the verification argv from the project's `AGENTS.md` integration or
-  verification section; if it does not define one, stop and ask the owner rather
-  than guessing. The command runs in an isolated candidate checkout. The
+  and the verifier file), so the pasted command carries zero placeholders.
+  The verifier file holds the verification argv as a JSON string array and is
+  named by the project's `AGENTS.md` integration or verification section; if
+  that section does not define one, stop and ask the owner rather than
+  guessing. Pass the argv inline with `--verify-command` only from a shell
+  that preserves embedded double quotes; PowerShell 5.1 strips them, so a
+  pasted inline JSON argv fails there. The command runs in an isolated
+  candidate checkout. The
   default verifier timeout is 300 seconds; set `--verify-timeout` only when the
   project requires a different bounded duration. Also state what not to do
   (build, install, push). Worktree audit/cleanup commands in a block follow the

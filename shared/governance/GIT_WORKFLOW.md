@@ -351,7 +351,7 @@ Formal evidence follows `VERIFICATION.md`; changing the delivered revision inval
 
 ## Integration verifier source
 
-`atc integrate` requires an explicit `--verify-command` JSON argv and an `--authority-reference`. The verification argv is defined by the target project's `AGENTS.md` integration/verification section. If that file does not identify the command, the caller must stop and obtain the command from the owner; it must not infer or invent a verifier. The command runs in the isolated candidate checkout with `ATC_INTEGRATION_SHA`, `ATC_CANDIDATE_DIR`, `ATC_EXPECTED_MAIN_SHA`, and `ATC_REVIEWED_SOURCE_SHA` set by the adapter. The adapter defaults `--verify-timeout` to 300 seconds. The authority reference is recorded as provenance; this adapter does not authenticate the caller's authority.
+`atc integrate` requires an explicit verification argv, given as a JSON string array either in a file (`--verify-command-file`, the form relay blocks use because it survives every shell's quoting) or inline (`--verify-command`), and an `--authority-reference`. The verification argv is defined by the target project's `AGENTS.md` integration/verification section. If that file does not identify the command, the caller must stop and obtain the command from the owner; it must not infer or invent a verifier. The command runs in the isolated candidate checkout with `ATC_INTEGRATION_SHA`, `ATC_CANDIDATE_DIR`, `ATC_EXPECTED_MAIN_SHA`, and `ATC_REVIEWED_SOURCE_SHA` set by the adapter, in its own process group so that a timeout ends the verifier and every process it started. The adapter defaults `--verify-timeout` to 300 seconds. The authority reference is recorded as provenance; this adapter does not authenticate the caller's authority.
 
 ## Cleanup trigger
 
