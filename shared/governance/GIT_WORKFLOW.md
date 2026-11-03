@@ -369,8 +369,8 @@ The authority reference names the task in the identity form `CORE.md`
 - a numbered task record: the record in the form the project's `AGENTS.md`
   declares, then ` @ ` and the reviewed SHA;
 - work outside a plan or task record: repository, branch and reviewed SHA,
-  then `per` the governing document's file and section, as in
-  `yulinnliu/agent-traffic-control impl/integration-concurrency @ b1abaabdfebe8c973b7d3d9b88f7de845016beeb per AGENTS.md § Changing this repo`.
+  then `per` the governing document's file and section
+  (`<owner>/<repo> <branch> @ <sha> per <file> § <section>`).
 
 ### Project verification section
 
