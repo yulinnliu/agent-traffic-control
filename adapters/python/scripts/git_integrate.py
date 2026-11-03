@@ -79,10 +79,18 @@ class _ProcessTree:
     through re-parenting. POSIX: the verifier's own session/process group.
     """
 
+    FALLBACK_WARNING = (
+        "verifier process tree is not isolated by a Job Object ({stage} failed); "
+        "a descendant re-parented past the verifier may outlive the verification"
+    )
+
     def __init__(self) -> None:
         self.job = None
+        self.warning: str | None = None
         if sys.platform == "win32":
             self.job = _create_kill_on_close_job()
+            if self.job is None:
+                self.warning = self.FALLBACK_WARNING.format(stage="job creation")
 
     def popen_kwargs(self) -> dict:
         if sys.platform == "win32":
@@ -92,16 +100,16 @@ class _ProcessTree:
     def adopt(self, process: subprocess.Popen) -> None:
         if self.job is None:
             return
-        import ctypes
-        if not ctypes.windll.kernel32.AssignProcessToJobObject(self.job, int(process._handle)):
-            ctypes.windll.kernel32.CloseHandle(self.job)
+        kernel32 = _kernel32()
+        if not kernel32.AssignProcessToJobObject(self.job, int(process._handle)):
+            kernel32.CloseHandle(self.job)
             self.job = None
+            self.warning = self.FALLBACK_WARNING.format(stage="job assignment")
 
     def terminate(self, process: subprocess.Popen) -> None:
         if sys.platform == "win32":
             if self.job is not None:
-                import ctypes
-                ctypes.windll.kernel32.TerminateJobObject(self.job, 1)
+                _kernel32().TerminateJobObject(self.job, 1)
             else:
                 subprocess.run(
                     ["taskkill", "/T", "/F", "/PID", str(process.pid)], capture_output=True, check=False,
@@ -116,9 +124,33 @@ class _ProcessTree:
 
     def close(self) -> None:
         if self.job is not None:
-            import ctypes
-            ctypes.windll.kernel32.CloseHandle(self.job)
+            _kernel32().CloseHandle(self.job)
             self.job = None
+
+
+_KERNEL32 = None
+
+
+def _kernel32():
+    """A private kernel32 binding with typed Job Object entry points."""
+    global _KERNEL32
+    if _KERNEL32 is None:
+        import ctypes
+        from ctypes import wintypes
+
+        lib = ctypes.WinDLL("kernel32", use_last_error=True)
+        lib.CreateJobObjectW.argtypes = [wintypes.LPVOID, wintypes.LPCWSTR]
+        lib.CreateJobObjectW.restype = wintypes.HANDLE
+        lib.SetInformationJobObject.argtypes = [wintypes.HANDLE, ctypes.c_int, wintypes.LPVOID, wintypes.DWORD]
+        lib.SetInformationJobObject.restype = wintypes.BOOL
+        lib.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+        lib.AssignProcessToJobObject.restype = wintypes.BOOL
+        lib.TerminateJobObject.argtypes = [wintypes.HANDLE, wintypes.UINT]
+        lib.TerminateJobObject.restype = wintypes.BOOL
+        lib.CloseHandle.argtypes = [wintypes.HANDLE]
+        lib.CloseHandle.restype = wintypes.BOOL
+        _KERNEL32 = lib
+    return _KERNEL32
 
 
 def _create_kill_on_close_job():
@@ -147,8 +179,7 @@ def _create_kill_on_close_job():
             ("PeakProcessMemoryUsed", ctypes.c_size_t), ("PeakJobMemoryUsed", ctypes.c_size_t),
         ]
 
-    kernel32 = ctypes.windll.kernel32
-    kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+    kernel32 = _kernel32()
     job = kernel32.CreateJobObjectW(None, None)
     if not job:
         return None
@@ -163,12 +194,15 @@ def _create_kill_on_close_job():
     return job
 
 
-def _run_verifier(argv: list[str], cwd: Path, env: dict[str, str], timeout: float) -> tuple[int, str, str]:
+def _run_verifier(
+    argv: list[str], cwd: Path, env: dict[str, str], timeout: float,
+) -> tuple[int, str, str, str | None]:
     """Run the verifier with a bounded wall clock and end its whole process tree.
 
     Output goes to temporary files rather than pipes so a descendant that
     outlives the verifier cannot hold the wait open past the timeout. When the
     verifier returns or times out, every process it started is terminated.
+    The last element names a weaker isolation the run had to fall back to.
     """
     tree = _ProcessTree()
     try:
@@ -193,6 +227,7 @@ def _run_verifier(argv: list[str], cwd: Path, env: dict[str, str], timeout: floa
                 returncode,
                 out.read().decode("utf-8", errors="replace"),
                 err.read().decode("utf-8", errors="replace"),
+                tree.warning,
             )
     finally:
         tree.close()
@@ -211,7 +246,8 @@ def parse_verify_command(command: str) -> list[str]:
 def _verify_candidate(
     argv: list[str], candidate_dir: Path, candidate_sha: str, expected_main: str, reviewed: str,
     timeout: float,
-) -> None:
+) -> str | None:
+    """Run the verifier in the candidate; return the isolation warning, if any."""
     env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
     env.update({
         "ATC_INTEGRATION_SHA": candidate_sha,
@@ -219,7 +255,7 @@ def _verify_candidate(
         "ATC_EXPECTED_MAIN_SHA": expected_main,
         "ATC_REVIEWED_SOURCE_SHA": reviewed,
     })
-    returncode, stdout, stderr = _run_verifier(argv, candidate_dir, env, timeout)
+    returncode, stdout, stderr, warning = _run_verifier(argv, candidate_dir, env, timeout)
     if returncode:
         detail = (stderr or stdout).strip()
         raise Refused(
@@ -229,6 +265,7 @@ def _verify_candidate(
         raise Refused("verification command changed candidate HEAD; candidate SHA is no longer bound")
     if git(candidate_dir, "status", "--porcelain").stdout.strip():
         raise Refused("verification command dirtied candidate checkout; refusing integration")
+    return warning
 
 
 
@@ -410,8 +447,12 @@ def integrate(
             elif candidate_sha != reviewed:
                 raise Refused(f"FF candidate is {candidate_sha}, expected reviewed SHA {reviewed}")
 
-            _verify_candidate(verify_argv, candidate_dir, candidate_sha, main_before, reviewed, verify_timeout)
+            verification_warning = _verify_candidate(
+                verify_argv, candidate_dir, candidate_sha, main_before, reviewed, verify_timeout,
+            )
             result["verification"] = "PASS"
+            if verification_warning:
+                result["verification_warning"] = verification_warning
 
             # Final source and target checks are inside the cooperative slot.
             if rev(repo, branch) != source_before or source_before != reviewed:
@@ -522,8 +563,9 @@ def main(argv: list[str] | None = None) -> int:
     report = result.pop("report", None)
     error = result.pop("error", None)
     if not args.json:
-        if result.get("candidate_cleanup_warning"):
-            print(f"WARNING {result['candidate_cleanup_warning']}", file=sys.stderr)
+        for key in ("verification_warning", "candidate_cleanup_warning"):
+            if result.get(key):
+                print(f"WARNING {result[key]}", file=sys.stderr)
         for entry in result.get("recovered_candidates", []):
             print(
                 f"NOTE recovery ref for candidate {entry['candidate_sha']}: {entry['disposition']}"

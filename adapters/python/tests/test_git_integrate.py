@@ -4,6 +4,7 @@ import json
 import sys
 import os
 import subprocess
+import tempfile
 import time
 from pathlib import Path
 
@@ -36,6 +37,11 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
     }.items():
         monkeypatch.setenv(key, value)
+    # Candidate worktrees and verifier output land under the test's own
+    # directory instead of the machine's temp root.
+    scratch = tmp_path / "tmp"
+    scratch.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(scratch))
     root = tmp_path / "repo"
     root.mkdir()
     run_git(root, "init", "-q", "-b", "main")
@@ -415,6 +421,42 @@ def test_verifier_descendants_end_when_verifier_returns(
     assert main_tip(repo) == tip
     assert_pid_ends(wait_for_pid(pid_file))
     assert "candidate worktree retained" not in capsys.readouterr().err
+
+
+def test_text_mode_warns_when_candidate_worktree_is_retained(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    tip = topic(repo, {"a.txt": "a2\n"})
+    real_git = gi.git
+
+    def refuse_worktree_remove(repo_arg, *args, **kwargs):
+        if args[:2] == ("worktree", "remove"):
+            return subprocess.CompletedProcess(args, 1, "", "simulated: directory in use")
+        return real_git(repo_arg, *args, **kwargs)
+
+    monkeypatch.setattr(gi, "git", refuse_worktree_remove)
+    assert integrate(repo, "topic", tip) == 0
+    captured = capsys.readouterr()
+    assert main_tip(repo) == tip
+    assert "WARNING candidate worktree retained at" in captured.err
+    assert "simulated: directory in use" in captured.err
+    assert str(tmp_path / "tmp" / "atc-integration-candidates") in captured.err
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="the Job Object fallback exists only on Windows")
+def test_job_object_fallback_is_reported(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(gi, "_create_kill_on_close_job", lambda: None)
+    tip = topic(repo, {"a.txt": "a2\n"})
+    assert integrate(repo, "topic", tip, "--json") == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["verdict"] == "FF"
+    assert "not isolated by a Job Object (job creation failed)" in data["verification_warning"]
+
+    tip2 = topic(repo, {"b.txt": "b2\n"}, branch="topic2")
+    assert integrate(repo, "topic2", tip2) == 0
+    assert "WARNING verifier process tree is not isolated by a Job Object" in capsys.readouterr().err
 
 
 def test_verify_command_file_with_bom_is_accepted(repo: Path, tmp_path: Path) -> None:
