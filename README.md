@@ -138,8 +138,8 @@ Release 0.1.0 (git tag `v0.1.0`; the Python adapter carries the same
 version). Governance, policies, schemas, skills, conformance fixtures and
 the Python reference implementation are in place. The `validate.yml` GitHub
 Actions workflow is manually dispatched; when run, it checks policy examples
-against their schemas, exercises the shell installer, and runs the Python
-suite on Linux and Windows. Files installed into a repository carry no format
+against their schemas, and exercises the shell installer and Python suite on
+Linux and Windows. Files installed into a repository carry no format
 version of their own: they are current when they equal what this release
 renders, and sync replaces them otherwise. `atc enforce` renders hard denies
 per access mode, refuses unresolvable tokens and, with `--check`, compares

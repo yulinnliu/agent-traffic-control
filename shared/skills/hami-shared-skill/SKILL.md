@@ -92,9 +92,9 @@ link) is a collision and left alone.
 
 `atc validate` compares each adapter with the render of its canonical,
 rejects orphaned adapters and canonical skills that point back at the
-checkout. Run it locally as needed; GitHub Actions validation is started
-manually through the `validate.yml` workflow. `atc validate --projects` does
-the same for every registered project.
+checkout. `atc validate --projects` does the same for every registered
+project. Run these commands locally as needed; GitHub Actions validation is
+started manually through the `validate.yml` workflow.
 
 ## Step 5 — git
 
