@@ -204,6 +204,14 @@ This counts as prior explicit task authority only when the authorization is
 bound to the exact repository, exact owned topic branch/ref, and authorized
 publication destination. `push_topic: true` means non-force publication of that branch only.
 
+For an independent-clone writer session, the task contract may grant this
+bounded authority by setting `push_topic: true` and naming the one authorized
+topic branch. The grant covers each non-force publication of that branch
+during the task; it does not require a new approval for each push. The task
+contract must keep `push_main: false`; at Revision Delivery, the published ref
+must resolve exactly to the reported target SHA, and review/integration takes
+place from the authority's local checkout.
+
 Publication authority is semantic, not command-specific. Advancing a remote
 ref through `git push`, GitHub file/content APIs, commit/ref APIs, or another
 mechanism is still publication. `push_topic: false` forbids those equivalent
