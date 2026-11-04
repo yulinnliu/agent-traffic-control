@@ -90,10 +90,11 @@ link) is a collision and left alone.
 
 ## Step 4 — guard against drift
 
-`atc validate` (CI runs it on every push) compares each adapter with the
-render of its canonical, rejects orphaned adapters and canonical skills
-that point back at the checkout. `atc validate --projects` does the same
-for every registered project.
+`atc validate` compares each adapter with the render of its canonical,
+rejects orphaned adapters and canonical skills that point back at the
+checkout. Run it locally as needed; GitHub Actions validation is started
+manually through the `validate.yml` workflow. `atc validate --projects` does
+the same for every registered project.
 
 ## Step 5 — git
 
