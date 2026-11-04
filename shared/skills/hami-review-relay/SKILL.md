@@ -26,6 +26,9 @@ session handoff; read them before the first report or review.
   report gives results rather than narrating the implementation.
 - Inline in the reply as one code block the user pastes whole. Use a file only
   for a prompt that is long and revised repeatedly, or a lasting template.
+- Relay blocks must not contain nested code fences: internal triple backticks
+  prematurely close the outer block. Put commands, scripts and quoted output
+  on plain text lines or use indentation instead.
 - Commands the user runs are pasted as-is, so they carry zero placeholders:
   capture a value in a variable on an earlier line, show the fields the user
   must check, then reference the variable.
@@ -40,8 +43,8 @@ session handoff; read them before the first report or review.
 
 End every completed step with a review request carrying:
 
-- the worktree path (or the checkout, for a repository without managed
-  worktrees), branch, tip SHA and its base SHA;
+- the checkout (a managed worktree path, or `independent clone` plus
+  its host kind, such as `cloud VM`), branch, tip SHA and its base SHA;
 - spec/plan sections in scope and the contract sections the step rewrote;
 - changed-file map;
 - targeted test commands with their exact summary lines;
@@ -49,6 +52,9 @@ End every completed step with a review request carrying:
   survivor;
 - deviations, open points, known failures you do not own, deferred items;
 - the specific questions for the reviewer, including the real path to walk.
+
+When taking over a topic from another session, fetch first and commit
+only on the fetched tip; never continue from a stale base.
 
 After a PASS the reviewed SHA is frozen; fixes go in new commits.
 
@@ -75,8 +81,11 @@ Work through every step; each ends on the stated criterion.
 
 1. **Pin the revision.** First confirm the previous topic's closure read-only:
    the `main` position and `atc worktree audit`. Then review exactly the tip
-   SHA the request names, against its stated base. Done when the branch tip
-   equals that SHA.
+   SHA the request names, against its stated base. If a check shows its
+   premise is stale (for example, `main` moved, a referenced file or section
+   was renamed, or a count changed), re-check against current state and
+   continue; do not stop to ask the user to verify a premise you can check
+   yourself. Done when the branch tip equals that SHA.
 2. **Build a scratch copy.** Export that exact tree to a scratch directory
    `%TEMP%\q\<name>` (`git archive <sha>`), point imports at the copy, isolate
    data roots and strip ambient credentials; tests and mutants never run in a
