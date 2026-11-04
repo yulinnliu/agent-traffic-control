@@ -1,8 +1,7 @@
 name: validate contracts
 
 on:
-  push:
-  pull_request:
+  workflow_dispatch:
 
 # Keep only the newest validation run for the same branch or pull request.
 # Different branches and pull requests remain independent.
