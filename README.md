@@ -136,8 +136,9 @@ with the evidence. `GLOSSARY.md` defines the terms the rules use.
 
 Release 0.1.0 (git tag `v0.1.0`; the Python adapter carries the same
 version). Governance, policies, schemas, skills, conformance fixtures and
-the Python reference implementation are in place. CI runs the policy
-examples against their schemas, the shell installer, and the Python suite on
+the Python reference implementation are in place. The `validate.yml` GitHub
+Actions workflow is manually dispatched; when run, it checks policy examples
+against their schemas, and exercises the shell installer and Python suite on
 Linux and Windows. Files installed into a repository carry no format
 version of their own: they are current when they equal what this release
 renders, and sync replaces them otherwise. `atc enforce` renders hard denies
