@@ -43,11 +43,17 @@ atc worktree <command> ...
 ```
 
 It finds the workspace map itself (the nearest `workspace.yaml` above the
-working directory, or the checkout it was installed from). If `atc` is not
-on PATH, ask the user to install it from their Agent Traffic Control
-checkout with `uv tool install -e <checkout>/adapters/python`; if there is
-no such checkout, report that this environment lacks the hami-worktree
-capability and stop. Never substitute raw `git worktree` commands.
+working directory, or the checkout it was installed from). If
+`workspace.yaml` exists but `atc` is not on PATH, ask the user to install it
+from their Agent Traffic Control checkout with
+`uv tool install -e <checkout>/adapters/python`. If no such
+Agent Traffic Control checkout is available, report that this environment
+lacks the `hami-worktree` capability and stop. If no `workspace.yaml`
+exists in the current directory or any parent and `atc` is not on PATH, this
+is an independent clone: the managed-worktree lifecycle does not apply. Use
+the `GIT_WORKFLOW.md` topic-branch procedure in this clone, and report the
+branch, tip SHA and base SHA instead of a worktree path. Never substitute raw
+`git worktree` commands.
 
 Every call passes `--project <name> --contract 1`. With `--project` absent,
 the CLI infers the project whose repository or worktrees root holds the
