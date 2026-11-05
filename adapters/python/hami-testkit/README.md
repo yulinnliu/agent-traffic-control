@@ -1,9 +1,10 @@
 # Hami testkit
 
-This document describes `hami-testkit` 0.4.0; update it with every version bump.
+This document describes `hami-testkit` 0.5.0; update it with every version bump.
 
 Development-only Python package shared by independent Hami projects. It contains
-the pytest marker contract, policy-driven test selection and Git gate helpers.
+the pytest marker contract, policy-driven test selection, Git gate helpers and
+verification evidence reuse.
 Production packages have no dependency on it.
 
 `markers` validates one semantic category and an orthogonal `slow` attribute. The
@@ -45,6 +46,33 @@ an unknown range for unfetched remote commits; `merge-base` compares them agains
 the common ancestor of `origin/main`. `verify_push_checkout` enforces clean-tree
 and pushed-commit identity when a consumer's gate requires it.
 
+`evidence` lets a pre-push gate reuse a passed `atc integrate` candidate
+verification in place of its test stage; the formats and the reuse table are
+`shared/conformance/verification-evidence/README.md` at the bound governance
+revision.
+
+- The project's integration verifier calls `write_report(os.environ, root,
+  selection.pytest_paths(), stages)` once its checks pass. It writes the report
+  to the path in `ATC_VERIFICATION_REPORT` and returns `None` when the variable
+  is unset. A `Stage` holds what decides which tests run: the marker expression
+  and ignored paths, without worker counts, temporary directories or verbosity.
+- The gate calls `check(git, root, pushed_sha, selection.pytest_paths(), stages,
+  argv_file)` after its static checks and before its test stage, with the same
+  `Stage` values the verifier reports, and prints `describe(decision)`:
+  `pre-push: tests REUSED (...)` or `pre-push: tests RUN (evidence: <reason>)`.
+  It skips the test stage only when `decision.reuse` is true.
+- Reuse needs the record of exactly the pushed commit and its tree, a clean
+  candidate, the same platform, `uv.lock` and `.python-version` digests,
+  verifier argv file, testkit version and stages, and a recorded selection
+  that covers the gate's own: the full suite covers everything, a directory
+  covers the files below it. The Python version is recorded and not compared.
+- A missing, unreadable or mismatched record, and any error while checking,
+  leaves `decision.reuse` false. `check` reads only; `atc integrate` writes and
+  expires records.
+
+`__version__` is the selector version a report carries and equals the package
+version.
+
 ## Distribution
 
 Build a universal wheel and release record with
@@ -52,7 +80,7 @@ Build a universal wheel and release record with
 The builder copies canonical metadata and Python sources into a clean temporary
 source tree, fixes archive timestamps, and checks the complete wheel payload
 against that snapshot. It refuses to replace changed release content. Use a fresh `--output-dir` for each subsequent version. Each consumer commits the exact wheel under
-`vendor/`, pins `hami-testkit==0.4.0` in its development dependencies and records
+`vendor/`, pins `hami-testkit==0.5.0` in its development dependencies and records
 the local artifact in `uv.lock`. Standalone clones and CI install their committed
 artifact without a workspace checkout or credentials. Released versions are
 immutable; source changes require a new version and explicit consumer upgrades.

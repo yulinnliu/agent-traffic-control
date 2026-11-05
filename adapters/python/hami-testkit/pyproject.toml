@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hami-testkit"
-version = "0.4.0"
+version = "0.5.0"
 description = "Shared Hami pytest classification and change-impact selection"
 requires-python = ">=3.12"
 dependencies = ["PyYAML>=6.0"]
