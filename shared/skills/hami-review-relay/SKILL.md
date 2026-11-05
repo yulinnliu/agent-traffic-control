@@ -77,7 +77,19 @@ A tree that runs source child processes needs a `.venv`:
 
 ## Reviewer: the review
 
-Work through every step; each ends on the stated criterion.
+Classify the diff first; the class decides the steps, and each step ends on
+its stated criterion:
+
+- documentation only: steps 1 and 5, read on the diff. No scratch copy, no
+  tests.
+- tests only: steps 1, 2 and 4.
+- behaviour: every step; step 3 when the change lies on a path to an
+  external effect, step 6 when it reads or writes host state.
+
+Read the diff at the reviewed SHA (`git diff <base>..<tip>`), and a whole
+file only for what the diff cannot settle. Send test and mutant output to a
+file in the scratch directory and read its summary lines; run all mutants in
+one `mutants.py` call.
 
 1. **Pin the revision.** First confirm the previous topic's closure read-only:
    the `main` position and `atc worktree audit`. Then review exactly the tip
@@ -99,10 +111,9 @@ Work through every step; each ends on the stated criterion.
    delivered by the real product assembly, not only by test fakes. Wording
    such as "pending wiring" or "awaiting acceptance" in a delivery is a
    blocker to tell the user now.
-4. **Run tests and mutants.** Scale effort with risk: docs only, no tests;
-   tests only, that file plus mutants; behaviour, the targeted set plus every
-   project gate the change touches. One single-string mutant per guard, one
-   at a time, restored after each run. Done when every file in the copy is
+4. **Run tests and mutants.** Tests only: that file plus mutants. Behaviour:
+   the targeted set plus every project gate the change touches. One
+   single-string mutant per guard, one at a time, restored after each run. Done when every file in the copy is
    proven equal to its Git object again and every surviving mutant is listed
    as a test gap or argued equivalent.
    `shared/skills/hami-review-relay/references/mutants.py` and `run_tests.sh`,
@@ -115,8 +126,9 @@ Work through every step; each ends on the stated criterion.
    second mechanism for one problem as a finding.
 6. **Check real state read-only.** Host evidence (scheduled tasks, stores,
    logs) is read without writing; credentials are never read.
-7. **Verify delegated verdicts.** A fresh-context reviewer's verdict is
-   evidence to check: spot-check its citations before relaying any of it.
+7. **Review inline.** Delegate to a subagent only for a search the diff does
+   not bound, one at most; its verdict is evidence to check, so spot-check
+   its citations before relaying any of it.
 
 ## Reviewer: the verdict block
 
