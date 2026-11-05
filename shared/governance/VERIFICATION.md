@@ -202,6 +202,13 @@ not replace the project's remote CI, and passing it does not authorize
 publication. Each project owns its path-to-test mapping in code, and clone setup
 installs the hook once per clone.
 
+The gate may reuse an `atc integrate` evidence record in place of its test
+stage when the record names the pushed commit and its tree, a clean
+candidate, the same platform, dependency inputs, verifier argv, selector
+version and test stages, and an executed selection that covers the gate's
+own selection. Static checks still run. A missing, unreadable or mismatched
+record runs the tests. The gate prints whether it reused evidence or ran.
+
 Every new or substantively changed test has exactly one semantic category and,
 optionally, the orthogonal `slow` attribute. A project records its legacy
 unmarked tests in a baseline that only shrinks; a new unmarked definition fails
@@ -222,7 +229,7 @@ Flaky or timing-sensitive tests:
   that is reverted and never committed, then decide.
 
 Projects that adopt `hami-testkit` follow its contract in
-`shared/python/hami-testkit/README.md`, read from the same governance revision.
+`adapters/python/hami-testkit/README.md`, read from the same governance revision.
 The category meanings, marker rules and selection behavior are defined there, for
 the testkit version the README names. A project's `AGENTS.md` and `README.md` do
 not restate this section; they hold the project's own commands, path rules and

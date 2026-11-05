@@ -200,7 +200,15 @@ runs from the candidate checkout with these environment variables:
 - `ATC_INTEGRATION_SHA`: immutable candidate commit SHA;
 - `ATC_CANDIDATE_DIR`: isolated candidate checkout path;
 - `ATC_EXPECTED_MAIN_SHA`: main SHA the candidate was based on;
-- `ATC_REVIEWED_SOURCE_SHA`: reviewed source SHA.
+- `ATC_REVIEWED_SOURCE_SHA`: reviewed source SHA;
+- `ATC_VERIFICATION_REPORT`: path outside the candidate where the verifier
+  may write its verification report.
+
+When verification passes with a valid report, the adapter writes an evidence
+record for the candidate under the repository's Git common directory after
+`main` is updated and read back. A missing or invalid report leaves
+integration unaffected and writes no record. The report and record formats
+are defined in `shared/conformance/verification-evidence/README.md`.
 
 The verifier must test the candidate identified by `ATC_INTEGRATION_SHA`, not
 resolve a moving branch name. A nonzero result, changed candidate HEAD, dirty
@@ -398,8 +406,8 @@ The verifier runs with the candidate checkout as its working directory. That
 checkout is created by `git worktree add --detach` at the candidate commit: a
 fresh working tree with no virtual environment, no installed packages and
 nothing carried over from the main checkout. The adapter sets
-`ATC_INTEGRATION_SHA`, `ATC_CANDIDATE_DIR`, `ATC_EXPECTED_MAIN_SHA` and
-`ATC_REVIEWED_SOURCE_SHA`. When the verifier returns, the candidate `HEAD`
+`ATC_INTEGRATION_SHA`, `ATC_CANDIDATE_DIR`, `ATC_EXPECTED_MAIN_SHA`,
+`ATC_REVIEWED_SOURCE_SHA` and `ATC_VERIFICATION_REPORT`. When the verifier returns, the candidate `HEAD`
 must still equal `ATC_INTEGRATION_SHA` and `git status --porcelain` must be
 empty, untracked files included; ignored paths may hold what the verifier
 built. The verifier runs inside its own process tree (a Job Object on Windows,
@@ -416,6 +424,8 @@ The verifier therefore:
   source and fails this proof;
 - selects its checks from the `ATC_EXPECTED_MAIN_SHA..ATC_INTEGRATION_SHA`
   range plus the project's required gates, and finishes within the timeout;
+- may write the verification report: the selection it executed, its test
+  stages and the digests of its dependency inputs;
 - exits nonzero on any failure; its stderr becomes the refusal detail.
 
 ### Pin advancement

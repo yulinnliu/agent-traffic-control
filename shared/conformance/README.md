@@ -39,3 +39,9 @@ Merge preflight (`FF`, `NO_FF`, `STOP`) and worktree identity (`CREATED`,
 `tests/test_git_preflight.py` and `tests/test_hami_worktree.py`, which build
 each repository in code; a second implementation ports those suites until
 fixtures with an `init.json` repository description exist here.
+
+Verification evidence (the report a verifier hands to `atc integrate`, the
+record the adapter writes, and the reuse verdicts `REUSE` and `RUN: <reason>`)
+is specified in `verification-evidence/README.md`. Writing needs a live
+integration and reading needs a live repository, so its cases are the Python
+suites `tests/test_git_integrate.py` and `tests/test_testkit_evidence.py`.
