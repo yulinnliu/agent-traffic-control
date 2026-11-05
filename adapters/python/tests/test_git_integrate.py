@@ -629,15 +629,17 @@ def test_failed_merge_is_aborted(repo: Path, monkeypatch: pytest.MonkeyPatch, ca
 
 
 def test_json_fields(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    keys = {"command", "authority_reference", "verdict", "reason", "main_before", "main_after", "reviewed", "source_before", "candidate_sha", "first_parent", "second_parent", "message", "verification", "candidate_ref"}
+    keys = {"command", "authority_reference", "verdict", "reason", "main_before", "main_after", "reviewed", "source_before", "candidate_sha", "first_parent", "second_parent", "message", "verification", "verification_seconds", "evidence", "evidence_reason", "candidate_ref"}
     before = main_tip(repo)
     tip = topic(repo, {"a.txt": "a2\n"}, branch="first")
     assert integrate(repo, "first", tip, "--json") == 0
     data = json.loads(capsys.readouterr().out)
+    assert data.pop("verification_seconds") >= 0
     assert data == {
         "command": "integrate", "authority_reference": "test-owner-authorization", "verdict": "FF", "reason": "FAST_FORWARD", "main_before": before,
         "main_after": tip, "reviewed": tip, "source_before": tip, "candidate_sha": tip,
-        "first_parent": None, "second_parent": None, "message": None, "verification": "PASS", "candidate_ref": None,
+        "first_parent": None, "second_parent": None, "message": None, "verification": "PASS",
+        "evidence": None, "evidence_reason": "NO_REPORT", "candidate_ref": None,
     }
 
     second = topic(repo, {"b.txt": "b2\n"}, branch="topic/next")
@@ -658,3 +660,161 @@ def test_json_stop_carries_preflight(repo: Path, capsys: pytest.CaptureFixture[s
     data = json.loads(capsys.readouterr().out)
     assert (data["verdict"], data["reason"], data["main_before"], data["main_after"]) == ("STOP", "CONFLICT", before, before)
     assert data["preflight"]["evidence"]["conflict_files"] == ["a.txt"]
+
+
+REPORT = {
+    "schema": "atc-verification-report/1",
+    "selector": {"name": "hami-testkit", "version": "0.5.0"},
+    "selection": {"full": False, "paths": ["packages/a/tests"]},
+    "stages": [{"name": "parallel", "marker": "not slow", "ignore": []}],
+    "dependency_inputs": {"uv.lock": "0" * 64},
+    "python": "3.13.14",
+}
+
+
+def report_command(text: str | None, *, fail: bool = False) -> str:
+    """A verifier that writes ``text`` as its report, outside the candidate."""
+    script = (
+        "import os,pathlib,sys; "
+        "report=pathlib.Path(os.environ['ATC_VERIFICATION_REPORT']).resolve(); "
+        "assert not report.is_relative_to(pathlib.Path(os.environ['ATC_CANDIDATE_DIR']).resolve()); "
+        f"text={text!r}; "
+        "text is None or report.write_text(text, encoding='utf-8'); "
+        f"sys.exit({int(fail)})"
+    )
+    return json.dumps([sys.executable, "-c", script])
+
+
+def integrate_with(repo: Path, branch: str, reviewed: str, command: str, *extra: str) -> int:
+    return gi.main([
+        "--repo", str(repo), "--branch", branch, "--reviewed", reviewed,
+        "--authority-reference", "test-owner-authorization", "--verify-command", command, *extra,
+    ])
+
+
+def evidence_dir(repo: Path) -> Path:
+    return repo / ".git" / "atc" / "verification-evidence"
+
+
+def records(repo: Path) -> list[str]:
+    return sorted(path.name for path in evidence_dir(repo).glob("*")) if evidence_dir(repo).is_dir() else []
+
+
+def leftover_reports() -> list[Path]:
+    return list(Path(tempfile.gettempdir()).rglob("*.report.json"))
+
+
+def test_valid_report_writes_evidence_record(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    import platform
+
+    before = main_tip(repo)
+    tip = topic(repo, {"a.txt": "a2\n"})
+    command = report_command(json.dumps(REPORT))
+    assert integrate_with(repo, "topic", tip, command) == 0
+    path = evidence_dir(repo) / f"{tip}.json"
+    line = capsys.readouterr().out.strip()
+    prefix = f"FF main {before} -> {tip} candidate {tip} verification=PASS evidence="
+    assert line.startswith(prefix)
+    assert Path(line.removeprefix(prefix)).resolve() == path.resolve()
+    assert records(repo) == [f"{tip}.json"]
+    record = json.loads(path.read_text(encoding="utf-8"))
+    assert record.pop("duration_seconds") >= 0
+    assert record.pop("verified_at").endswith("+00:00")
+    assert record == {
+        "schema": "atc-verification-evidence/1", "candidate_sha": tip,
+        "tree": run_git(repo, "rev-parse", f"{tip}^{{tree}}"), "clean": True,
+        "expected_main": before, "reviewed": tip, "verdict": "FF",
+        "authority_reference": "test-owner-authorization", "verify_argv": json.loads(command),
+        "platform": {"system": sys.platform, "machine": platform.machine()},
+        "report": REPORT,
+    }
+    assert leftover_reports() == []
+    assert run_git(repo, "status", "--porcelain") == ""
+
+
+def test_no_ff_record_names_the_merge_commit_only(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    tip = topic(repo, {"a.txt": "a2\n"})
+    base = commit(repo, "c.txt", "c\n")
+    assert integrate_with(repo, "topic", tip, report_command(json.dumps(REPORT)), "--json") == 0
+    data = json.loads(capsys.readouterr().out)
+    merged = main_tip(repo)
+    assert merged not in (tip, base)
+    assert records(repo) == [f"{merged}.json"]
+    assert Path(data["evidence"]).resolve() == (evidence_dir(repo) / f"{merged}.json").resolve()
+    assert data["evidence_reason"] is None
+    record = json.loads((evidence_dir(repo) / f"{merged}.json").read_text(encoding="utf-8"))
+    assert (record["candidate_sha"], record["verdict"], record["expected_main"], record["reviewed"]) == (
+        merged, "NO_FF", base, tip)
+    assert record["tree"] == run_git(repo, "rev-parse", f"{merged}^{{tree}}")
+    assert record["tree"] != run_git(repo, "rev-parse", f"{tip}^{{tree}}")
+
+
+def test_verifier_without_report_integrates_and_writes_no_record(
+    repo: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    tip = topic(repo, {"a.txt": "a2\n"})
+    assert integrate_with(repo, "topic", tip, report_command(None)) == 0
+    assert capsys.readouterr().out.strip().endswith("verification=PASS evidence=NONE(NO_REPORT)")
+    assert main_tip(repo) == tip
+    assert records(repo) == []
+
+
+@pytest.mark.parametrize("text", [
+    "not json",
+    json.dumps(REPORT)[:40],
+    json.dumps([REPORT]),
+    json.dumps({**REPORT, "schema": "atc-verification-report/2"}),
+    json.dumps({key: value for key, value in REPORT.items() if key != "selection"}),
+    json.dumps({**REPORT, "selection": {"full": "yes", "paths": []}}),
+    json.dumps({**REPORT, "selection": {"full": True, "paths": [1]}}),
+    json.dumps({**REPORT, "selector": {"name": "hami-testkit"}}),
+    json.dumps({**REPORT, "stages": [{"name": "parallel", "marker": "not slow"}]}),
+    json.dumps({**REPORT, "dependency_inputs": {"uv.lock": None}}),
+    "",
+], ids=["not-json", "truncated", "not-object", "schema", "no-selection", "full-type", "paths-type",
+        "selector", "stage-ignore", "input-digest", "empty"])
+def test_invalid_report_integrates_and_writes_no_record(
+    repo: Path, capsys: pytest.CaptureFixture[str], text: str,
+) -> None:
+    tip = topic(repo, {"a.txt": "a2\n"})
+    assert integrate_with(repo, "topic", tip, report_command(text), "--json") == 0
+    data = json.loads(capsys.readouterr().out)
+    assert (data["verification"], data["evidence"], data["evidence_reason"]) == ("PASS", None, "INVALID_REPORT")
+    assert main_tip(repo) == tip
+    assert records(repo) == []
+
+
+def test_failed_verification_writes_no_record(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    before = main_tip(repo)
+    tip = topic(repo, {"a.txt": "a2\n"})
+    assert integrate_with(repo, "topic", tip, report_command(json.dumps(REPORT), fail=True), "--json") == 1
+    data = json.loads(capsys.readouterr().out)
+    assert (data["verification"], data["evidence"], data["evidence_reason"]) == ("NOT_RUN", None, None)
+    assert main_tip(repo) == before
+    assert records(repo) == []
+    assert leftover_reports() == []
+
+
+def test_record_write_failure_keeps_the_integration(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    def refuse(*_args):
+        raise OSError("read-only")
+    monkeypatch.setattr(gi, "_write_evidence", refuse)
+    tip = topic(repo, {"a.txt": "a2\n"})
+    assert integrate_with(repo, "topic", tip, report_command(json.dumps(REPORT))) == 0
+    assert capsys.readouterr().out.strip().endswith("verification=PASS evidence=NONE(WRITE_FAILED)")
+    assert main_tip(repo) == tip
+
+
+def test_expired_records_are_removed_after_a_write(repo: Path) -> None:
+    directory = evidence_dir(repo)
+    directory.mkdir(parents=True)
+    expired, recent, foreign = directory / ("1" * 40 + ".json"), directory / ("2" * 40 + ".json"), directory / "notes.txt"
+    day = 24 * 3600
+    for path, age in ((expired, 15 * day), (recent, 13 * day), (foreign, 15 * day)):
+        path.write_text("{}", encoding="utf-8")
+        os.utime(path, (time.time() - age,) * 2)
+    tip = topic(repo, {"a.txt": "a2\n"})
+    assert integrate_with(repo, "topic", tip, report_command(json.dumps(REPORT))) == 0
+    assert records(repo) == sorted([recent.name, foreign.name, f"{tip}.json"])

@@ -18,13 +18,16 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import platform
 import re
 import signal
 import subprocess
 import sys
+import time
 import uuid
 import tempfile
 from dataclasses import asdict
+from datetime import datetime, timezone
 from pathlib import Path
 
 from git_preflight import GitError, git, merge_preflight, render, rev, same_path
@@ -32,6 +35,11 @@ from integration_slot import IntegrationSlot
 
 FULL_SHA = re.compile(r"[0-9a-f]{40}")
 WORKTREE_BRANCH = re.compile(r"worktree-[^+]+\+(?P<topic>.+)")
+# Formats: shared/conformance/verification-evidence/README.md
+REPORT_SCHEMA = "atc-verification-report/1"
+EVIDENCE_SCHEMA = "atc-verification-evidence/1"
+EVIDENCE_DIR = ("atc", "verification-evidence")
+EVIDENCE_RETENTION_SECONDS = 14 * 24 * 3600
 
 
 class Refused(Exception):
@@ -243,9 +251,69 @@ def parse_verify_command(command: str) -> list[str]:
     return argv
 
 
+def _strings(value: object) -> bool:
+    return isinstance(value, list) and all(isinstance(item, str) for item in value)
+
+
+def _valid_report(report: object) -> bool:
+    if not isinstance(report, dict) or report.get("schema") != REPORT_SCHEMA:
+        return False
+    selector, selection, stages, inputs = (
+        report.get(key) for key in ("selector", "selection", "stages", "dependency_inputs")
+    )
+    return (
+        isinstance(selector, dict)
+        and isinstance(selector.get("name"), str) and isinstance(selector.get("version"), str)
+        and isinstance(selection, dict)
+        and isinstance(selection.get("full"), bool) and _strings(selection.get("paths"))
+        and isinstance(stages, list)
+        and all(
+            isinstance(stage, dict) and isinstance(stage.get("name"), str)
+            and isinstance(stage.get("marker"), str) and _strings(stage.get("ignore"))
+            for stage in stages
+        )
+        and isinstance(inputs, dict)
+        and all(isinstance(key, str) and isinstance(value, str) for key, value in inputs.items())
+    )
+
+
+def _read_report(path: Path) -> tuple[dict | None, str | None]:
+    """The verifier's report, or the reason no evidence record can be written."""
+    try:
+        raw = path.read_bytes()
+    except FileNotFoundError:
+        return None, "NO_REPORT"
+    except OSError:
+        return None, "INVALID_REPORT"
+    try:
+        report = json.loads(raw.decode("utf-8-sig"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None, "INVALID_REPORT"
+    return (report, None) if _valid_report(report) else (None, "INVALID_REPORT")
+
+
+def _write_evidence(repo: Path, record: dict) -> Path:
+    """Store the record under the Git common directory and drop expired ones."""
+    common = Path(_git_ok(repo, "rev-parse", "--path-format=absolute", "--git-common-dir"))
+    directory = common.joinpath(*EVIDENCE_DIR)
+    directory.mkdir(parents=True, exist_ok=True)
+    target = directory / f"{record['candidate_sha']}.json"
+    partial = directory / f".{record['candidate_sha']}.{uuid.uuid4().hex}.tmp"
+    partial.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+    os.replace(partial, target)
+    cutoff = time.time() - EVIDENCE_RETENTION_SECONDS
+    for old in directory.glob("*.json"):
+        try:
+            if old != target and old.stat().st_mtime < cutoff:
+                old.unlink()
+        except OSError:
+            pass
+    return target
+
+
 def _verify_candidate(
     argv: list[str], candidate_dir: Path, candidate_sha: str, expected_main: str, reviewed: str,
-    timeout: float,
+    timeout: float, report_path: Path,
 ) -> str | None:
     """Run the verifier in the candidate; return the isolation warning, if any."""
     env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
@@ -254,6 +322,7 @@ def _verify_candidate(
         "ATC_CANDIDATE_DIR": str(candidate_dir),
         "ATC_EXPECTED_MAIN_SHA": expected_main,
         "ATC_REVIEWED_SOURCE_SHA": reviewed,
+        "ATC_VERIFICATION_REPORT": str(report_path),
     })
     returncode, stdout, stderr, warning = _run_verifier(argv, candidate_dir, env, timeout)
     if returncode:
@@ -337,6 +406,9 @@ def _recover_interrupted_update(
         "second_parent": None,
         "message": None,
         "verification": "PASS",
+        "verification_seconds": None,
+        "evidence": None,
+        "evidence_reason": "RECOVERED",
         "candidate_ref": matching[0],
         "recovery_status": "CONSISTENT",
     }
@@ -400,6 +472,9 @@ def integrate(
             "second_parent": None,
             "message": None,
             "verification": "NOT_RUN",
+            "verification_seconds": None,
+            "evidence": None,
+            "evidence_reason": None,
             "candidate_ref": None,
         }
         if recovered_candidates:
@@ -416,6 +491,7 @@ def integrate(
         candidate_root.mkdir(parents=True, exist_ok=True)
         repo_id = str(abs(hash(str(repo.resolve()))))
         candidate_dir = candidate_root / f"{repo_id}-{uuid.uuid4().hex}"
+        report_path = candidate_dir.with_name(candidate_dir.name + ".report.json")
         candidate_created = False
         candidate_ref: str | None = None
         integration_updated = False
@@ -447,10 +523,14 @@ def integrate(
             elif candidate_sha != reviewed:
                 raise Refused(f"FF candidate is {candidate_sha}, expected reviewed SHA {reviewed}")
 
+            verification_started = time.monotonic()
             verification_warning = _verify_candidate(
                 verify_argv, candidate_dir, candidate_sha, main_before, reviewed, verify_timeout,
+                report_path,
             )
             result["verification"] = "PASS"
+            result["verification_seconds"] = round(time.monotonic() - verification_started, 1)
+            verifier_report, result["evidence_reason"] = _read_report(report_path)
             if verification_warning:
                 result["verification_warning"] = verification_warning
 
@@ -488,8 +568,25 @@ def integrate(
                     f"recovery required: main advanced to {candidate_sha} but checkout is dirty "
                     f"({status}); retained {candidate_ref}"
                 )
-            if report.verdict == "FF":
-                return 0, result
+            if verifier_report is not None:
+                try:
+                    result["evidence"] = str(_write_evidence(repo, {
+                        "schema": EVIDENCE_SCHEMA,
+                        "candidate_sha": candidate_sha,
+                        "tree": _git_ok(repo, "rev-parse", f"{candidate_sha}^{{tree}}"),
+                        "clean": True,
+                        "expected_main": main_before,
+                        "reviewed": reviewed,
+                        "verdict": result["verdict"],
+                        "authority_reference": authority_reference,
+                        "verify_argv": verify_argv,
+                        "platform": {"system": sys.platform, "machine": platform.machine()},
+                        "verified_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                        "duration_seconds": result["verification_seconds"],
+                        "report": verifier_report,
+                    }))
+                except (OSError, GitError):
+                    result["evidence_reason"] = "WRITE_FAILED"
             return 0, result
         except Refused as exc:
             result["error"] = str(exc)
@@ -497,6 +594,7 @@ def integrate(
                 result["recovery_required"] = True
             return 1, result
         finally:
+            report_path.unlink(missing_ok=True)
             cleanup_error = _remove_candidate(repo, candidate_dir) if candidate_created else None
             if cleanup_error:
                 result["candidate_cleanup_warning"] = cleanup_error
@@ -518,6 +616,8 @@ def render_result(result: dict) -> str:
         line += f" candidate {result['candidate_sha']} verification={result['verification']}"
     if result["verdict"] == "NO_FF":
         line += f" (parents {result['first_parent']} {result['second_parent']})"
+    if result.get("verification") == "PASS":
+        line += f" evidence={result.get('evidence') or 'NONE(' + str(result.get('evidence_reason')) + ')'}"
     return line
 
 
