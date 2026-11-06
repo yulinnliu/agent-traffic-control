@@ -38,7 +38,7 @@ whole directory loses nothing. Persistent state lives elsewhere
       qdr/                      data root
     systmp/                     stand-in for the system temporary directory
       pytest-of-<user>/         pytest runs started without a scratch
-    integration-candidates/     candidate trees and verifier reports of `atc integrate`
+    candidates/                 candidate trees and verifier reports of `atc integrate`
   cache/                        regenerable
     uv/                         UV_CACHE_DIR
     python/                     UV_PYTHON_INSTALL_DIR
@@ -49,7 +49,9 @@ whole directory loses nothing. Persistent state lives elsewhere
 
 One rule gives `<tmp>` and `<tmp>/systmp`, and every entry point applies it:
 
-- `atc-testkit` publishes the Python implementation: it returns the two
+- `atc-testkit` publishes the Python implementation, and `atc` uses it
+  through the adapter's dependency on the package (`TESTKIT.md` § Commands).
+  It returns the two
   paths, creating them on first use, and offers one call that makes a
   directory below `<tmp>` the temporary directory of the current process and
   of every process it starts (`TEMP`, `TMP`, `TMPDIR`, and Python's
@@ -87,7 +89,7 @@ A scratch is the working directory of one isolated test run made through
   `<tmp>/<scratch>`. A path is accepted only when it resolves to a direct
   child of `<tmp>`; anything else is refused with `SCRATCH_OUTSIDE_TMP`
   (exit 9) before anything is created. `systmp` and
-  `integration-candidates` are refused as scratch names.
+  `candidates` are refused as scratch names.
 - The absolute long-name form of `<tmp>/<scratch>` is at most 64 characters;
   a longer one is refused with `SCRATCH_PATH_TOO_LONG` (exit 9).
 - The scratch is the run's temporary directory. `bt` inside it is pytest's
@@ -150,8 +152,9 @@ expected.
 - Under `<tmp>/systmp` it takes every entry other than `pytest-of-*`. This
   includes the working directory a failed verifier or gate run left for
   inspection.
-- Under `<tmp>/integration-candidates` it removes a candidate tree through
-  `git worktree remove` in the repository that owns it; a tree Git refuses to
+- Under `<tmp>/candidates` it removes a candidate tree through
+  `git worktree remove` in the repository that owns it, which the tree's own
+  `.git` file names; a tree Git refuses to
   remove prints `REFUSED` with Git's message and is left. A report file, and
   a tree Git no longer knows, are handled as any other entry.
 
@@ -160,13 +163,20 @@ It reports registered scratches older than seven days and deletes none.
 ## Integration and the pre-push gate
 
 - `atc integrate` creates each candidate tree at
-  `<tmp>/integration-candidates/<id>` and names the verifier's report file
-  `<tmp>/integration-candidates/<id>.report.json` through
-  `ATC_VERIFICATION_REPORT`. It removes both when the run ends. The files that
+  `<tmp>/candidates/<id>` and names the verifier's report file
+  `<tmp>/candidates/<id>.report.json` through
+  `ATC_VERIFICATION_REPORT`. `<id>` is twelve random lowercase hexadecimal
+  digits, so the tree's absolute path is at most 64 characters, the bound of
+  a scratch. It removes both when the run ends. The files that
   capture the verifier's output are under `<tmp>/systmp`.
 - A project's integration verifier keeps its logs and per-stage data in a
   working directory under `<tmp>/systmp`. It removes the directory after a
   passing run and leaves it, with the path printed, after a failing one.
+- A working directory of the verifier or of the gate has a name of at most
+  eight characters, so its absolute
+  path is at most 56. pytest's base directory of every stage lies in it and
+  never in the candidate tree or the checkout, whose own path would leave
+  the paths a test builds no room under the Windows path limit.
 - The pre-push gate, when it runs tests instead of reusing an evidence record,
   keeps its working files under `<tmp>/systmp` in the same way.
 - The evidence record that lets the gate skip its tests is not temporary: it
@@ -181,6 +191,10 @@ repository that registers the plugin gets
 the newest three at each run's start and exit and leaves a run with a live
 `.lock` alone. The ATC adapter's own test suite and `check.ps1` follow the
 same rule and pass no `--basetemp` of their own.
+
+This base carries the user name and has no length bound of its own. A suite
+whose paths need the shorter base runs through `atc test run`, the gate or
+the verifier.
 
 ## Cache
 

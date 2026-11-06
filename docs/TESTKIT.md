@@ -64,6 +64,10 @@ order. Each is one pytest invocation over the selected paths.
 - Each stage has its own data root (§ Isolated environment).
 - CI runs the same stages through the same runner and passes its own worker
   count.
+- `slow` tests run in CI only, as one further invocation through the same
+  runner with the marker expression `slow` and `-n 0`, whatever other
+  markers a test carries. It passes when it collects no test. The project
+  decides which CI job holds it.
 
 ## Isolated environment
 
@@ -83,9 +87,17 @@ environment built from the caller's by these rules:
   and safe to share.
 - `TEMP`, `TMP`, `TMPDIR` and `ATC_TMP` carry the values the entry point
   resolved before it redirected the profile.
+- Written into the directory `HOME` and `USERPROFILE` name: a `.gitconfig`
+  with a test identity (`user.name`, `user.email`) and
+  `core.longpaths=true`. Git finds it through the profile, so it also holds
+  for a Git process a test starts with every `GIT_*` variable removed
+  (`GIT_WORKFLOW.md` § Git environment in hooks and tests), and it is the
+  only global configuration a stage reads.
 
 The run's working directory is created under `<tmp>/systmp`, removed after a
-passing run, and kept with its path printed after a failing one.
+passing run, and kept with its path printed after a failing one. Every
+stage's pytest base directory lies in it (`ATC_HOME.md` § Integration and
+the pre-push gate).
 
 ## Running and logging
 
@@ -110,6 +122,10 @@ prints the selection for those paths and runs nothing.
    covers this push's selection and stages. When every pushed commit is
    covered, print `tests REUSED` for each and finish.
 5. Otherwise print `tests RUN` with the reason and run the stages.
+
+A record covers a push only when its selector name and stage list are the
+gate's own. A record written by a testkit version that differs in either
+covers nothing, and a push with no other record runs the stages.
 
 The hook is one line: `exec uv run --frozen <project's uv options> python
 <gate> --run`.
@@ -155,6 +171,16 @@ this order:
   verdict a pass.
 - The gate and the verifier of a project share one selection policy and one
   stage definition, which is what lets a record of one be reused by the other.
+- The workspace root builds the testkit and vendors no wheel. Its verifier
+  is the same skeleton, imported from the tree, with the rows a consumer's
+  data feeds absent: no selection, lock, contract, lint or collection row,
+  and its own test command, run once with its base directory in the working
+  directory, in place of the stages. Its own static checks carry its own
+  tokens. Its range is documentation-only when every changed path is
+  Markdown under `docs/`, and such a range skips that test command. It
+  writes no verification report. § Isolated environment, § Running and
+  logging and the working-directory rules bind it as they bind a project's
+  verifier.
 
 ## Child processes
 
@@ -174,6 +200,9 @@ A test starts a child process through the testkit's `start` or `run`.
   when one exists. Sessions with different base directories never fail one
   another; two runs given the same scratch at the same time share one and are
   not supported.
+- The testkit reads the process list and command lines itself, through the
+  standard library and the tools the operating system ships (`ps` outside
+  Windows). It imports no product code and no third-party package for it.
 
 ## Private desktop
 
@@ -202,7 +231,8 @@ output, for each failing test: one line of context as JSON, one line per
 exception of the cause chain with the root cause first, and the last 4000
 characters of the report. At interpreter shutdown it lists the non-daemon
 threads still alive. A project may add fields to the context line and hints
-to the summary.
+to the summary, and may name one initialization function, which the runner
+calls before pytest starts, for preparation only that project needs.
 
 ## Commands
 
@@ -210,6 +240,10 @@ The test tools a review or a developer runs are subcommands of `atc`, one
 implementation on every platform. A machine that runs them has `atc`
 installed (`uv tool install -e adapters/python`), as integration already
 requires. Every variable ATC itself defines starts with `ATC_`.
+
+`atc test` and `atc tmp` are implemented in `atc-testkit`. The adapter
+depends on the package by its path in the tree, and `atc` dispatches to it;
+`atc integrate` takes the location rule from the same package.
 
 ### `atc test run <tree> <scratch> <python> <label> <pytest args...>`
 
@@ -267,4 +301,7 @@ The scratch registry and deletion (`ATC_HOME.md` § Scratch registry,
 - Product module prefixes for the import check, extra credential variable
   names, data-root variable names, and automation-Markdown prefixes.
 - `--ignore` arguments appended to a stage, `uv` options for the hook, test
-  paths, and the CI platform matrix.
+  paths, the CI platform matrix, the CI job that runs `slow` tests, and the
+  CI runner's initialization function.
+- The verifier argv file, which is a project file and carries the `uv`
+  options the project's verifier needs, an interpreter version for example.
