@@ -341,6 +341,10 @@ def test_a_run_no_test_failed_in_is_inconclusive_and_ends_the_list(export: Expor
     assert "KILLED" not in run.stdout and "restored-ok tests/test_value.py" in run.stdout
 
 
+def test_a_timeout_names_itself_as_the_reason() -> None:
+    assert "timed out" in testrun._verdict(testrun.Result(None, []))[1]
+
+
 def test_a_timeout_returns_no_code(tmp_path: Path) -> None:
     result = testrun._capture([sys.executable, "-c", "import time; time.sleep(60)"], tmp_path, os.environ, False, 1.0)
     assert result.code is None
