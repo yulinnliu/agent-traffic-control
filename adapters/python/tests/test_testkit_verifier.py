@@ -432,7 +432,7 @@ def integration_repo(tmp_path: Path, atc_tmp: Path, monkeypatch: pytest.MonkeyPa
     (root / "tests").mkdir(parents=True)
     (root / "src/fixture_prod").mkdir(parents=True)
     (root / "src/fixture_prod/__init__.py").write_text("", encoding="utf-8")
-    (root / "tests/test_a.py").write_text("def test_a():\n    pass\n", encoding="utf-8")
+    (root / "tests/test_a.py").write_text("def test_a(tmp_path):\n    assert tmp_path.is_dir()\n", encoding="utf-8")
     (root / "own_check.py").write_text("", encoding="utf-8")
     (root / "verify.py").write_text(VERIFIER_SCRIPT, encoding="utf-8")
     (root / ".gitignore").write_text("__pycache__/\n", encoding="utf-8")

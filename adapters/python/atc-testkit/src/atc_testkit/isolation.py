@@ -52,6 +52,8 @@ class IsolatedRun:
         (self.home / ".gitconfig").write_text(GITCONFIG, encoding="utf-8")
 
     def base_directory(self, stage: str) -> Path:
+        """pytest's base directory of ``stage``; its parent exists, as pytest creates only the last component."""
+        (self.work / stage).mkdir(exist_ok=True)
         return self.work / stage / "bt"
 
     def data_root(self, stage: str) -> Path:
