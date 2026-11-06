@@ -45,20 +45,20 @@ whole directory loses nothing. Persistent state lives elsewhere
 
 One rule gives `<tmp>` and `<tmp>/systmp`, and every entry point applies it:
 
-- `hami-testkit` publishes the Python implementation: it returns the two
+- `atc-testkit` publishes the Python implementation: it returns the two
   paths, creating them on first use, and offers one call that makes
   `<tmp>/systmp` the temporary directory of the current process and of every
   process it starts (`TEMP`, `TMP`, `TMPDIR`, and Python's `tempfile`). It
   also publishes a pytest plugin that makes the call at configure time, which
-  every project that carries `hami-testkit` registers in its root
+  every project that carries `atc-testkit` registers in its root
   `conftest.py`.
 - An entry point makes that call before it creates a temporary file or starts
   a child. The entry points are:
 
   | Entry point | Owner |
   | --- | --- |
-  | `run_tests.sh`, `check.ps1` | ATC, applying the same rule in shell |
-  | `atc integrate`, `build_testkit_release.py` | ATC |
+  | `atc test run`, `atc test mutants`, `atc integrate`, `build_testkit_release.py` | ATC |
+  | `check.ps1` | ATC, applying the same rule in shell |
   | the integration verifier named by a project's verifier argv file | the project |
   | the pre-push gate | the project |
 
@@ -75,7 +75,7 @@ One rule gives `<tmp>` and `<tmp>/systmp`, and every entry point applies it:
 ## Test scratch
 
 A scratch is the working directory of one isolated test run made through
-`run_tests.sh <tree> <scratch> <python> <label> <pytest args...>`.
+`atc test run <tree> <scratch> <python> <label> <pytest args...>`.
 
 - `<scratch>` is a name matching `[A-Za-z0-9._-]+`, resolved to
   `<tmp>/<scratch>`. A path is accepted only when it resolves to a direct
@@ -99,15 +99,15 @@ A scratch is the working directory of one isolated test run made through
 - `project`: `[project].name` from `<tree>/pyproject.toml`; the tree's
   directory name when that file or key is absent.
 - `scratch`, `tree`: absolute native paths. `created_utc`: `YYYY-MM-DDTHH:MM:SSZ`.
-- `run_tests.sh` appends the line when it creates the scratch. A scratch that
+- `atc test run` appends the line when it creates the scratch. A scratch that
   is reused keeps its existing line.
-- `clean_scratch.ps1 <dir>...` deletes scratches and removes their lines. It
+- `atc tmp clean <dir>...` deletes scratches and removes their lines. It
   refuses any `<dir>` that is not a direct child of `<tmp>` or that carries a
   reserved name, and treats links inside `<dir>\bt`, and `<dir>\.venv`, as
   expected links that are removed without being entered.
-- `clean_scratch.ps1 -Project <name>` selects every registered scratch of one
-  project; `-List` prints the registry with each scratch's size and deletes
-  nothing.
+- `atc tmp clean --project <name>` selects every registered scratch of one
+  project. `atc tmp list` prints the registry with each scratch's size and
+  deletes nothing.
 
 Scratches are classified by the `project` column, never by a directory level,
 so classification costs no path length.
