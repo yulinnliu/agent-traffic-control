@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -31,6 +32,32 @@ def test_a_command_runs_on_a_new_desktop_with_no_visible_console(tmp_path: Path)
     assert kind == desktop.PRIVATE and process.wait() == 0
     name, visible = output.split()
     assert name.startswith("atc_") and visible == "False"
+
+
+CONSOLE_HANDLE = """
+import ctypes
+from ctypes import wintypes
+kernel = ctypes.WinDLL("kernel32")
+kernel.GetConsoleWindow.restype = wintypes.HWND
+print("CONSOLE", kernel.GetConsoleWindow() or 0)
+"""
+DETACHED_PARENT = """
+import os, sys
+from atc_testkit import desktop
+process = desktop.popen([sys.executable, sys.argv[1]], cwd=os.getcwd(), env=os.environ)
+sys.stdout.write(process.stdout.read().decode())
+sys.exit(process.wait())
+"""
+
+
+@windows
+def test_a_caller_without_a_console_starts_a_child_without_a_console_window(tmp_path: Path) -> None:
+    (tmp_path / "console.py").write_text(CONSOLE_HANDLE, encoding="utf-8")
+    run = subprocess.run([sys.executable, "-c", DETACHED_PARENT, str(tmp_path / "console.py")], cwd=tmp_path,
+                         capture_output=True, text=True, stdin=subprocess.DEVNULL,
+                         creationflags=subprocess.DETACHED_PROCESS)
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert run.stdout.split() == ["CONSOLE", "0"]
 
 
 @windows

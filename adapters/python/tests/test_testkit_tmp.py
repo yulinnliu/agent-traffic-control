@@ -139,6 +139,93 @@ def test_a_bare_name_and_a_short_form_resolve_to_the_child(atc_tmp: Path) -> Non
         assert clean(f"{buffer.value}\\shorter") == (0, [f"DELETED {shorter}"])
 
 
+def short_form(path: Path) -> str:
+    """The 8.3 form of ``path``; the test skips on a volume that has none."""
+    import ctypes
+    buffer = ctypes.create_unicode_buffer(1024)
+    ctypes.windll.kernel32.GetShortPathNameW(str(path), buffer, 1024)
+    if os.path.basename(buffer.value).lower() == path.name.lower():
+        pytest.skip("this volume keeps no 8.3 names")
+    return buffer.value
+
+
+windows = pytest.mark.skipif(os.name != "nt", reason="a form of a name only Windows resolves")
+
+
+@windows
+def test_a_reserved_name_typed_in_its_short_form_is_refused(atc_tmp: Path) -> None:
+    held = write(atc_tmp / "candidates/keep.txt")
+    code, lines = clean(short_form(atc_tmp / "candidates"))
+    assert code == 2 and len(lines) == 1 and lines[0].startswith("REFUSED ") and "reserved name" in lines[0]
+    assert held.is_file()
+
+
+@windows
+def test_a_scratch_typed_in_its_short_form_is_the_scratch(atc_tmp: Path) -> None:
+    directory = scratch_dir(atc_tmp, "a-long-scratch-name")
+    add(atc_tmp, directory)
+    assert clean(short_form(directory)) == (0, [f"DELETED {directory}"])
+    assert not directory.exists() and registered_names(atc_tmp) == []
+
+
+@windows
+@pytest.mark.parametrize("name", ["systmp", "plain"])
+@pytest.mark.parametrize("stream", ["::$INDEX_ALLOCATION", ":$I30:$INDEX_ALLOCATION", ":name"])
+@pytest.mark.parametrize("bare", [True, False])
+def test_a_stream_form_is_refused(atc_tmp: Path, name: str, stream: str, bare: bool) -> None:
+    held = write(atc_tmp / name / "keep.txt")
+    code, lines = clean(name + stream if bare else f"{atc_tmp}{os.sep}{name}{stream}")
+    assert code == 2 and len(lines) == 1 and lines[0].startswith("REFUSED ")
+    assert held.is_file()
+
+
+@windows
+@pytest.mark.parametrize("typed", ["systmp.", "systmp ", "systmp...", "CANDIDATES."])
+def test_a_name_windows_trims_to_a_reserved_one_is_refused(atc_tmp: Path, typed: str) -> None:
+    (atc_tmp / "candidates").mkdir()
+    held = write(atc_tmp / "systmp/keep.txt")
+    code, lines = clean(typed)
+    assert code == 2 and lines[0].startswith("REFUSED ") and held.is_file()
+
+
+@windows
+@pytest.mark.parametrize("prefix", ["\\\\?\\", "\\\\.\\"])
+def test_a_device_form_of_a_reserved_name_is_refused(atc_tmp: Path, prefix: str) -> None:
+    held = write(atc_tmp / "systmp/keep.txt")
+    code, lines = clean(f"{prefix}{atc_tmp}{os.sep}systmp")
+    assert code == 2 and lines[0].startswith("REFUSED ") and held.is_file()
+
+
+def test_a_name_outside_the_scratch_form_is_refused(atc_tmp: Path) -> None:
+    held = write(atc_tmp / "a name/keep.txt")
+    code, lines = clean(atc_tmp / "a name")
+    assert code == 2 and "not a scratch name" in lines[0] and held.is_file()
+
+
+def test_the_registry_passes_the_same_name_checks(atc_tmp: Path) -> None:
+    held = write(atc_tmp / "systmp/keep.txt")
+    scratch.register(atc_tmp, f"{atc_tmp}{os.sep}systmp.x:y", atc_tmp)
+    code, lines = clean(project=atc_tmp.name)
+    assert code == 2 and lines[0].startswith("REFUSED ") and held.is_file()
+
+
+def test_the_recursive_delete_refuses_a_directory_that_is_a_link(tmp_path: Path, atc_tmp: Path) -> None:
+    link = atc_tmp / "link"
+    link_directory(link, target(tmp_path, "victim"))
+    lines: list[str] = []
+    assert scratch.remove_tree(link, scratch.no_link, lines.append) == "is itself a link"
+    assert (link / "keep.txt").is_file()
+
+
+@windows
+def test_the_run_refuses_the_same_forms_of_a_reserved_name(atc_tmp: Path) -> None:
+    (atc_tmp / "candidates").mkdir()
+    for typed in (short_form(atc_tmp / "candidates"), f"{atc_tmp}{os.sep}candidates::$INDEX_ALLOCATION", "candidates."):
+        with pytest.raises(scratch.Refusal) as refused:
+            scratch.resolve_scratch(typed, atc_tmp)
+        assert refused.value.token == "SCRATCH_OUTSIDE_TMP"
+
+
 @pytest.mark.skipif(os.name != "nt", reason="a read-only reparse point is a Windows state")
 def test_a_link_that_survives_removal_blocks_the_recursive_delete(tmp_path: Path, atc_tmp: Path) -> None:
     stuck = scratch_dir(atc_tmp, "stuck")
@@ -392,3 +479,33 @@ def test_a_tree_git_no_longer_knows_is_any_other_entry(repository: Path, atc_tmp
     age(plain, 8)
     code, lines = prune()
     assert code == 0 and sorted(lines) == sorted([f"DELETED {tree}", f"DELETED {plain}"])
+
+
+@pytest.mark.parametrize("parent", ["systmp", "candidates"])
+def test_prune_refuses_a_parent_that_is_a_link_and_never_enters_it(tmp_path: Path, atc_tmp: Path, parent: str) -> None:
+    victim = target(tmp_path, "victim")
+    old = age(write(victim / "old.txt"), 30)
+    age(write(victim / "dir/file.txt").parent, 30)
+    if parent == "systmp":
+        (atc_tmp / "systmp").rmdir() if (atc_tmp / "systmp").exists() else None
+    link_directory(atc_tmp / parent, victim)
+    code, lines = prune()
+    assert code == 1 and lines == [f"REFUSED {atc_tmp / parent} (is itself a link)"]
+    assert old.is_file() and (victim / "dir/file.txt").is_file() and (victim / "keep.txt").is_file()
+
+
+def test_a_linked_parent_leaves_the_other_parent_and_the_report_to_run(tmp_path: Path, atc_tmp: Path) -> None:
+    link_directory(atc_tmp / "candidates", target(tmp_path, "victim"))
+    taken = age(write(atc_tmp / "systmp/old.txt"), 8)
+    scratch.register(atc_tmp, atc_tmp / "s", atc_tmp / "s/tree", NOW - timedelta(days=8))
+    code, lines = prune()
+    assert code == 1 and lines[0] == f"DELETED {taken}" and lines[1].startswith("REFUSED ") and lines[2].startswith("OLD ")
+
+
+def test_prune_refuses_a_parent_that_is_a_file(atc_tmp: Path) -> None:
+    write(atc_tmp / "candidates")
+    assert prune() == (1, [f"REFUSED {atc_tmp / 'candidates'} (not a directory)"])
+
+
+def test_prune_passes_over_a_missing_parent(atc_tmp: Path) -> None:
+    assert prune() == (0, [])

@@ -195,6 +195,8 @@ def remove_tree(directory: str | os.PathLike[str], expected: Callable[[str], boo
     Returns the reason the tree stays, or ``None`` once it is gone.
     """
     directory = os.fspath(directory)
+    if _is_link(os.lstat(_extended(directory))):
+        return "is itself a link"
     links = _links(directory)
     anomalies = [link for link in links if not expected(link)]
     if anomalies:
@@ -238,9 +240,9 @@ def no_link(_link: str) -> bool:
     return False
 
 
-def _long_parent(path: str) -> str:
-    """``path`` with 8.3 names expanded and links left as they are."""
-    if os.name != "nt" or not os.path.exists(path):
+def _expanded(path: str) -> str:
+    """``path`` with 8.3 names expanded and links left as they are; a path that does not exist stays as typed."""
+    if os.name != "nt":
         return path
     import ctypes
     buffer = ctypes.create_unicode_buffer(32768)
@@ -255,9 +257,12 @@ def _resolve_for_clean(argument: str, root: Path) -> tuple[str | None, str]:
         lexical = os.path.abspath(chosen)
     except (OSError, ValueError) as error:
         return None, f"{argument!r}: {error}"
-    parent, name = os.path.split(lexical)
-    if not locations.same_path(_long_parent(parent), root):
+    parent = _expanded(os.path.dirname(lexical))
+    name = os.path.basename(_expanded(lexical))
+    if not locations.same_path(parent, root):
         return None, f"{lexical} (not a direct child of {root} through real directories)"
+    if not SCRATCH_NAME.fullmatch(name):
+        return None, f"{lexical} (not a scratch name)"
     if _is_reserved(name):
         return None, f"{lexical} (reserved name)"
     return os.path.join(root, name), ""
@@ -403,10 +408,18 @@ def prune(*, say: Callable[[str], None] = print, environ=None, now: datetime | N
     for parent, handle, skip in ((places.systmp, _prune_entry, "pytest-of-*"),
                                  (places.tmp / CANDIDATES, _prune_candidate, None)):
         try:
-            entries = sorted(os.scandir(parent), key=lambda entry: entry.name)
+            parent_status = os.lstat(parent)
         except FileNotFoundError:
             continue
-        for entry in entries:
+        if _is_link(parent_status):
+            say(f"REFUSED {parent} (is itself a link)")
+            code = 1
+            continue
+        if not stat.S_ISDIR(parent_status.st_mode):
+            say(f"REFUSED {parent} (not a directory)")
+            code = 1
+            continue
+        for entry in sorted(os.scandir(parent), key=lambda entry: entry.name):
             if skip and fnmatch.fnmatch(entry.name, skip):
                 continue
             status = entry.stat(follow_symlinks=False)
