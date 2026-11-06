@@ -509,3 +509,14 @@ def test_prune_refuses_a_parent_that_is_a_file(atc_tmp: Path) -> None:
 
 def test_prune_passes_over_a_missing_parent(atc_tmp: Path) -> None:
     assert prune() == (0, [])
+
+
+def test_a_link_is_refused_before_the_delete_is_reached(tmp_path: Path, atc_tmp: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def reached(*_args):
+        raise AssertionError("the recursive delete was reached")
+    monkeypatch.setattr(scratch, "remove_tree", reached)
+    victim = target(tmp_path, "victim")
+    link_directory(atc_tmp / "link", victim)
+    link_directory(atc_tmp / "systmp/old", victim)
+    assert clean(atc_tmp / "link") == (1, [f"REFUSED {atc_tmp / 'link'} (is itself a link)"])
+    assert prune() == (1, [f"REFUSED {atc_tmp / 'systmp/old'} (is itself a link)"])
