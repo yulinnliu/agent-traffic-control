@@ -37,6 +37,9 @@ def test_an_unsuitable_root_is_refused_before_anything_is_created(atc_tmp: Path,
     with pytest.raises(Refusal) as refused:
         locations.locate(env)
     assert refused.value.token == "ATC_TMP_UNSUITABLE" and refused.value.code == 9
+    expected = {"relative": "not absolute", "appdata": "inside AppData", "appdata_variable": "inside AppData",
+                "git": "holds .git", "long": "limit 40"}[kind]
+    assert expected in refused.value.detail
     assert kind == "relative" or not Path(value).exists()
 
 
@@ -62,10 +65,10 @@ def test_locate_returns_and_creates_both_paths(atc_tmp: Path) -> None:
 
 
 def test_a_root_that_cannot_be_created_is_refused(atc_tmp: Path) -> None:
-    (atc_tmp / "file").write_text("x")
+    (atc_tmp / "f").write_text("x")
     with pytest.raises(Refusal) as refused:
-        locations.locate(environment(ATC_TMP=str(atc_tmp / "file")))
-    assert refused.value.token == "ATC_TMP_UNSUITABLE"
+        locations.locate(environment(ATC_TMP=str(atc_tmp / "f")))
+    assert refused.value.token == "ATC_TMP_UNSUITABLE" and "cannot be created" in refused.value.detail
 
 
 def test_enter_moves_this_process_and_every_child(atc_tmp: Path) -> None:
