@@ -288,6 +288,9 @@ def mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None = None
     except Refusal as refusal:
         print(f"{refusal.token} {refusal.detail}", file=sys.stderr, flush=True)
         aborted = refusal.code
+    except Exception as error:  # noqa: BLE001 - the restore check and the last line report every ending of the list
+        print(f"{type(error).__name__}: {error}", file=sys.stderr, flush=True)
+        aborted = 1
 
     mismatched = False
     for path in sorted(touched):

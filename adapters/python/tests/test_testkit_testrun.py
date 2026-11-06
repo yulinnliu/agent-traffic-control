@@ -343,6 +343,32 @@ def test_a_run_no_test_failed_in_is_inconclusive_and_ends_the_list(export: Expor
     assert run.stdout.splitlines()[-1] == "done: 1 of 2 mutants, 0 survived"
 
 
+def test_an_exception_during_a_mutant_still_restores_and_reports(export: Export, tmp_path: Path,
+                                                                  capsys: pytest.CaptureFixture[str],
+                                                                  monkeypatch: pytest.MonkeyPatch) -> None:
+    results = iter([testrun.Result(0, ["1 passed"])])
+
+    def execute(*_args, **_kwargs):
+        for result in results:
+            return result
+        raise TimeoutError("CHILD_TREE_STILL_RUNNING")
+    monkeypatch.setattr(testrun, "execute", execute)
+    listing = tmp_path / "mutants.json"
+    listing.write_text(json.dumps([KILLED]), encoding="utf-8")
+    code = testrun.mutants([export.place.name, export.sha, str(export.worktree), str(listing), "--python", sys.executable,
+                            "--tests", "tests"])
+    captured = capsys.readouterr()
+    assert code == 1 and captured.err.splitlines()[0] == "TimeoutError: CHILD_TREE_STILL_RUNNING"
+    assert captured.out.splitlines()[-2:] == ["restored-ok src/fixture_pkg/__init__.py", "done: 0 of 1 mutants, 0 survived"]
+    assert b"return 1" in export.file.read_bytes()
+
+
+def test_an_error_applying_a_mutant_still_reports(export: Export, tmp_path: Path) -> None:
+    run = export.run(tmp_path, [{"label": "a directory", "edits": [{"path": "src", "old": "x", "new": "y"}]}])
+    assert run.returncode == 1 and "Traceback" not in run.stderr and run.stderr.strip()
+    assert run.stdout.splitlines()[-1] == "done: 0 of 1 mutants, 0 survived"
+
+
 def test_a_timeout_names_itself_as_the_reason() -> None:
     assert "timed out" in testrun._verdict(testrun.Result(None, []))[1]
 
