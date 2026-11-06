@@ -8,8 +8,11 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import zipfile
+
+from atc_testkit import locations
 
 
 WORKSPACE = Path(__file__).resolve().parents[3]
@@ -84,6 +87,11 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", type=Path, default=WORKSPACE / ".tooling/testkit-dist")
     args = parser.parse_args(argv)
+    try:
+        locations.enter()
+    except locations.Refusal as refusal:
+        print(f"{refusal.token} {refusal.detail}", file=sys.stderr)
+        return refusal.code
     args.output_dir.mkdir(parents=True, exist_ok=True)
     env = {**os.environ, "SOURCE_DATE_EPOCH": "315532800"}
     with tempfile.TemporaryDirectory(prefix="atc-testkit-") as temporary:

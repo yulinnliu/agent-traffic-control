@@ -1,4 +1,5 @@
 """Release identities change with canonical source and preserve immutable artifacts."""
+import os
 from pathlib import Path
 import sys
 
@@ -32,7 +33,30 @@ def test_local_release_is_repeatable_and_rejects_changed_content(tmp_path):
 
 
 
-def test_release_build_uses_clean_source_and_excludes_removed_modules(tmp_path, monkeypatch):
+@pytest.mark.integration
+def test_the_build_makes_the_location_call_before_it_creates_a_file(tmp_path, atc_tmp, monkeypatch):
+    import build_testkit_release as builder
+    seen = []
+
+    def stop(package, snapshot):
+        seen.append(Path(snapshot))
+        raise ValueError("stop here")
+    monkeypatch.setattr(builder, 'snapshot_source', stop)
+    with pytest.raises(ValueError, match='stop here'):
+        builder.main(['--output-dir', str(tmp_path / 'release')])
+    assert seen[0].parent.parent == atc_tmp / 'systmp'
+    assert os.environ['ATC_TMP'] == str(atc_tmp) and os.environ['TEMP'] == str(atc_tmp / 'systmp')
+
+
+@pytest.mark.integration
+def test_an_unsuitable_root_stops_the_build_before_it_creates_a_file(tmp_path, atc_tmp, monkeypatch, capsys):
+    import build_testkit_release as builder
+    monkeypatch.setenv('ATC_TMP', 'relative')
+    assert builder.main(['--output-dir', str(tmp_path / 'release')]) == 9
+    assert capsys.readouterr().err.startswith('ATC_TMP_UNSUITABLE ') and not (tmp_path / 'release').exists()
+
+
+def test_release_build_uses_clean_source_and_excludes_removed_modules(tmp_path, atc_tmp, monkeypatch):
     import json
     import zipfile
     import build_testkit_release as builder
