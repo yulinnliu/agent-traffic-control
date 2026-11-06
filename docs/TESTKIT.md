@@ -17,7 +17,8 @@ lands together with a governance change to that sentence.
 
 ## Adoption
 
-- A project vendors one released `atc-testkit` wheel; all projects of a
+- A project vendors one released `atc-testkit` wheel under `vendor/`, with
+  its release record `vendor/atc-testkit.json` beside it; all projects of a
   workspace carry the same version.
 - The project's root `conftest.py` registers the testkit's pytest plugin and
   nothing else of its own for the concerns below. The plugin registers the
@@ -66,8 +67,10 @@ order. Each is one pytest invocation over the selected paths.
   count.
 - `slow` tests run in CI only, as one further invocation through the same
   runner with the marker expression `slow` and `-n 0`, whatever other
-  markers a test carries. It passes when it collects no test. The project
-  decides which CI job holds it.
+  markers a test carries. It runs on the desktop the CI job starts it from,
+  where an `interactive_desktop` test among them finds what it needs. It
+  passes when it collects no test. The project decides which CI job holds
+  it.
 
 ## Isolated environment
 
@@ -177,8 +180,10 @@ this order:
   and its own test command, run once with its base directory in the working
   directory, in place of the stages. Its own static checks carry its own
   tokens. Its range is documentation-only when every changed path is
-  Markdown under `docs/`, and such a range skips that test command. It
-  writes no verification report. § Isolated environment, § Running and
+  Markdown under `docs/`, and such a range skips that test command. A range
+  Git cannot read refuses with `RANGE_UNREADABLE`, in the place of the
+  selection row. It writes no verification report.
+  § Isolated environment, § Running and
   logging and the working-directory rules bind it as they bind a project's
   verifier.
 
@@ -190,10 +195,15 @@ A test starts a child process through the testkit's `start` or `run`.
   group on other platforms). The teardown of the test that started it ends
   the whole tree and waits for it; `run` does so when it returns, also on a
   timeout.
-- A child opens no console window unless the test passes its own creation
-  flags. A test whose subject is a detached or new-console launch passes
-  those flags through `start`, and carries `interactive_desktop` when the
-  launch shows a window.
+- A child opens no console window. On Windows the testkit starts it on a
+  windowless console (`CREATE_NO_WINDOW`), which the processes it starts
+  inherit. A venv `python.exe` is a redirector that passes its console to
+  the interpreter it starts; started without a console (`DETACHED_PROCESS`)
+  it has none to pass, and the interpreter allocates a new visible one.
+- A test whose subject is a detached or new-console launch passes its own
+  creation flags through `start`. A new console starts hidden
+  (`CREATE_NEW_CONSOLE` with `STARTF_USESHOWWINDOW` and `SW_HIDE`). A launch
+  that still shows a window carries `interactive_desktop`.
 - At the end of a session the controlling process lists every live process
   whose command line names that session's pytest base directory, excluding
   itself and its ancestors, and fails the run with `CHILD_PROCESSES_ALIVE`
@@ -213,11 +223,18 @@ Windows only; on other platforms a stage starts normally.
   command and every process it starts open their windows there. Its stdout
   and stderr arrive merged, stdin is empty, and waiting for it returns the
   exit code and releases the desktop.
+- The desktop holds the windows a process creates itself, Tk windows among
+  them, and xdist workers run on it. A console window belongs to the console
+  host, which Windows starts on the interactive desktop, so a console a
+  process allocates appears there whatever desktop the process runs on.
+  Consoles stay hidden through the launch flags: § Child processes for the
+  children a test starts, and the product's own flags for the processes
+  product code starts.
 - When the desktop or the process cannot be created, the stage runs on the
   interactive desktop and one line says so. The log header records `private`
   or `interactive`.
-- A test that needs the interactive desktop (native tray icons and some Tk
-  windows are the known cases) carries `interactive_desktop` and runs in the
+- A test that needs the interactive desktop (native tray icons are the
+  known case) carries `interactive_desktop` and runs in the
   `interactive` stage, which still shows windows.
 - `atc test run` runs on a private desktop when called with
   `ATC_PRIVATE_DESKTOP=1`, and then excludes `interactive_desktop` tests.

@@ -15,8 +15,9 @@ whole directory loses nothing. Persistent state lives elsewhere
   shorter volume. The resolved root is written `<tmp>` below.
 - No shared tool writes generated files to the system temporary directory, to
   a drive root, or into a repository's tracked tree.
-- `<tmp>` lies outside `AppData`, where file metadata calls cost about ten
-  times those elsewhere, and has no ancestor that holds `.git`, because
+- `<tmp>` lies outside `AppData`, where file metadata calls cost more than
+  elsewhere (measured: create 1.6, `stat` 7.7, delete 2.0 times), and has no
+  ancestor that holds `.git`, because
   product code under test runs Git when one does. Its absolute long-name form
   is at most 40 characters, which leaves a scratch name of at least 23. A
   root that breaks one of these is refused with `ATC_TMP_UNSUITABLE` and the

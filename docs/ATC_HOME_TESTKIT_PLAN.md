@@ -2,10 +2,9 @@
 
 How and in what order `ATC_HOME.md` and `TESTKIT.md` become what the tools do.
 The two specs hold every rule; this plan cites them by section and adds none.
-A point the specs leave open is listed in § Points for the Owner with the
-step that meets it, and is settled in the spec before that step continues.
 
-Step 1 is a set of measurements and commits nothing. Steps 2 to 5 and the
+Step 1 is a set of measurements, made on this host, and committed nothing.
+Steps 2 to 5 and the
 reference clean-up of step 6 are each one topic branch in the repository
 named, reviewed by the `hami-review-relay` method under the class given, and
 integrated with `atc integrate` before the next step that depends on it. The
@@ -22,77 +21,28 @@ project records it.
 ```
 
 Steps 4 and 5 do not depend on each other. Step 6 needs both. Step 2 starts
-on the Owner's word after the report of step 1.
+on the Owner's word.
 
 ## 1. Verifications that may change the spec
 
-The four measurements below run before any code of step 2 is written. Each
-is a measurement, not a change to a project: its script lives in a scratch
-directory and nothing is committed in a project repository. Every result is
-reported to the Owner with its numbers, whatever it shows, and step 2 starts
-on the Owner's word after that report.
+The four measurements are made and the specs carry what they changed. What
+the later steps take from them:
 
-### 1.1 xdist workers on a private desktop
-
-Question: does the `parallel` stage of `TESTKIT.md` § Stages work as
-written, with its worker option, when started on a private Windows desktop
-(`TESTKIT.md` § Private desktop)?
-
-- Repository: `hami-quant-trading`, read only. The launcher is its
-  `scripts/private_desktop.py`, which today starts only the serial stage
-  (`scripts/prepush_select.py`, `run_stages()`).
-- How: start the trading `parallel`-stage command through
-  `private_desktop.popen` for a targeted set that includes process, Tk and
-  subprocess tests (not the full suite, which is CI-only), once with workers
-  and once with `-n 0`, and the same set on the interactive desktop as the
-  control. Record: exit codes, the summary lines, whether execnet workers
-  start, whether any window reaches the interactive desktop, wall clock of
-  each run.
-- The report names each of these when it occurs, because it changes the
-  Desktop column of `TESTKIT.md` § Stages: workers that fail to start or
-  hang on a private desktop; a test that passes on the interactive desktop
-  and fails on the private one for a reason other than needing the
-  interactive desktop (those are counted in 1.2). It gives the wall clock of
-  the private and the interactive run side by side.
-
-### 1.2 Count of `interactive_desktop` tests
-
-Question: how many tests in each project need the interactive desktop, and is
-the `interactive` stage small enough that showing its windows is acceptable?
-
-- Repositories: `hami-quant-trading` and `hami-quant`, read only.
-- How: list candidates by source (tray icon, Tk root creation, detached or
-  new-console launches, `CREATE_NEW_CONSOLE`), then run each candidate file
-  on a private desktop and on the interactive desktop. A test needs the
-  marker when it fails only on the private desktop. Report per project: the
-  count, the files, the wall clock of the would-be `interactive` stage, and
-  the tests that open a window on the interactive desktop.
-- The report names each of these when it occurs: a test that needs the
-  interactive desktop and is also `serial`-sensitive in a way the stage
-  table does not place; a whole category (every Tk test, for example) that
-  needs the marker. It gives the share of a gate run's wall clock the
-  would-be `interactive` stage takes.
-
-### 1.3 Metadata cost under `AppData`
-
-Question: does the cost `ATC_HOME.md` § Location states for `AppData` hold
-on this host?
-
-- How: time one targeted set of each project with its base directory under
-  `%LOCALAPPDATA%\Temp` and under `%USERPROFILE%\.atc\tmp`, three runs
-  each. Report the wall clocks and their ratio.
-- Needs the write guard to allow `~/.atc` (§ Separate authority).
-
-### 1.4 Path length below `<tmp>`
-
-Question: does the bound `ATC_HOME.md` § Location puts on `<tmp>` leave the
-paths the tests build room under the Windows path limit?
-
-- How: for the targeted sets of 1.3, record the longest path created below
-  the base directory, for a scratch run and for a run without a scratch
-  (`ATC_HOME.md` § pytest without a scratch). Report the two lengths per
-  project and the room each leaves. Step 3 repeats the measurement for the
-  root's suite in a candidate.
+- xdist workers and Tk windows run on a private desktop, so the Desktop
+  column of `TESTKIT.md` § Stages stands as written.
+- `interactive_desktop` goes on two tests, the native tray tests of
+  hami-quant-trading's `test_trading_app_window.py` (step 4); hami-quant
+  has none (step 5).
+- A console window reaches the user's desktop from any desktop
+  (`TESTKIT.md` § Private desktop), so each of steps 4 and 5 lists the
+  launches in its project that start a venv `python.exe` without a console
+  and moves the test launches onto the testkit's `start` or `run`
+  (`TESTKIT.md` § Child processes).
+- The longest path below the base directory is 114 characters in
+  hami-quant-trading and 55 in hami-quant, inside the bound of
+  `ATC_HOME.md` § Location. Step 3 measures the root's suite in a candidate.
+- A suite's wall clock is the same under `AppData` and under `<tmp>`; the
+  cost `ATC_HOME.md` § Location names shows in the metadata calls alone.
 
 ## 2. The `atc-testkit` release
 
@@ -105,8 +55,7 @@ Files:
 - `adapters/python/hami-testkit/` becomes `adapters/python/atc-testkit/`:
   distribution `atc-testkit`, import package `atc_testkit`, config table
   `[tool.atc-testkit]`, release record `vendor/atc-testkit.json`
-  (`pyproject.toml`, `src/`, `README.md`). The record's name is a point for
-  the Owner (§ Points for the Owner).
+  (`pyproject.toml`, `src/`, `README.md`).
 - Existing modules carried over: `markers`, `selection`, `git`, `evidence`,
   `check`.
 - New modules, each written from the spec section and the code it replaces:
@@ -137,8 +86,7 @@ Files:
     `scripts/private_desktop.py`.
   - CI runner: `TESTKIT.md` § CI runner, with the `slow` invocation of
     § Stages and the initialization function a project names; replaces the
-    shared part of trading's `scripts/ci_pytest.py`. The desktop of the
-    `slow` invocation is settled here (§ Points for the Owner).
+    shared part of trading's `scripts/ci_pytest.py`.
   - commands: `atc test run`, `atc test mutants` and
     `atc tmp list|clean|prune` (`TESTKIT.md` § Commands,
     `ATC_HOME.md` § Test scratch, § Scratch registry, § Deleting), which
@@ -225,8 +173,7 @@ package.
    of `TESTKIT.md` § Isolated environment; a working directory under
    `<tmp>/systmp` with the name bound of
    `ATC_HOME.md` § Integration and the pre-push gate; and the logs of
-   `TESTKIT.md` § Running and logging. The token of a range Git cannot read
-   is settled here (§ Points for the Owner).
+   `TESTKIT.md` § Running and logging.
    `adapters/python/tests/test_integration_verify.py` follows.
 8. Root `AGENTS.md` `## Integration verification`: the paragraph of
    differences is removed and the timeout is re-measured. The section keeps
@@ -288,7 +235,9 @@ script.
 - `scripts/integration_verify.py`, `scripts/integration-verify.json`: the
   project's data passed to the shared verifier.
 - Every test that starts a child: imports `start` and `run` from the testkit.
-- Tests found in step 1.2: the `interactive_desktop` marker.
+- The two tests step 1 names: the `interactive_desktop` marker.
+- The launches step 1 has this step list: the product ones get a windowless
+  console in their own code, the test ones go through `start` or `run`.
 - `.github/workflows/ci.yml`: the testkit's runner, the three stages, the
   `slow` invocation of `TESTKIT.md` § Stages in the job the project names,
   the targeted `workflow_dispatch` run through the same runner, and the
@@ -351,9 +300,9 @@ Repository: `hami-quant`. Class: behaviour. Depends on steps 2 and 3.
   `--managed-python --python 3.13.14` and `-B`, which the project's
   `AGENTS.md` requires. Its tokens change to the spec's table
   (`tests/test_integration_verify.py`).
-- Tests that are sensitive to parallel load get `serial`; tests found in
-  step 1.2 get `interactive_desktop`; tests that start a child use the
-  testkit's `start` and `run`.
+- Tests that are sensitive to parallel load get `serial`; tests that start
+  a child use the testkit's `start` and `run`, which covers the launches
+  step 1 has this step list.
 - `.github/workflows/ci.yml`: the testkit's runner and stages on
   `ubuntu-latest`, the `slow` invocation of `TESTKIT.md` § Stages in the job
   the project names, and the Windows supervision job through the same
@@ -429,7 +378,6 @@ Changes this plan depends on and a writer of the steps above does not make:
 | `shared/governance/VERIFICATION.md` § Testing: the sentence naming `hami-testkit` and `adapters/python/hami-testkit/README.md` | a governance change under `GOVERNANCE_CHANGES.md` | step 2 is vendored anywhere; then each project's pin advances with its step 4 or 5 |
 | `docs/LAYOUT.md`: `hami-testkit/` in § The checkout, and the place of `~/.atc` beside the checkout | the Owner's instruction for that document | step 2 lands |
 | `shared/skills/hami-review-relay/SKILL.md` and its rendered copies: `run_tests.sh`, `clean_scratch.ps1`, `mutants.py`, `%TEMP%\q`, `LEDGER.txt` become the `atc` commands and `<tmp>`, with `clean_scratch.ps1` kept for `%TEMP%\q` until step 6 | a skill change with its own review (`hami-writing-for-agents`), then `atc onboard --sync` into every project | the end of step 3 |
-| `~/.claude/hooks/write_scope_guard.py`: allow `~/.atc` | the Owner edits it | measurement 1.3 of step 1, and step 2 |
 | The release version number of `atc-testkit` | the Owner | step 2 |
 
 ## Unverified items
@@ -441,24 +389,8 @@ Owner before that step continues.
 | Item | Settled in | How |
 | --- | --- | --- |
 | `atc` on cloud writer hosts: `TESTKIT.md` § Commands assumes `atc` is installed where the test tools run; a cloud VM clone has no `workspace.yaml` and may have no `atc` | step 3 | install from a clone on a cloud host and run `atc test run` against a project clone; decide what a host without `atc` runs |
-| The ten-times `AppData` metadata cost in `ATC_HOME.md` § Location | step 1 | measurement 1.3 |
 | PowerShell module-cache timing and trading's tests under a redirected profile (`TESTKIT.md` § Isolated environment redirects `USERPROFILE`, `APPDATA`, `LOCALAPPDATA`) | step 4 | run trading's PowerShell-launching test files with the redirected variables before the gate is switched |
-| The 40-character bound on `<tmp>` against `MAX_PATH` | steps 1 and 3 | measurement 1.4 for the projects; step 3's verification for the root's suite in a candidate |
+| The 40-character bound on `<tmp>` against `MAX_PATH`, for the root's suite | step 3 | the longest path the root's suite creates in a candidate |
 | Tests and trading's mutation verifier that pin today's verifier tokens | steps 4 and 5 | listed in those steps; hami-quant's tokens differ from the spec's table today |
 | `atc integrate` on the workspace root: a candidate of the root, the `.venv` the verifier argv builds in it, and `git worktree remove` of a candidate that holds that `.venv` | the first root topic integrated, then step 2 | a documentation-only range exercises all three without the suite; step 2's own topic is the first full range |
 | The installed `atc` with a path dependency: `uv tool install -e adapters/python` and the source snapshot under `~/.local/atc-src` (`ATC_HOME.md` § Outside the ATC home) must carry `atc-testkit` beside the adapter | step 3 | install from the step's tree and run `atc tmp list` from a directory outside the checkout |
-
-## Points for the Owner
-
-What the two specs leave open. None is decided here; each is settled in the
-spec when the step named meets it.
-
-1. `TESTKIT.md` § Stages gives each stage a desktop and gives the `slow`
-   invocation none. Step 2 builds the invocation with the CI runner.
-2. `TESTKIT.md` § Integration verifier gives the workspace root no selection
-   row, so no row carries a range Git cannot read. The root's verifier
-   refuses it with `RANGE_UNREADABLE`, a token the table does not hold.
-   Step 3 item 7 moves the verifier onto the skeleton.
-3. No spec names the release record a project vendors beside the wheel.
-   The code names it `vendor/hami-testkit.json`, and this plan writes
-   `vendor/atc-testkit.json` after the package. Step 2 renames it.
