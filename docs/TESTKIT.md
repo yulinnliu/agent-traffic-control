@@ -226,8 +226,8 @@ Windows only; on other platforms a stage starts normally.
   exit code and releases the desktop.
 - The desktop holds the windows a process creates itself, Tk windows among
   them, and xdist workers run on it. A console window is created by the
-  console host and not by the process, and a visible one appears on the
-  interactive desktop whatever desktop the process runs on.
+  console host, and a visible one appears on the interactive desktop
+  whatever desktop the process that allocated it runs on.
   Consoles stay hidden through the launch flags: § Child processes for the
   children a test starts, and the product's own flags for the processes
   product code starts.

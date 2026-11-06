@@ -35,15 +35,13 @@ the later steps take from them:
   has none (step 5).
 - A console window reaches the user's desktop from any desktop
   (`TESTKIT.md` § Private desktop), so each of steps 4 and 5 lists the
-  launches in its project that start a venv `python.exe` without a console.
-  The test launches move onto the testkit's `start` or `run`
-  (`TESTKIT.md` § Child processes); a product launch on the list goes to
-  the Owner.
+  launches in its project that start a venv `python.exe` without a console
+  and moves the test launches onto the testkit's `start` or `run`
+  (`TESTKIT.md` § Child processes).
 - The longest path below the base directory is 114 characters in
   hami-quant-trading and 55 in hami-quant. Below a scratch in a `<tmp>` of
-  the 40 characters `ATC_HOME.md` § Location allows, the longer one leaves
-  98 characters under the Windows path limit. Step 3 measures the root's
-  suite in a candidate.
+  the 40 characters `ATC_HOME.md` § Location allows, both stay under the
+  Windows path limit. Step 3 measures the root's suite in a candidate.
 - A suite's wall clock is the same under `AppData` and under `<tmp>`; the
   cost `ATC_HOME.md` § Location names shows in the metadata calls alone.
 
@@ -237,8 +235,9 @@ script.
   project's data passed to the shared verifier.
 - Every test that starts a child: imports `start` and `run` from the testkit.
 - The two tests step 1 names: the `interactive_desktop` marker.
-- The list of launches that start a venv `python.exe` without a console
-  (step 1): the test ones go through `start` or `run`.
+- The list of launches that start a venv `python.exe` without a console is
+  made here: the test ones go through `start` or `run`, and the step's
+  report names the product ones.
 - `.github/workflows/ci.yml`: the testkit's runner, the three stages, the
   `slow` invocation of `TESTKIT.md` § Stages in the job the project names,
   the targeted `workflow_dispatch` run through the same runner, and the
@@ -303,8 +302,8 @@ Repository: `hami-quant`. Class: behaviour. Depends on steps 2 and 3.
   (`tests/test_integration_verify.py`).
 - Tests that are sensitive to parallel load get `serial`; tests that start
   a child use the testkit's `start` and `run`. The list of launches that
-  start a venv `python.exe` without a console (step 1) is made here and its
-  test launches go the same way.
+  start a venv `python.exe` without a console is made here: its test
+  launches go the same way, and the step's report names the product ones.
 - `.github/workflows/ci.yml`: the testkit's runner and stages on
   `ubuntu-latest`, the `slow` invocation of `TESTKIT.md` § Stages in the job
   the project names, and the Windows supervision job through the same
