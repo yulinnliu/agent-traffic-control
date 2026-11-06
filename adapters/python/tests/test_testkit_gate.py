@@ -122,6 +122,46 @@ def test_no_test_input_runs_nothing(repo: Path, capsys: pytest.CaptureFixture[st
     assert recorder.calls == [] and "skip: no test inputs" in capsys.readouterr().out
 
 
+def stale_logs(repo: Path) -> tuple[Path, Path]:
+    logs = repo / ".tmp"
+    logs.mkdir(exist_ok=True)
+    (logs / "other.txt").write_text("kept", encoding="utf-8")
+    (logs / "prepush-serial.log").write_text("an earlier run", encoding="utf-8")
+    return logs / "prepush-serial.log", logs / "other.txt"
+
+
+def test_a_run_clears_the_logs_of_the_earlier_run(repo: Path) -> None:
+    stale, other = stale_logs(repo)
+    base = git(repo, "rev-parse", "HEAD")
+    sha = commit(repo, "a.py")
+    assert gate.main(project(repo), ["--run"], [push_line(repo, base, sha)], Recorder(**{"prepush-parallel": 1})) == 1
+    assert not stale.exists() and other.read_text(encoding="utf-8") == "kept"
+
+
+def test_a_run_with_nothing_to_run_clears_them_too(repo: Path) -> None:
+    stale, _other = stale_logs(repo)
+    base = git(repo, "rev-parse", "HEAD")
+    sha = commit(repo, "a.md")
+    assert gate.main(project(repo), ["--run"], [push_line(repo, base, sha)], Recorder()) == 0
+    assert not stale.exists()
+
+
+def test_printing_a_selection_keeps_them(repo: Path) -> None:
+    stale, _other = stale_logs(repo)
+    assert gate.main(project(repo), ["--paths", "a.py"]) == 0
+    assert stale.exists()
+
+
+def test_a_log_that_cannot_go_is_named(repo: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
+    stale, _other = stale_logs(repo)
+
+    def locked(_path):
+        raise PermissionError("in use")
+    monkeypatch.setattr(Path, "unlink", locked)
+    gate._clear_logs(repo / ".tmp")
+    assert str(stale) in capsys.readouterr().err
+
+
 def test_no_test_input_leaves_the_root_unread(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     base = git(repo, "rev-parse", "HEAD")
     sha = commit(repo, "a.md")

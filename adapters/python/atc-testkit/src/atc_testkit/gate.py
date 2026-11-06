@@ -14,6 +14,7 @@ from .git import SelectionError, baseline_deltas, changed_paths, git_env, verify
 from .project import Project, StaticCheck
 
 LOG_DIRECTORY = ".tmp"
+LOG_PATTERN = "prepush-*.log"
 SELECTION_FAILED_EXIT = 2
 
 
@@ -35,6 +36,15 @@ def pushed_commits(push_lines: Iterable[str]) -> list[str]:
         if len(fields) == 4 and set(fields[1]) != {"0"} and fields[1] not in commits:
             commits.append(fields[1])
     return commits
+
+
+def _clear_logs(logs: Path) -> None:
+    """The directory holds the latest run's logs only; a log that cannot go is named."""
+    for log in logs.glob(LOG_PATTERN):
+        try:
+            log.unlink()
+        except OSError as error:
+            print(f"pre-push: log of an earlier run left: {log} ({error})", file=sys.stderr)
 
 
 def _selection(project: Project, push_lines: list[str], explicit: Sequence[str] | None, run_mode: bool, git):
@@ -120,6 +130,8 @@ def main(project: Project, argv: Sequence[str] | None = None, stdin: Iterable[st
     print(selection.describe(chosen), flush=True)
     if not args.run:
         return 0
+    logs = project.root / LOG_DIRECTORY
+    _clear_logs(logs)
     checks = [check for check in project.checks if check.applies(paths)]
     if not checks and pytest_paths is None:
         return 0
@@ -133,7 +145,6 @@ def main(project: Project, argv: Sequence[str] | None = None, stdin: Iterable[st
         return refusal.code
     isolated = isolation.IsolatedRun(work, credentials=project.credential_variables,
                                      data_roots=project.data_root_variables)
-    logs = project.root / LOG_DIRECTORY
     code = _run_checks(project, checks, isolated, logs, run)
     if not code and pytest_paths is not None:
         code = _run_tests(project, push_lines, pytest_paths, isolated, logs, git, run)
