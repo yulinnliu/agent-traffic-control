@@ -119,7 +119,7 @@ def test_a_refusal_exits_nine_with_its_token_and_creates_nothing(tree: Path, atc
               "long": "a" * (65 - len(str(atc_tmp)))}
     run = run_command("test", "run", *(argument.format(**values) for argument in arguments), "l", "tests")
     assert run.returncode == 9, run.stdout + run.stderr
-    assert run.stdout.startswith(token + " ")
+    assert run.stderr.startswith(token + " ")
     assert not (tmp_path / "out").exists() and not (atc_tmp / values["long"]).exists()
 
 
@@ -143,7 +143,7 @@ def test_a_path_to_a_direct_child_is_accepted(atc_tmp: Path) -> None:
 
 def test_an_unsuitable_root_exits_nine(tree: Path, atc_tmp: Path) -> None:
     run = run_command("test", "run", str(tree), "s", sys.executable, "l", "tests", ATC_TMP="relative")
-    assert run.returncode == 9 and run.stdout.startswith("ATC_TMP_UNSUITABLE ")
+    assert run.returncode == 9 and run.stderr.startswith("ATC_TMP_UNSUITABLE ")
 
 
 def test_a_pythonpath_directory_absent_after_entering_is_refused(tree: Path, atc_tmp: Path, tmp_path: Path,
@@ -158,7 +158,7 @@ def test_a_pythonpath_directory_absent_after_entering_is_refused(tree: Path, atc
 def test_a_package_that_cannot_load_is_refused(tree: Path, atc_tmp: Path, body: str) -> None:
     (tree / "src/fixture_pkg/__init__.py").write_text(body, encoding="utf-8")
     run = run_command("test", "run", str(tree), "s", sys.executable, "l", "tests")
-    assert run.returncode == 8 and run.stdout.startswith("COPY_IMPORT_MISMATCH ")
+    assert run.returncode == 8 and run.stderr.startswith("COPY_IMPORT_MISMATCH ")
 
 
 def test_a_package_loaded_from_outside_the_tree_is_refused(tree: Path, atc_tmp: Path, tmp_path: Path) -> None:
@@ -168,7 +168,7 @@ def test_a_package_loaded_from_outside_the_tree_is_refused(tree: Path, atc_tmp: 
     body = f"import sys, importlib\nsys.modules.pop(__name__)\nsys.path.remove(sys.path[0]) if False else None\nsys.path.insert(0, {str(outside)!r})\nimport importlib.util\nspec = importlib.util.spec_from_file_location(__name__, {str(outside / 'fixture_pkg.py')!r})\nmodule = importlib.util.module_from_spec(spec)\nspec.loader.exec_module(module)\nsys.modules[__name__] = module\n"
     (tree / "src/fixture_pkg/__init__.py").write_text(body, encoding="utf-8")
     run = run_command("test", "run", str(tree), "s", sys.executable, "l", "tests")
-    assert run.returncode == 8 and "fixture_pkg" in run.stdout
+    assert run.returncode == 8 and "fixture_pkg" in run.stderr
 
 
 def test_the_guard_descends_through_namespace_directories(tree: Path, atc_tmp: Path) -> None:
@@ -176,7 +176,7 @@ def test_the_guard_descends_through_namespace_directories(tree: Path, atc_tmp: P
     package.mkdir(parents=True)
     (package / "__init__.py").write_text("raise ImportError('deep')\n", encoding="utf-8")
     run = run_command("test", "run", str(tree), "s", sys.executable, "l", "tests")
-    assert run.returncode == 8 and "name_space.inner" in run.stdout
+    assert run.returncode == 8 and "name_space.inner" in run.stderr
 
 
 def test_the_tree_has_no_venv_note_when_it_holds_one(tree: Path, atc_tmp: Path) -> None:
@@ -288,7 +288,7 @@ def test_a_red_baseline_applies_no_mutant(export: Export, tmp_path: Path) -> Non
 def test_an_old_that_does_not_occur_exactly_once_aborts(export: Export, tmp_path: Path, old: str) -> None:
     edit = {"label": "bad", "edits": [{"path": "src/fixture_pkg/__init__.py", "old": old, "new": "x"}]}
     run = export.run(tmp_path, [edit, KILLED])
-    assert run.returncode == 1 and "need exactly 1" in run.stdout and "K one" not in run.stdout
+    assert run.returncode == 1 and "need exactly 1" in run.stderr and "K one" not in run.stdout
 
 
 def test_edits_follow_the_files_line_endings(export: Export, tmp_path: Path) -> None:
@@ -302,7 +302,7 @@ def test_edits_follow_the_files_line_endings(export: Export, tmp_path: Path) -> 
 def test_an_import_guard_refusal_aborts_and_restores(export: Export, tmp_path: Path) -> None:
     edit = {"label": "guard", "edits": [{"path": "src/fixture_pkg/__init__.py", "old": "def value():", "new": "raise ImportError('x')\ndef value():"}]}
     run = export.run(tmp_path, [edit, KILLED])
-    assert run.returncode == 8 and "COPY_IMPORT_MISMATCH" in run.stdout and "K one" not in run.stdout
+    assert run.returncode == 8 and "COPY_IMPORT_MISMATCH" in run.stderr and "K one" not in run.stdout
     assert "restored-ok src/fixture_pkg/__init__.py" in run.stdout and b"raise" not in export.file.read_bytes()
 
 
@@ -312,19 +312,61 @@ def test_a_file_that_differs_from_its_object_is_a_restore_mismatch(export: Expor
     assert run.returncode == 1 and "RESTORE-MISMATCH src/fixture_pkg/__init__.py" in run.stdout
 
 
-def test_a_timed_out_mutant_counts_as_killed_and_its_tree_ends(export: Export, tmp_path: Path,
-                                                                 monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(testrun, "MUTANT_SECONDS", 0.001)
-    assert testrun._summary(testrun.Result(None, []))[0] is False
+@pytest.mark.parametrize(("result", "verdict"), [
+    (testrun.Result(0, ["1 passed"]), testrun.SURVIVED),
+    (testrun.Result(1, ["FAILED tests/a.py::t", "ERROR tests/b.py::t"]), testrun.KILLED),
+    (testrun.Result(1, ["ERROR tests/a.py::t - PermissionError"]), testrun.INCONCLUSIVE),
+    (testrun.Result(1, ["no summary"]), testrun.INCONCLUSIVE),
+    (testrun.Result(2, ["FAILED looks like a failure"]), testrun.INCONCLUSIVE),
+    (testrun.Result(3, []), testrun.INCONCLUSIVE),
+    (testrun.Result(4, []), testrun.INCONCLUSIVE),
+    (testrun.Result(5, []), testrun.INCONCLUSIVE),
+    (testrun.Result(None, []), testrun.INCONCLUSIVE),
+])
+def test_only_a_failed_test_is_a_kill(result: testrun.Result, verdict: str) -> None:
+    assert testrun._verdict(result)[0] == verdict
+
+
+@pytest.mark.parametrize(("old", "new", "expected"), [
+    ("import fixture_pkg\n", "raise RuntimeError('at collection')\nimport fixture_pkg\n", "pytest exit 2"),
+    ("def test_value():", "import pytest\n@pytest.fixture(autouse=True)\ndef broken():\n    raise RuntimeError('at setup')\n"
+                          "def test_value():", "pytest exit 1: ERROR"),
+])
+def test_a_run_no_test_failed_in_is_inconclusive_and_ends_the_list(export: Export, tmp_path: Path, old: str, new: str,
+                                                                    expected: str) -> None:
+    edit = {"label": "odd", "edits": [{"path": "tests/test_value.py", "old": old, "new": new}]}
+    run = export.run(tmp_path, [edit, KILLED])
+    assert run.returncode == 1, run.stdout + run.stderr
+    assert f"INCONCLUSIVE odd -> {expected}" in run.stdout and "K one" not in run.stdout
+    assert "KILLED" not in run.stdout and "restored-ok tests/test_value.py" in run.stdout
+
+
+def test_a_timeout_returns_no_code(tmp_path: Path) -> None:
     result = testrun._capture([sys.executable, "-c", "import time; time.sleep(60)"], tmp_path, os.environ, False, 1.0)
     assert result.code is None
+
+
+def test_a_result_line_stays_on_stdout_and_a_refusal_goes_to_stderr(atc_tmp: Path, capsys: pytest.CaptureFixture[str],
+                                                                    monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ATC_TMP", "relative")
+    assert commands.main(["tmp", "list"]) == 9
+    captured = capsys.readouterr()
+    assert captured.out == "" and captured.err.startswith("ATC_TMP_UNSUITABLE ")
+    monkeypatch.setenv("ATC_TMP", str(atc_tmp))
+    (atc_tmp / "s").mkdir()
+    assert commands.main(["tmp", "clean", "s"]) == 0
+    captured = capsys.readouterr()
+    assert captured.out == f"DELETED {atc_tmp / 's'}\n" and captured.err == ""
+    assert commands.main(["tmp", "clean", "systmp"]) == 2
+    captured = capsys.readouterr()
+    assert captured.out.startswith("REFUSED ") and captured.err == ""
 
 
 def test_mutants_need_the_export(tree: Path, atc_tmp: Path, tmp_path: Path) -> None:
     listing = tmp_path / "m.json"
     listing.write_text("[]", encoding="utf-8")
     run = run_command("test", "mutants", "m", "0" * 40, str(tree), str(listing), "--python", sys.executable, "--tests", "tests")
-    assert run.returncode == 9 and run.stdout.startswith("TREE_NOT_FOUND ")
+    assert run.returncode == 9 and run.stderr.startswith("TREE_NOT_FOUND ")
 
 
 # dispatch

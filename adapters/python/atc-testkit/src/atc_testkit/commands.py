@@ -54,7 +54,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         return _dispatch(arguments)
     except Refusal as refusal:
-        print(f"{refusal.token} {refusal.detail}", flush=True)
+        print(f"{refusal.token} {refusal.detail}", file=sys.stderr, flush=True)
         return refusal.code
 
 

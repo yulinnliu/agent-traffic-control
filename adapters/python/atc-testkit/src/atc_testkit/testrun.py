@@ -26,6 +26,7 @@ MUTANT_SECONDS = 900.0
 SUMMARY_WIDTH = 150
 PRIVATE_DESKTOP_VARIABLE = "ATC_PRIVATE_DESKTOP"
 INTERACTIVE_EXCLUSION = "not interactive_desktop"
+KILLED, SURVIVED, INCONCLUSIVE = "KILLED", "SURVIVED", "INCONCLUSIVE"
 IMPORT_GUARD = r"""
 import glob, importlib, os, sys
 tree = os.path.normcase(os.path.realpath(sys.argv[1])) + os.sep
@@ -198,12 +199,18 @@ def _digest(data: bytes) -> str:
     return hashlib.sha256(data.replace(b"\r", b"")).hexdigest()
 
 
-def _summary(result: Result) -> tuple[bool, str]:
+def _verdict(result: Result) -> tuple[str, str]:
+    """``SURVIVED`` on a pass, ``KILLED`` on a failed test, and ``INCONCLUSIVE`` on any other ending of the run."""
     if result.code is None:
-        return False, f"timed out after {MUTANT_SECONDS:.0f} seconds"
-    failed = [line for line in result.lines if line.startswith(("FAILED", "ERROR"))]
+        return INCONCLUSIVE, f"timed out after {MUTANT_SECONDS:.0f} seconds"
+    failed = next((line for line in result.lines if line.startswith("FAILED")), None)
+    if result.code == 1 and failed:
+        return KILLED, failed[:SUMMARY_WIDTH]
     last = next((line for line in reversed(result.lines) if line.strip()), "")
-    return result.code == 0, (failed[0] if failed else last)[:SUMMARY_WIDTH]
+    if result.code == 0:
+        return SURVIVED, last[:SUMMARY_WIDTH]
+    errored = next((line for line in result.lines if line.startswith("ERROR")), last)
+    return INCONCLUSIVE, f"pytest exit {result.code}: {errored}"[:SUMMARY_WIDTH]
 
 
 class _Aborted(Exception):
@@ -250,7 +257,8 @@ def mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None = None
         return execute(str(tree), str(place), python, label, pytest_arguments, environ, quiet=True,
                        timeout=MUTANT_SECONDS)
 
-    passed, summary = _summary(attempt("baseline"))
+    verdict, summary = _verdict(attempt("baseline"))
+    passed = verdict == SURVIVED
     print(f"{'BASELINE-OK' if passed else 'BASELINE-RED'} {summary}", flush=True)
     if not passed:
         return 1
@@ -263,18 +271,21 @@ def mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None = None
             originals: dict[Path, bytes] = {}
             try:
                 _apply(tree, mutant, touched, originals)
-                passed, summary = _summary(attempt(mutant["label"]))
-                print(f"{'SURVIVED' if passed else 'KILLED  '} {mutant['label']} -> {summary}", flush=True)
-                if passed:
+                verdict, summary = _verdict(attempt(mutant["label"]))
+                print(f"{verdict:<8} {mutant['label']} -> {summary}", flush=True)
+                if verdict == SURVIVED:
                     survivors.append(mutant["label"])
+                elif verdict == INCONCLUSIVE:
+                    aborted = 1
+                    break
             finally:
                 for target, data in originals.items():
                     target.write_bytes(data)
     except _Aborted as abort:
-        print(str(abort), flush=True)
+        print(str(abort), file=sys.stderr, flush=True)
         aborted = abort.code
     except Refusal as refusal:
-        print(f"{refusal.token} {refusal.detail}", flush=True)
+        print(f"{refusal.token} {refusal.detail}", file=sys.stderr, flush=True)
         aborted = refusal.code
 
     mismatched = False
