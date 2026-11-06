@@ -26,7 +26,6 @@ from .evidence import Stage
 REPORT_LIMIT = 4000  # characters of a failing report kept, counted from its end where the exception line sits
 CAUSE_LIMIT = 20  # chain elements listed, root cause first
 CAUSE_MESSAGE_LIMIT = 300  # characters of one element's crash message
-LOG_DIRECTORY = ".tmp"
 
 Context = Callable[[object, object], dict]
 Hints = Callable[[object], list[str]]
@@ -129,7 +128,10 @@ def _self_command() -> list[str]:
 
 def run_all_stages(paths: Sequence[str], workers: int | None, run: stages.Run = stages.run_logged) -> int:
     """The three stages, each its own process; a run in which every stage collects no test is refused."""
-    logs = Path(LOG_DIRECTORY)
+    logs = Path(stages.LOG_DIRECTORY)
+    refused = stages.refuse_log_directory(logs)
+    if refused:
+        return refused
     outcome = stages.run_stages(_self_command(), paths, cwd=Path.cwd(),
                                 stage_list=stages.stages(config.ignored_paths(Path.cwd())),
                                 env_for=lambda stage: dict(os.environ), options_for=lambda stage: (),

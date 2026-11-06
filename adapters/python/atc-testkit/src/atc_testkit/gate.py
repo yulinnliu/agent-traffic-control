@@ -13,10 +13,7 @@ from .evidence import Decision
 from .git import SelectionError, baseline_deltas, changed_paths, git_env, verify_push_checkout
 from .project import Project, StaticCheck
 
-LOG_DIRECTORY = ".tmp"
 LOG_PATTERN = "prepush-*.log"
-LOG_DIRECTORY_UNSUITABLE = "LOG_DIRECTORY_UNSUITABLE"
-LOG_DIRECTORY_EXIT = 9
 SELECTION_FAILED_EXIT = 2
 
 
@@ -132,11 +129,10 @@ def main(project: Project, argv: Sequence[str] | None = None, stdin: Iterable[st
     print(selection.describe(chosen), flush=True)
     if not args.run:
         return 0
-    logs = project.root / LOG_DIRECTORY
-    not_real = locations.not_a_real_directory(logs)
-    if not_real:
-        print(f"{LOG_DIRECTORY_UNSUITABLE} {not_real}", file=sys.stderr)
-        return LOG_DIRECTORY_EXIT
+    logs = project.root / stages.LOG_DIRECTORY
+    refused = stages.refuse_log_directory(logs)
+    if refused:
+        return refused
     _clear_logs(logs)
     checks = [check for check in project.checks if check.applies(paths)]
     if not checks and pytest_paths is None:

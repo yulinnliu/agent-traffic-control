@@ -108,10 +108,12 @@ the pre-push gate).
 - A command's output is shown live and written to a log. The log starts with
   a header: time, platform, Python, working directory, desktop and command.
 - The gate keeps the latest run's logs in the checkout's ignored `.tmp/`
-  directory, one file per static check and per stage. A `.tmp` that is a link
-  or anything else that is not a directory stops `--run` with
-  `LOG_DIRECTORY_UNSUITABLE` (exit 9) before the gate reads, writes or deletes
-  anything in it. The verifier keeps its logs in the run's working directory.
+  directory, one file per static check and per stage, and the CI runner's
+  `--stages` writes its stage logs there. A `.tmp` that is a link or anything
+  else that is not a directory stops the gate's `--run` and the runner's
+  `--stages` with `LOG_DIRECTORY_UNSUITABLE` (exit 9) before either reads,
+  writes or deletes anything in it. The verifier keeps its logs in the run's
+  working directory.
 - A failure names the log and repeats its last twenty `FAILED` or `ERROR`
   lines.
 

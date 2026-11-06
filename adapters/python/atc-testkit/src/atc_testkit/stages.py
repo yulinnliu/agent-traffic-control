@@ -10,7 +10,7 @@ import re
 import sys
 import time
 
-from . import desktop
+from . import desktop, locations
 from .evidence import Stage
 
 PARALLEL = Stage("parallel", "not slow and not serial and not interactive_desktop")
@@ -24,8 +24,20 @@ TESTS_FAILED = "TESTS_FAILED"
 NO_TESTS_COLLECTED = "NO_TESTS_COLLECTED"
 FAILURE_LINE = re.compile(r"^(?:FAILED|ERROR)\b")
 REPORTED_LINES = 20
+LOG_DIRECTORY = ".tmp"
+LOG_DIRECTORY_UNSUITABLE = "LOG_DIRECTORY_UNSUITABLE"
+LOG_DIRECTORY_EXIT = 9
 
 Run = Callable[..., int]
+
+
+def refuse_log_directory(logs: Path) -> int:
+    """The exit code of a log directory that is a link or not a directory, with its token on stderr; 0 for one in order."""
+    not_real = locations.not_a_real_directory(logs)
+    if not not_real:
+        return 0
+    print(f"{LOG_DIRECTORY_UNSUITABLE} {not_real}", file=sys.stderr, flush=True)
+    return LOG_DIRECTORY_EXIT
 
 
 def stages(ignore: Sequence[str] = ()) -> tuple[Stage, ...]:

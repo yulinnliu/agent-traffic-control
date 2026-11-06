@@ -129,6 +129,30 @@ def test_the_stages_run_through_the_runner_with_its_worker_count(project: Path) 
     assert (project / ".tmp/ci-serial.log").is_file() and (project / ".tmp/ci-interactive.log").is_file()
 
 
+@pytest.mark.integration
+def test_a_file_as_the_log_directory_stops_the_stages(project: Path) -> None:
+    (project / "tests/test_a.py").write_text(PASSING, encoding="utf-8")
+    (project / ".tmp").write_text("x", encoding="utf-8")
+    run = runner(project, "--stages")
+    assert run.returncode == 9 and run.stderr.startswith("LOG_DIRECTORY_UNSUITABLE ")
+    assert (project / ".tmp").read_text(encoding="utf-8") == "x"
+
+
+@pytest.mark.integration
+def test_a_linked_log_directory_stops_the_stages_and_its_target_keeps_its_files(project: Path, tmp_path: Path) -> None:
+    (project / "tests/test_a.py").write_text(PASSING, encoding="utf-8")
+    target = tmp_path / "elsewhere"
+    target.mkdir()
+    (target / "ci-parallel.log").write_text("not this checkout's", encoding="utf-8")
+    if os.name == "nt":
+        subprocess.run(["cmd", "/c", "mklink", "/J", str(project / ".tmp"), str(target)], check=True, capture_output=True)
+    else:
+        (project / ".tmp").symlink_to(target, target_is_directory=True)
+    run = runner(project, "--stages")
+    assert run.returncode == 9 and run.stderr.startswith("LOG_DIRECTORY_UNSUITABLE ")
+    assert (target / "ci-parallel.log").read_text(encoding="utf-8") == "not this checkout's"
+
+
 def test_stages_that_collect_nothing_are_refused(project: Path) -> None:
     (project / "tests/test_a.py").write_text(SLOW, encoding="utf-8")
     run = runner(project, "--stages")
