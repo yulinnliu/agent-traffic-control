@@ -2,9 +2,8 @@
 
 How and in what order `ATC_HOME.md` and `TESTKIT.md` become what the tools do.
 The two specs hold every rule; this plan cites them by section and adds none.
-A point where the specs are silent or disagree with the code is listed in
-§ Points for the Owner and is settled in the spec before the step that needs
-it starts.
+A point the specs leave open is listed in § Points for the Owner with the
+step that meets it, and is settled in the spec before that step continues.
 
 Every step is one topic branch in the repository it names, reviewed by the
 `hami-review-relay` method under the class given, and integrated with
@@ -96,31 +95,52 @@ Files:
     hami-quant's.
   - isolated environment: `TESTKIT.md` § Isolated environment; replaces
     `isolated_env()` in trading's `scripts/integration_verify.py` and
-    `isolated_environment()` in hami-quant's.
+    `isolated_environment()` in hami-quant's. `HOME` and `USERPROFILE` are
+    given one directory, which is what lets the section's `.gitconfig` hold
+    for both; a test pins that the two are equal.
   - pre-push gate skeleton: `TESTKIT.md` § Pre-push gate; replaces `main()`
     of both `scripts/prepush_select.py`.
   - integration verifier skeleton: `TESTKIT.md` § Integration verifier;
-    replaces both `scripts/integration_verify.py` and the root's own verifier
-    under `adapters/python/scripts/`.
+    replaces both `scripts/integration_verify.py`, and carries the form of
+    the section's workspace-root paragraph, in which the rows a consumer's
+    data feeds are absent.
   - child processes: `TESTKIT.md` § Child processes; replaces trading's
     `scripts/tests/child_process_support.py`, without its imports of trading
     product code (`trading_app_job`, `hami_quant_trading_cli.host_stop`).
+    The process list comes from the sources the section's last item names.
   - private desktop: `TESTKIT.md` § Private desktop; replaces trading's
     `scripts/private_desktop.py`.
-  - CI runner: `TESTKIT.md` § CI runner; replaces the shared part of
-    trading's `scripts/ci_pytest.py`.
+  - CI runner: `TESTKIT.md` § CI runner, with the `slow` invocation of
+    § Stages and the initialization function a project names; replaces the
+    shared part of trading's `scripts/ci_pytest.py`. The desktop of the
+    `slow` invocation is settled here (§ Points for the Owner).
+  - commands: `atc test run`, `atc test mutants` and
+    `atc tmp list|clean|prune` (`TESTKIT.md` § Commands,
+    `ATC_HOME.md` § Test scratch, § Scratch registry, § Deleting), which
+    that section places in the package. Their behaviour is that of
+    `run_tests.sh`, `mutants.py` and `clean_scratch.ps1` under
+    `shared/skills/hami-review-relay/references/`, in Python on every
+    platform.
 - `check`: reads `[tool.atc-testkit]`, the new record name and the data of
   `TESTKIT.md` § What a project supplies; `python -m atc_testkit.check`.
 - `adapters/python/scripts/build_testkit_release.py`,
   `testkit_contract.py`, `doctor.py`, `onboard_project.py`: the new names.
+- `adapters/python/scripts/integration_verify.py`: its import of the
+  package's `git` module follows the rename; the script stays the root's own
+  until step 3.
 - `adapters/python/tests/test_testkit_*.py` renamed with the package, plus
-  one test file per new module with a test per refusal token of the spec
-  tables.
+  one test file per new module with a test per refusal token and exit code
+  of the spec tables. `adapters/python/tests/test_clean_scratch.py` becomes
+  the test of `atc tmp clean`, keeping every case it has and adding the
+  registry, the reserved names, `--project` and `prune`.
 - `adapters/python/README.md`: the package name and the new commands.
 
 Verification: `uv run --locked pytest` from `adapters/python` in an isolated
-copy; one mutant per guard of the new modules; the wheel built by
-`build_testkit_release.py` installs into an empty virtual environment and
+copy; the topic's own `atc integrate`, a full run of the root verifier in a
+candidate, up to `git worktree remove` of a candidate that holds a `.venv`
+(§ Unverified items); one mutant per guard of the new modules; the wheel
+built by `build_testkit_release.py` installs into an empty virtual
+environment and
 `python -m atc_testkit.check --installed` runs against a fixture project;
 the Windows-only modules (private desktop, child processes) are exercised on
 this host and their non-Windows paths in the `python-adapter` CI job on
@@ -137,35 +157,47 @@ that change is in `main`.
 ## 3. Root tools
 
 Repository: the workspace root. Class: behaviour. Depends on step 2 for the
-location rule.
+package.
 
-1. `atc test run` (`TESTKIT.md` § Commands): new command module, registered
-   in `adapters/python/src/atc_cli/__init__.py`. Its behaviour is that of
-   `shared/skills/hami-review-relay/references/run_tests.sh` under the scratch
-   rules of `ATC_HOME.md` § Test scratch and § Scratch registry. Tests: one
-   per refusal token and exit code of the spec's five steps, run on Windows
-   and POSIX.
-2. `atc test mutants`: same module family; behaviour of
-   `references/mutants.py` through `atc test run`.
-3. `atc tmp list|clean|prune` (`ATC_HOME.md` § Scratch registry, § Deleting):
-   behaviour of `references/clean_scratch.ps1` in Python, on every platform.
-   `adapters/python/tests/test_clean_scratch.py` becomes the test of
-   `atc tmp clean`, keeping every case it has and adding the registry, the
-   reserved names, `--project` and `prune`.
-4. `atc integrate` (`ATC_HOME.md` § Integration and the pre-push gate):
+1. The adapter's dependency on the package (`TESTKIT.md` § Commands):
+   `adapters/python/pyproject.toml` names `atc-testkit` by its path in the
+   tree, `uv.lock` follows, and the verifier and the scripts import the
+   package without a search-path insert.
+2. `atc test` and `atc tmp`: registered in
+   `adapters/python/src/atc_cli/__init__.py`, dispatching to the package.
+   Tests: each subcommand reaches the package's implementation with its
+   arguments and returns its exit code, on Windows and POSIX.
+3. `atc integrate` (`ATC_HOME.md` § Integration and the pre-push gate):
    `adapters/python/scripts/git_integrate.py` makes the location call before
-   it creates a file, places candidates and reports under
-   `<tmp>/integration-candidates` and its output capture under
-   `<tmp>/systmp`. `tests/test_git_integrate.py` follows.
-5. `build_testkit_release.py`: the same location call.
-6. `adapters/python/check.ps1` (`ATC_HOME.md` § Resolving the locations,
+   it creates a file, places each candidate at `<tmp>/candidates/<id>` and
+   its report at `<tmp>/candidates/<id>.report.json` with the `<id>` of that
+   section, removes both when the run ends, and keeps its output capture
+   under `<tmp>/systmp`. `tests/test_git_integrate.py` follows, with a test
+   of the 64-character bound on the candidate path.
+4. `build_testkit_release.py`: the same location call.
+5. `adapters/python/check.ps1` (`ATC_HOME.md` § Resolving the locations,
    § Cache, § pytest without a scratch): caches under `~/.atc/cache` unless
    the caller set them, the location rule in shell, no `--basetemp`.
-7. `adapters/python/tests/conftest.py`: registers the plugin from the in-tree
+6. `adapters/python/tests/conftest.py`: registers the plugin from the in-tree
    source and sets no base directory of its own.
-8. The root's integration verifier: replaced by a thin caller of the shared
-   skeleton, and the root `AGENTS.md` `## Integration verification` section
-   and its timeout re-measured.
+7. The root's integration verifier
+   (`TESTKIT.md` § Integration verifier, the workspace-root paragraph):
+   `adapters/python/scripts/integration_verify.py` becomes a thin caller of
+   the skeleton, imported from the tree, that supplies the root's static
+   checks with their tokens and its test command. This closes the four
+   differences the root `AGENTS.md` `## Integration verification` section
+   lists: the skeleton in place of the root's own script; the environment
+   of `TESTKIT.md` § Isolated environment; a working directory under
+   `<tmp>/systmp` with the name bound of
+   `ATC_HOME.md` § Integration and the pre-push gate; and the logs of
+   `TESTKIT.md` § Running and logging. The token of a range Git cannot read
+   is settled here (§ Points for the Owner).
+   `adapters/python/tests/test_integration_verify.py` follows.
+8. Root `AGENTS.md` `## Integration verification`: the paragraph of
+   differences is removed, the section keeps the argv file and timeout lines
+   `atc integrate` reads plus a pointer to `TESTKIT.md` § Integration
+   verifier, the rule that derives the timeout moves to
+   `adapters/python/README.md`, and the timeout is re-measured by that rule.
 9. `shared/skills/hami-review-relay/references/`: `run_tests.sh`,
    `clean_scratch.ps1`, `mutants.py` and `mutants.example.json` are removed
    in the same topic that changes the skill text (§ Separate authority); until
@@ -175,15 +207,16 @@ Verification: the adapter suite; one mutant per guard; a real
 `atc test run` and `atc test mutants` against an exported copy of each
 project at its current `main`, compared line for line with the output of the
 scripts they replace; `atc tmp clean` on a scratch that holds a `.venv`
-junction; one real `atc integrate` of a documentation topic in the root with
-the candidate under `<tmp>/integration-candidates`.
+junction; a real `atc integrate` in the root of a documentation topic and of
+this step's own topic, each with its candidate at `<tmp>/candidates/<id>`,
+its working directory under `<tmp>/systmp`, and both gone after the pass.
 
 Review: behaviour; host state is read for the registry and the candidate
 directory. The deletion path of `atc tmp clean` is walked against the six
 steps of `ATC_HOME.md` § Deleting.
 
 Blocked until: the Owner's `write_scope_guard.py` allows `~/.atc`
-(§ Separate authority). A session cannot run item 1 to 4 for real before
+(§ Separate authority). A session cannot run items 2 to 7 for real before
 that.
 
 ## 4. hami-quant-trading moves onto the testkit
@@ -205,8 +238,9 @@ The App's product code is untouched; every file below is test tooling.
   `test_child_process_support.py`, `test_pytest_marker_contract.py`,
   `scripts/verify_pytest_temp_root_mutations.py`).
 - `scripts/ci_pytest.py`: reduced to the project's additions to the CI runner
-  (context fields, hints), or removed when none remain;
-  `scripts/tests/test_ci_pytest.py` follows.
+  (`TESTKIT.md` § CI runner): context fields, hints, and the one
+  initialization function, which holds the Tk library and token-owner
+  preparation; `scripts/tests/test_ci_pytest.py` follows.
 - `scripts/prepush_select.py`: keeps the selection policy and the project's
   static checks; stages, logging, desktop and evidence calls come from the
   testkit. `scripts/git-hooks/pre-push` keeps its one line.
@@ -214,8 +248,9 @@ The App's product code is untouched; every file below is test tooling.
   project's data passed to the shared verifier.
 - Every test that starts a child: imports `start` and `run` from the testkit.
 - Tests found in step 1.2: the `interactive_desktop` marker.
-- `.github/workflows/ci.yml`: the testkit's runner, the three stages and the
-  `python -m atc_testkit.check --installed` step.
+- `.github/workflows/ci.yml`: the testkit's runner, the three stages, the
+  `slow` invocation of `TESTKIT.md` § Stages in the job the project names,
+  and the `python -m atc_testkit.check --installed` step.
 - Documents: `AGENTS.md` § Test layout and § Integration verification,
   `scripts/tests/README.md`, `README.md`, `docs/specs/error_inventory.json`
   where it lists verifier tokens.
@@ -231,8 +266,9 @@ impact-selected stages through the new gate on this host, on a private
 desktop; `atc test run` of the targeted set in an exported copy;
 repository-wide `pytest --collect-only`; `atc integrate` of the topic itself
 is the first run of the shared verifier on this project, so its evidence
-record and the next push's `tests REUSED` line are checked. The full suite
-runs in CI only.
+record and the next push's `tests REUSED` line are checked; a push that has
+only records of the earlier testkit version prints `tests RUN`
+(`TESTKIT.md` § Pre-push gate). The full suite runs in CI only.
 
 Review: behaviour, under the project's `## Review` section, including the App
 boundary snapshot and the digest-pinned tests the touched modules belong to.
@@ -252,7 +288,8 @@ Repository: `hami-quant`. Class: behaviour. Depends on steps 2 and 3.
   gate gains the stages, the private desktop and evidence reuse, which it
   does not have at 0.4.0. `scripts/git-hooks/pre-push`: the one-line form.
 - `scripts/integration_verify.py`, `scripts/integration-verify.json`: the
-  project's data passed to the shared verifier; the argv keeps
+  project's data passed to the shared verifier; the argv file is the
+  project's (`TESTKIT.md` § What a project supplies) and keeps
   `--managed-python --python 3.13.14` and `-B`, which the project's
   `AGENTS.md` requires. Its tokens change to the spec's table
   (`tests/test_integration_verify.py`).
@@ -260,7 +297,9 @@ Repository: `hami-quant`. Class: behaviour. Depends on steps 2 and 3.
   step 1.2 get `interactive_desktop`; tests that start a child use the
   testkit's `start` and `run`.
 - `.github/workflows/ci.yml`: the testkit's runner and stages on
-  `ubuntu-latest`, and the Windows supervision job through the same runner.
+  `ubuntu-latest`, the `slow` invocation of `TESTKIT.md` § Stages in the job
+  the project names, and the Windows supervision job through the same
+  runner.
 - Documents: `AGENTS.md` § Commands and § Integration verification,
   `docs/agent-runbooks/quant-worktree-workflow.md` "Test-run isolation",
   `README.md`.
@@ -284,7 +323,7 @@ Runs only after steps 4 and 5 are integrated and one gate run and one
 | `C:\hqt`, `C:\hqt070s` | no known source | the Owner; this plan only confirms no file in either repository or in `shared/` names them |
 | `adapters/python/tests/.tmp-pytest` | the adapter's `conftest.py` | deleted with step 3; the `**/tests/.tmp*/` ignore line stays until no checkout has one |
 | `.tooling/uv-cache`, `.tooling/python`, `.tooling/pytest-tmp` | `check.ps1` | the Owner, after step 3; `.tooling/testkit-dist/` stays (`ATC_HOME.md` § Outside the ATC home) |
-| `%TEMP%\atc-integration-candidates`, `%TEMP%\hami-trading-verify-*`, `%TEMP%\hami-targeted-*`, `%TEMP%\atc-root-verify-*` | `atc integrate`, the verifiers, `run_targeted_tests.ps1` | candidates through `git worktree remove` in their repository; the rest by the Owner |
+| `%TEMP%\atc-integration-candidates`, `%TEMP%\hami-trading-verify-*`, `%TEMP%\hami-targeted-*`, `%TEMP%\atc-root-verify-*` | `atc integrate`, the verifiers, `run_targeted_tests.ps1` | candidates through `git worktree remove` in the repository each tree's `.git` file names, report files and trees Git no longer knows by the Owner; the rest by the Owner |
 
 A session deletes nothing at a drive root and nothing outside the directories
 its write guard allows; each row above that names the Owner is a list handed
@@ -338,52 +377,17 @@ before that step continues.
 | PowerShell module-cache timing and trading's tests under a redirected profile (`TESTKIT.md` § Isolated environment redirects `USERPROFILE`, `APPDATA`, `LOCALAPPDATA`) | step 4 | run trading's PowerShell-launching test files with the redirected variables before the gate is switched |
 | The 40-character bound on `<tmp>` against `MAX_PATH` | steps 1 and 3 | measure the longest path each project's tests create below the base directory, for a scratch run and for a run without a scratch |
 | Tests and trading's mutation verifier that pin today's verifier tokens | steps 4 and 5 | listed in those steps; hami-quant's tokens differ from the spec's table today |
+| `atc integrate` on the workspace root: a candidate of the root, the `.venv` the verifier argv builds in it, and `git worktree remove` of a candidate that holds that `.venv` | the first root topic integrated, then step 2 | a documentation-only range exercises all three without the suite; step 2's own topic is the first full range |
+| The installed `atc` with a path dependency: `uv tool install -e adapters/python` and the source snapshot under `~/.local/atc-src` (`ATC_HOME.md` § Outside the ATC home) must carry `atc-testkit` beside the adapter | step 3 | install from the step's tree and run `atc tmp list` from a directory outside the checkout |
 
 ## Points for the Owner
 
-Where reading the code against the two specs found the specs silent, or at
-odds with what exists. None is decided here.
+What the two specs leave open. None is decided here; each is settled in the
+spec when the step named meets it.
 
-1. `TESTKIT.md` § Integration verifier describes a consumer with a selection
-   policy, a lock check, `atc_testkit.check --installed`, `ruff` and stages.
-   The workspace root has none of those and is not a testkit consumer. The
-   spec does not say whether the root adopts the testkit (vendoring its own
-   wheel) or uses the skeleton with those rows absent.
-2. `TESTKIT.md` § Commands has `atc` run the test tools, and
-   `ATC_HOME.md` § Resolving the locations has `atc-testkit` publish the
-   location rule that `atc integrate` applies. `atc-python-adapter` does not
-   depend on the testkit today. The spec does not say whether the adapter
-   depends on the package, or where `atc test` and `atc tmp` are implemented.
-3. `ATC_HOME.md` bounds `<tmp>` (40) and `<tmp>/<scratch>` (64) but not the
-   other bases: `<tmp>/systmp/pytest-of-<user>/pytest-<N>` is already 61
-   characters for the user name `Andy Liu`, and
-   `<tmp>/integration-candidates/<id>` is over 100 with today's `<id>`
-   (a hash, a hyphen and 32 hex digits). The root's suite fails in a
-   candidate of that length when its base lies inside the candidate.
-4. `TESTKIT.md` § Stages excludes `slow` from all three stages and says CI
-   runs the same stages. It does not say how CI runs `slow` tests, which
-   trading runs as a separate job and hami-quant inside its single run.
-5. `TESTKIT.md` § CI runner allows a project context fields and hints.
-   Trading's `scripts/ci_pytest.py` also prepares Tk libraries and a token
-   owner before pytest starts, which is platform initialization the spec's
-   opening paragraph gives to the package. The spec does not say where a
-   project's own initialization goes.
-6. `TESTKIT.md` § Isolated environment redirects `HOME` and `USERPROFILE`.
-   Git then reads no global configuration (identity, `core.longpaths`,
-   `safe.directory`). The spec does not say whether a stage gets a Git
-   configuration.
-7. Evidence records carry the selector name `hami-testkit` and the stage
-   list. The rename and the third stage make every existing record
-   mismatch, so the first push of each project after its step runs the
-   tests. The spec does not say this is intended.
-8. hami-quant's gate runs one stage (`-n auto -m "not slow"`), has no
-   `serial` marker and no evidence reuse, and its verifier builds a managed
-   `3.13.14` interpreter. `TESTKIT.md` § What a project supplies lists `uv`
-   options for the hook but not for the verifier argv, which stays a project
-   file.
-9. `TESTKIT.md` § Child processes needs a process inventory with command
-   lines on every platform. Trading's comes from its product code; the spec
-   does not name the non-Windows source.
-10. `%TEMP%\atc-integration-candidates` holds candidate directories from
-    earlier runs on this host. `ATC_HOME.md` § Deleting covers the new
-    location only.
+1. `TESTKIT.md` § Stages gives each stage a desktop and gives the `slow`
+   invocation none. Step 2 builds the invocation with the CI runner.
+2. `TESTKIT.md` § Integration verifier gives the workspace root no selection
+   row, so no row carries a range Git cannot read. The root's verifier
+   refuses it with `RANGE_UNREADABLE`, a token the table does not hold.
+   Step 3 item 7 moves the verifier onto the skeleton.
