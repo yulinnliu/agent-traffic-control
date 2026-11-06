@@ -297,6 +297,6 @@ def mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None = None
         same = _digest((tree / path).read_bytes()) == _digest(_blob(worktree, args.sha, path))
         mismatched |= not same
         print("restored-ok" if same else "RESTORE-MISMATCH", path, flush=True)
-    counted = finished if finished == len(entries) else f"{finished} of {len(entries)}"
+    counted = f"{finished} of {len(entries)}" if aborted else finished
     print(f"done: {counted} mutants, {len(survivors)} survived", *survivors, flush=True)
     return aborted or (1 if mismatched else 0)

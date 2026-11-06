@@ -343,6 +343,17 @@ def test_a_run_no_test_failed_in_is_inconclusive_and_ends_the_list(export: Expor
     assert run.stdout.splitlines()[-1] == "done: 1 of 2 mutants, 0 survived"
 
 
+def test_an_abort_on_the_last_mutant_prints_the_aborted_form(export: Export, tmp_path: Path) -> None:
+    odd = {"label": "odd", "edits": [{"path": "tests/test_value.py", "old": "import fixture_pkg\n",
+                                      "new": "raise RuntimeError('at collection')\nimport fixture_pkg\n"}]}
+    run = export.run(tmp_path, [KILLED, odd])
+    assert run.returncode == 1, run.stdout + run.stderr
+    assert run.stdout.splitlines()[-1] == "done: 2 of 2 mutants, 0 survived"
+    run = export.run(tmp_path, [odd])
+    assert run.returncode == 1, run.stdout + run.stderr
+    assert run.stdout.splitlines()[-1] == "done: 1 of 1 mutants, 0 survived"
+
+
 def test_an_exception_during_a_mutant_still_restores_and_reports(export: Export, tmp_path: Path,
                                                                   capsys: pytest.CaptureFixture[str],
                                                                   monkeypatch: pytest.MonkeyPatch) -> None:
