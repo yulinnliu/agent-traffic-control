@@ -33,16 +33,15 @@ Then read `shared/governance/INDEX.md` and `CORE.md` from that exact same revisi
 
 - Verifier argv file: adapters/python/scripts/integration-verify.json
 - Verifier timeout: 1140
+  (`adapters/python/README.md` states how this value is derived)
 
 The argv runs `adapters/python/scripts/integration_verify.py` in the
 candidate's own `adapters/python/.venv/` built from `uv.lock`; that script
-defines its input, import-location and clean-tree checks. A refusal exits
-nonzero with the reason token on the first stderr line and keeps the failing
-check's log in an `atc-root-verify-*` directory under the system temp
-directory. Pytest's base directory lies there too, because the candidate's
-path leaves the repositories the tests build no room under the Windows path
-limit. The verifier writes no verification report, so `atc integrate` records
-no evidence for this repository.
+supplies the root's data to the verifier skeleton (`docs/TESTKIT.md`
+§ Integration verifier), which defines its input, import-location and
+clean-tree checks, its environment, working directory and logs. The verifier
+writes no verification report, so `atc integrate` records no evidence for this
+repository.
 
 Every range passes `git diff --check` of the range and the commands of the
 `python-adapter` job in `.github/workflows/validate.yml`, run from
@@ -57,19 +56,6 @@ itself: when every path in the range is Markdown under `docs/`, the range is
 documentation-only and skips `pytest` alone. Markdown anywhere else is
 rendered into managed copies or read by the tests, so it runs the suite. The
 caller never chooses the exception.
-
-`docs/TESTKIT.md` § Integration verifier states the target form of this
-verifier. It differs from that form in four ways: it is this repository's own
-script, not the shared skeleton; its child processes drop the `GIT_*`
-variables and nothing else (§ Isolated environment); its working directory
-lies under the system temp directory, not under `<tmp>/systmp`
-(`docs/ATC_HOME.md` § Resolving the locations); and it writes a log for a
-failing check only (§ Running and logging). `RANGE_UNREADABLE` is its own
-token for a range Git cannot read.
-
-The timeout is three times the measured wall clock of a full run, rounded up
-to a whole minute and never below 300 seconds; re-measure it when the suite's
-duration changes.
 
 ## This host
 
