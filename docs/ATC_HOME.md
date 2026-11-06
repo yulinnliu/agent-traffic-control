@@ -16,8 +16,10 @@ whole directory loses nothing. Persistent state lives elsewhere
   a drive root, or into a repository's tracked tree.
 - `<tmp>` lies outside `AppData`, where file metadata calls cost about ten
   times those elsewhere, and has no ancestor that holds `.git`, because
-  product code under test runs Git when one does. An `ATC_TMP` value keeps
-  both properties.
+  product code under test runs Git when one does. Its absolute long-name form
+  is at most 40 characters, which leaves a scratch name of at least 23. A
+  root that breaks one of these is refused with `ATC_TMP_UNSUITABLE` and the
+  property it breaks, before anything is created.
 - CI (`CI` set) keeps the platform's own temporary locations.
 - `~/.atc` is unrelated to a repository's tracked `.atc/` directory
   (`LAYOUT.md` § Inside a consuming repository) and is never a governance
@@ -29,9 +31,10 @@ whole directory loses nothing. Persistent state lives elsewhere
 ~/.atc/
   tmp/                          disposable
     scratch-dirs.tsv            registry of scratch directories
-    <scratch>/                  one per isolated test run
+    <scratch>/                  one per isolated test run; the run's temporary directory
+      tree/                     exported copy of the tree under review
       bt/                       pytest basetemp
-      qdr/                      QUANT_DATA_ROOT
+      qdr/                      data root
     systmp/                     stand-in for the system temporary directory
       pytest-of-<user>/         pytest runs started without a scratch
     integration-candidates/     candidate trees and verifier reports of `atc integrate`
@@ -46,28 +49,30 @@ whole directory loses nothing. Persistent state lives elsewhere
 One rule gives `<tmp>` and `<tmp>/systmp`, and every entry point applies it:
 
 - `atc-testkit` publishes the Python implementation: it returns the two
-  paths, creating them on first use, and offers one call that makes
-  `<tmp>/systmp` the temporary directory of the current process and of every
-  process it starts (`TEMP`, `TMP`, `TMPDIR`, and Python's `tempfile`). It
-  also publishes a pytest plugin that makes the call at configure time, which
-  every project that carries `atc-testkit` registers in its root
-  `conftest.py`.
+  paths, creating them on first use, and offers one call that makes a
+  directory below `<tmp>` the temporary directory of the current process and
+  of every process it starts (`TEMP`, `TMP`, `TMPDIR`, and Python's
+  `tempfile`). The directory is `<tmp>/systmp` unless the entry point names
+  another.
 - An entry point makes that call before it creates a temporary file or starts
   a child. The entry points are:
 
-  | Entry point | Owner |
-  | --- | --- |
-  | `atc test run`, `atc test mutants`, `atc integrate`, `build_testkit_release.py` | ATC |
-  | `check.ps1` | ATC, applying the same rule in shell |
-  | the integration verifier named by a project's verifier argv file | the project |
-  | the pre-push gate | the project |
+  | Entry point | Temporary directory | Owner |
+  | --- | --- | --- |
+  | `atc test run`, `atc test mutants` | the scratch, `<tmp>/<scratch>` | ATC |
+  | `atc integrate`, `build_testkit_release.py` | `<tmp>/systmp` | ATC |
+  | `check.ps1` | `<tmp>/systmp`, applying the same rule in shell | ATC |
+  | the integration verifier named by a project's verifier argv file | `<tmp>/systmp`, or a working directory it creates there | the project |
+  | the pre-push gate | `<tmp>/systmp`, or a working directory it creates there | the project |
 
 - A process started by an entry point inherits the setting, so a verifier or
-  test that calls `tempfile` writes under `<tmp>/systmp` without naming it. A
-  project script run on its own, outside every entry point, uses whatever
-  temporary directory its caller has.
-- An entry point may create its own working directory under `<tmp>/systmp`
-  and point its children's temporary directory inside it.
+  test that calls `tempfile` writes there without naming it. A project script
+  run on its own, outside every entry point, uses whatever temporary
+  directory its caller has.
+- The pytest plugin every project registers (`TESTKIT.md` § Adoption) makes
+  the call at configure time only when the process's temporary directory is
+  not already below `<tmp>`. It changes nothing when `--basetemp` or
+  `PYTEST_DEBUG_TEMPROOT` is given.
 - An entry point exports the resolved `<tmp>` as `ATC_TMP` to the processes
   it starts, so a child whose home directory is redirected
   (`TESTKIT.md` § Isolated environment) still resolves the same root.
@@ -75,7 +80,7 @@ One rule gives `<tmp>` and `<tmp>/systmp`, and every entry point applies it:
 ## Test scratch
 
 A scratch is the working directory of one isolated test run made through
-`atc test run <tree> <scratch> <python> <label> <pytest args...>`.
+`atc test run` (`TESTKIT.md` § Commands).
 
 - `<scratch>` is a name matching `[A-Za-z0-9._-]+`, resolved to
   `<tmp>/<scratch>`. A path is accepted only when it resolves to a direct
@@ -84,11 +89,12 @@ A scratch is the working directory of one isolated test run made through
   `integration-candidates` are refused as scratch names.
 - The absolute long-name form of `<tmp>/<scratch>` is at most 64 characters;
   a longer one is refused with `SCRATCH_PATH_TOO_LONG` (exit 9).
-- Inside the scratch, `bt` is pytest's basetemp and `qdr` is
-  `QUANT_DATA_ROOT`. The run's temporary directory is `<tmp>/systmp`, shared
-  with every other entry point, so the paths `tempfile` produces stay short.
+- The scratch is the run's temporary directory. `bt` inside it is pytest's
+  basetemp, so state a test builds in its temporary path lies below the
+  temporary directory, which product code that requires isolated state
+  checks. `qdr` inside it is the data root.
 - An exported copy of a tree (`git archive <sha>`) that a review runs against
-  is itself placed at `<tmp>/<scratch>`.
+  is placed at `<tmp>/<scratch>/tree`.
 
 ## Scratch registry
 
@@ -99,18 +105,53 @@ A scratch is the working directory of one isolated test run made through
 - `project`: `[project].name` from `<tree>/pyproject.toml`; the tree's
   directory name when that file or key is absent.
 - `scratch`, `tree`: absolute native paths. `created_utc`: `YYYY-MM-DDTHH:MM:SSZ`.
-- `atc test run` appends the line when it creates the scratch. A scratch that
-  is reused keeps its existing line.
-- `atc tmp clean <dir>...` deletes scratches and removes their lines. It
-  refuses any `<dir>` that is not a direct child of `<tmp>` or that carries a
-  reserved name, and treats links inside `<dir>\bt`, and `<dir>\.venv`, as
-  expected links that are removed without being entered.
-- `atc tmp clean --project <name>` selects every registered scratch of one
-  project. `atc tmp list` prints the registry with each scratch's size and
-  deletes nothing.
+- `atc test run` adds the line at the start of a run whenever the scratch has
+  none, whether or not the directory already exists.
+- Every change to the file is made under `<tmp>/scratch-dirs.lock` and
+  replaces the file in one step.
+- `atc tmp list` prints the registry with each scratch's size and deletes
+  nothing.
 
 Scratches are classified by the `project` column, never by a directory level,
 so classification costs no path length.
+
+## Deleting
+
+`atc tmp clean <dir>...` deletes scratches; `atc tmp clean --project <name>`
+takes its directories from the registry rows of one project. Both pass every
+directory through the same checks, and the single recursive delete in ATC's
+temporary tooling runs only at the end of them.
+
+1. Each `<dir>` is resolved first. One that is not a direct child of `<tmp>`
+   through real directories, or that carries a reserved name, prints
+   `REFUSED` with the reason, and the command exits 2 before anything is
+   deleted.
+2. A missing `<dir>` prints `SKIPPED` and loses its registry line.
+3. A `<dir>` that is not a directory, or is itself a link, prints `REFUSED`.
+4. Links found in the tree are sorted. Expected ones are `<dir>\.venv`,
+   `<dir>\tree\.venv` and any link inside `<dir>\bt`; they are removed as
+   links and never entered. Any other link prints `ANOMALY` with its path,
+   the `<dir>` prints `REFUSED` and is left as it is.
+5. The tree is scanned again and deleted recursively only when the scan finds
+   no link. A link that remains prints `LEFT` and the `<dir>` prints
+   `REFUSED`.
+6. A deleted `<dir>` prints `DELETED` and loses its registry line.
+
+Each `<dir>` ends on one line: `DELETED`, `SKIPPED` or `REFUSED` with the
+reason. The exit code is the highest across all of them: 0, 1 for a refusal
+at steps 3 to 5, 2 for a refusal at step 1.
+
+`atc tmp prune` deletes entries whose last modification is older than seven
+days:
+
+- under `<tmp>/systmp`, other than `pytest-of-*`, by steps 3 to 5 with no
+  link expected. This includes the working directory a failed verifier or
+  gate run left for inspection.
+- under `<tmp>/integration-candidates`, a candidate tree through
+  `git worktree remove` in the repository that owns it, and a report file or
+  a tree Git no longer knows by steps 3 to 5.
+
+It reports registered scratches older than seven days and deletes none.
 
 ## Integration and the pre-push gate
 
@@ -119,34 +160,31 @@ so classification costs no path length.
   `<tmp>/integration-candidates/<id>.report.json` through
   `ATC_VERIFICATION_REPORT`. It removes both when the run ends. The files that
   capture the verifier's output are under `<tmp>/systmp`.
-- A project's integration verifier keeps its logs and per-stage data under
-  `<tmp>/systmp`. It removes them after a passing run and leaves them, with
-  the path printed, after a failing one.
+- A project's integration verifier keeps its logs and per-stage data in a
+  working directory under `<tmp>/systmp`. It removes the directory after a
+  passing run and leaves it, with the path printed, after a failing one.
 - The pre-push gate, when it runs tests instead of reusing an evidence record,
   keeps its working files under `<tmp>/systmp` in the same way.
 - The evidence record that lets the gate skip its tests is not temporary: it
   stays in the repository's git common directory (§ Outside the ATC home).
   Losing it makes the gate run the tests; it never makes the gate pass.
 
-## Other temporary files
+## pytest without a scratch
 
-- **pytest without a scratch.** pytest's base follows the system temporary
-  directory, so a run in a repository that registers the plugin gets
-  `<tmp>/systmp/pytest-of-<user>/pytest-<N>/`. pytest removes runs older than
-  the newest three at each run's start and exit and leaves a run with a live
-  `.lock` alone. An explicit `--basetemp` or `PYTEST_DEBUG_TEMPROOT` wins.
-- **`atc tmp prune`** deletes entries of `<tmp>/systmp`, other than
-  `pytest-of-*`, and of `<tmp>/integration-candidates` whose last modification
-  is older than seven days, and reports registered scratches older than seven
-  days without deleting them.
+pytest's base follows the temporary directory, so a run started directly in a
+repository that registers the plugin gets
+`<tmp>/systmp/pytest-of-<user>/pytest-<N>/`. pytest removes runs older than
+the newest three at each run's start and exit and leaves a run with a live
+`.lock` alone. The ATC adapter's own test suite and `check.ps1` follow the
+same rule and pass no `--basetemp` of their own.
 
 ## Cache
 
 - `check.ps1` sets `UV_CACHE_DIR` to `~/.atc/cache/uv` and
   `UV_PYTHON_INSTALL_DIR` to `~/.atc/cache/python` when the caller has not set
   them.
-- The gate and the verifier give the processes they start `UV_CACHE_DIR` as
-  `~/.atc/cache/uv` and `RUFF_CACHE_DIR` as `~/.atc/cache/ruff`
+- The gate and the verifier give the processes they start the same two
+  values and `RUFF_CACHE_DIR` as `~/.atc/cache/ruff`
   (`TESTKIT.md` § Isolated environment).
 - A cache entry is safe to delete at any time; the next run downloads it again.
 
@@ -157,6 +195,7 @@ so classification costs no path length.
 | Workspace map, project checkouts, worktrees, project data | `workspace.yaml`, `projects/`, `worktrees/`, `state/<name>-data/` | bound to one workspace checkout (`LAYOUT.md`) |
 | ATC friction records | `state/workspace-friction/` | persistent, bound to one workspace checkout |
 | Verification evidence records, integration slot lock | the repository's git common directory | bound to one repository |
+| The latest pre-push gate logs | the checkout's ignored `.tmp/` directory | read next to the checkout after a refused push |
 | Built testkit wheels | `.tooling/testkit-dist/` | release output of `build_testkit_release.py` |
 | Installed `atc` command and its source snapshot | `~/.local/bin`, `~/.local/atc-src` | installer convention |
 | A product's runtime files | the product's own locations (`PROJECT_RUNTIME.md`) | product state, not ATC's |

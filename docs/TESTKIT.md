@@ -6,6 +6,15 @@ supplies data (§ What a project supplies); the behaviour below is the
 testkit's. Temporary and cache locations are in `ATC_HOME.md`; evidence
 formats are in `shared/conformance/verification-evidence/README.md`.
 
+The package's own `README.md` is the contract `VERIFICATION.md` § Testing
+names: it defines the category meanings, the marker rules and the selection
+behaviour for the version it describes, and this document repeats none of
+them. This document states the capabilities that README describes from the
+release that carries them, in which the package, not each repository, owns
+execution commands, parallelism, platform initialization and diagnostics.
+`VERIFICATION.md` names the package and the README by path, so the release
+lands together with a governance change to that sentence.
+
 ## Adoption
 
 - A project vendors one released `atc-testkit` wheel; all projects of a
@@ -18,21 +27,20 @@ formats are in `shared/conformance/verification-evidence/README.md`.
 - `[tool.atc-testkit]` in `pyproject.toml` names the project's gate, hook,
   workflow, CI job, unmarked-baseline file and the data listed in
   § What a project supplies.
+- A project keeps no script of its own for a targeted isolated run;
+  `atc test run` against the checkout is that run.
 
 ## Markers
 
-The plugin registers these markers with one description each, so a project's
-`pyproject.toml` lists none of them.
+The plugin registers every marker with one description, so a project's
+`pyproject.toml` lists none. Beside the semantic categories and `slow`, which
+the README defines, the contract has two markers that place a test in a
+stage:
 
 | Marker | Meaning |
 | --- | --- |
-| `unit`, `integration`, `render`, `statistical` | semantic category; a test carries exactly one |
-| `slow` | unsuitable for the fast loop; combined with one semantic category |
 | `serial` | sensitive to parallel load; runs without xdist workers |
 | `interactive_desktop` | needs the interactive Windows desktop (§ Private desktop) |
-
-A test definition with no semantic category fails collection unless the
-project's unmarked-baseline file lists it.
 
 ## Stages
 
@@ -41,23 +49,26 @@ order. Each is one pytest invocation over the selected paths.
 
 | Stage | Marker expression | Workers | Desktop |
 | --- | --- | --- | --- |
-| `parallel` | `not slow and not serial and not interactive_desktop` | `min(8, cpu count)`, `--dist loadscope` | private |
-| `serial` | `serial and not slow and not interactive_desktop` | none | private |
-| `interactive` | `interactive_desktop and not slow` | none | interactive |
+| `parallel` | `not slow and not serial and not interactive_desktop` | `-n min(8, cpu count) --dist loadscope` | private |
+| `serial` | `serial and not slow and not interactive_desktop` | `-n 0` | private |
+| `interactive` | `interactive_desktop and not slow` | `-n 0` | interactive |
 
+- Every stage passes its worker option explicitly, so a project's `addopts`
+  cannot change it.
 - A stage that collects no test passes. A run in which every stage collects
   no test is refused with `NO_TESTS_COLLECTED`.
-- A project may append pytest arguments to a stage (an `--ignore` for a
-  platform, for example); the appended arguments are part of the stage's
-  evidence record.
+- A project may append `--ignore` arguments to a stage, for a platform for
+  example, and nothing else. A stage's evidence record is its name, marker
+  expression and ignored paths, as the evidence format defines.
 - Each stage has its own data root (§ Isolated environment).
 - CI runs the same stages through the same runner and passes its own worker
   count.
 
 ## Isolated environment
 
-Every process the gate or the verifier starts for a static check or a stage
-gets an environment built from the caller's by these rules:
+The gate and the verifier first remove every `HAMI_*` variable from their own
+process. Every process they start for a static check or a stage then gets an
+environment built from the caller's by these rules:
 
 - Removed: every `GIT_*` and `HAMI_*` variable, and every credential variable:
   one whose name ends in `_API_KEY`, `_API_SECRET`, `_SECRET`, `_TOKEN` or
@@ -66,8 +77,9 @@ gets an environment built from the caller's by these rules:
   `LOCALAPPDATA`, `XDG_CACHE_HOME`, `XDG_CONFIG_HOME`, `XDG_DATA_HOME`,
   `PYTHONPYCACHEPREFIX`, pytest's `cache_dir`, and each data-root variable the
   project names, one directory per stage.
-- Shared across runs: `UV_CACHE_DIR` and `RUFF_CACHE_DIR`, under
-  `~/.atc/cache`. These caches are content-addressed and safe to share.
+- Shared across runs: `UV_CACHE_DIR`, `UV_PYTHON_INSTALL_DIR` and
+  `RUFF_CACHE_DIR`, under `~/.atc/cache`. These stores are content-addressed
+  and safe to share.
 - `TEMP`, `TMP`, `TMPDIR` and `ATC_TMP` carry the values the entry point
   resolved before it redirected the profile.
 
@@ -117,18 +129,22 @@ this order:
 | `ATC_EXPECTED_MAIN_SHA` is an ancestor of the candidate | `EXPECTED_MAIN_NOT_IN_CANDIDATE` |
 | `ATC_REVIEWED_SOURCE_SHA` is an ancestor of the candidate | `REVIEWED_SOURCE_NOT_IN_CANDIDATE` |
 | Every product module the tree defines, and every one the search path offers under the project's prefixes, imports from inside the candidate, on pytest's search path | `CANDIDATE_IMPORT_MISMATCH` |
+| Every source root of a product namespace package that the tree holds is among the locations that namespace imports from | `CANDIDATE_IMPORT_MISMATCH` |
 | The expected-main to candidate range changes at least one path | `EMPTY_INTEGRATION_DIFF` |
 | The selection for that range can be computed | `SELECTION_FAILED` |
+| The project's static checks that run first | the project's tokens |
 | `uv lock --check` | `UV_LOCK_CHECK_FAILED` |
 | `git diff --check` over the range | `DIFF_CHECK_FAILED` |
 | `python -m atc_testkit.check --installed` | `TESTKIT_CONTRACT_FAILED` |
 | `ruff check` over the project's lint scope | `RUFF_CHECK_FAILED` |
 | Repository-wide collection, when the range changes a test, test helper, fixture or `conftest.py` | `COLLECTION_FAILED` |
-| The project's own static checks | the project's tokens |
+| The project's other static checks | the project's tokens |
 | The stages | `TESTS_FAILED`, `NO_TESTS_COLLECTED` |
 | `HEAD` is still `ATC_INTEGRATION_SHA` | `CANDIDATE_HEAD_MOVED` |
 | The tree is clean, untracked files included | `CANDIDATE_DIRTY` |
 
+- A project static check keeps its own condition on the changed paths and
+  says whether it runs before the shared checks.
 - A range is documentation-only when every changed path is Markdown, the
   selection names no test, and no path is automation Markdown (`AGENTS.md`,
   `CLAUDE.md`, or a file under a prefix the project names). Such a range
@@ -148,11 +164,14 @@ A test starts a child process through the testkit's `start` or `run`.
   the whole tree and waits for it; `run` does so when it returns, also on a
   timeout.
 - A child opens no console window unless the test passes its own creation
-  flags.
+  flags. A test whose subject is a detached or new-console launch passes
+  those flags through `start`, and carries `interactive_desktop` when the
+  launch shows a window.
 - At the end of a session the controlling process lists every live process
-  whose command line names the session's temporary root, excluding itself and
-  its ancestors, and fails the run with `CHILD_PROCESSES_ALIVE` when one
-  exists.
+  whose command line names that session's pytest base directory, excluding
+  itself and its ancestors, and fails the run with `CHILD_PROCESSES_ALIVE`
+  when one exists. Two sessions never share a base directory, so one
+  session's children never fail another.
 
 ## Private desktop
 
@@ -188,23 +207,61 @@ to the summary.
 The test tools a review or a developer runs are subcommands of `atc`, one
 implementation on every platform. A machine that runs them has `atc`
 installed (`uv tool install -e adapters/python`), as integration already
-requires.
+requires. Every variable ATC itself defines starts with `ATC_`.
 
-| Command | What it does |
-| --- | --- |
-| `atc test run <tree> <scratch> <python> <label> <pytest args...>` | one isolated pytest run in a scratch (`ATC_HOME.md` § Test scratch) |
-| `atc test mutants <scratch> <sha> <worktree> <mutants.json> --python <py> --tests <path>...` | applies each mutant alone to the scratch copy, runs the tests, restores the file and proves its bytes equal Git |
-| `atc tmp list`, `atc tmp clean`, `atc tmp prune` | the scratch registry and cleanup (`ATC_HOME.md`) |
+### `atc test run <tree> <scratch> <python> <label> <pytest args...>`
 
-Every environment variable an ATC tool reads or sets starts with `ATC_`.
+One isolated pytest run inside `<tree>`, a worktree or an exported copy, in
+the scratch `<scratch>` (`ATC_HOME.md` § Test scratch). In order:
+
+1. Resolve `<tree>` and a path-form `<python>` against the caller's
+   directory: `TREE_NOT_FOUND`, `PYTHON_NOT_FOUND` (exit 9). Check the
+   scratch: `SCRATCH_OUTSIDE_TMP`, `SCRATCH_PATH_TOO_LONG` (exit 9).
+2. Remove every `HAMI_*` variable. Point each data-root variable the tree's
+   `[tool.atc-testkit]` names, and `QUANT_DATA_ROOT` when it names none, at
+   `<scratch>/qdr`. Make the scratch the temporary directory.
+3. Set `PYTHONPATH` to the tree's `packages/*/src` and `src` directories. One
+   that is absent after entering the tree is refused with
+   `PYTHONPATH_MISSING` (exit 8).
+4. Import every regular package under those directories, descending through
+   namespace directories, and require each to load from inside the tree:
+   `COPY_IMPORT_MISMATCH` (exit 8). This guard is what proves the copy, not
+   an installed checkout, is what runs.
+5. Print `NOTE no .venv` when the tree has none, then `== <label> ==`, and
+   run pytest with `-p no:cacheprovider`, `-n 0` when xdist is installed,
+   `-q` and `--basetemp <scratch>/bt`, printing the last fifteen lines of its
+   output.
+
+### `atc test mutants <scratch> <sha> <worktree> <mutants.json> --python <py> --tests <path>...`
+
+Applies each mutant alone to `<scratch>/tree`, the export of `<sha>`, through
+`atc test run`.
+
+- The tests run once unmutated first; a failing baseline prints
+  `BASELINE-RED` and exits 1 before any mutant is applied.
+- A mutant is a label and a list of edits `{path, old, new}`. An `old` that
+  does not occur exactly once in its file aborts the run. Edits follow the
+  file's line endings.
+- Each mutant prints `KILLED` or `SURVIVED` with the first failing line or
+  the summary, and its files are restored whether or not the run completes.
+  An import-guard refusal aborts the run.
+- At the end every touched file is compared with its Git object at `<sha>`,
+  carriage returns ignored: `restored-ok` or `RESTORE-MISMATCH` per file,
+  exit 1 on any mismatch. The last line counts the mutants and names the
+  survivors.
+
+### `atc tmp list`, `atc tmp clean`, `atc tmp prune`
+
+The scratch registry and deletion (`ATC_HOME.md` § Scratch registry,
+§ Deleting).
 
 ## What a project supplies
 
 - The selection policy: package dependencies, path prefixes, full-suite
   files, and how a missing remote baseline is read.
-- Its static checks and their tokens, the lint scope, and the documentation
-  check.
+- Its static checks with their tokens, path conditions and position, the lint
+  scope, and the documentation check.
 - Product module prefixes for the import check, extra credential variable
   names, data-root variable names, and automation-Markdown prefixes.
-- Arguments appended to a stage, `uv` options for the hook, test paths, and
-  the CI platform matrix.
+- `--ignore` arguments appended to a stage, `uv` options for the hook, test
+  paths, and the CI platform matrix.
