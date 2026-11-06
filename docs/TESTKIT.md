@@ -301,7 +301,10 @@ Applies each mutant alone to `<scratch>/tree`, the export of `<sha>`, through
   does not occur exactly once in its file aborts the run. Edits follow the
   file's line endings.
 - Each mutant prints one line, and its files are restored whether or not the
-  run completes. A run that exits 1 with a `FAILED` line prints `KILLED` with
+  run completes. Every edit and restore moves the file's modification time
+  to a later whole second than its last, so a bytecode cache, which records
+  that second and the size, never stands in for the source the run is meant
+  to see. A run that exits 1 with a `FAILED` line prints `KILLED` with
   that line; a run that exits 0 prints `SURVIVED` with the summary.
 - Any other ending of a mutated run, an `ERROR` line alone, exits 2 to 5 or a
   timeout, prints `INCONCLUSIVE <label> -> <reason>` and aborts the run with

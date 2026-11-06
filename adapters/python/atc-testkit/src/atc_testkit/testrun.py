@@ -221,6 +221,14 @@ class _Aborted(Exception):
         self.code = code
 
 
+def _rewrite(target: Path, data: bytes) -> None:
+    """Replace a file's bytes and move it past its last whole second, which a bytecode cache records with the size."""
+    before = int(target.stat().st_mtime)
+    target.write_bytes(data)
+    if int(target.stat().st_mtime) <= before:
+        os.utime(target, (before + 1, before + 1))
+
+
 def _apply(tree: Path, mutant: Mapping, touched: set[str], originals: dict[Path, bytes]) -> None:
     for edit in mutant["edits"]:
         target = tree / edit["path"]
@@ -232,7 +240,7 @@ def _apply(tree: Path, mutant: Mapping, touched: set[str], originals: dict[Path,
         count = data.count(old)
         if count != 1:
             raise _Aborted(f"{mutant['label']}: `old` occurs {count} times in {edit['path']}, need exactly 1")
-        target.write_bytes(data.replace(old, new))
+        _rewrite(target, data.replace(old, new))
         touched.add(edit["path"])
 
 
@@ -281,7 +289,7 @@ def mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None = None
                     break
             finally:
                 for target, data in originals.items():
-                    target.write_bytes(data)
+                    _rewrite(target, data)
     except _Aborted as abort:
         print(str(abort), file=sys.stderr, flush=True)
         aborted = abort.code

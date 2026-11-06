@@ -300,6 +300,34 @@ def test_edits_follow_the_files_line_endings(export: Export, tmp_path: Path) -> 
     assert b"\r\n" in export.file.read_bytes()
 
 
+def test_a_same_size_write_in_the_files_last_second_reaches_the_run(export: Export, tmp_path: Path,
+                                                                     capsys: pytest.CaptureFixture[str],
+                                                                     monkeypatch: pytest.MonkeyPatch) -> None:
+    write_bytes = Path.write_bytes
+
+    def in_the_same_second(self: Path, data: bytes) -> int:
+        if os.path.normcase(self) != os.path.normcase(export.file):
+            return write_bytes(self, data)
+        last = self.stat().st_mtime
+        written = write_bytes(self, data)
+        os.utime(self, (last, last))
+        return written
+    listing = tmp_path / "mutants.json"
+    other_file = {"label": "other file", "edits": [{"path": "tests/test_value.py", "old": "def test_value():",
+                                                    "new": "def test_value(): "}]}
+    listing.write_text(json.dumps([KILLED, other_file]), encoding="utf-8")
+    bytecode_written = {key: value for key, value in os.environ.items() if key != "PYTHONDONTWRITEBYTECODE"}
+    with monkeypatch.context() as held_writes:
+        held_writes.setattr(Path, "write_bytes", in_the_same_second)
+        held_writes.chdir(tmp_path)
+        code = testrun.mutants([export.place.name, export.sha, str(export.worktree), str(listing), "--python",
+                                sys.executable, "--tests", "tests"], bytecode_written)
+    lines = capsys.readouterr().out.splitlines()
+    assert code == 0, lines
+    assert lines[1].startswith("KILLED") and "K one" in lines[1]
+    assert lines[2].startswith("SURVIVED") and "other file" in lines[2]
+
+
 def test_an_import_guard_refusal_aborts_and_restores(export: Export, tmp_path: Path) -> None:
     edit = {"label": "guard", "edits": [{"path": "src/fixture_pkg/__init__.py", "old": "def value():", "new": "raise ImportError('x')\ndef value():"}]}
     run = export.run(tmp_path, [edit, KILLED])
