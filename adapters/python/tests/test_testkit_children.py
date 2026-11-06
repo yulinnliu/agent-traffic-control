@@ -108,7 +108,7 @@ def test_a_tree_that_keeps_running_is_reported_with_its_token() -> None:
     tree = Stuck(1)
     with pytest.raises(TimeoutError, match="CHILD_TREE_STILL_RUNNING"):
         children._end(FakeProcess(), tree, seconds=0.1)
-    assert not tree.closed
+    assert tree.closed
 
 
 def test_a_member_that_does_not_finish_is_reported_with_its_token() -> None:
@@ -118,7 +118,7 @@ def test_a_member_that_does_not_finish_is_reported_with_its_token() -> None:
     tree = Unfinished(0)
     with pytest.raises(TimeoutError, match="CHILD_TREE_STILL_RUNNING"):
         children._end(FakeProcess(), tree, seconds=0.1)
-    assert not tree.closed
+    assert tree.closed
 
 
 def test_members_are_held_before_the_tree_ends_and_again_after() -> None:
@@ -133,6 +133,52 @@ def test_members_are_held_before_the_tree_ends_and_again_after() -> None:
             super().terminate()
     children._end(FakeProcess(), Recording(1))
     assert calls == ["hold", "terminate", "hold"]
+
+
+def test_a_member_list_that_fails_still_ends_the_tree_and_closes_it() -> None:
+    class Unlisted(FakeTree):
+        def hold_members(self) -> None:
+            raise OSError("CHILD_JOB_QUERY_FAILED")
+    tree = Unlisted(1)
+    with pytest.raises(OSError, match="CHILD_JOB_QUERY_FAILED"):
+        children._end(FakeProcess(), tree)
+    assert tree.terminated and tree.closed
+
+
+def test_a_child_that_outlasts_the_wait_closes_the_tree() -> None:
+    class Waiting(FakeProcess):
+        def wait(self, seconds: float) -> int:
+            raise subprocess.TimeoutExpired("child", seconds)
+    tree = FakeTree(1)
+    with pytest.raises(subprocess.TimeoutExpired):
+        children._end(Waiting(), tree)
+    assert tree.terminated and tree.closed
+
+
+@windows
+def test_the_member_list_grows_to_hold_every_member(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    pid_file = tmp_path / "pid"
+    process = children.start([sys.executable, "-c", GRANDCHILD, str(pid_file)])
+    grandchild = int(wait_for_text(pid_file))
+    tree = next(entry[1] for entry in children._started if entry[0] is process)
+    monkeypatch.setattr(children, "_MEMBER_ROOM", 1)
+    try:
+        assert {process.pid, grandchild} <= set(tree.members())
+    finally:
+        children.reap()
+
+
+@windows
+def test_a_failed_query_is_named() -> None:
+    process = children.start([sys.executable, "-c", SLEEP])
+    tree = next(entry[1] for entry in children._started if entry[0] is process)
+    real, tree.handle = tree.handle, 0x7FFFFFF0  # no open handle has this value
+    try:
+        with pytest.raises(OSError, match="CHILD_JOB_QUERY_FAILED"):
+            tree.members()
+    finally:
+        tree.handle = real
+        children.reap()
 
 
 @windows

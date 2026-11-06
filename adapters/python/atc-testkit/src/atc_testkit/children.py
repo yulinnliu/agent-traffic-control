@@ -29,7 +29,7 @@ class HostProcess(NamedTuple):
 if os.name == "nt":
     from ctypes import wintypes
 
-    _MAX_MEMBERS = 4096
+    _MEMBER_ROOM = 64
     _SYNCHRONIZE = 0x00100000
     _WAIT_OBJECT_0 = 0
 
@@ -47,9 +47,10 @@ if os.name == "nt":
     class _UnicodeString(ctypes.Structure):
         _fields_ = [("Length", wintypes.USHORT), ("MaximumLength", wintypes.USHORT), ("Buffer", ctypes.c_void_p)]
 
-    class _ProcessIdList(ctypes.Structure):
-        _fields_ = [("assigned", wintypes.DWORD), ("listed", wintypes.DWORD),
-                    ("ids", ctypes.c_size_t * _MAX_MEMBERS)]
+    def _process_id_list(room: int) -> ctypes.Structure:
+        class ProcessIdList(ctypes.Structure):
+            _fields_ = [("assigned", wintypes.DWORD), ("listed", wintypes.DWORD), ("ids", ctypes.c_size_t * room)]
+        return ProcessIdList()
 
     class _Tree:
         """A non-breakaway Windows Job that holds one child's whole tree."""
@@ -88,11 +89,16 @@ if os.name == "nt":
 
         def members(self) -> list[int]:
             """The process IDs the Job lists; a Job drops a process from this list before its teardown ends."""
-            value = _ProcessIdList()
-            if not self.kernel.QueryInformationJobObject(self.handle, 3, ctypes.byref(value), ctypes.sizeof(value),
-                                                         None):
-                raise OSError("CHILD_JOB_QUERY_FAILED")
-            return [int(pid) for pid in value.ids[:value.listed]]
+            room = _MEMBER_ROOM
+            while True:
+                value = _process_id_list(room)
+                succeeded = self.kernel.QueryInformationJobObject(self.handle, 3, ctypes.byref(value),
+                                                                  ctypes.sizeof(value), None)
+                if succeeded and value.listed == value.assigned:
+                    return [int(pid) for pid in value.ids[:value.listed]]
+                if value.assigned <= room:
+                    raise OSError("CHILD_JOB_QUERY_FAILED")
+                room = value.assigned + _MEMBER_ROOM
 
         def hold_members(self) -> None:
             """Open a handle to every member, which is what stays waitable through its teardown."""
@@ -194,20 +200,26 @@ def start(args, **options) -> subprocess.Popen:
 
 
 def _end(process: subprocess.Popen, tree: _Tree, seconds: float = REAP_SECONDS) -> None:
-    """End every process of the child's tree and return once the child and every member have finished."""
-    tree.hold_members()
-    if process.poll() is None or tree.active():
-        tree.terminate()
-    tree.hold_members()
-    process.wait(seconds)
-    deadline = time.monotonic() + seconds
-    while tree.active():
-        if time.monotonic() > deadline:
+    """End every process of the child's tree and return once the child and every member have finished.
+
+    The tree is told to end and its handles close on every path, also when the wait raises.
+    """
+    try:
+        try:
+            tree.hold_members()
+        finally:
+            tree.terminate()
+        tree.hold_members()
+        process.wait(seconds)
+        deadline = time.monotonic() + seconds
+        while tree.active():
+            if time.monotonic() > deadline:
+                raise TimeoutError("CHILD_TREE_STILL_RUNNING")
+            time.sleep(0.05)
+        if not tree.wait_members(seconds):
             raise TimeoutError("CHILD_TREE_STILL_RUNNING")
-        time.sleep(0.05)
-    if not tree.wait_members(seconds):
-        raise TimeoutError("CHILD_TREE_STILL_RUNNING")
-    tree.close()
+    finally:
+        tree.close()
 
 
 def run(args, *, input=None, capture_output=False, timeout=None, check=False, **options) -> subprocess.CompletedProcess:
