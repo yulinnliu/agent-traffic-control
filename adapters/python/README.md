@@ -24,6 +24,7 @@ location, in that order.
 | `worktree` | `hami_worktree.py` | `create`, `resume`, `audit`, `cleanup` per-topic worktrees with identity in git |
 | `friction` | `friction.py` | append incident and resolution events; summaries |
 | | `check_workspace.py` | runs the validator and records a failure as friction evidence |
+| | `integration_verify.py` | the verifier `atc integrate` runs in a candidate of this checkout (root `AGENTS.md` § Integration verification) |
 | | `build_testkit_release.py` | builds the `hami-testkit` wheel and digest record for consuming projects |
 
 `src/atc_cli/` is the dispatcher; the scripts stay runnable directly with
