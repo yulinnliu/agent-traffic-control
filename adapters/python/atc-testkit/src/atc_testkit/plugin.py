@@ -13,7 +13,6 @@ import pytest
 from . import children, config as project_config, locations
 from .markers import MARKER_DESCRIPTIONS, load_unmarked_baseline, marker_contract_violations
 
-pytest_plugins = ("pytester",)  # a root conftest.py registers this plugin only, and marker tests use pytester
 TEMP_ROOT_VARIABLE = "PYTEST_DEBUG_TEMPROOT"
 
 

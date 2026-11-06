@@ -102,6 +102,10 @@ def test_xdist_workers_inherit_the_location(project: Path, atc_tmp: Path) -> Non
     assert bases
 
 
+def test_the_plugin_loads_no_other_plugin_into_a_project(project: Path, atc_tmp: Path) -> None:
+    assert "pytester" not in pytest_in(project, "--fixtures").stdout
+
+
 def test_every_marker_is_registered_with_one_description(project: Path, atc_tmp: Path) -> None:
     run = pytest_in(project, "--markers")
     for name in ("unit", "integration", "render", "statistical", "slow", "serial", "interactive_desktop"):
