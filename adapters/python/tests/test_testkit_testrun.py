@@ -340,6 +340,7 @@ def test_a_run_no_test_failed_in_is_inconclusive_and_ends_the_list(export: Expor
     assert run.returncode == 1, run.stdout + run.stderr
     assert f"INCONCLUSIVE odd -> {expected}" in run.stdout and "K one" not in run.stdout
     assert "KILLED" not in run.stdout and "restored-ok tests/test_value.py" in run.stdout
+    assert run.stdout.splitlines()[-1] == "done: 1 of 2 mutants, 0 survived"
 
 
 def test_a_timeout_names_itself_as_the_reason() -> None:

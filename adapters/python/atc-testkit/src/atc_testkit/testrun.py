@@ -265,7 +265,7 @@ def mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None = None
 
     touched: set[str] = set()
     survivors: list[str] = []
-    aborted = 0
+    aborted = finished = 0
     try:
         for mutant in entries:
             originals: dict[Path, bytes] = {}
@@ -273,6 +273,7 @@ def mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None = None
                 _apply(tree, mutant, touched, originals)
                 verdict, summary = _verdict(attempt(mutant["label"]))
                 print(f"{verdict:<8} {mutant['label']} -> {summary}", flush=True)
+                finished += 1
                 if verdict == SURVIVED:
                     survivors.append(mutant["label"])
                 elif verdict == INCONCLUSIVE:
@@ -293,5 +294,6 @@ def mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None = None
         same = _digest((tree / path).read_bytes()) == _digest(_blob(worktree, args.sha, path))
         mismatched |= not same
         print("restored-ok" if same else "RESTORE-MISMATCH", path, flush=True)
-    print(f"done: {len(entries)} mutants, {len(survivors)} survived", *survivors, flush=True)
+    counted = finished if finished == len(entries) else f"{finished} of {len(entries)}"
+    print(f"done: {counted} mutants, {len(survivors)} survived", *survivors, flush=True)
     return aborted or (1 if mismatched else 0)
