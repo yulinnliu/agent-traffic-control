@@ -88,7 +88,7 @@ def resolve_tree(argument: str) -> Path:
 
 def prepare_scratch(argument: str, environ: MutableMapping[str, str]) -> tuple[Path, Path]:
     """``<tmp>`` and the scratch, checked and with its data root created; refusals exit 9."""
-    root = locations.tmp_root(environ)
+    root = locations.locate(environ).tmp
     place = scratch.resolve_scratch(argument, root)
     try:
         (place / "qdr").mkdir(parents=True, exist_ok=True)

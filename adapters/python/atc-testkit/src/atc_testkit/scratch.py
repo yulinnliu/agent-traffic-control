@@ -17,7 +17,7 @@ from typing import NamedTuple
 
 from . import locations
 from .git import git_env
-from .locations import CANDIDATES, Refusal, SYSTMP
+from .locations import CANDIDATES, Refusal, SYSTMP, is_link as _is_link
 
 SCRATCH_NAME = re.compile(r"[A-Za-z0-9._-]+")
 RESERVED_NAMES = frozenset({SYSTMP, CANDIDATES})
@@ -148,12 +148,6 @@ def _extended(path: str) -> str:
     if os.name != "nt" or path.startswith("\\\\?\\"):
         return path
     return "\\\\?\\" + os.path.abspath(path)
-
-
-def _is_link(status: os.stat_result) -> bool:
-    if os.name == "nt":
-        return bool(status.st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT)
-    return stat.S_ISLNK(status.st_mode)
 
 
 def _links(directory: str) -> list[str]:

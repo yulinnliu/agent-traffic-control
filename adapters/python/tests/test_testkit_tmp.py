@@ -13,7 +13,7 @@ import subprocess
 import pytest
 
 import atc_testkit
-from atc_testkit import scratch
+from atc_testkit import locations, scratch
 
 
 def link_directory(link: Path, target: Path) -> None:
@@ -481,8 +481,15 @@ def test_a_tree_git_no_longer_knows_is_any_other_entry(repository: Path, atc_tmp
     assert code == 0 and sorted(lines) == sorted([f"DELETED {tree}", f"DELETED {plain}"])
 
 
+@pytest.fixture()
+def parent_appears_after_locate(atc_tmp: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A parent that turns into a link or a file after ``locate`` read it reaches prune's own guards."""
+    monkeypatch.setattr(scratch.locations, "locate", lambda _environ=None: locations.Locations(atc_tmp, atc_tmp / "systmp"))
+
+
 @pytest.mark.parametrize("parent", ["systmp", "candidates"])
-def test_prune_refuses_a_parent_that_is_a_link_and_never_enters_it(tmp_path: Path, atc_tmp: Path, parent: str) -> None:
+def test_prune_refuses_a_parent_that_is_a_link_and_never_enters_it(tmp_path: Path, atc_tmp: Path, parent: str,
+                                                                   parent_appears_after_locate) -> None:
     victim = target(tmp_path, "victim")
     old = age(write(victim / "old.txt"), 30)
     age(write(victim / "dir/file.txt").parent, 30)
@@ -494,7 +501,8 @@ def test_prune_refuses_a_parent_that_is_a_link_and_never_enters_it(tmp_path: Pat
     assert old.is_file() and (victim / "dir/file.txt").is_file() and (victim / "keep.txt").is_file()
 
 
-def test_a_linked_parent_leaves_the_other_parent_and_the_report_to_run(tmp_path: Path, atc_tmp: Path) -> None:
+def test_a_linked_parent_leaves_the_other_parent_and_the_report_to_run(tmp_path: Path, atc_tmp: Path,
+                                                                       parent_appears_after_locate) -> None:
     link_directory(atc_tmp / "candidates", target(tmp_path, "victim"))
     taken = age(write(atc_tmp / "systmp/old.txt"), 8)
     scratch.register(atc_tmp, atc_tmp / "s", atc_tmp / "s/tree", NOW - timedelta(days=8))
@@ -502,7 +510,7 @@ def test_a_linked_parent_leaves_the_other_parent_and_the_report_to_run(tmp_path:
     assert code == 1 and lines[0] == f"DELETED {taken}" and lines[1].startswith("REFUSED ") and lines[2].startswith("OLD ")
 
 
-def test_prune_refuses_a_parent_that_is_a_file(atc_tmp: Path) -> None:
+def test_prune_refuses_a_parent_that_is_a_file(atc_tmp: Path, parent_appears_after_locate) -> None:
     write(atc_tmp / "candidates")
     assert prune() == (1, [f"REFUSED {atc_tmp / 'candidates'} (not a directory)"])
 
@@ -552,7 +560,8 @@ def test_an_error_in_a_candidates_handler_is_its_refusal(atc_tmp: Path, monkeypa
 
 
 @pytest.mark.parametrize("failing", ["lstat", "scandir"])
-def test_an_error_reading_a_parent_is_its_refusal(atc_tmp: Path, monkeypatch: pytest.MonkeyPatch, failing: str) -> None:
+def test_an_error_reading_a_parent_is_its_refusal(atc_tmp: Path, monkeypatch: pytest.MonkeyPatch, failing: str,
+                                                  parent_appears_after_locate) -> None:
     (atc_tmp / "candidates").mkdir()
     real = getattr(os, failing)
 

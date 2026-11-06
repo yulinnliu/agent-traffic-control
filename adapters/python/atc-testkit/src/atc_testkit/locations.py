@@ -5,6 +5,7 @@ from collections.abc import MutableMapping
 from dataclasses import dataclass
 import os
 from pathlib import Path
+import stat
 import tempfile
 
 TMP_VARIABLE = "ATC_TMP"
@@ -55,8 +56,33 @@ def cache_directories(environ: MutableMapping[str, str] | None = None) -> dict[s
             "RUFF_CACHE_DIR": str(cache / "ruff")}
 
 
+def is_link(status: os.stat_result) -> bool:
+    """Whether an ``lstat`` result is a symbolic link or, on Windows, any reparse point such as a junction."""
+    if os.name == "nt":
+        return bool(status.st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT)
+    return stat.S_ISLNK(status.st_mode)
+
+
+def _not_a_real_directory(path: str | os.PathLike[str]) -> str | None:
+    """What keeps an existing ``path`` from being a real directory; ``None`` for one, or for a path still to create."""
+    try:
+        status = os.lstat(path)
+    except (FileNotFoundError, NotADirectoryError):
+        return None
+    except OSError as error:
+        return f"cannot be read: {path}: {error}"
+    if is_link(status):
+        return f"is a link: {path}"
+    if not stat.S_ISDIR(status.st_mode):
+        return f"is not a directory: {path}"
+    return None
+
+
 def _broken_property(root: str, environ: MutableMapping[str, str]) -> str | None:
     """The property of docs/ATC_HOME.md § Location that ``root`` breaks, or ``None``."""
+    not_real = _not_a_real_directory(os.path.normpath(root))
+    if not_real:
+        return not_real
     long = long_name(root)
     parts = [part.lower() for part in Path(long).parts]
     app_data = [environ.get(name) for name in ("APPDATA", "LOCALAPPDATA")]
@@ -88,9 +114,13 @@ def tmp_root(environ: MutableMapping[str, str] | None = None) -> Path:
 
 
 def locate(environ: MutableMapping[str, str] | None = None) -> Locations:
-    """``<tmp>`` and ``<tmp>/systmp``, created on first use."""
+    """``<tmp>`` and ``<tmp>/systmp``, created on first use once they and ``<tmp>/candidates`` are checked."""
     root = tmp_root(environ)
     systmp = root / SYSTMP
+    for directory in (systmp, root / CANDIDATES):
+        not_real = _not_a_real_directory(directory)
+        if not_real:
+            raise Refusal(UNSUITABLE, not_real)
     try:
         systmp.mkdir(parents=True, exist_ok=True)
     except OSError as error:
