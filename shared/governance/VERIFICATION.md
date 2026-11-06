@@ -228,8 +228,8 @@ Flaky or timing-sensitive tests:
 - Time-box stress experiments: one targeted run with temporary instrumentation
   that is reverted and never committed, then decide.
 
-Projects that adopt `hami-testkit` follow its contract in
-`adapters/python/hami-testkit/README.md`, read from the same governance revision.
+Projects that adopt `atc-testkit` follow its contract in
+`adapters/python/atc-testkit/README.md`, read from the same governance revision.
 The category meanings, marker rules and selection behavior are defined there, for
 the testkit version the README names. A project's `AGENTS.md` and `README.md` do
 not restate this section; they hold the project's own commands, path rules and
