@@ -20,6 +20,7 @@ import json
 import os
 import platform
 import re
+import secrets
 import signal
 import subprocess
 import sys
@@ -30,10 +31,12 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 
+from atc_testkit import locations
 from git_preflight import GitError, git, merge_preflight, render, rev, same_path
 from integration_slot import IntegrationSlot
 
 FULL_SHA = re.compile(r"[0-9a-f]{40}")
+CANDIDATE_ID_BYTES = 6
 WORKTREE_BRANCH = re.compile(r"worktree-[^+]+\+(?P<topic>.+)")
 # Formats: shared/conformance/verification-evidence/README.md
 REPORT_SCHEMA = "atc-verification-report/1"
@@ -203,18 +206,18 @@ def _create_kill_on_close_job():
 
 
 def _run_verifier(
-    argv: list[str], cwd: Path, env: dict[str, str], timeout: float,
+    argv: list[str], cwd: Path, env: dict[str, str], timeout: float, captures: Path,
 ) -> tuple[int, str, str, str | None]:
     """Run the verifier with a bounded wall clock and end its whole process tree.
 
-    Output goes to temporary files rather than pipes so a descendant that
+    Output goes to temporary files in ``captures`` rather than pipes so a descendant that
     outlives the verifier cannot hold the wait open past the timeout. When the
     verifier returns or times out, every process it started is terminated.
     The last element names a weaker isolation the run had to fall back to.
     """
     tree = _ProcessTree()
     try:
-        with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
+        with tempfile.TemporaryFile(dir=captures) as out, tempfile.TemporaryFile(dir=captures) as err:
             try:
                 process = subprocess.Popen(
                     argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=out, stderr=err,
@@ -313,7 +316,7 @@ def _write_evidence(repo: Path, record: dict) -> Path:
 
 def _verify_candidate(
     argv: list[str], candidate_dir: Path, candidate_sha: str, expected_main: str, reviewed: str,
-    timeout: float, report_path: Path,
+    timeout: float, captures: Path, report_path: Path,
 ) -> str | None:
     """Run the verifier in the candidate; return the isolation warning, if any."""
     env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
@@ -324,7 +327,7 @@ def _verify_candidate(
         "ATC_REVIEWED_SOURCE_SHA": reviewed,
         "ATC_VERIFICATION_REPORT": str(report_path),
     })
-    returncode, stdout, stderr, warning = _run_verifier(argv, candidate_dir, env, timeout)
+    returncode, stdout, stderr, warning = _run_verifier(argv, candidate_dir, env, timeout, captures)
     if returncode:
         detail = (stderr or stdout).strip()
         raise Refused(
@@ -487,10 +490,13 @@ def integrate(
         if rev(repo, main) != main_before or rev(repo, "HEAD") != main_before:
             return 1, {**result, "error": f"{main} moved after preflight; main unchanged"}
 
-        candidate_root = Path(tempfile.gettempdir()) / "atc-integration-candidates"
-        candidate_root.mkdir(parents=True, exist_ok=True)
-        repo_id = str(abs(hash(str(repo.resolve()))))
-        candidate_dir = candidate_root / f"{repo_id}-{uuid.uuid4().hex}"
+        places = locations.locate()
+        candidate_root = places.tmp / locations.CANDIDATES
+        try:
+            candidate_root.mkdir(exist_ok=True)
+        except OSError as exc:
+            raise locations.Refusal(locations.UNSUITABLE, f"cannot be created: {candidate_root}: {exc}") from exc
+        candidate_dir = candidate_root / secrets.token_hex(CANDIDATE_ID_BYTES)
         report_path = candidate_dir.with_name(candidate_dir.name + ".report.json")
         candidate_created = False
         candidate_ref: str | None = None
@@ -525,7 +531,7 @@ def integrate(
 
             verification_started = time.monotonic()
             verification_warning = _verify_candidate(
-                verify_argv, candidate_dir, candidate_sha, main_before, reviewed, verify_timeout,
+                verify_argv, candidate_dir, candidate_sha, main_before, reviewed, verify_timeout, places.systmp,
                 report_path,
             )
             result["verification"] = "PASS"
@@ -642,6 +648,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
+        locations.enter()
         if not FULL_SHA.fullmatch(args.reviewed):
             raise Refused(f"--reviewed must be a full 40-character lowercase SHA: {args.reviewed}")
         check_checkout(args.repo)
@@ -657,6 +664,9 @@ def main(argv: list[str] | None = None) -> int:
             args.repo, args.branch, args.reviewed, args.main, verify_command,
             args.authority_reference, args.verify_timeout,
         )
+    except locations.Refusal as refusal:
+        print(f"{refusal.token} {refusal.detail}", file=sys.stderr)
+        return refusal.code
     except (Refused, GitError, RuntimeError) as exc:
         print(f"ERROR {exc}", file=sys.stderr)
         return 2

@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 import os
 import subprocess
-import tempfile
 import time
 from pathlib import Path
 
 import pytest
 
+from atc_testkit import locations
 import git_integrate as gi
+
+CANDIDATE_PATH_BOUND = 64
 
 
 def run_git(repo: Path, *args: str) -> str:
@@ -26,7 +29,7 @@ def commit(repo: Path, path: str, content: str) -> str:
 
 
 @pytest.fixture
-def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def repo(tmp_path: Path, atc_tmp: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     # The command's own git calls inherit this environment, so the merge
     # commit gets a fixed identity and no user or system config applies.
     for key in [key for key in os.environ if key.startswith("GIT_")]:
@@ -37,11 +40,6 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
     }.items():
         monkeypatch.setenv(key, value)
-    # Candidate worktrees and verifier output land under the test's own
-    # directory instead of the machine's temp root.
-    scratch = tmp_path / "tmp"
-    scratch.mkdir()
-    monkeypatch.setattr(tempfile, "tempdir", str(scratch))
     root = tmp_path / "repo"
     root.mkdir()
     run_git(root, "init", "-q", "-b", "main")
@@ -423,8 +421,109 @@ def test_verifier_descendants_end_when_verifier_returns(
     assert "candidate worktree retained" not in capsys.readouterr().err
 
 
+SEEN_BY_THE_VERIFIER = (
+    "import json, os, sys, tempfile; "
+    "print(json.dumps({'cwd': os.getcwd(), 'report': os.environ['ATC_VERIFICATION_REPORT'], "
+    "'tmp': os.environ.get('ATC_TMP'), 'temp': tempfile.gettempdir()})); sys.exit(1)"
+)
+
+
+def verifier_view(repo: Path, capsys: pytest.CaptureFixture[str]) -> dict:
+    """What a verifier that prints its locations and refuses saw of an integration of a new topic."""
+    tip = topic(repo, {"a.txt": "a2\n"})
+    assert integrate_with(repo, "topic", tip, json.dumps([sys.executable, "-c", SEEN_BY_THE_VERIFIER])) == 1
+    err = capsys.readouterr().err
+    return json.loads(err[err.index("{"):err.index("}") + 1])
+
+
+@pytest.mark.integration
+def test_the_candidate_and_its_report_lie_in_candidates_under_a_twelve_digit_id(
+    repo: Path, atc_tmp: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    seen = verifier_view(repo, capsys)
+    tree, report = Path(seen["cwd"]), Path(seen["report"])
+    assert tree.parent == atc_tmp / "candidates" and re.fullmatch(r"[0-9a-f]{12}", tree.name)
+    assert report == tree.with_name(tree.name + ".report.json")
+    assert seen["tmp"] == str(atc_tmp) and Path(seen["temp"]) == atc_tmp / "systmp"
+    assert list((atc_tmp / "candidates").iterdir()) == []
+
+
+@pytest.mark.integration
+def test_the_candidate_path_keeps_the_bound_at_the_longest_root(
+    repo: Path, atc_tmp: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    room = locations.TMP_NAME_BOUND - len(str(atc_tmp)) - 1
+    if room < 1:
+        pytest.skip(f"the home directory leaves {atc_tmp} no room below the bound")
+    longest = atc_tmp / ("r" * room)
+    longest.mkdir()
+    monkeypatch.setenv("ATC_TMP", str(longest))
+    assert len(str(longest)) == locations.TMP_NAME_BOUND
+    tree = Path(verifier_view(repo, capsys)["cwd"])
+    assert len(str(tree)) == CANDIDATE_PATH_BOUND
+    assert not tree.exists()
+
+
+@pytest.mark.integration
+def test_the_verifier_output_is_captured_under_systmp(
+    repo: Path, atc_tmp: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created = []
+    temporary_file = gi.tempfile.TemporaryFile
+
+    def recording(*args, **kwargs):
+        created.append(kwargs.get("dir"))
+        return temporary_file(*args, **kwargs)
+    monkeypatch.setattr(gi.tempfile, "TemporaryFile", recording)
+    verifier_view(repo, capsys)
+    assert created == [atc_tmp / "systmp"] * 2
+
+
+@pytest.mark.integration
+def test_under_ci_the_candidate_keeps_candidates_below_the_platform_directory(
+    repo: Path, atc_tmp: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    platform_directory = atc_tmp / "platform"
+    platform_directory.mkdir()
+    monkeypatch.setenv("CI", "1")
+    monkeypatch.delenv("ATC_TMP")
+    monkeypatch.setattr(gi.locations.tempfile, "tempdir", str(platform_directory))
+    assert Path(verifier_view(repo, capsys)["cwd"]).parent == platform_directory / "candidates"
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("value", ["relative", "file"])
+def test_an_unsuitable_root_exits_nine_before_anything_is_created(
+    repo: Path, atc_tmp: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, value: str,
+) -> None:
+    tip = topic(repo, {"a.txt": "a2\n"})
+    if value == "file":
+        (atc_tmp / "file").write_text("x", encoding="utf-8")
+        value = str(atc_tmp / "file")
+    monkeypatch.setenv("ATC_TMP", value)
+    before = sorted(atc_tmp.iterdir())
+    assert integrate(repo, "topic", tip) == 9
+    assert capsys.readouterr().err.startswith(locations.UNSUITABLE)
+    assert sorted(atc_tmp.iterdir()) == before and main_tip(repo) != tip
+
+
+@pytest.mark.integration
+def test_a_linked_candidates_directory_exits_nine(
+    repo: Path, atc_tmp: Path, capsys: pytest.CaptureFixture[str], tmp_path: Path,
+) -> None:
+    tip = topic(repo, {"a.txt": "a2\n"})
+    target = tmp_path / "elsewhere"
+    target.mkdir()
+    if os.name == "nt":
+        subprocess.run(["cmd", "/c", "mklink", "/J", str(atc_tmp / "candidates"), str(target)], check=True, capture_output=True)
+    else:
+        (atc_tmp / "candidates").symlink_to(target, target_is_directory=True)
+    assert integrate(repo, "topic", tip) == 9
+    assert capsys.readouterr().err.startswith(locations.UNSUITABLE) and list(target.iterdir()) == []
+
+
 def test_text_mode_warns_when_candidate_worktree_is_retained(
-    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    repo: Path, atc_tmp: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     tip = topic(repo, {"a.txt": "a2\n"})
     real_git = gi.git
@@ -440,7 +539,7 @@ def test_text_mode_warns_when_candidate_worktree_is_retained(
     assert main_tip(repo) == tip
     assert "WARNING candidate worktree retained at" in captured.err
     assert "simulated: directory in use" in captured.err
-    assert str(tmp_path / "tmp" / "atc-integration-candidates") in captured.err
+    assert str(atc_tmp / "candidates") in captured.err
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="the Job Object fallback exists only on Windows")
@@ -701,7 +800,7 @@ def records(repo: Path) -> list[str]:
 
 
 def leftover_reports() -> list[Path]:
-    return list(Path(tempfile.gettempdir()).rglob("*.report.json"))
+    return list((Path(os.environ["ATC_TMP"]) / "candidates").rglob("*.report.json"))
 
 
 def test_valid_report_writes_evidence_record(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
