@@ -25,9 +25,9 @@ lands together with a governance change to that sentence.
   markers, enforces the marker contract, moves the temporary directory
   (`ATC_HOME.md` § Resolving the locations) and ends child processes
   (§ Child processes).
-- `[tool.atc-testkit]` in `pyproject.toml` names the project's gate, hook,
-  workflow, CI job, unmarked-baseline file and the data listed in
-  § What a project supplies.
+- `[tool.atc-testkit]` in `pyproject.toml` holds the project's data under the
+  keys listed in § What a project supplies. The selection policy and the
+  static checks stay in the project's Python file.
 - A project keeps no script of its own for a targeted isolated run;
   `atc test run` against the checkout is that run.
 
@@ -138,7 +138,8 @@ The hook is one line: `exec uv run --frozen <project's uv options> python
 
 The verifier runs with the candidate tree as its working directory. It
 refuses by printing a token as the first stderr line, a summary after it, and
-exiting 1; any unexpected fault refuses with `VERIFIER_ERROR`. Checks run in
+exiting 1, or exiting 9 for `ATC_TMP_UNSUITABLE`; any unexpected fault refuses
+with `VERIFIER_ERROR`. Checks run in
 this order:
 
 | Check | Token |
@@ -312,14 +313,35 @@ The scratch registry and deletion (`ATC_HOME.md` § Scratch registry,
 
 ## What a project supplies
 
+In the project's Python file:
+
 - The selection policy: package dependencies, path prefixes, full-suite
   files, and how a missing remote baseline is read.
-- Its static checks with their tokens, path conditions and position, the lint
-  scope, and the documentation check.
-- Product module prefixes for the import check, extra credential variable
-  names, data-root variable names, and automation-Markdown prefixes.
-- `--ignore` arguments appended to a stage, `uv` options for the hook, test
-  paths, the CI platform matrix, the CI job that runs `slow` tests, and the
-  CI runner's initialization function.
+- Its static checks with their tokens, path conditions and position, and the
+  documentation check.
+
+In `[tool.atc-testkit]`; the first seven keys are required:
+
+| Key | Holds |
+| --- | --- |
+| `gate` | the gate script's path |
+| `hook` | the pre-push hook's path |
+| `workflow` | the CI workflow's path |
+| `ci_job` | the CI job that runs `atc_testkit.check` |
+| `unmarked_baseline` | the unmarked-baseline file's path |
+| `slow_ci_job` | the CI job that runs `slow` tests |
+| `product_module_prefixes` | product module prefixes for the import check |
+| `credential_variables` | extra credential variable names |
+| `data_root_variables` | data-root variable names |
+| `automation_markdown_prefixes` | automation-Markdown path prefixes |
+| `lint_scope` | the paths the lint check reads |
+| `hook_uv_options` | `uv` options for the hook |
+| `ci_platforms` | the CI platform matrix |
+| `ci_init` | the CI runner's initialization function, as `module:function` |
+| `ignore` | `--ignore` paths appended to a stage, under `nt` and `posix` |
+
+Elsewhere in the project:
+
+- Test paths, as `testpaths` in `[tool.pytest.ini_options]`.
 - The verifier argv file, which is a project file and carries the `uv`
   options the project's verifier needs, an interpreter version for example.
