@@ -25,14 +25,6 @@ def alive(pid: int) -> bool:
     return any(process.pid == pid for process in children.list_processes())
 
 
-def gone(pid: int) -> bool:
-    """The system's process list drops an ended process shortly after its Job counts it out."""
-    deadline = time.monotonic() + 15
-    while alive(pid) and time.monotonic() < deadline:
-        time.sleep(0.1)
-    return not alive(pid)
-
-
 def wait_for_text(path: Path) -> str:
     deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
@@ -48,10 +40,10 @@ def test_reap_ends_the_whole_tree_and_waits(tmp_path: Path) -> None:
     grandchild = int(wait_for_text(pid_file))
     children.reap()
     assert process.poll() is not None
-    assert gone(process.pid) and gone(grandchild)
+    assert not alive(process.pid) and not alive(grandchild)
 
 
-def test_a_test_teardown_reaps_what_it_started(tmp_path: Path, pytester_unused=None) -> None:
+def test_a_test_teardown_reaps_what_it_started(tmp_path: Path) -> None:
     process = children.start([sys.executable, "-c", SLEEP])
     assert process.poll() is None
     children.reap()
@@ -71,7 +63,7 @@ def test_run_ends_what_the_child_left_running(tmp_path: Path) -> None:
             "stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL); "
             "open(sys.argv[1],'w').write(str(c.pid))")
     assert children.run([sys.executable, "-c", code, str(pid_file)]).returncode == 0
-    assert gone(int(pid_file.read_text()))
+    assert not alive(int(pid_file.read_text()))
 
 
 class FakeProcess:
@@ -93,6 +85,12 @@ class FakeTree:
     def terminate(self) -> None:
         self.terminated = True
 
+    def hold_members(self) -> None:
+        pass
+
+    def wait_members(self, _seconds: float) -> bool:
+        return True
+
     def close(self) -> None:
         self.closed = True
 
@@ -111,6 +109,47 @@ def test_a_tree_that_keeps_running_is_reported_with_its_token() -> None:
     with pytest.raises(TimeoutError, match="CHILD_TREE_STILL_RUNNING"):
         children._end(FakeProcess(), tree, seconds=0.1)
     assert not tree.closed
+
+
+def test_a_member_that_does_not_finish_is_reported_with_its_token() -> None:
+    class Unfinished(FakeTree):
+        def wait_members(self, _seconds: float) -> bool:
+            return False
+    tree = Unfinished(0)
+    with pytest.raises(TimeoutError, match="CHILD_TREE_STILL_RUNNING"):
+        children._end(FakeProcess(), tree, seconds=0.1)
+    assert not tree.closed
+
+
+def test_members_are_held_before_the_tree_ends_and_again_after() -> None:
+    calls = []
+
+    class Recording(FakeTree):
+        def hold_members(self) -> None:
+            calls.append("hold")
+
+        def terminate(self) -> None:
+            calls.append("terminate")
+            super().terminate()
+    children._end(FakeProcess(), Recording(1))
+    assert calls == ["hold", "terminate", "hold"]
+
+
+@windows
+def test_a_held_member_is_waited_for(tmp_path: Path) -> None:
+    pid_file = tmp_path / "pid"
+    process = children.start([sys.executable, "-c", GRANDCHILD, str(pid_file)])
+    grandchild = int(wait_for_text(pid_file))
+    tree = next(entry[1] for entry in children._started if entry[0] is process)
+    try:
+        assert {process.pid, grandchild} <= set(tree.members())
+        tree.hold_members()
+        assert {process.pid, grandchild} <= set(tree.held)
+        assert not tree.wait_members(0.05)
+        tree.terminate()
+        assert tree.wait_members(10.0)
+    finally:
+        children.reap()
 
 
 def test_run_passes_input_and_check(tmp_path: Path) -> None:

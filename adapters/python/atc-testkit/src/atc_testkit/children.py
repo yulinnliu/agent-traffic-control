@@ -29,6 +29,10 @@ class HostProcess(NamedTuple):
 if os.name == "nt":
     from ctypes import wintypes
 
+    _MAX_MEMBERS = 4096
+    _SYNCHRONIZE = 0x00100000
+    _WAIT_OBJECT_0 = 0
+
     class _Accounting(ctypes.Structure):
         _fields_ = [(name, ctypes.c_int64) for name in ("user", "kernel", "period_user", "period_kernel")] + [
             (name, wintypes.DWORD) for name in ("faults", "total", "active", "terminated")]
@@ -43,6 +47,10 @@ if os.name == "nt":
     class _UnicodeString(ctypes.Structure):
         _fields_ = [("Length", wintypes.USHORT), ("MaximumLength", wintypes.USHORT), ("Buffer", ctypes.c_void_p)]
 
+    class _ProcessIdList(ctypes.Structure):
+        _fields_ = [("assigned", wintypes.DWORD), ("listed", wintypes.DWORD),
+                    ("ids", ctypes.c_size_t * _MAX_MEMBERS)]
+
     class _Tree:
         """A non-breakaway Windows Job that holds one child's whole tree."""
 
@@ -55,6 +63,11 @@ if os.name == "nt":
                                                               wintypes.DWORD, ctypes.c_void_p]
             self.kernel.TerminateJobObject.argtypes = [wintypes.HANDLE, wintypes.UINT]
             self.kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+            self.kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+            self.kernel.OpenProcess.restype = wintypes.HANDLE
+            self.kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+            self.kernel.WaitForSingleObject.restype = wintypes.DWORD
+            self.held: dict[int, int] = {}
             self.handle = self.kernel.CreateJobObjectW(None, None)
             if not self.handle:
                 raise OSError("CHILD_JOB_CREATE_FAILED")
@@ -73,7 +86,35 @@ if os.name == "nt":
             if not self.kernel.TerminateJobObject(self.handle, 1):
                 raise OSError("CHILD_JOB_TERMINATE_FAILED")
 
+        def members(self) -> list[int]:
+            """The process IDs the Job lists; a Job drops a process from this list before its teardown ends."""
+            value = _ProcessIdList()
+            if not self.kernel.QueryInformationJobObject(self.handle, 3, ctypes.byref(value), ctypes.sizeof(value),
+                                                         None):
+                raise OSError("CHILD_JOB_QUERY_FAILED")
+            return [int(pid) for pid in value.ids[:value.listed]]
+
+        def hold_members(self) -> None:
+            """Open a handle to every member, which is what stays waitable through its teardown."""
+            for pid in self.members():
+                if pid not in self.held:
+                    handle = self.kernel.OpenProcess(_SYNCHRONIZE, False, pid)
+                    if handle:
+                        self.held[pid] = handle
+
+        def wait_members(self, seconds: float) -> bool:
+            """Whether every held process has finished within ``seconds``."""
+            deadline = time.monotonic() + seconds
+            for handle in self.held.values():
+                remaining = max(deadline - time.monotonic(), 0.0)
+                if self.kernel.WaitForSingleObject(handle, int(remaining * 1000)) != _WAIT_OBJECT_0:
+                    return False
+            return True
+
         def close(self) -> None:
+            for handle in self.held.values():
+                self.kernel.CloseHandle(handle)
+            self.held = {}
             self.kernel.CloseHandle(self.handle)
             self.handle = None
 else:
@@ -97,6 +138,12 @@ else:
                 os.killpg(self.group, signal.SIGKILL)
             except ProcessLookupError:
                 pass
+
+        def hold_members(self) -> None:
+            """The group's existence is what ``active`` reads until its last member is reaped."""
+
+        def wait_members(self, _seconds: float) -> bool:
+            return True
 
         def close(self) -> None:
             self.group = None
@@ -147,15 +194,19 @@ def start(args, **options) -> subprocess.Popen:
 
 
 def _end(process: subprocess.Popen, tree: _Tree, seconds: float = REAP_SECONDS) -> None:
-    """End every process of the child's tree and wait until the child and its tree are gone."""
+    """End every process of the child's tree and return once the child and every member have finished."""
+    tree.hold_members()
     if process.poll() is None or tree.active():
         tree.terminate()
+    tree.hold_members()
     process.wait(seconds)
     deadline = time.monotonic() + seconds
     while tree.active():
         if time.monotonic() > deadline:
             raise TimeoutError("CHILD_TREE_STILL_RUNNING")
         time.sleep(0.05)
+    if not tree.wait_members(seconds):
+        raise TimeoutError("CHILD_TREE_STILL_RUNNING")
     tree.close()
 
 
