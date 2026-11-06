@@ -29,7 +29,7 @@ Operational description of the tree; governance semantics live under
   reports drift. Anything heavier belongs in a language adapter.
 - `adapters/python/` — the Python reference implementation of the tools behind
   the `atc` command, with its own `pyproject.toml` and lock file, plus
-  `hami-testkit/`, the pytest adapter of the verification contract. Other
+  `atc-testkit/`, the pytest adapter of the verification contract. Other
   languages add a sibling directory and run the same fixtures.
 - `workspace.yaml.example` — the shape of the machine-local map.
 - `docs/` — operational documentation. `.out-of-scope/` — recorded rejections.
