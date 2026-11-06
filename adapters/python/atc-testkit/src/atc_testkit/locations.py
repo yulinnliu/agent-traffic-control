@@ -63,7 +63,7 @@ def is_link(status: os.stat_result) -> bool:
     return stat.S_ISLNK(status.st_mode)
 
 
-def _not_a_real_directory(path: str | os.PathLike[str]) -> str | None:
+def not_a_real_directory(path: str | os.PathLike[str]) -> str | None:
     """What keeps an existing ``path`` from being a real directory; ``None`` for one, or for a path still to create."""
     try:
         status = os.lstat(path)
@@ -80,7 +80,7 @@ def _not_a_real_directory(path: str | os.PathLike[str]) -> str | None:
 
 def _broken_property(root: str, environ: MutableMapping[str, str]) -> str | None:
     """The property of docs/ATC_HOME.md § Location that ``root`` breaks, or ``None``."""
-    not_real = _not_a_real_directory(os.path.normpath(root))
+    not_real = not_a_real_directory(os.path.normpath(root))
     if not_real:
         return not_real
     long = long_name(root)
@@ -118,7 +118,7 @@ def locate(environ: MutableMapping[str, str] | None = None) -> Locations:
     root = tmp_root(environ)
     systmp = root / SYSTMP
     for directory in (systmp, root / CANDIDATES):
-        not_real = _not_a_real_directory(directory)
+        not_real = not_a_real_directory(directory)
         if not_real:
             raise Refusal(UNSUITABLE, not_real)
     try:

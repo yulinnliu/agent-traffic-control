@@ -128,6 +128,45 @@ def stale_logs(repo: Path) -> tuple[Path, Path]:
     return logs / "prepush-serial.log", logs / "other.txt"
 
 
+@pytest.fixture()
+def linked_logs(repo: Path, tmp_path: Path):
+    """``.tmp`` as a link to a directory that holds a log of another owner."""
+    target = tmp_path / "elsewhere"
+    target.mkdir()
+    (target / "prepush-serial.log").write_text("not this checkout's", encoding="utf-8")
+    link = repo / ".tmp"
+    if os.name == "nt":
+        subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(target)], check=True, capture_output=True)
+    else:
+        link.symlink_to(target, target_is_directory=True)
+    yield target
+    os.rmdir(link) if os.name == "nt" else link.unlink()
+
+
+@pytest.mark.parametrize("name", ["a.py", "a.md"])
+def test_a_linked_log_directory_stops_the_run_and_stays_untouched(repo: Path, linked_logs: Path, name: str,
+                                                                  capsys: pytest.CaptureFixture[str]) -> None:
+    base = git(repo, "rev-parse", "HEAD")
+    sha = commit(repo, name)
+    recorder = Recorder()
+    assert gate.main(project(repo), ["--run"], [push_line(repo, base, sha)], recorder) == 9
+    assert capsys.readouterr().err.splitlines()[0].startswith("LOG_DIRECTORY_UNSUITABLE ")
+    assert recorder.calls == [] and [path.name for path in linked_logs.iterdir()] == ["prepush-serial.log"]
+    assert (linked_logs / "prepush-serial.log").read_text(encoding="utf-8") == "not this checkout's"
+
+
+def test_a_file_as_the_log_directory_stops_the_run(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    (repo / ".tmp").write_text("x", encoding="utf-8")
+    base = git(repo, "rev-parse", "HEAD")
+    sha = commit(repo, "a.py")
+    assert gate.main(project(repo), ["--run"], [push_line(repo, base, sha)], Recorder()) == 9
+    assert capsys.readouterr().err.startswith("LOG_DIRECTORY_UNSUITABLE ")
+
+
+def test_printing_a_selection_never_reads_the_log_directory(repo: Path, linked_logs: Path) -> None:
+    assert gate.main(project(repo), ["--paths", "a.py"]) == 0
+
+
 def test_a_run_clears_the_logs_of_the_earlier_run(repo: Path) -> None:
     stale, other = stale_logs(repo)
     base = git(repo, "rev-parse", "HEAD")
