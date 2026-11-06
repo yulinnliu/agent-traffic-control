@@ -411,6 +411,10 @@ def prune(*, say: Callable[[str], None] = print, environ=None, now: datetime | N
             parent_status = os.lstat(parent)
         except FileNotFoundError:
             continue
+        except OSError as error:
+            say(f"REFUSED {parent} (error: {error})")
+            code = 1
+            continue
         if _is_link(parent_status):
             say(f"REFUSED {parent} (is itself a link)")
             code = 1
@@ -419,12 +423,22 @@ def prune(*, say: Callable[[str], None] = print, environ=None, now: datetime | N
             say(f"REFUSED {parent} (not a directory)")
             code = 1
             continue
-        for entry in sorted(os.scandir(parent), key=lambda entry: entry.name):
+        try:
+            entries = sorted(os.scandir(parent), key=lambda entry: entry.name)
+        except OSError as error:
+            say(f"REFUSED {parent} (error: {error})")
+            code = 1
+            continue
+        for entry in entries:
             if skip and fnmatch.fnmatch(entry.name, skip):
                 continue
-            status = entry.stat(follow_symlinks=False)
-            if _old(status, now):
-                code = max(code, handle(entry.path, status, say))
+            try:
+                status = entry.stat(follow_symlinks=False)
+                if _old(status, now):
+                    code = max(code, handle(entry.path, status, say))
+            except Exception as error:  # noqa: BLE001 - an error while handling an entry is its refusal
+                say(f"REFUSED {entry.path} (error: {error})")
+                code = 1
     for row in registered(places.tmp):
         try:
             created = datetime.strptime(row.created_utc, TIME_FORMAT).replace(tzinfo=UTC)

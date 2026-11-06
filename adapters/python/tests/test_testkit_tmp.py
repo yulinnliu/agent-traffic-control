@@ -520,3 +520,47 @@ def test_a_link_is_refused_before_the_delete_is_reached(tmp_path: Path, atc_tmp:
     link_directory(atc_tmp / "systmp/old", victim)
     assert clean(atc_tmp / "link") == (1, [f"REFUSED {atc_tmp / 'link'} (is itself a link)"])
     assert prune() == (1, [f"REFUSED {atc_tmp / 'systmp/old'} (is itself a link)"])
+
+
+class UnreadableEntry:
+    name, path = "broken", "the-entry"
+
+    def stat(self, *, follow_symlinks: bool):
+        raise PermissionError("cannot read")
+
+
+def test_an_error_on_an_entry_is_its_refusal_and_the_rest_continue(atc_tmp: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    taken = age(write(atc_tmp / "systmp/old.txt"), 8)
+    real = os.scandir
+
+    def with_a_broken_entry(path):
+        return [UnreadableEntry(), *real(path)] if Path(path) == atc_tmp / "systmp" else real(path)
+    with monkeypatch.context() as patch:
+        patch.setattr(scratch.os, "scandir", with_a_broken_entry)
+        code, lines = prune()
+    assert code == 1 and lines == ["REFUSED the-entry (error: cannot read)", f"DELETED {taken}"]
+
+
+def test_an_error_in_a_candidates_handler_is_its_refusal(atc_tmp: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    tree = age(write(atc_tmp / "candidates/tree/.git", "gitdir: x\n").parent, 8)
+
+    def no_git(_tree):
+        raise FileNotFoundError("git is missing")
+    monkeypatch.setattr(scratch, "_owning_repository", no_git)
+    code, lines = prune()
+    assert code == 1 and lines == [f"REFUSED {tree} (error: git is missing)"]
+
+
+@pytest.mark.parametrize("failing", ["lstat", "scandir"])
+def test_an_error_reading_a_parent_is_its_refusal(atc_tmp: Path, monkeypatch: pytest.MonkeyPatch, failing: str) -> None:
+    (atc_tmp / "candidates").mkdir()
+    real = getattr(os, failing)
+
+    def refuse(path, *args, **kwargs):
+        if Path(path) == atc_tmp / "candidates":
+            raise PermissionError("cannot read")
+        return real(path, *args, **kwargs)
+    with monkeypatch.context() as patch:
+        patch.setattr(scratch.os, failing, refuse)
+        code, lines = prune()
+    assert code == 1 and lines == [f"REFUSED {atc_tmp / 'candidates'} (error: cannot read)"]
