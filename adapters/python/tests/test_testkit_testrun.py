@@ -280,8 +280,9 @@ def test_mutants_are_killed_or_survive_and_files_are_restored(export: Export, tm
 
 def test_a_red_baseline_applies_no_mutant(export: Export, tmp_path: Path) -> None:
     export.file.write_text("def value():\n    return 9\n", encoding="utf-8")
-    run = export.run(tmp_path, [KILLED])
-    assert run.returncode == 1 and run.stdout.startswith("BASELINE-RED") and "K one" not in run.stdout
+    applicable = {"label": "K one", "edits": [{"path": "src/fixture_pkg/__init__.py", "old": "return 9", "new": "return 1"}]}
+    run = export.run(tmp_path, [applicable])
+    assert run.returncode == 1 and run.stdout.startswith("BASELINE-RED") and "K one" not in run.stdout + run.stderr
 
 
 @pytest.mark.parametrize("old", ["absent text", "\n"])
