@@ -18,6 +18,7 @@ import importlib.util
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -184,6 +185,18 @@ def check_final_state(root: Path, sha: str) -> None:
         raise VerifyError("CANDIDATE_DIRTY", *dirty[:REPORTED_LINES])
 
 
+def remove_tree(path: Path) -> None:
+    """Delete ``path``, read-only files included (Git writes its objects read-only); a leftover keeps the verdict."""
+    def writable(function: Callable[[str], object], target: str, _exc: BaseException) -> None:
+        os.chmod(target, stat.S_IWRITE)
+        function(target)
+
+    try:
+        shutil.rmtree(path, onexc=writable)
+    except OSError as exc:
+        print(f"working directory left: {path} ({type(exc).__name__}: {exc})", flush=True)
+
+
 def main(environ: Mapping[str, str] | None = None, root: Path = ROOT, run: Run = run_command) -> int:
     environ = os.environ if environ is None else environ
     work = None
@@ -208,7 +221,7 @@ def main(environ: Mapping[str, str] | None = None, root: Path = ROOT, run: Run =
         print("VERIFIER_ERROR", file=sys.stderr)
         print(f"{type(exc).__name__}: {exc}", file=sys.stderr)
         return 1
-    shutil.rmtree(work, ignore_errors=True)
+    remove_tree(work)
     print(f"integration verification: PASS {sha}", flush=True)
     return 0
 

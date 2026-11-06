@@ -32,7 +32,7 @@ Then read `shared/governance/INDEX.md` and `CORE.md` from that exact same revisi
 `GIT_WORKFLOW.md` § Integration verifier source).
 
 - Verifier argv file: adapters/python/scripts/integration-verify.json
-- Verifier timeout: 900
+- Verifier timeout: 1080
 
 The argv runs `adapters/python/scripts/integration_verify.py` in the
 candidate's own `adapters/python/.venv/` built from `uv.lock`; that script

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 import subprocess
 import tempfile
 from pathlib import Path
@@ -51,6 +52,11 @@ class Candidate:
         self.calls.append((argv, cwd))
         if argv[0] == "git":
             return iv.run_command(argv, cwd)
+        if name(argv) == "pytest":  # what the suite leaves in its base directory: a repository's read-only object
+            left = Path(argv[-1]) / "repo/object"
+            left.parent.mkdir(parents=True)
+            left.write_bytes(b"x")
+            left.chmod(stat.S_IREAD)
         return self.codes.get(name(argv), 0), "output line\nFAILED tests/test_x.py::test_y - boom\nlast line\n"
 
     def verify(self, capsys: pytest.CaptureFixture[str], **overrides: str) -> tuple[int, list[str]]:
@@ -296,6 +302,16 @@ def test_unexpected_fault_is_refused(candidate: Candidate, capsys: pytest.Captur
 
     assert iv.main(candidate.env(), candidate.root, run) == 1
     assert capsys.readouterr().err.splitlines() == ["VERIFIER_ERROR", "OSError: uv is not installed"]
+
+
+def test_git_hook_variables_do_not_select_another_repository(
+    candidate: Candidate, tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    candidate.advance()
+    env = candidate.env()
+    monkeypatch.setenv("GIT_DIR", str(tmp_path / "elsewhere"))
+    assert iv.main(env, candidate.root, candidate.run) == 0
+    assert capsys.readouterr().err == ""
 
 
 def test_checks_are_the_python_adapter_job_commands() -> None:
