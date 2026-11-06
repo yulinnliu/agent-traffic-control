@@ -54,7 +54,8 @@ order. Each is one pytest invocation over the selected paths.
 | `interactive` | `interactive_desktop and not slow` | `-n 0` | interactive |
 
 - Every stage passes its worker option explicitly, so a project's `addopts`
-  cannot change it.
+  cannot change it. A project that carries the testkit has `pytest-xdist`
+  installed.
 - A stage that collects no test passes. A run in which every stage collects
   no test is refused with `NO_TESTS_COLLECTED`.
 - A project may append `--ignore` arguments to a stage, for a platform for
@@ -170,8 +171,9 @@ A test starts a child process through the testkit's `start` or `run`.
 - At the end of a session the controlling process lists every live process
   whose command line names that session's pytest base directory, excluding
   itself and its ancestors, and fails the run with `CHILD_PROCESSES_ALIVE`
-  when one exists. Two sessions never share a base directory, so one
-  session's children never fail another.
+  when one exists. Sessions with different base directories never fail one
+  another; two runs given the same scratch at the same time share one and are
+  not supported.
 
 ## Private desktop
 
@@ -215,8 +217,9 @@ One isolated pytest run inside `<tree>`, a worktree or an exported copy, in
 the scratch `<scratch>` (`ATC_HOME.md` § Test scratch). In order:
 
 1. Resolve `<tree>` and a path-form `<python>` against the caller's
-   directory: `TREE_NOT_FOUND`, `PYTHON_NOT_FOUND` (exit 9). Check the
-   scratch: `SCRATCH_OUTSIDE_TMP`, `SCRATCH_PATH_TOO_LONG` (exit 9).
+   directory: `TREE_NOT_FOUND`, `PYTHON_NOT_FOUND` (exit 9). Check and
+   create the scratch: `SCRATCH_OUTSIDE_TMP`, `SCRATCH_PATH_TOO_LONG`,
+   `SCRATCH_NOT_RESOLVED`, `SCRATCH_NOT_CREATED` (exit 9).
 2. Remove every `HAMI_*` variable. Point each data-root variable the tree's
    `[tool.atc-testkit]` names, and `QUANT_DATA_ROOT` when it names none, at
    `<scratch>/qdr`. Make the scratch the temporary directory.

@@ -10,7 +10,8 @@ whole directory loses nothing. Persistent state lives elsewhere
 - The ATC home is `.atc` in the user's home directory (`%USERPROFILE%\.atc` on
   Windows, `$HOME/.atc` elsewhere), written `~/.atc` below.
 - The temporary root is `~/.atc/tmp`. `ATC_TMP`, when set to an absolute path,
-  replaces it; this is how one machine places temporary files on a faster or
+  replaces it, and a value that is not absolute is refused with
+  `ATC_TMP_UNSUITABLE`; this is how one machine places temporary files on a faster or
   shorter volume. The resolved root is written `<tmp>` below.
 - No shared tool writes generated files to the system temporary directory, to
   a drive root, or into a repository's tracked tree.
@@ -19,7 +20,7 @@ whole directory loses nothing. Persistent state lives elsewhere
   product code under test runs Git when one does. Its absolute long-name form
   is at most 40 characters, which leaves a scratch name of at least 23. A
   root that breaks one of these is refused with `ATC_TMP_UNSUITABLE` and the
-  property it breaks, before anything is created.
+  property it breaks (exit 9), before anything is created.
 - CI (`CI` set) keeps the platform's own temporary locations.
 - `~/.atc` is unrelated to a repository's tracked `.atc/` directory
   (`LAYOUT.md` § Inside a consuming repository) and is never a governance
@@ -138,18 +139,21 @@ temporary tooling runs only at the end of them.
 6. A deleted `<dir>` prints `DELETED` and loses its registry line.
 
 Each `<dir>` ends on one line: `DELETED`, `SKIPPED` or `REFUSED` with the
-reason. The exit code is the highest across all of them: 0, 1 for a refusal
+reason; an error while handling a `<dir>` is a `REFUSED` with the error. The exit code is the highest across all of them: 0, 1 for a refusal
 at steps 3 to 5, 2 for a refusal at step 1.
 
 `atc tmp prune` deletes entries whose last modification is older than seven
-days:
+days. An entry that is a link prints `REFUSED` and is left. A plain file is
+deleted as a file. A directory goes through steps 4 and 5 with no link
+expected.
 
-- under `<tmp>/systmp`, other than `pytest-of-*`, by steps 3 to 5 with no
-  link expected. This includes the working directory a failed verifier or
-  gate run left for inspection.
-- under `<tmp>/integration-candidates`, a candidate tree through
-  `git worktree remove` in the repository that owns it, and a report file or
-  a tree Git no longer knows by steps 3 to 5.
+- Under `<tmp>/systmp` it takes every entry other than `pytest-of-*`. This
+  includes the working directory a failed verifier or gate run left for
+  inspection.
+- Under `<tmp>/integration-candidates` it removes a candidate tree through
+  `git worktree remove` in the repository that owns it; a tree Git refuses to
+  remove prints `REFUSED` with Git's message and is left. A report file, and
+  a tree Git no longer knows, are handled as any other entry.
 
 It reports registered scratches older than seven days and deletes none.
 
