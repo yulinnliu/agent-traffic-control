@@ -109,7 +109,8 @@ diagnostics. A project supplies data.
   Every other ending of a mutated run (a setup `ERROR` alone, exits 2 to 5, a
   timeout) prints `INCONCLUSIVE` with the reason, ends the run with exit 1 after
   restoring the files, and leaves the remaining mutants unrun; the last line
-  then reads `done: 1 of 13 mutants`. An exception while applying or running a
+  then reads `done: N of M mutants`, where `N` counts the mutants that printed a
+  result line. An exception while applying or running a
   mutant ends the run the same way, with its name on stderr.
 
 ## Distribution

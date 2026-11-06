@@ -30,7 +30,10 @@ whole directory loses nothing. Persistent state lives elsewhere
   platform's temporary directory, or `ATC_TMP` when that is set and absolute,
   and the properties above are not checked on it. `<tmp>/systmp` and
   `<tmp>/candidates` are still real directories. An entry point that names no
-  directory keeps the platform's temporary directory and checks nothing.
+  directory keeps the platform's temporary directory: its call to § Resolving
+  the locations returns that directory, creates nothing, checks nothing and
+  sets no variable, `ATC_TMP` included. One that names a directory gets the
+  call as that section describes it.
 - `~/.atc` is unrelated to a repository's tracked `.atc/` directory
   (`LAYOUT.md` § Inside a consuming repository) and is never a governance
   source.

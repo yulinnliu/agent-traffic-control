@@ -312,8 +312,9 @@ Applies each mutant alone to `<scratch>/tree`, the export of `<sha>`, through
   carriage returns ignored: `restored-ok` or `RESTORE-MISMATCH` per file,
   exit 1 on any mismatch. The last line counts the mutants and names the
   survivors: `done: M mutants, S survived <labels>`, or
-  `done: N of M mutants, S survived <labels>` after an abort, where `N` counts
-  the mutants that ended with a verdict.
+  `done: N of M mutants, S survived <labels>` after any abort, also one on the
+  last mutant, where `N` counts the mutants that printed a `KILLED`,
+  `SURVIVED` or `INCONCLUSIVE` line.
 
 ### `atc tmp list`, `atc tmp clean`, `atc tmp prune`
 
