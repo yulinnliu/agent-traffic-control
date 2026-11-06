@@ -1,19 +1,22 @@
+"""The root's data for the verifier skeleton; the skeleton's own rows are tested in ``test_testkit_verifier.py``."""
 from __future__ import annotations
 
 import json
 import os
 import stat
 import subprocess
-import sys
-import tempfile
 from pathlib import Path
 
 import pytest
 
 import integration_verify as iv
+from atc_testkit import isolation, locations, verifier
+
+pytestmark = pytest.mark.integration
 
 ADAPTER = Path(__file__).resolve().parents[1]
 WORKSPACE = ADAPTER.parents[1]
+FAILING_OUTPUT = "output line\nFAILED tests/test_x.py::test_y - boom\nlast line\n"
 
 
 def run_git(repo: Path, *args: str) -> str:
@@ -48,28 +51,32 @@ class Candidate:
         return {"ATC_EXPECTED_MAIN_SHA": self.main, "ATC_INTEGRATION_SHA": head, "ATC_CANDIDATE_DIR": str(self.root),
                 "ATC_REVIEWED_SOURCE_SHA": head, **overrides}
 
-    def run(self, argv: list[str], cwd: Path) -> tuple[int, str]:
+    def run(self, argv: list[str], *, cwd: Path, env: dict[str, str], log: Path, private: bool = False) -> int:
         """Git runs for real; every other command returns the code set for its name."""
-        self.calls.append((argv, cwd))
+        self.calls.append((argv, cwd, env, private))
+        log.parent.mkdir(parents=True, exist_ok=True)
         if argv[0] == "git":
-            return iv.run_command(argv, cwd)
+            result = subprocess.run(argv, cwd=cwd, env=env, capture_output=True, text=True)
+            log.write_text(result.stdout + result.stderr, encoding="utf-8")
+            return result.returncode
         if name(argv) == "pytest":  # what the suite leaves in its base directory: a repository's read-only object
             left = Path(argv[-1]) / "repo/object"
             left.parent.mkdir(parents=True)
             left.write_bytes(b"x")
             left.chmod(stat.S_IREAD)
-        return self.codes.get(name(argv), 0), "output line\nFAILED tests/test_x.py::test_y - boom\nlast line\n"
+        log.write_text(FAILING_OUTPUT, encoding="utf-8")
+        return self.codes.get(name(argv), 0)
 
     def verify(self, capsys: pytest.CaptureFixture[str], **overrides: str) -> tuple[int, list[str]]:
         code = iv.main(self.env(**overrides), self.root, self.run)
         return code, capsys.readouterr().err.splitlines()
 
     def started(self) -> list[str]:
-        return [name(argv) for argv, _cwd in self.calls]
+        return [name(call[0]) for call in self.calls]
 
 
 @pytest.fixture
-def candidate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Candidate:
+def candidate(tmp_path: Path, atc_tmp: Path, monkeypatch: pytest.MonkeyPatch) -> Candidate:
     for key in [key for key in os.environ if key.startswith("GIT_")]:
         monkeypatch.delenv(key)
     for key, value in {
@@ -78,21 +85,17 @@ def candidate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Candidate:
         "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
     }.items():
         monkeypatch.setenv(key, value)
-    systmp = tmp_path / "systmp"
-    systmp.mkdir()
-    monkeypatch.setattr(tempfile, "tempdir", str(systmp))
     root = tmp_path / "candidate"
     (root / iv.ADAPTER_DIR).mkdir(parents=True)
     run_git(root, "init", "-q", "-b", "main")
     main = commit(root, "a.txt", "a\n")
     monkeypatch.chdir(root)
-    monkeypatch.setattr(iv, "PRODUCT_MODULES", ())
+    monkeypatch.setattr(iv, "PRODUCT_PREFIXES", ())
     return Candidate(root, main)
 
 
-def test_full_range_runs_every_check_in_order(
-    candidate: Candidate, tmp_path: Path, capsys: pytest.CaptureFixture[str],
-) -> None:
+def test_full_range_runs_the_roots_checks_in_order(candidate: Candidate, atc_tmp: Path,
+                                                    capsys: pytest.CaptureFixture[str]) -> None:
     sha = candidate.advance()
     assert iv.main(candidate.env(), candidate.root, candidate.run) == 0
     captured = capsys.readouterr()
@@ -101,17 +104,39 @@ def test_full_range_runs_every_check_in_order(
     assert captured.out.splitlines()[-1] == f"integration verification: PASS {sha}"
     adapter = candidate.root / iv.ADAPTER_DIR
     pytest_argv = candidate.calls[-1][0]
-    assert candidate.calls == [
+    assert [call[:2] for call in candidate.calls] == [
         (["git", "diff", "--check", f"{candidate.main}..{sha}"], candidate.root),
-        (iv.WORKSPACE_CHECK[1], adapter), (iv.POLICY_CHECK[1], adapter), (pytest_argv, adapter),
+        (list(iv.WORKSPACE_CHECK.argv), adapter), (list(iv.POLICY_CHECK.argv), adapter), (pytest_argv, adapter),
     ]
-    assert pytest_argv[:-2] == iv.PYTEST and pytest_argv[-2] == "--basetemp"
-    basetemp = Path(pytest_argv[-1])
-    assert basetemp.parent.parent == tmp_path / "systmp" and not iv.inside(basetemp, candidate.root)
-    assert list((tmp_path / "systmp").iterdir()) == []
+    assert pytest_argv[:-2] == list(iv.TESTS.argv) and pytest_argv[-2] == "--basetemp"
 
 
-def test_documentation_only_range_skips_pytest_only(candidate: Candidate, capsys: pytest.CaptureFixture[str]) -> None:
+def test_the_working_directory_holds_the_base_directory_and_is_removed_after_a_pass(
+        candidate: Candidate, atc_tmp: Path) -> None:
+    candidate.advance()
+    assert iv.main(candidate.env(), candidate.root, candidate.run) == 0
+    base = Path(candidate.calls[-1][0][-1])
+    work = base.parents[1]
+    assert work.parent == atc_tmp / locations.SYSTMP and len(work.name) <= isolation.WORK_NAME_BOUND
+    assert not verifier.inside(base, candidate.root)
+    assert not work.exists()
+
+
+def test_the_checks_run_in_the_isolated_environment(candidate: Candidate, atc_tmp: Path,
+                                                     monkeypatch: pytest.MonkeyPatch) -> None:
+    candidate.advance()
+    monkeypatch.setenv("SOME_API_KEY", "x")
+    assert iv.main(candidate.env(), candidate.root, candidate.run) == 0
+    for _argv, _cwd, env, _private in candidate.calls:
+        work = Path(env["HOME"]).parent
+        assert work.parent == atc_tmp / locations.SYSTMP
+        assert env["USERPROFILE"] == env["HOME"] and "SOME_API_KEY" not in env
+        assert env["ATC_TMP"] == str(atc_tmp) and env["TEMP"] == str(work)
+        assert env["UV_CACHE_DIR"] == locations.cache_directories()["UV_CACHE_DIR"]
+    assert [call[3] for call in candidate.calls] == [False, False, False, True]
+
+
+def test_documentation_only_range_skips_the_tests_only(candidate: Candidate, capsys: pytest.CaptureFixture[str]) -> None:
     candidate.advance("docs/NOTE.md", "# note\n")
     assert iv.main(candidate.env(), candidate.root, candidate.run) == 0
     assert capsys.readouterr().out.splitlines()[0] == "classification: documentation-only"
@@ -136,83 +161,21 @@ def test_documentation_only_classification(paths: list[str], expected: bool) -> 
     assert iv.documentation_only(paths) is expected
 
 
-@pytest.mark.parametrize("name", iv.REQUIRED_ENV)
-def test_missing_input_is_refused(candidate: Candidate, capsys: pytest.CaptureFixture[str], name: str) -> None:
-    candidate.advance()
-    code, err = candidate.verify(capsys, **{name: ""})
-    assert (code, err[0], err[1]) == (1, "VERIFY_ENV_MISSING", f"missing: {name}")
-    assert candidate.calls == []
-
-
-@pytest.mark.parametrize("name", [name for name in iv.REQUIRED_ENV if name.endswith("_SHA")])
-@pytest.mark.parametrize("value", ["main", "abc1234", "A" * 40])
-def test_abbreviated_or_symbolic_sha_is_refused(
-    candidate: Candidate, capsys: pytest.CaptureFixture[str], name: str, value: str,
-) -> None:
-    candidate.advance()
-    code, err = candidate.verify(capsys, **{name: value})
-    assert (code, err[0]) == (1, "VERIFY_ENV_INVALID")
-    assert candidate.calls == []
-
-
-def test_candidate_dir_other_than_the_tree_is_refused(
-    candidate: Candidate, tmp_path: Path, capsys: pytest.CaptureFixture[str],
-) -> None:
-    candidate.advance()
-    code, err = candidate.verify(capsys, ATC_CANDIDATE_DIR=str(tmp_path))
-    assert (code, err[0]) == (1, "CANDIDATE_DIR_MISMATCH")
-
-
-def test_working_directory_other_than_the_candidate_is_refused(
-    candidate: Candidate, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    candidate.advance()
-    monkeypatch.chdir(candidate.root / iv.ADAPTER_DIR)
-    code, err = candidate.verify(capsys)
-    assert (code, err[0]) == (1, "CANDIDATE_DIR_MISMATCH")
-
-
-def test_working_directory_above_the_candidate_is_refused(
-    candidate: Candidate, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    candidate.advance()
-    monkeypatch.chdir(candidate.root.parent)
-    code, err = candidate.verify(capsys)
-    assert (code, err[0]) == (1, "CANDIDATE_DIR_MISMATCH")
-
-
-def test_head_other_than_the_integration_sha_is_refused(candidate: Candidate, capsys: pytest.CaptureFixture[str]) -> None:
-    candidate.advance()
-    code, err = candidate.verify(capsys, ATC_INTEGRATION_SHA=candidate.main)
-    assert (code, err[0]) == (1, "CANDIDATE_HEAD_MISMATCH")
-
-
-def side_commit(candidate: Candidate) -> str:
-    """A commit on a branch from main that the candidate does not contain."""
-    head = run_git(candidate.root, "rev-parse", "HEAD")
-    run_git(candidate.root, "switch", "-q", "-c", "side", candidate.main)
-    side = commit(candidate.root, "side.txt", "s\n")
-    run_git(candidate.root, "switch", "-q", "--detach", head)
-    return side
-
-
-def test_expected_main_outside_the_candidate_is_refused(candidate: Candidate, capsys: pytest.CaptureFixture[str]) -> None:
-    candidate.advance()
-    code, err = candidate.verify(capsys, ATC_EXPECTED_MAIN_SHA=side_commit(candidate))
-    assert (code, err[0]) == (1, "EXPECTED_MAIN_NOT_IN_CANDIDATE")
-
-
-def test_reviewed_source_outside_the_candidate_is_refused(candidate: Candidate, capsys: pytest.CaptureFixture[str]) -> None:
-    candidate.advance()
-    code, err = candidate.verify(capsys, ATC_REVIEWED_SOURCE_SHA=side_commit(candidate))
-    assert (code, err[0]) == (1, "REVIEWED_SOURCE_NOT_IN_CANDIDATE")
+def test_file_moved_into_docs_is_not_documentation_only(candidate: Candidate, capsys: pytest.CaptureFixture[str]) -> None:
+    candidate.main = candidate.advance("shared/skills/x.md", "# skill\n\nbody line one\nbody line two\n")
+    (candidate.root / "docs").mkdir()
+    run_git(candidate.root, "mv", "shared/skills/x.md", "docs/x.md")
+    run_git(candidate.root, "commit", "-q", "-m", "move")
+    assert iv.main(candidate.env(), candidate.root, candidate.run) == 0
+    assert capsys.readouterr().out.splitlines()[0] == "classification: full"
+    assert "pytest" in candidate.started()
 
 
 def test_product_module_imported_from_outside_the_candidate_is_refused(
     candidate: Candidate, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     candidate.advance()
-    monkeypatch.setattr(iv, "PRODUCT_MODULES", ("atc_cli",))
+    monkeypatch.setattr(iv, "PRODUCT_PREFIXES", ("atc_cli",))
     code, err = candidate.verify(capsys)
     assert (code, err[0]) == (1, "CANDIDATE_IMPORT_MISMATCH")
     assert err[1].startswith("atc_cli: ")
@@ -220,50 +183,10 @@ def test_product_module_imported_from_outside_the_candidate_is_refused(
 
 
 def test_this_checkout_imports_its_own_product_modules() -> None:
-    assert iv.PRODUCT_MODULES == ("atc_cli",)
-    assert iv.import_violations(iv.PRODUCT_MODULES, WORKSPACE) == []
-
-
-def test_range_without_a_changed_path_is_refused(candidate: Candidate, capsys: pytest.CaptureFixture[str]) -> None:
-    code, err = candidate.verify(capsys)
-    assert (code, err[0]) == (1, "EMPTY_INTEGRATION_DIFF")
-    assert candidate.calls == []
-
-
-def test_unreadable_range_is_refused(
-    candidate: Candidate, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    candidate.advance()
-    real = iv.git
-
-    def git(root: Path, *args: str) -> subprocess.CompletedProcess:
-        if args[0] == "diff":
-            return subprocess.CompletedProcess(args, 128, "", "fatal: bad object\n")
-        return real(root, *args)
-
-    monkeypatch.setattr(iv, "git", git)
-    code, err = candidate.verify(capsys)
-    assert (code, err[0], err[-1]) == (1, "RANGE_UNREADABLE", "fatal: bad object")
-    assert candidate.calls == []
-
-
-def test_file_moved_into_docs_is_not_documentation_only(candidate: Candidate, capsys: pytest.CaptureFixture[str]) -> None:
-    candidate.main = candidate.advance("shared/skills/x.md", "# skill\n\nbody line one\nbody line two\n")
-    (candidate.root / "docs").mkdir()
-    run_git(candidate.root, "mv", "shared/skills/x.md", "docs/x.md")
-    run_git(candidate.root, "commit", "-q", "-m", "move")
-    assert run_git(candidate.root, "diff", "--name-only", f"{candidate.main}..HEAD") == "docs/x.md"
-    assert iv.main(candidate.env(), candidate.root, candidate.run) == 0
-    assert capsys.readouterr().out.splitlines()[0] == "classification: full"
-    assert "pytest" in candidate.started()
-
-
-def test_whitespace_error_in_the_range_is_refused(candidate: Candidate, capsys: pytest.CaptureFixture[str]) -> None:
-    candidate.advance("docs/NOTE.md", "trailing \n")
-    code, err = candidate.verify(capsys)
-    assert (code, err[0]) == (1, "DIFF_CHECK_FAILED")
-    assert any("trailing whitespace" in line for line in err)
-    assert candidate.started() == [candidate.started()[0]]
+    project = iv.project(WORKSPACE)
+    names = verifier.module_names(project)
+    assert {"atc_cli", "atc_testkit"} <= set(names)
+    assert verifier.import_violations(names, WORKSPACE) == []
 
 
 @pytest.mark.parametrize(("failing", "token", "later"), [
@@ -282,111 +205,44 @@ def test_failing_check_is_refused_and_stops_the_run(
 
 
 def test_failing_suite_reports_its_failure_lines_and_keeps_its_log(
-    candidate: Candidate, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+    candidate: Candidate, atc_tmp: Path, capsys: pytest.CaptureFixture[str],
 ) -> None:
     candidate.advance()
     candidate.codes["pytest"] = 1
     _code, err = candidate.verify(capsys)
-    (work,) = (tmp_path / "systmp").iterdir()
-    log = work / "tests_failed.log"
+    (work,) = (atc_tmp / locations.SYSTMP).iterdir()
+    log = work / "tests.log"
     assert err[1] == f"{' '.join(candidate.calls[-1][0])} exited 1; log {log}"
     assert err[2:] == ["FAILED tests/test_x.py::test_y - boom", f"working directory kept: {work}"]
     assert "last line" in log.read_text(encoding="utf-8")
 
 
-def test_failing_check_reports_what_it_wrote_to_stderr(
-    candidate: Candidate, tmp_path: Path, capsys: pytest.CaptureFixture[str],
-) -> None:
-    candidate.advance()
-    child = [sys.executable, "-c", "import sys; print('to stdout'); sys.stderr.write('to stderr\\n'); sys.exit(3)"]
-
-    def run(argv: list[str], cwd: Path) -> tuple[int, str]:
-        if name(argv) == "scripts/validate_workspace.py":
-            return iv.run_command(child, cwd)
-        return candidate.run(argv, cwd)
-
-    assert iv.main(candidate.env(), candidate.root, run) == 1
-    err = capsys.readouterr().err.splitlines()
-    (work,) = (tmp_path / "systmp").iterdir()
-    assert err[0] == "WORKSPACE_VALIDATION_FAILED" and "to stdout" in err and "to stderr" in err
-    assert "to stderr" in (work / "workspace_validation_failed.log").read_text(encoding="utf-8")
-
-
 def test_suite_that_collects_no_test_is_refused(candidate: Candidate, capsys: pytest.CaptureFixture[str]) -> None:
     candidate.advance()
-    candidate.codes["pytest"] = iv.PYTEST_NO_TESTS_COLLECTED
+    candidate.codes["pytest"] = 5
     code, err = candidate.verify(capsys)
     assert (code, err[0]) == (1, "NO_TESTS_COLLECTED")
 
 
-def test_head_moved_by_a_check_is_refused(candidate: Candidate, capsys: pytest.CaptureFixture[str]) -> None:
+def test_whitespace_error_in_the_range_is_refused(candidate: Candidate, capsys: pytest.CaptureFixture[str]) -> None:
+    candidate.advance("docs/NOTE.md", "trailing \n")
+    code, err = candidate.verify(capsys)
+    assert (code, err[0]) == (1, "DIFF_CHECK_FAILED")
+    assert candidate.started() == [candidate.started()[0]]
+
+
+def test_unsuitable_temporary_root_exits_nine(candidate: Candidate, capsys: pytest.CaptureFixture[str],
+                                              monkeypatch: pytest.MonkeyPatch) -> None:
     candidate.advance()
-    env = candidate.env()
-
-    def run(argv: list[str], cwd: Path) -> tuple[int, str]:
-        if name(argv) == "pytest":
-            candidate.advance("later.txt", "l\n")
-        return candidate.run(argv, cwd)
-
-    assert iv.main(env, candidate.root, run) == 1
-    assert capsys.readouterr().err.splitlines()[0] == "CANDIDATE_HEAD_MOVED"
+    monkeypatch.setenv("ATC_TMP", "relative")
+    code, err = candidate.verify(capsys)
+    assert (code, err[0]) == (9, locations.UNSUITABLE)
+    assert candidate.calls == []
 
 
-@pytest.mark.parametrize("change", ["untracked", "modified"])
-def test_tree_left_dirty_by_a_check_is_refused(
-    candidate: Candidate, capsys: pytest.CaptureFixture[str], change: str,
-) -> None:
-    candidate.advance()
-
-    def run(argv: list[str], cwd: Path) -> tuple[int, str]:
-        if name(argv) == "pytest":
-            left = candidate.root / ("new/left.txt" if change == "untracked" else "a.txt")
-            left.parent.mkdir(exist_ok=True)
-            left.write_text("left\n", encoding="utf-8")
-        return candidate.run(argv, cwd)
-
-    assert iv.main(candidate.env(), candidate.root, run) == 1
-    err = capsys.readouterr().err.splitlines()
-    assert err[0] == "CANDIDATE_DIRTY"
-    assert err[1].endswith("new/left.txt" if change == "untracked" else "a.txt")
-
-
-def test_unexpected_fault_is_refused_and_names_the_kept_working_directory(
-    candidate: Candidate, tmp_path: Path, capsys: pytest.CaptureFixture[str],
-) -> None:
-    candidate.advance()
-
-    def run(argv: list[str], cwd: Path) -> tuple[int, str]:
-        raise OSError("uv is not installed")
-
-    assert iv.main(candidate.env(), candidate.root, run) == 1
-    (work,) = (tmp_path / "systmp").iterdir()
-    assert capsys.readouterr().err.splitlines() == [
-        "VERIFIER_ERROR", "OSError: uv is not installed", f"working directory kept: {work}"]
-
-
-def test_fault_before_the_working_directory_exists_is_refused(
-    candidate: Candidate, tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    candidate.advance()
-
-    def fault(_candidate: str) -> None:
-        raise RuntimeError("import machinery broke")
-
-    monkeypatch.setattr(iv, "check_imports", fault)
-    assert iv.main(candidate.env(), candidate.root, candidate.run) == 1
-    assert capsys.readouterr().err.splitlines() == ["VERIFIER_ERROR", "RuntimeError: import machinery broke"]
-    assert list((tmp_path / "systmp").iterdir()) == []
-
-
-def test_git_hook_variables_do_not_select_another_repository(
-    candidate: Candidate, tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    candidate.advance()
-    env = candidate.env()
-    monkeypatch.setenv("GIT_DIR", str(tmp_path / "elsewhere"))
-    assert iv.main(env, candidate.root, candidate.run) == 0
-    assert capsys.readouterr().err == ""
+def test_the_verifier_imports_the_package_without_a_search_path_insert() -> None:
+    source = Path(iv.__file__).read_text(encoding="utf-8")
+    assert "sys.path" not in source and "from atc_testkit import" in source
 
 
 def test_checks_are_the_python_adapter_job_commands() -> None:
@@ -394,7 +250,7 @@ def test_checks_are_the_python_adapter_job_commands() -> None:
     job = workflow[workflow.index("  python-adapter:"):]
     assert f"working-directory: {iv.ADAPTER_DIR}" in job
     assert [line.split("- run: ", 1)[1] for line in job.splitlines() if "- run: " in line] == [
-        " ".join(argv) for argv in (iv.PYTEST, iv.WORKSPACE_CHECK[1], iv.POLICY_CHECK[1])
+        " ".join(argv) for argv in (iv.TESTS.argv, iv.WORKSPACE_CHECK.argv, iv.POLICY_CHECK.argv)
     ]
 
 
