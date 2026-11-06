@@ -67,7 +67,7 @@ def _not_a_real_directory(path: str | os.PathLike[str]) -> str | None:
     """What keeps an existing ``path`` from being a real directory; ``None`` for one, or for a path still to create."""
     try:
         status = os.lstat(path)
-    except (FileNotFoundError, NotADirectoryError):
+    except FileNotFoundError:
         return None
     except OSError as error:
         return f"cannot be read: {path}: {error}"
