@@ -16,7 +16,7 @@ whole directory loses nothing. Persistent state lives elsewhere
 - No shared tool writes generated files to the system temporary directory, to
   a drive root, or into a repository's tracked tree.
 - `<tmp>` lies outside `AppData`, where file metadata calls cost more than
-  elsewhere (measured: create 1.6, `stat` 7.7, delete 2.0 times), and has no
+  elsewhere (create 1.6x, `stat` 7.7x, delete 2.0x), and has no
   ancestor that holds `.git`, because
   product code under test runs Git when one does. Its absolute long-name form
   is at most 40 characters, which leaves a scratch name of at least 23. A

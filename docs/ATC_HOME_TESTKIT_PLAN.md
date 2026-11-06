@@ -3,7 +3,7 @@
 How and in what order `ATC_HOME.md` and `TESTKIT.md` become what the tools do.
 The two specs hold every rule; this plan cites them by section and adds none.
 
-Step 1 is a set of measurements, made on this host, and committed nothing.
+Step 1 is a set of measurements whose results the specs carry.
 Steps 2 to 5 and the
 reference clean-up of step 6 are each one topic branch in the repository
 named, reviewed by the `hami-review-relay` method under the class given, and
@@ -35,12 +35,15 @@ the later steps take from them:
   has none (step 5).
 - A console window reaches the user's desktop from any desktop
   (`TESTKIT.md` § Private desktop), so each of steps 4 and 5 lists the
-  launches in its project that start a venv `python.exe` without a console
-  and moves the test launches onto the testkit's `start` or `run`
-  (`TESTKIT.md` § Child processes).
+  launches in its project that start a venv `python.exe` without a console.
+  The test launches move onto the testkit's `start` or `run`
+  (`TESTKIT.md` § Child processes); a product launch on the list goes to
+  the Owner.
 - The longest path below the base directory is 114 characters in
-  hami-quant-trading and 55 in hami-quant, inside the bound of
-  `ATC_HOME.md` § Location. Step 3 measures the root's suite in a candidate.
+  hami-quant-trading and 55 in hami-quant. Below a scratch in a `<tmp>` of
+  the 40 characters `ATC_HOME.md` § Location allows, the longer one leaves
+  98 characters under the Windows path limit. Step 3 measures the root's
+  suite in a candidate.
 - A suite's wall clock is the same under `AppData` and under `<tmp>`; the
   cost `ATC_HOME.md` § Location names shows in the metadata calls alone.
 
@@ -133,10 +136,8 @@ Lands together with: the `VERIFICATION.md` § Testing sentence
 (§ Separate authority). The release is not vendored into a project before
 that change is in `main`.
 
-Blocked until: the Owner's `write_scope_guard.py` allows `~/.atc`
-(§ Separate authority). The location tests need a root outside `AppData`
-and outside every repository, and the review walks the plugin to
-`<tmp>/systmp`.
+The location tests use a root outside `AppData` and outside every
+repository, and the review walks the plugin to `<tmp>/systmp`.
 
 ## 3. Root tools
 
@@ -236,8 +237,8 @@ script.
   project's data passed to the shared verifier.
 - Every test that starts a child: imports `start` and `run` from the testkit.
 - The two tests step 1 names: the `interactive_desktop` marker.
-- The launches step 1 has this step list: the product ones get a windowless
-  console in their own code, the test ones go through `start` or `run`.
+- The list of launches that start a venv `python.exe` without a console
+  (step 1): the test ones go through `start` or `run`.
 - `.github/workflows/ci.yml`: the testkit's runner, the three stages, the
   `slow` invocation of `TESTKIT.md` § Stages in the job the project names,
   the targeted `workflow_dispatch` run through the same runner, and the
@@ -301,8 +302,9 @@ Repository: `hami-quant`. Class: behaviour. Depends on steps 2 and 3.
   `AGENTS.md` requires. Its tokens change to the spec's table
   (`tests/test_integration_verify.py`).
 - Tests that are sensitive to parallel load get `serial`; tests that start
-  a child use the testkit's `start` and `run`, which covers the launches
-  step 1 has this step list.
+  a child use the testkit's `start` and `run`. The list of launches that
+  start a venv `python.exe` without a console (step 1) is made here and its
+  test launches go the same way.
 - `.github/workflows/ci.yml`: the testkit's runner and stages on
   `ubuntu-latest`, the `slow` invocation of `TESTKIT.md` § Stages in the job
   the project names, and the Windows supervision job through the same
@@ -389,6 +391,7 @@ Owner before that step continues.
 | Item | Settled in | How |
 | --- | --- | --- |
 | `atc` on cloud writer hosts: `TESTKIT.md` § Commands assumes `atc` is installed where the test tools run; a cloud VM clone has no `workspace.yaml` and may have no `atc` | step 3 | install from a clone on a cloud host and run `atc test run` against a project clone; decide what a host without `atc` runs |
+| A hosted Windows CI runner gives the `slow` invocation of `TESTKIT.md` § Stages a desktop that a test carrying `slow` and `interactive_desktop` can use | step 4 | the first CI run of the invocation in the project that has such a test; with none, the item stays open |
 | PowerShell module-cache timing and trading's tests under a redirected profile (`TESTKIT.md` § Isolated environment redirects `USERPROFILE`, `APPDATA`, `LOCALAPPDATA`) | step 4 | run trading's PowerShell-launching test files with the redirected variables before the gate is switched |
 | The 40-character bound on `<tmp>` against `MAX_PATH`, for the root's suite | step 3 | the longest path the root's suite creates in a candidate |
 | Tests and trading's mutation verifier that pin today's verifier tokens | steps 4 and 5 | listed in those steps; hami-quant's tokens differ from the spec's table today |

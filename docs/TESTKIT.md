@@ -67,10 +67,11 @@ order. Each is one pytest invocation over the selected paths.
   count.
 - `slow` tests run in CI only, as one further invocation through the same
   runner with the marker expression `slow` and `-n 0`, whatever other
-  markers a test carries. It runs on the desktop the CI job starts it from,
-  where an `interactive_desktop` test among them finds what it needs. It
-  passes when it collects no test. The project decides which CI job holds
-  it.
+  markers a test carries. The `interactive` stage excludes `slow`, so this
+  invocation is the one run of a test that is both `slow` and
+  `interactive_desktop`; it therefore runs on the desktop the CI job starts
+  it from, with no private desktop. It passes when it collects no test. The
+  project decides which CI job holds it.
 
 ## Isolated environment
 
@@ -178,11 +179,11 @@ this order:
   is the same skeleton, imported from the tree, with the rows a consumer's
   data feeds absent: no selection, lock, contract, lint or collection row,
   and its own test command, run once with its base directory in the working
-  directory, in place of the stages. Its own static checks carry its own
-  tokens. Its range is documentation-only when every changed path is
-  Markdown under `docs/`, and such a range skips that test command. A range
-  Git cannot read refuses with `RANGE_UNREADABLE`, in the place of the
-  selection row. It writes no verification report.
+  directory, in place of the stages. Its own rows carry its own tokens:
+  after the ancestry rows it reads the range, and a range Git cannot read
+  refuses with `RANGE_UNREADABLE`; its static checks follow. Its range is
+  documentation-only when every changed path is Markdown under `docs/`, and
+  such a range skips that test command. It writes no verification report.
   § Isolated environment, § Running and
   logging and the working-directory rules bind it as they bind a project's
   verifier.
@@ -224,9 +225,9 @@ Windows only; on other platforms a stage starts normally.
   and stderr arrive merged, stdin is empty, and waiting for it returns the
   exit code and releases the desktop.
 - The desktop holds the windows a process creates itself, Tk windows among
-  them, and xdist workers run on it. A console window belongs to the console
-  host, which Windows starts on the interactive desktop, so a console a
-  process allocates appears there whatever desktop the process runs on.
+  them, and xdist workers run on it. A console window is created by the
+  console host and not by the process, and a visible one appears on the
+  interactive desktop whatever desktop the process runs on.
   Consoles stay hidden through the launch flags: § Child processes for the
   children a test starts, and the product's own flags for the processes
   product code starts.
