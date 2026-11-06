@@ -6,7 +6,8 @@ from ``uv.lock`` under the candidate's ignored ``adapters/python/.venv/``. It ru
 and skips pytest for a documentation-only range. Pytest's base directory and the log of a failing check lie in
 a working directory under the system temporary directory, which is short enough for the repositories the tests
 build and is removed after a pass. On any failure the exit code is nonzero and the first stderr line is the
-reason token. Tokens follow ``docs/TESTKIT.md`` § Integration verifier.
+reason token. Tokens follow ``docs/TESTKIT.md`` § Integration verifier, whose root paragraph is the target form;
+AGENTS.md "Integration verification" lists where this script differs from it.
 
     uv run --quiet --locked --project adapters/python python adapters/python/scripts/integration_verify.py
 """

@@ -58,6 +58,15 @@ documentation-only and skips `pytest` alone. Markdown anywhere else is
 rendered into managed copies or read by the tests, so it runs the suite. The
 caller never chooses the exception.
 
+`docs/TESTKIT.md` § Integration verifier states the target form of this
+verifier. It differs from that form in four ways: it is this repository's own
+script, not the shared skeleton; its child processes drop the `GIT_*`
+variables and nothing else (§ Isolated environment); its working directory
+lies under the system temp directory, not under `<tmp>/systmp`
+(`docs/ATC_HOME.md` § Resolving the locations); and it writes a log for a
+failing check only (§ Running and logging). `RANGE_UNREADABLE` is its own
+token for a range Git cannot read.
+
 The timeout is three times the measured wall clock of a full run, rounded up
 to a whole minute and never below 300 seconds; re-measure it when the suite's
 duration changes.
