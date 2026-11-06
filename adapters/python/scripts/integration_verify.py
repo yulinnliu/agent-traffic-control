@@ -3,8 +3,10 @@
 Runs with the candidate as its working directory, in the environment ``scripts/integration-verify.json`` builds
 from ``uv.lock`` under the candidate's ignored ``adapters/python/.venv/``. It runs the checks of the
 ``python-adapter`` CI job plus ``git diff --check`` over the ``ATC_EXPECTED_MAIN_SHA..ATC_INTEGRATION_SHA`` range,
-and skips pytest for a documentation-only range. On any failure the exit code is nonzero and the first stderr
-line is the reason token. Tokens follow ``docs/TESTKIT.md`` § Integration verifier; this script moves to the
+and skips pytest for a documentation-only range. Pytest's base directory and the log of a failing check lie in
+a working directory under the system temporary directory, which is short enough for the repositories the tests
+build and is removed after a pass. On any failure the exit code is nonzero and the first stderr line is the
+reason token. Tokens follow ``docs/TESTKIT.md`` § Integration verifier; this script moves to the
 shared verifier when ``atc-testkit`` ships it.
 
     uv run --quiet --locked --project adapters/python python adapters/python/scripts/integration_verify.py
@@ -15,8 +17,10 @@ import importlib
 import importlib.util
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path, PurePosixPath
@@ -36,6 +40,7 @@ AUTOMATION_MARKDOWN_PREFIXES = ("shared/skills/", "shared/governance/", "shared/
 PYTEST_NO_TESTS_COLLECTED = 5
 FAILURE_LINE = re.compile(r"^(?:FAILED|ERROR) ")
 REPORTED_LINES = 20
+WORK_PREFIX = "atc-root-verify-"
 
 WORKSPACE_CHECK = ("WORKSPACE_VALIDATION_FAILED", ["uv", "run", "--locked", "python", "scripts/validate_workspace.py"])
 POLICY_CHECK = ("POLICY_CHECK_FAILED",
@@ -149,22 +154,25 @@ def tail(output: str, pattern: re.Pattern | None = None) -> list[str]:
     return (chosen or lines)[-REPORTED_LINES:]
 
 
-def execute(root: Path, base: str, sha: str, doc_only: bool, run: Run) -> None:
+def execute(root: Path, base: str, sha: str, doc_only: bool, work: Path, run: Run) -> None:
     """``git diff --check``, the two contract checks, then the suite unless the range is documentation-only."""
     adapter = root / ADAPTER_DIR
     checks = [("DIFF_CHECK_FAILED", ["git", "diff", "--check", f"{base}..{sha}"], root),
               (*WORKSPACE_CHECK, adapter), (*POLICY_CHECK, adapter)]
     if not doc_only:
-        checks.append(("TESTS_FAILED", PYTEST, adapter))
+        checks.append(("TESTS_FAILED", [*PYTEST, "--basetemp", str(work / "bt")], adapter))
     for token, argv, cwd in checks:
         started = time.monotonic()
         code, output = run(argv, cwd)
-        if argv is PYTEST and code == PYTEST_NO_TESTS_COLLECTED:
-            raise VerifyError("NO_TESTS_COLLECTED", f"{' '.join(argv)} collected no test")
+        command = " ".join(argv)
+        if token == "TESTS_FAILED" and code == PYTEST_NO_TESTS_COLLECTED:
+            raise VerifyError("NO_TESTS_COLLECTED", f"{command} collected no test")
         if code:
-            raise VerifyError(token, f"{' '.join(argv)} exited {code}",
-                              *tail(output, FAILURE_LINE if argv is PYTEST else None))
-        print(f"ok {' '.join(argv)} ({time.monotonic() - started:.1f}s)", flush=True)
+            log = work / (token.lower() + ".log")
+            log.write_text(output, encoding="utf-8")
+            raise VerifyError(token, f"{command} exited {code}; log {log}",
+                              *tail(output, FAILURE_LINE if token == "TESTS_FAILED" else None))
+        print(f"ok {command} ({time.monotonic() - started:.1f}s)", flush=True)
 
 
 def check_final_state(root: Path, sha: str) -> None:
@@ -178,6 +186,7 @@ def check_final_state(root: Path, sha: str) -> None:
 
 def main(environ: Mapping[str, str] | None = None, root: Path = ROOT, run: Run = run_command) -> int:
     environ = os.environ if environ is None else environ
+    work = None
     try:
         values = require_env(environ)
         check_candidate(root, values, Path.cwd())
@@ -185,17 +194,21 @@ def main(environ: Mapping[str, str] | None = None, root: Path = ROOT, run: Run =
         base, sha = values["ATC_EXPECTED_MAIN_SHA"], values["ATC_INTEGRATION_SHA"]
         doc_only = documentation_only(changed_paths(root, base, sha))
         print(f"classification: {'documentation-only' if doc_only else 'full'}", flush=True)
-        execute(root, base, sha, doc_only, run)
+        work = Path(tempfile.mkdtemp(prefix=WORK_PREFIX))
+        execute(root, base, sha, doc_only, work, run)
         check_final_state(root, sha)
     except VerifyError as exc:
         print(exc.token, file=sys.stderr)
         for line in exc.lines:
             print(line, file=sys.stderr)
+        if work is not None:
+            print(f"working directory kept: {work}", file=sys.stderr)
         return 1
     except Exception as exc:  # noqa: BLE001 - any verifier fault refuses the candidate
         print("VERIFIER_ERROR", file=sys.stderr)
         print(f"{type(exc).__name__}: {exc}", file=sys.stderr)
         return 1
+    shutil.rmtree(work, ignore_errors=True)
     print(f"integration verification: PASS {sha}", flush=True)
     return 0
 

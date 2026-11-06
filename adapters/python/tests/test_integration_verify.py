@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -27,6 +28,10 @@ def commit(repo: Path, path: str, content: str) -> str:
     return run_git(repo, "rev-parse", "HEAD")
 
 
+def name(argv: list[str]) -> str:
+    return "pytest" if "pytest" in argv else argv[-1]
+
+
 class Candidate:
     """A repository at a candidate commit, the adapter's inputs for it and the commands the verifier started."""
 
@@ -42,18 +47,18 @@ class Candidate:
                 "ATC_REVIEWED_SOURCE_SHA": head, **overrides}
 
     def run(self, argv: list[str], cwd: Path) -> tuple[int, str]:
-        """Git runs for real; every other command returns the code set for its last argument."""
+        """Git runs for real; every other command returns the code set for its name."""
         self.calls.append((argv, cwd))
         if argv[0] == "git":
             return iv.run_command(argv, cwd)
-        return self.codes.get(argv[-1], 0), "output line\nFAILED tests/test_x.py::test_y - boom\nlast line\n"
+        return self.codes.get(name(argv), 0), "output line\nFAILED tests/test_x.py::test_y - boom\nlast line\n"
 
     def verify(self, capsys: pytest.CaptureFixture[str], **overrides: str) -> tuple[int, list[str]]:
         code = iv.main(self.env(**overrides), self.root, self.run)
         return code, capsys.readouterr().err.splitlines()
 
     def started(self) -> list[str]:
-        return [argv[-1] for argv, _cwd in self.calls]
+        return [name(argv) for argv, _cwd in self.calls]
 
 
 @pytest.fixture
@@ -66,6 +71,9 @@ def candidate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Candidate:
         "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
     }.items():
         monkeypatch.setenv(key, value)
+    systmp = tmp_path / "systmp"
+    systmp.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(systmp))
     root = tmp_path / "candidate"
     (root / iv.ADAPTER_DIR).mkdir(parents=True)
     run_git(root, "init", "-q", "-b", "main")
@@ -75,7 +83,9 @@ def candidate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Candidate:
     return Candidate(root, main)
 
 
-def test_full_range_runs_every_check_in_order(candidate: Candidate, capsys: pytest.CaptureFixture[str]) -> None:
+def test_full_range_runs_every_check_in_order(
+    candidate: Candidate, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
     sha = candidate.advance()
     assert iv.main(candidate.env(), candidate.root, candidate.run) == 0
     captured = capsys.readouterr()
@@ -83,10 +93,15 @@ def test_full_range_runs_every_check_in_order(candidate: Candidate, capsys: pyte
     assert captured.out.splitlines()[0] == "classification: full"
     assert captured.out.splitlines()[-1] == f"integration verification: PASS {sha}"
     adapter = candidate.root / iv.ADAPTER_DIR
+    pytest_argv = candidate.calls[-1][0]
     assert candidate.calls == [
         (["git", "diff", "--check", f"{candidate.main}..{sha}"], candidate.root),
-        (iv.WORKSPACE_CHECK[1], adapter), (iv.POLICY_CHECK[1], adapter), (iv.PYTEST, adapter),
+        (iv.WORKSPACE_CHECK[1], adapter), (iv.POLICY_CHECK[1], adapter), (pytest_argv, adapter),
     ]
+    assert pytest_argv[:-2] == iv.PYTEST and pytest_argv[-2] == "--basetemp"
+    basetemp = Path(pytest_argv[-1])
+    assert basetemp.parent.parent == tmp_path / "systmp" and not iv.inside(basetemp, candidate.root)
+    assert list((tmp_path / "systmp").iterdir()) == []
 
 
 def test_documentation_only_range_skips_pytest_only(candidate: Candidate, capsys: pytest.CaptureFixture[str]) -> None:
@@ -221,11 +236,17 @@ def test_failing_check_is_refused_and_stops_the_run(
     assert failing in candidate.started() and not set(later) & set(candidate.started())
 
 
-def test_failing_suite_reports_its_failure_lines(candidate: Candidate, capsys: pytest.CaptureFixture[str]) -> None:
+def test_failing_suite_reports_its_failure_lines_and_keeps_its_log(
+    candidate: Candidate, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
     candidate.advance()
     candidate.codes["pytest"] = 1
     _code, err = candidate.verify(capsys)
-    assert err[1:] == ["uv run --locked pytest exited 1", "FAILED tests/test_x.py::test_y - boom"]
+    (work,) = (tmp_path / "systmp").iterdir()
+    log = work / "tests_failed.log"
+    assert err[1] == f"{' '.join(candidate.calls[-1][0])} exited 1; log {log}"
+    assert err[2:] == ["FAILED tests/test_x.py::test_y - boom", f"working directory kept: {work}"]
+    assert "last line" in log.read_text(encoding="utf-8")
 
 
 def test_suite_that_collects_no_test_is_refused(candidate: Candidate, capsys: pytest.CaptureFixture[str]) -> None:
@@ -240,7 +261,7 @@ def test_head_moved_by_a_check_is_refused(candidate: Candidate, capsys: pytest.C
     env = candidate.env()
 
     def run(argv: list[str], cwd: Path) -> tuple[int, str]:
-        if argv[-1] == "pytest":
+        if name(argv) == "pytest":
             candidate.advance("later.txt", "l\n")
         return candidate.run(argv, cwd)
 
@@ -255,10 +276,10 @@ def test_tree_left_dirty_by_a_check_is_refused(
     candidate.advance()
 
     def run(argv: list[str], cwd: Path) -> tuple[int, str]:
-        if argv[-1] == "pytest":
-            name = "new/left.txt" if change == "untracked" else "a.txt"
-            (candidate.root / name).parent.mkdir(exist_ok=True)
-            (candidate.root / name).write_text("left\n", encoding="utf-8")
+        if name(argv) == "pytest":
+            left = candidate.root / ("new/left.txt" if change == "untracked" else "a.txt")
+            left.parent.mkdir(exist_ok=True)
+            left.write_text("left\n", encoding="utf-8")
         return candidate.run(argv, cwd)
 
     assert iv.main(candidate.env(), candidate.root, run) == 1

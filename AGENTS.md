@@ -37,7 +37,11 @@ Then read `shared/governance/INDEX.md` and `CORE.md` from that exact same revisi
 The argv runs `adapters/python/scripts/integration_verify.py` in the
 candidate's own `adapters/python/.venv/` built from `uv.lock`; that script
 defines its input, import-location and clean-tree checks. A refusal exits
-nonzero with the reason token on the first stderr line. The verifier writes no
+nonzero with the reason token on the first stderr line and keeps the failing
+check's log in an `atc-root-verify-*` directory under the system temp
+directory. Pytest's base directory lies there too, because the candidate's
+path leaves the repositories the tests build no room under the Windows path
+limit. The verifier writes no
 verification report, so `atc integrate` records no evidence for this
 repository.
 
