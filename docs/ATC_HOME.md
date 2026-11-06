@@ -153,7 +153,8 @@ expected.
   includes the working directory a failed verifier or gate run left for
   inspection.
 - Under `<tmp>/candidates` it removes a candidate tree through
-  `git worktree remove` in the repository that owns it; a tree Git refuses to
+  `git worktree remove` in the repository that owns it, which the tree's own
+  `.git` file names; a tree Git refuses to
   remove prints `REFUSED` with Git's message and is left. A report file, and
   a tree Git no longer knows, are handled as any other entry.
 
@@ -171,7 +172,8 @@ It reports registered scratches older than seven days and deletes none.
 - A project's integration verifier keeps its logs and per-stage data in a
   working directory under `<tmp>/systmp`. It removes the directory after a
   passing run and leaves it, with the path printed, after a failing one.
-- The working directory's name is at most eight characters, so its absolute
+- A working directory of the verifier or of the gate has a name of at most
+  eight characters, so its absolute
   path is at most 56. pytest's base directory of every stage lies in it and
   never in the candidate tree or the checkout, whose own path would leave
   the paths a test builds no room under the Windows path limit.

@@ -65,8 +65,9 @@ order. Each is one pytest invocation over the selected paths.
 - CI runs the same stages through the same runner and passes its own worker
   count.
 - `slow` tests run in CI only, as one further invocation through the same
-  runner with the marker expression `slow`. The project decides which CI job
-  holds it.
+  runner with the marker expression `slow` and `-n 0`, whatever other
+  markers a test carries. It passes when it collects no test. The project
+  decides which CI job holds it.
 
 ## Isolated environment
 
@@ -86,10 +87,12 @@ environment built from the caller's by these rules:
   and safe to share.
 - `TEMP`, `TMP`, `TMPDIR` and `ATC_TMP` carry the values the entry point
   resolved before it redirected the profile.
-- Set after the removal: `GIT_CONFIG_GLOBAL`, naming a file the testkit
-  writes in the working directory with a test identity (`user.name`,
-  `user.email`) and `core.longpaths=true`. The redirected profile holds no
-  Git configuration, so this file is the only global one a stage reads.
+- Written into the directory `HOME` and `USERPROFILE` name: a `.gitconfig`
+  with a test identity (`user.name`, `user.email`) and
+  `core.longpaths=true`. Git finds it through the profile, so it also holds
+  for a Git process a test starts with every `GIT_*` variable removed
+  (`GIT_WORKFLOW.md` § Git environment in hooks and tests), and it is the
+  only global configuration a stage reads.
 
 The run's working directory is created under `<tmp>/systmp`, removed after a
 passing run, and kept with its path printed after a failing one. Every
@@ -121,9 +124,8 @@ prints the selection for those paths and runs nothing.
 5. Otherwise print `tests RUN` with the reason and run the stages.
 
 A record covers a push only when its selector name and stage list are the
-gate's own. A record written by another testkit version that differs in
-either covers nothing, so the first push after a project changes to such a
-version runs the stages.
+gate's own. A record written by a testkit version that differs in either
+covers nothing, and a push with no other record runs the stages.
 
 The hook is one line: `exec uv run --frozen <project's uv options> python
 <gate> --run`.
@@ -174,8 +176,11 @@ this order:
   data feeds absent: no selection, lock, contract, lint or collection row,
   and its own test command, run once with its base directory in the working
   directory, in place of the stages. Its own static checks carry its own
-  tokens. A documentation-only range skips that test command. It writes no
-  verification report.
+  tokens. Its range is documentation-only when every changed path is
+  Markdown under `docs/`, and such a range skips that test command. It
+  writes no verification report. § Isolated environment, § Running and
+  logging and the working-directory rules bind it as they bind a project's
+  verifier.
 
 ## Child processes
 
@@ -195,9 +200,9 @@ A test starts a child process through the testkit's `start` or `run`.
   when one exists. Sessions with different base directories never fail one
   another; two runs given the same scratch at the same time share one and are
   not supported.
-- The testkit reads the process list and command lines from the operating
-  system itself, the Windows process interface or `ps` elsewhere, and
-  imports no product code for it.
+- The testkit reads the process list and command lines itself, through the
+  standard library and the tools the operating system ships (`ps` outside
+  Windows). It imports no product code and no third-party package for it.
 
 ## Private desktop
 
@@ -298,5 +303,5 @@ The scratch registry and deletion (`ATC_HOME.md` § Scratch registry,
 - `--ignore` arguments appended to a stage, `uv` options for the hook, test
   paths, the CI platform matrix, the CI job that runs `slow` tests, and the
   CI runner's initialization function.
-- The verifier argv file, which stays a project file and carries the `uv`
+- The verifier argv file, which is a project file and carries the `uv`
   options the project's verifier needs, an interpreter version for example.
