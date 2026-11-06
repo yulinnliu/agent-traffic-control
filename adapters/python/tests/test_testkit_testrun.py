@@ -300,6 +300,7 @@ def test_edits_follow_the_files_line_endings(export: Export, tmp_path: Path) -> 
     assert b"\r\n" in export.file.read_bytes()
 
 
+@pytest.mark.integration
 def test_a_same_size_write_in_the_files_last_second_reaches_the_run(export: Export, tmp_path: Path,
                                                                      capsys: pytest.CaptureFixture[str],
                                                                      monkeypatch: pytest.MonkeyPatch) -> None:

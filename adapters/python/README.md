@@ -42,8 +42,15 @@ uv run --locked pytest                                  # suite, including share
 uv run --locked pytest tests/test_tooling.py -k name    # one test
 uv run atc validate                                     # this checkout's contract
 uv run atc onboard --sync --root-only                   # re-render .claude/ .agents/ .dsh/ after a canonical skill change
-pwsh -File check.ps1 -Projects -Tests                   # Windows one-shot with caches under ../../.tooling
+pwsh -File check.ps1 -Projects -Tests                   # one-shot with temporary files and caches under ~/.atc
 ```
 
-Tests build throwaway repositories under `tests/.tmp-pytest/` and never
-touch `projects/`, `worktrees/` or `state/`.
+Tests build throwaway repositories under pytest's base directory
+(`docs/ATC_HOME.md` § pytest without a scratch) and never touch `projects/`,
+`worktrees/` or `state/`. Registering the `atc-testkit` plugin puts the suite
+under its marker contract: a new test carries a category, and
+`tests/unmarked_baseline.txt` lists the tests that have none yet.
+
+The `Verifier timeout` in the root `AGENTS.md` is three times the measured
+wall clock of a full run, rounded up to a whole minute and never below 300
+seconds; re-measure it when the suite's duration changes.

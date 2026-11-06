@@ -28,6 +28,9 @@ atc-testkit = { path = "atc-testkit", editable = true }
 [tool.hatch.build.targets.wheel]
 packages = ["src/atc_cli"]
 
+[tool.atc-testkit]
+unmarked_baseline = "tests/unmarked_baseline.txt"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q -p no:cacheprovider"

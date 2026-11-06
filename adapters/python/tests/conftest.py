@@ -10,16 +10,11 @@ from pathlib import Path
 
 import pytest
 
+pytest_plugins = ("atc_testkit.plugin",)
+
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
-
-
-def pytest_configure(config: pytest.Config) -> None:
-    # A sandboxed %TEMP% can differ between calls; keep temporary repos under
-    # the gitignored tests/.tmp-pytest/ instead.
-    if config.option.basetemp is None:
-        config.option.basetemp = Path(__file__).resolve().parent / ".tmp-pytest"
 
 
 def _writable_retry(function, target, _error) -> None:
@@ -41,7 +36,8 @@ def restored_process():
 @pytest.fixture()
 def atc_tmp(restored_process, monkeypatch: pytest.MonkeyPatch):
     """A ``<tmp>`` of its own, outside ``AppData`` and every repository, set as ``ATC_TMP``."""
-    root = Path.home() / ".atc" / "tmp" / ("t" + secrets.token_hex(4))
+    parent = Path(os.environ.get("ATC_TMP") or Path.home() / ".atc" / "tmp")
+    root = parent / ("t" + secrets.token_hex(4))
     root.mkdir(parents=True)
     root = Path(os.path.realpath(root))
     monkeypatch.setenv("ATC_TMP", str(root))
