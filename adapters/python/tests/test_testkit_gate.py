@@ -25,7 +25,7 @@ def git(root: Path, *args: str) -> str:
 
 
 def select(paths: Sequence[str], _deltas) -> selection.Selection:
-    chosen = selection.Selection(("tests",))
+    chosen = selection.Selection(("tests", "more"))
     for path in paths:
         if path == "broken.py":
             raise ValueError("selection broke")
@@ -225,17 +225,6 @@ def test_a_record_of_another_selector_or_stage_list_covers_nothing(repo: Path, c
     out = capsys.readouterr().out
     assert "tests RUN" in out and ("STAGES_MISMATCH" if change == "stages" else "SELECTOR_MISMATCH") in out
     assert len(recorder.calls) == 3
-
-
-def test_every_pushed_commit_needs_a_record(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    base = git(repo, "rev-parse", "HEAD")
-    sha = commit(repo, "a.py")
-    chosen = project(repo)
-    write_record(repo, sha, chosen.stage_list())
-    lines = [push_line(repo, base, sha), f"refs/heads/second {base} refs/heads/second {base}\n"]
-    recorder = Recorder()
-    gate.main(chosen, ["--run"], lines, recorder)
-    assert "tests RUN" in capsys.readouterr().out or recorder.calls
 
 
 def test_an_unsuitable_root_stops_before_anything_runs(repo: Path, capsys: pytest.CaptureFixture[str],

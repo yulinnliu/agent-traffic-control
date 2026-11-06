@@ -41,7 +41,7 @@ def tree(tmp_path: Path) -> Path:
     root = tmp_path / "tree"
     (root / "src/fixture_pkg").mkdir(parents=True)
     (root / "tests").mkdir()
-    (root / "src/fixture_pkg/__init__.py").write_text(MODULE, encoding="utf-8")
+    (root / "src/fixture_pkg/__init__.py").write_bytes(MODULE.replace("\n", "\r\n").encode())
     (root / "tests/test_value.py").write_text(REPORTING_TEST, encoding="utf-8")
     (root / "pyproject.toml").write_text('[project]\nname = "fixture-name"\nversion = "1"\n', encoding="utf-8")
     return root
@@ -128,9 +128,12 @@ def test_the_scratch_bound_is_sixty_four_characters(tree: Path, atc_tmp: Path) -
     assert run_command("test", "run", str(tree), name, sys.executable, "l", "tests").returncode == 0
 
 
-def test_a_scratch_that_cannot_be_resolved_is_refused(atc_tmp: Path) -> None:
+def test_a_scratch_that_cannot_be_resolved_is_refused(atc_tmp: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def unreadable(_path):
+        raise OSError("cannot read")
+    monkeypatch.setattr(scratch.locations, "long_name", unreadable)
     with pytest.raises(Refusal) as refused:
-        scratch.resolve_scratch("a\0b", atc_tmp)
+        scratch.resolve_scratch("name", atc_tmp)
     assert refused.value.token == "SCRATCH_NOT_RESOLVED" and refused.value.code == 9
 
 
@@ -289,7 +292,6 @@ def test_an_old_that_does_not_occur_exactly_once_aborts(export: Export, tmp_path
 
 
 def test_edits_follow_the_files_line_endings(export: Export, tmp_path: Path) -> None:
-    export.file.write_bytes(export.file.read_bytes().replace(b"\n", b"\r\n"))
     edit = {"label": "crlf", "edits": [{"path": "src/fixture_pkg/__init__.py", "old": "def value():\n    return 1",
                                         "new": "def value():\n    return 3"}]}
     run = export.run(tmp_path, [edit])

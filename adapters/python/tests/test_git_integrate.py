@@ -664,7 +664,7 @@ def test_json_stop_carries_preflight(repo: Path, capsys: pytest.CaptureFixture[s
 
 REPORT = {
     "schema": "atc-verification-report/1",
-    "selector": {"name": "atc-testkit", "version": "0.5.0"},
+    "selector": {"name": "atc-testkit", "version": "0.6.0"},
     "selection": {"full": False, "paths": ["packages/a/tests"]},
     "stages": [{"name": "parallel", "marker": "not slow", "ignore": []}],
     "dependency_inputs": {"uv.lock": "0" * 64},

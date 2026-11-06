@@ -436,6 +436,7 @@ def integration_repo(tmp_path: Path, atc_tmp: Path, monkeypatch: pytest.MonkeyPa
     (root / "own_check.py").write_text("", encoding="utf-8")
     (root / "verify.py").write_text(VERIFIER_SCRIPT, encoding="utf-8")
     (root / ".gitignore").write_text("__pycache__/\n", encoding="utf-8")
+    (root / ".gitattributes").write_text("* text=auto eol=lf\n", encoding="utf-8")
     (root / "pyproject.toml").write_text('[tool.pytest.ini_options]\npythonpath = ["src"]\n', encoding="utf-8")
     git(root, "init", "-q", "-b", "main")
     git(root, "add", ".")
