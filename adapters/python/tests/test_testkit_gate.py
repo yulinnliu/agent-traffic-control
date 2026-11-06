@@ -122,6 +122,13 @@ def test_no_test_input_runs_nothing(repo: Path, capsys: pytest.CaptureFixture[st
     assert recorder.calls == [] and "skip: no test inputs" in capsys.readouterr().out
 
 
+def test_no_test_input_leaves_the_root_unread(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    base = git(repo, "rev-parse", "HEAD")
+    sha = commit(repo, "a.md")
+    monkeypatch.setenv("ATC_TMP", "relative")
+    assert gate.main(project(repo), ["--run"], [push_line(repo, base, sha)], Recorder()) == 0
+
+
 def test_stages_run_when_no_record_covers_the_push(repo: Path, capsys: pytest.CaptureFixture[str], atc_tmp: Path) -> None:
     base = git(repo, "rev-parse", "HEAD")
     sha = commit(repo, "a.py")

@@ -25,6 +25,14 @@ def alive(pid: int) -> bool:
     return any(process.pid == pid for process in children.list_processes())
 
 
+def gone(pid: int) -> bool:
+    """The system's process list drops an ended process shortly after its Job counts it out."""
+    deadline = time.monotonic() + 15
+    while alive(pid) and time.monotonic() < deadline:
+        time.sleep(0.1)
+    return not alive(pid)
+
+
 def wait_for_text(path: Path) -> str:
     deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
@@ -39,7 +47,8 @@ def test_reap_ends_the_whole_tree_and_waits(tmp_path: Path) -> None:
     process = children.start([sys.executable, "-c", GRANDCHILD, str(pid_file)])
     grandchild = int(wait_for_text(pid_file))
     children.reap()
-    assert process.poll() is not None and not alive(process.pid) and not alive(grandchild)
+    assert process.poll() is not None
+    assert gone(process.pid) and gone(grandchild)
 
 
 def test_a_test_teardown_reaps_what_it_started(tmp_path: Path, pytester_unused=None) -> None:
@@ -53,6 +62,55 @@ def test_run_returns_the_result_and_ends_the_tree(tmp_path: Path) -> None:
     result = children.run([sys.executable, "-c", "print('out')"], capture_output=True, text=True)
     assert result.returncode == 0 and result.stdout.strip() == "out"
     assert children._started == []
+
+
+def test_run_ends_what_the_child_left_running(tmp_path: Path) -> None:
+    pid_file = tmp_path / "pid"
+    code = ("import subprocess,sys; "
+            "c=subprocess.Popen([sys.executable,'-c','import time; time.sleep(120)'], stdout=subprocess.DEVNULL, "
+            "stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL); "
+            "open(sys.argv[1],'w').write(str(c.pid))")
+    assert children.run([sys.executable, "-c", code, str(pid_file)]).returncode == 0
+    assert gone(int(pid_file.read_text()))
+
+
+class FakeProcess:
+    def poll(self) -> int:
+        return 0
+
+    def wait(self, _seconds: float) -> int:
+        return 0
+
+
+class FakeTree:
+    def __init__(self, active: int):
+        self.remaining, self.closed, self.terminated = active, False, False
+
+    def active(self) -> int:
+        self.remaining = max(self.remaining - 1, 0) if self.terminated else self.remaining
+        return self.remaining
+
+    def terminate(self) -> None:
+        self.terminated = True
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def test_ending_waits_until_the_tree_counts_no_process() -> None:
+    tree = FakeTree(3)
+    children._end(FakeProcess(), tree)
+    assert tree.remaining == 0 and tree.closed
+
+
+def test_a_tree_that_keeps_running_is_reported_with_its_token() -> None:
+    class Stuck(FakeTree):
+        def active(self) -> int:
+            return 1
+    tree = Stuck(1)
+    with pytest.raises(TimeoutError, match="CHILD_TREE_STILL_RUNNING"):
+        children._end(FakeProcess(), tree, seconds=0.1)
+    assert not tree.closed
 
 
 def test_run_passes_input_and_check(tmp_path: Path) -> None:
