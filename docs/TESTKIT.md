@@ -108,8 +108,10 @@ the pre-push gate).
 - A command's output is shown live and written to a log. The log starts with
   a header: time, platform, Python, working directory, desktop and command.
 - The gate keeps the latest run's logs in the checkout's ignored `.tmp/`
-  directory, one file per static check and per stage. The verifier keeps its
-  logs in the run's working directory.
+  directory, one file per static check and per stage. A `.tmp` that is a link
+  or anything else that is not a directory stops `--run` with
+  `LOG_DIRECTORY_UNSUITABLE` (exit 9) before the gate reads, writes or deletes
+  anything in it. The verifier keeps its logs in the run's working directory.
 - A failure names the log and repeats its last twenty `FAILED` or `ERROR`
   lines.
 
@@ -298,13 +300,20 @@ Applies each mutant alone to `<scratch>/tree`, the export of `<sha>`, through
 - A mutant is a label and a list of edits `{path, old, new}`. An `old` that
   does not occur exactly once in its file aborts the run. Edits follow the
   file's line endings.
-- Each mutant prints `KILLED` or `SURVIVED` with the first failing line or
-  the summary, and its files are restored whether or not the run completes.
-  An import-guard refusal aborts the run.
+- Each mutant prints one line, and its files are restored whether or not the
+  run completes. A run that exits 1 with a `FAILED` line prints `KILLED` with
+  that line; a run that exits 0 prints `SURVIVED` with the summary.
+- Any other ending of a mutated run, an `ERROR` line alone, exits 2 to 5 or a
+  timeout, prints `INCONCLUSIVE <label> -> <reason>` and aborts the run with
+  exit 1. An import-guard refusal aborts the run with its exit code, and an
+  exception while applying or running a mutant with exit 1, each with its
+  token or name on stderr. The remaining mutants of an aborted run stay unrun.
 - At the end every touched file is compared with its Git object at `<sha>`,
   carriage returns ignored: `restored-ok` or `RESTORE-MISMATCH` per file,
   exit 1 on any mismatch. The last line counts the mutants and names the
-  survivors.
+  survivors: `done: M mutants, S survived <labels>`, or
+  `done: N of M mutants, S survived <labels>` after an abort, where `N` counts
+  the mutants that ended with a verdict.
 
 ### `atc tmp list`, `atc tmp clean`, `atc tmp prune`
 
@@ -342,6 +351,7 @@ In `[tool.atc-testkit]`; the first seven keys are required:
 
 Elsewhere in the project:
 
-- Test paths, as `testpaths` in `[tool.pytest.ini_options]`.
+- Test paths and pytest's search path, as `testpaths` and `pythonpath` in
+  `[tool.pytest.ini_options]`.
 - The verifier argv file, which is a project file and carries the `uv`
   options the project's verifier needs, an interpreter version for example.

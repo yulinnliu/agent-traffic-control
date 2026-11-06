@@ -26,7 +26,11 @@ whole directory loses nothing. Persistent state lives elsewhere
   that is a link or anything else that is not a directory is refused with
   `ATC_TMP_UNSUITABLE` and the property it breaks (exit 9), before anything
   is created. One that does not exist yet is created on first use.
-- CI (`CI` set) keeps the platform's own temporary locations.
+- CI (`CI` set) keeps the platform's own temporary locations. `<tmp>` is the
+  platform's temporary directory, or `ATC_TMP` when that is set and absolute,
+  and the properties above are not checked on it. `<tmp>/systmp` and
+  `<tmp>/candidates` are still real directories. An entry point that names no
+  directory keeps the platform's temporary directory and checks nothing.
 - `~/.atc` is unrelated to a repository's tracked `.atc/` directory
   (`LAYOUT.md` § Inside a consuming repository) and is never a governance
   source.
