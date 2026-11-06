@@ -1,0 +1,394 @@
+"""docs/ATC_HOME.md § Scratch registry and § Deleting: ``atc tmp list``, ``clean`` and ``prune``.
+
+Carries every case of ``test_clean_scratch.py`` for the replacement of ``clean_scratch.ps1``.
+"""
+from __future__ import annotations
+
+import ast
+from datetime import UTC, datetime, timedelta
+import os
+from pathlib import Path
+import subprocess
+
+import pytest
+
+import atc_testkit
+from atc_testkit import scratch
+
+
+def link_directory(link: Path, target: Path) -> None:
+    link.parent.mkdir(parents=True, exist_ok=True)
+    if os.name == "nt":
+        subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(target)], check=True, capture_output=True)
+    else:
+        link.symlink_to(target, target_is_directory=True)
+
+
+def unlink_directory(link: Path) -> None:
+    os.rmdir(link) if os.name == "nt" else link.unlink()
+
+
+def write(path: Path, text: str = "x\n") -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def target(tmp_path: Path, name: str) -> Path:
+    write(tmp_path / "outer" / name / "keep.txt", name)
+    return tmp_path / "outer" / name
+
+
+def scratch_dir(root: Path, name: str) -> Path:
+    write(root / name / "tree/src/pkg/__init__.py")
+    write(root / name / "qdr/data.txt")
+    return root / name
+
+
+def clean(*dirs: Path | str, project: str | None = None) -> tuple[int, list[str]]:
+    lines: list[str] = []
+    code = scratch.clean([str(item) for item in dirs], project, say=lines.append)
+    return code, lines
+
+
+def add(root: Path, *directories: Path, project: str = "tree") -> None:
+    for directory in directories:
+        scratch.register(root, directory, directory / project)
+
+
+def registered_names(root: Path) -> list[str]:
+    return [Path(row.scratch).name for row in scratch.registered(root)]
+
+
+def test_expected_links_are_unlinked_and_their_targets_survive(tmp_path: Path, atc_tmp: Path) -> None:
+    real = scratch_dir(atc_tmp, "real")
+    write(real / ".venv/Lib/site.py")
+    venv = scratch_dir(atc_tmp, "venv")
+    link_directory(venv / ".venv", target(tmp_path, "venv"))
+    tree_venv = scratch_dir(atc_tmp, "treevenv")
+    link_directory(tree_venv / "tree/.venv", target(tmp_path, "treevenv"))
+    bt = scratch_dir(atc_tmp, "bt")
+    link_directory(bt / "bt/test_x0/link", target(tmp_path, "bt"))
+    write(bt / "bt/test_x0/file.txt")
+    other = atc_tmp / "other"
+    add(atc_tmp, real, venv, tree_venv, bt, other)
+    code, lines = clean(real, venv, tree_venv, bt)
+    assert code == 0, lines
+    assert lines == [f"DELETED {d}" for d in (real, venv, tree_venv, bt)]
+    assert not real.exists() and not venv.exists() and not tree_venv.exists() and not bt.exists()
+    for name in ("venv", "treevenv", "bt"):
+        assert (tmp_path / "outer" / name / "keep.txt").read_text(encoding="utf-8") == name
+    assert registered_names(atc_tmp) == ["other"]
+
+
+def test_a_link_elsewhere_refuses_that_tree_untouched_and_the_rest_continue(tmp_path: Path, atc_tmp: Path) -> None:
+    odd = scratch_dir(atc_tmp, "odd")
+    link_directory(odd / ".venv", target(tmp_path, "venv"))
+    link_directory(odd / "bt/test_x0/link", target(tmp_path, "bt"))
+    link_directory(odd / "tree/src/hidden", target(tmp_path, "hidden"))
+    inner = scratch_dir(atc_tmp, "inner")
+    write(inner / ".venv/Lib/site.py")
+    link_directory(inner / ".venv/Lib/link", target(tmp_path, "inner"))
+    plain = scratch_dir(atc_tmp, "plain")
+    add(atc_tmp, odd, plain)
+    code, lines = clean(odd, inner, plain)
+    assert code == 1
+    assert lines == [f"ANOMALY {odd / 'tree/src/hidden'}", f"REFUSED {odd} (1 unexpected links)",
+                     f"ANOMALY {inner / '.venv/Lib/link'}", f"REFUSED {inner} (1 unexpected links)", f"DELETED {plain}"]
+    assert (inner / ".venv/Lib/link/keep.txt").is_file() and (inner / ".venv/Lib/site.py").is_file()
+    for link in (odd / ".venv", odd / "bt/test_x0/link", odd / "tree/src/hidden"):
+        assert (link / "keep.txt").is_file()
+    assert (odd / "qdr/data.txt").is_file() and not plain.exists()
+    assert registered_names(atc_tmp) == ["odd"]
+
+
+@pytest.mark.parametrize("where", ["outside", "root", "dotdot", "under_link", "nested", "systmp", "candidates",
+                                   "SYSTMP", "named_dotdot"])
+def test_a_path_not_inside_the_root_refuses_the_whole_run(tmp_path: Path, atc_tmp: Path, where: str) -> None:
+    inside = scratch_dir(atc_tmp, "inside")
+    outside = scratch_dir(tmp_path, "outside")
+    link_directory(atc_tmp / "link", outside)
+    (atc_tmp / "systmp").mkdir()
+    bad = {"outside": outside, "root": atc_tmp, "dotdot": f"{atc_tmp}{os.sep}..{os.sep}..{os.sep}outside",
+           "under_link": atc_tmp / "link" / "tree", "nested": inside / "tree", "systmp": atc_tmp / "systmp",
+           "candidates": "candidates", "SYSTMP": "SYSTMP", "named_dotdot": ".."}[where]
+    code, lines = clean(inside, bad)
+    assert code == 2
+    assert len(lines) == 1 and lines[0].startswith("REFUSED ")
+    assert (inside / "qdr/data.txt").is_file() and (outside / "tree/src/pkg/__init__.py").is_file()
+    assert (atc_tmp / "systmp").is_dir()
+    unlink_directory(atc_tmp / "link")
+
+
+def test_a_directory_under_a_link_back_into_the_root_is_refused(atc_tmp: Path) -> None:
+    victim = scratch_dir(atc_tmp, "victim")
+    link_directory(atc_tmp / "loop", atc_tmp)
+    code, lines = clean(atc_tmp / "loop" / "victim")
+    assert code == 2 and lines[0].startswith("REFUSED ") and victim.is_dir()
+    unlink_directory(atc_tmp / "loop")
+
+
+def test_a_bare_name_and_a_short_form_resolve_to_the_child(atc_tmp: Path) -> None:
+    named = scratch_dir(atc_tmp, "named")
+    assert clean("named") == (0, [f"DELETED {named}"])
+    if os.name == "nt":
+        import ctypes
+        buffer = ctypes.create_unicode_buffer(1024)
+        ctypes.windll.kernel32.GetShortPathNameW(str(atc_tmp), buffer, 1024)
+        shorter = scratch_dir(atc_tmp, "shorter")
+        assert clean(f"{buffer.value}\\shorter") == (0, [f"DELETED {shorter}"])
+
+
+@pytest.mark.skipif(os.name != "nt", reason="a read-only reparse point is a Windows state")
+def test_a_link_that_survives_removal_blocks_the_recursive_delete(tmp_path: Path, atc_tmp: Path) -> None:
+    stuck = scratch_dir(atc_tmp, "stuck")
+    link = stuck / "bt/test_x0/link"
+    link_directory(link, target(tmp_path, "bt"))
+    subprocess.run(["cmd", "/c", "attrib", "+r", str(link), "/L"], check=True, capture_output=True)
+    try:
+        code, lines = clean(stuck)
+        assert code == 1
+        assert lines == [f"LEFT {link}", f"REFUSED {stuck} (1 links remain after link removal)"]
+        assert (link / "keep.txt").is_file() and (stuck / "qdr/data.txt").is_file()
+    finally:
+        subprocess.run(["cmd", "/c", "attrib", "-r", str(link), "/L"], capture_output=True)
+
+
+def test_a_link_removal_failure_is_left_to_the_rescan(tmp_path: Path, atc_tmp: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    stuck = scratch_dir(atc_tmp, "stuck")
+    link = stuck / "bt/link"
+    link_directory(link, target(tmp_path, "bt"))
+    monkeypatch.setattr(scratch, "_remove_link", lambda _path: None)
+    code, lines = clean(stuck)
+    assert code == 1 and lines == [f"LEFT {link}", f"REFUSED {stuck} (1 links remain after link removal)"]
+    assert (stuck / "qdr/data.txt").is_file()
+    monkeypatch.undo()
+
+
+def test_a_dir_that_is_itself_a_link_is_refused(tmp_path: Path, atc_tmp: Path) -> None:
+    link = atc_tmp / "link"
+    link_directory(link, target(tmp_path, "whole"))
+    code, lines = clean(link)
+    assert code == 1 and lines == [f"REFUSED {link} (is itself a link)"]
+    assert (link / "keep.txt").is_file()
+
+
+def test_a_file_is_refused_as_not_a_directory(atc_tmp: Path) -> None:
+    item = write(atc_tmp / "item.txt")
+    assert clean(item) == (1, [f"REFUSED {item} (not a directory)"]) and item.is_file()
+
+
+def test_a_missing_dir_is_skipped_and_drops_its_registry_line(atc_tmp: Path) -> None:
+    gone = atc_tmp / "gone"
+    add(atc_tmp, gone)
+    assert clean(gone) == (0, [f"SKIPPED {gone} (not found)"])
+    assert registered_names(atc_tmp) == []
+
+
+def test_an_error_while_handling_a_dir_is_its_refusal_and_the_rest_continue(atc_tmp: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    first, second = scratch_dir(atc_tmp, "first"), scratch_dir(atc_tmp, "second")
+    original = scratch.remove_tree
+
+    def failing(directory, expected, say):
+        if str(directory) == str(first):
+            raise OSError("boom")
+        return original(directory, expected, say)
+    monkeypatch.setattr(scratch, "remove_tree", failing)
+    code, lines = clean(first, second)
+    assert code == 1 and lines == [f"REFUSED {first} (error: boom)", f"DELETED {second}"]
+
+
+def test_read_only_files_are_deleted(atc_tmp: Path) -> None:
+    directory = scratch_dir(atc_tmp, "git")
+    item = write(directory / "tree/.git/objects/ab/cd")
+    item.chmod(0o400)
+    assert clean(directory) == (0, [f"DELETED {directory}"])
+
+
+@pytest.mark.skipif(os.name != "nt", reason="the Windows path limit")
+def test_a_tree_beyond_the_windows_path_limit_is_deleted(atc_tmp: Path) -> None:
+    directory = scratch_dir(atc_tmp, "deep")
+    deep = "\\\\?\\" + str(directory / "bt") + ("\\" + "d" * 100) * 4
+    os.makedirs(deep)
+    with open(deep + "\\file.txt", "w", encoding="utf-8") as stream:
+        stream.write("x")
+    assert clean(directory) == (0, [f"DELETED {directory}"])
+
+
+def test_the_only_recursive_delete_rescans_for_links_first() -> None:
+    package = Path(atc_testkit.__file__).parent
+    calls = [(path.name, node) for path in package.glob("*.py") for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+             if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "rmtree"]
+    assert [name for name, _node in calls] == ["scratch.py"]
+    source = (package / "scratch.py").read_text(encoding="utf-8")
+    body = source[source.index("def remove_tree"):source.index("shutil.rmtree(")]
+    assert "left = _links(directory)" in body and "if left:" in body and "return f\"{len(left)} links remain" in body
+
+
+def test_clean_by_project_takes_its_directories_from_the_registry(atc_tmp: Path) -> None:
+    one, two = scratch_dir(atc_tmp, "one"), scratch_dir(atc_tmp, "two")
+    scratch.register(atc_tmp, one, write(one / "tree/pyproject.toml", '[project]\nname = "alpha"\n').parent)
+    scratch.register(atc_tmp, two, write(two / "tree/pyproject.toml", '[project]\nname = "beta"\n').parent)
+    assert clean(project="alpha") == (0, [f"DELETED {one}"])
+    assert two.is_dir() and registered_names(atc_tmp) == ["two"]
+    assert clean(project="absent") == (0, [])
+
+
+def test_clean_by_project_passes_the_same_checks(atc_tmp: Path, tmp_path: Path) -> None:
+    outside = scratch_dir(tmp_path, "outside")
+    scratch.register(atc_tmp, outside, outside / "tree")
+    code, lines = clean(project="tree")
+    assert code == 2 and lines[0].startswith("REFUSED ") and outside.is_dir()
+
+
+# the registry
+
+
+def test_the_registry_format(atc_tmp: Path, tmp_path: Path) -> None:
+    tree = write(tmp_path / "t/pyproject.toml", '[project]\nname = "alpha"\n').parent
+    scratch.register(atc_tmp, atc_tmp / "s", tree, datetime(2026, 11, 6, 1, 2, 3, tzinfo=UTC))
+    raw = (atc_tmp / "scratch-dirs.tsv").read_bytes()
+    assert raw == (f"project\tscratch\ttree\tcreated_utc\nalpha\t{atc_tmp / 's'}\t{tree}\t2026-11-06T01:02:03Z\n").encode()
+    assert not list(atc_tmp.glob("scratch-dirs.tsv.*"))
+
+
+def test_a_scratch_gets_one_line(atc_tmp: Path, tmp_path: Path) -> None:
+    add(atc_tmp, atc_tmp / "s", atc_tmp / "s")
+    assert registered_names(atc_tmp) == ["s"]
+
+
+def test_the_project_falls_back_to_the_tree_name(tmp_path: Path) -> None:
+    tree = tmp_path / "named"
+    tree.mkdir()
+    assert scratch.project_name(tree) == "named"
+    write(tree / "pyproject.toml", "[tool.x]\n")
+    assert scratch.project_name(tree) == "named"
+    write(tree / "pyproject.toml", "not toml [")
+    assert scratch.project_name(tree) == "named"
+
+
+def test_concurrent_changes_keep_every_line(atc_tmp: Path, tmp_path: Path) -> None:
+    import threading
+    threads = [threading.Thread(target=scratch.register, args=(atc_tmp, atc_tmp / f"s{i}", tmp_path)) for i in range(20)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert len(scratch.registered(atc_tmp)) == 20
+
+
+def test_list_prints_the_registry_with_sizes_and_deletes_nothing(atc_tmp: Path, tmp_path: Path) -> None:
+    present = atc_tmp / "present"
+    write(present / "file.txt", "12345")
+    add(atc_tmp, present, atc_tmp / "absent")
+    lines: list[str] = []
+    assert scratch.list_scratches(say=lines.append) == 0
+    assert lines[0] == "project\tscratch\ttree\tcreated_utc\tsize"
+    assert lines[1].endswith("\t5") and lines[2].endswith("\tmissing")
+    assert present.is_dir()
+
+
+# prune
+
+
+NOW = datetime.now(UTC) + timedelta(days=8, minutes=1)
+
+
+def age(path: Path, days: float) -> Path:
+    """A link keeps its creation time, eight days before ``NOW``; the rest take the given age."""
+    stamp = (NOW - timedelta(days=days)).timestamp()
+    os.utime(path, (stamp, stamp))
+    return path
+
+
+def prune() -> tuple[int, list[str]]:
+    lines: list[str] = []
+    return scratch.prune(say=lines.append, now=NOW), lines
+
+
+def test_prune_takes_old_entries_of_systmp_except_pytest(atc_tmp: Path) -> None:
+    systmp = atc_tmp / "systmp"
+    old_file = age(write(systmp / "old.txt"), 8)
+    new_file = age(write(systmp / "new.txt"), 6)
+    write(systmp / "w1/stage/log.txt")
+    old_dir = age(systmp / "w1", 8)
+    write(systmp / "pytest-of-me/pytest-0/x")
+    pytest_dir = age(systmp / "pytest-of-me", 30)
+    code, lines = prune()
+    assert code == 0 and sorted(lines) == sorted([f"DELETED {old_file}", f"DELETED {old_dir}"])
+    assert not old_file.exists() and not old_dir.exists() and new_file.exists() and pytest_dir.exists()
+
+
+def test_prune_refuses_a_link_and_a_directory_that_holds_one(tmp_path: Path, atc_tmp: Path) -> None:
+    systmp = atc_tmp / "systmp"
+    link_directory(systmp / "alink", target(tmp_path, "a"))
+    age(systmp / "alink", 8)
+    held = write(systmp / "held/file.txt").parent
+    link_directory(held / "bt/inner", target(tmp_path, "b"))
+    age(held, 8)
+    code, lines = prune()
+    assert code == 1
+    assert lines == [f"REFUSED {systmp / 'alink'} (is itself a link)", f"ANOMALY {held / 'bt/inner'}",
+                     f"REFUSED {held} (1 unexpected links)"]
+    assert (systmp / "alink/keep.txt").is_file() and (held / "file.txt").is_file()
+
+
+def test_prune_reports_old_registered_scratches_and_deletes_none(atc_tmp: Path) -> None:
+    old, new = scratch_dir(atc_tmp, "old"), scratch_dir(atc_tmp, "new")
+    scratch.register(atc_tmp, old, old / "tree", NOW - timedelta(days=8))
+    scratch.register(atc_tmp, new, new / "tree", NOW - timedelta(days=1))
+    code, lines = prune()
+    assert code == 0 and lines == [f"OLD {old} (tree, created {(NOW - timedelta(days=8)).strftime(scratch.TIME_FORMAT)})"]
+    assert old.is_dir() and new.is_dir()
+
+
+def git(cwd: Path, *args: str) -> str:
+    env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    return subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.com", *args], cwd=cwd, env=env,
+                          capture_output=True, text=True, check=True).stdout.strip()
+
+
+@pytest.fixture()
+def repository(tmp_path: Path) -> Path:
+    root = tmp_path / "repo"
+    root.mkdir()
+    git(root, "init", "-q", "-b", "main")
+    write(root / "a.txt")
+    (root / ".gitignore").write_text(".venv/\n", encoding="utf-8")
+    git(root, "add", ".")
+    git(root, "commit", "-q", "-m", "x")
+    return root
+
+
+def test_prune_removes_a_candidate_through_its_repository(repository: Path, atc_tmp: Path) -> None:
+    tree = atc_tmp / "candidates/abc"
+    git(repository, "worktree", "add", "-q", "--detach", str(tree))
+    write(tree / ".venv/Lib/site.py")
+    report = age(write(atc_tmp / "candidates/abc.report.json"), 8)
+    age(tree, 8)
+    code, lines = prune()
+    assert code == 0 and sorted(lines) == sorted([f"DELETED {tree}", f"DELETED {report}"])
+    assert not tree.exists() and "abc" not in git(repository, "worktree", "list", "--porcelain")
+
+
+def test_a_candidate_git_refuses_is_left_with_gits_message(repository: Path, atc_tmp: Path) -> None:
+    tree = atc_tmp / "candidates/dirty"
+    git(repository, "worktree", "add", "-q", "--detach", str(tree))
+    write(tree / "a.txt", "changed\n")
+    age(tree, 8)
+    code, lines = prune()
+    assert code == 1 and lines[0].startswith(f"REFUSED {tree} (") and "fatal" in lines[0]
+    assert (tree / "a.txt").is_file()
+    git(repository, "worktree", "remove", "--force", str(tree))
+
+
+def test_a_tree_git_no_longer_knows_is_any_other_entry(repository: Path, atc_tmp: Path) -> None:
+    tree = atc_tmp / "candidates/orphan"
+    git(repository, "worktree", "add", "-q", "--detach", str(tree))
+    git(repository, "worktree", "remove", "--force", str(tree))
+    write(tree / ".git", "gitdir: " + str(repository / ".git/worktrees/orphan") + "\n")
+    age(tree, 8)
+    plain = write(atc_tmp / "candidates/plain/file.txt").parent
+    age(plain, 8)
+    code, lines = prune()
+    assert code == 0 and sorted(lines) == sorted([f"DELETED {tree}", f"DELETED {plain}"])

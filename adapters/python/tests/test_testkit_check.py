@@ -8,8 +8,8 @@ import zipfile
 import pytest
 import yaml
 
-sys.path.insert(0, str(Path(__file__).parents[1] / 'hami-testkit/src'))
-from hami_testkit.check import repository_problems
+sys.path.insert(0, str(Path(__file__).parents[1] / 'atc-testkit/src'))
+from atc_testkit.check import repository_problems
 
 
 @pytest.fixture
@@ -20,34 +20,39 @@ def repository(tmp_path):
         path.write_text(content, encoding='utf-8')
         return path
     write('pyproject.toml', '''[dependency-groups]
-dev = ["hami-testkit==0.2.0"]
+dev = ["atc-testkit==0.2.0", "pytest-xdist==3.6.1"]
 [tool.uv.sources]
-hami-testkit = { path = "vendor/hami_testkit-0.2.0-py3-none-any.whl" }
+atc-testkit = { path = "vendor/atc_testkit-0.2.0-py3-none-any.whl" }
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-[tool.hami-testkit]
+[tool.atc-testkit]
 gate = "scripts/prepush_select.py"
 hook = "scripts/git-hooks/pre-push"
 workflow = ".github/workflows/ci.yml"
 ci_job = "python"
+unmarked_baseline = "unmarked-baseline.txt"
+slow_ci_job = "python"
+product_module_prefixes = ["fixture_"]
 ''')
+    write('unmarked-baseline.txt', '')
+    write('conftest.py', 'pytest_plugins = ("atc_testkit.plugin",)\n')
     write('tests/test_case.py', 'def test_case(): pass\n')
-    write('scripts/prepush_select.py', 'from hami_testkit import selection\n')
-    write('scripts/git-hooks/pre-push', '#!/bin/sh\nexec uv run python scripts/prepush_select.py --run\n')
+    write('scripts/prepush_select.py', 'from atc_testkit import selection\n')
+    write('scripts/git-hooks/pre-push', '#!/bin/sh\nexec uv run --frozen python scripts/prepush_select.py --run\n')
     write('.github/workflows/ci.yml', '''jobs:
   python:
     steps:
       - run: uv sync --all-packages --frozen
-      - run: uv run python -m hami_testkit.check --installed
+      - run: uv run python -m atc_testkit.check --installed
 ''')
-    wheel = tmp_path / 'vendor/hami_testkit-0.2.0-py3-none-any.whl'
+    wheel = tmp_path / 'vendor/atc_testkit-0.2.0-py3-none-any.whl'
     wheel.parent.mkdir(exist_ok=True)
     with zipfile.ZipFile(wheel, 'w') as archive:
-        archive.writestr('hami_testkit/__init__.py', b'')
+        archive.writestr('atc_testkit/__init__.py', b'')
     digest = hashlib.sha256(wheel.read_bytes()).hexdigest()
-    write('vendor/hami-testkit.json', json.dumps(dict(managed_by='agent-traffic-control',version='0.2.0',wheel=wheel.name,wheel_sha256=digest)))
+    write('vendor/atc-testkit.json', json.dumps(dict(managed_by='agent-traffic-control',version='0.2.0',wheel=wheel.name,wheel_sha256=digest)))
     write('uv.lock', f'''[[package]]
-name = "hami-testkit"
+name = "atc-testkit"
 version = "0.2.0"
 source = {{ path = "vendor/{wheel.name}" }}
 wheels = [{{ hash = "sha256:{digest}" }}]
@@ -62,14 +67,14 @@ def test_valid_contract_is_read_only(repository):
 
 
 @pytest.mark.parametrize(('relative','old','new'), [
-    ('pyproject.toml', 'hami-testkit==0.2.0', 'hami-testkit>=0.2.0'),
-    ('pyproject.toml', 'vendor/hami_testkit-0.2.0', 'other/hami_testkit-0.2.0'),
+    ('pyproject.toml', 'atc-testkit==0.2.0', 'atc-testkit>=0.2.0'),
+    ('pyproject.toml', 'vendor/atc_testkit-0.2.0', 'other/atc_testkit-0.2.0'),
     ('uv.lock', 'version = "0.2.0"', 'version = "0.1.1"'),
     ('uv.lock', 'sha256:', 'wrong:'),
-    ('vendor/hami-testkit.json', 'agent-traffic-control', 'project-owned'),
-    ('scripts/prepush_select.py', 'from hami_testkit import selection', '# from hami_testkit import selection'),
+    ('vendor/atc-testkit.json', 'agent-traffic-control', 'project-owned'),
+    ('scripts/prepush_select.py', 'from atc_testkit import selection', '# from atc_testkit import selection'),
     ('scripts/git-hooks/pre-push', 'exec uv run', '# exec uv run'),
-    ('.github/workflows/ci.yml', '- run: uv run python -m hami_testkit.check --installed', '# check omitted'),
+    ('.github/workflows/ci.yml', '- run: uv run python -m atc_testkit.check --installed', '# check omitted'),
 ])
 def test_miswiring_is_an_error(repository, relative, old, new):
     path=repository/relative
@@ -106,7 +111,7 @@ def test_workspace_bridge_only_inspects_opted_in_projects(repository, tmp_path):
     absent=tmp_path/'unadopted'
     absent.mkdir()
     assert testkit_contract.problems(absent) == []
-    (repository/'vendor/hami-testkit.json').write_text('{}')
+    (repository/'vendor/atc-testkit.json').write_text('{}')
     assert testkit_contract.problems(repository)
 
 
@@ -127,6 +132,81 @@ def test_onboarding_reports_testkit_drift_without_rewriting_project_config(repos
     onboard_project.apply_plan(plan,'sync')
     assert before=={str(p):p.read_bytes() for p in repository.rglob('*') if p.is_file()}
     path=repository/'pyproject.toml'
-    path.write_text(path.read_text().replace('hami-testkit==0.2.0','hami-testkit>=0.2.0'))
+    path.write_text(path.read_text().replace('atc-testkit==0.2.0','atc-testkit>=0.2.0'))
     plan=onboard_project.build_plan(repository,workspace)
-    assert any(item.action=='collision' and item.path.name=='hami-testkit.json' for item in plan)
+    assert any(item.action=='collision' and item.path.name=='atc-testkit.json' for item in plan)
+
+
+@pytest.mark.parametrize(('relative', 'old', 'new'), [
+    ('pyproject.toml', 'unmarked_baseline = "unmarked-baseline.txt"', ''),
+    ('pyproject.toml', 'unmarked-baseline.txt', 'absent.txt'),
+    ('pyproject.toml', 'slow_ci_job = "python"', ''),
+    ('pyproject.toml', 'slow_ci_job = "python"', 'slow_ci_job = "other"'),
+    ('pyproject.toml', 'product_module_prefixes = ["fixture_"]', ''),
+    ('pyproject.toml', 'product_module_prefixes = ["fixture_"]', 'product_module_prefixes = []'),
+    ('pyproject.toml', ', "pytest-xdist==3.6.1"', ''),
+    ('pyproject.toml', 'testpaths = ["tests"]', 'testpaths = ["tests"]\nmarkers = ["x: y"]'),
+    ('pyproject.toml', 'gate = "scripts/prepush_select.py"', 'gate = "scripts/prepush_select.py"\nci_init = "no function"'),
+    ('pyproject.toml', 'gate = "scripts/prepush_select.py"', 'gate = "scripts/prepush_select.py"\nlint_scope = "src"'),
+    ('pyproject.toml', 'gate = "scripts/prepush_select.py"', 'gate = "scripts/prepush_select.py"\nignore = { other = ["x"] }'),
+    ('pyproject.toml', 'gate = "scripts/prepush_select.py"', 'gate = "scripts/prepush_select.py"\nhook_uv_options = ["--all-packages"]'),
+    ('conftest.py', 'atc_testkit.plugin', 'other'),
+    ('scripts/git-hooks/pre-push', '--frozen ', ''),
+])
+def test_the_supplied_data_is_checked(repository, relative, old, new):
+    path = repository / relative
+    text = path.read_text(encoding='utf-8')
+    assert old in text
+    path.write_text(text.replace(old, new), encoding='utf-8')
+    assert repository_problems(repository)
+
+
+def test_the_hook_carries_the_named_uv_options(repository):
+    path = repository / 'pyproject.toml'
+    path.write_text(path.read_text(encoding='utf-8').replace(
+        'gate = "scripts/prepush_select.py"', 'gate = "scripts/prepush_select.py"\nhook_uv_options = ["--all-packages"]'), encoding='utf-8')
+    hook = repository / 'scripts/git-hooks/pre-push'
+    hook.write_text(hook.read_text(encoding='utf-8').replace('--frozen ', '--frozen --all-packages '), encoding='utf-8')
+    assert repository_problems(repository) == []
+
+
+def test_optional_data_of_the_right_shape_passes(repository):
+    path = repository / 'pyproject.toml'
+    path.write_text(path.read_text(encoding='utf-8').replace('gate = "scripts/prepush_select.py"', '''gate = "scripts/prepush_select.py"
+credential_variables = ["X"]
+data_root_variables = ["Y"]
+automation_markdown_prefixes = [".claude/"]
+lint_scope = ["src"]
+ci_platforms = ["ubuntu-latest"]
+ci_init = "scripts.ci:prepare"
+ignore = { posix = ["tests/x.py"], nt = [] }'''), encoding='utf-8')
+    assert repository_problems(repository) == []
+
+
+@pytest.fixture
+def earlier_repository(repository):
+    '''A project that still carries the earlier release's names and none of the newer data.'''
+    for relative in ('pyproject.toml', 'uv.lock', 'scripts/prepush_select.py', '.github/workflows/ci.yml',
+                     'vendor/atc-testkit.json', 'scripts/git-hooks/pre-push'):
+        path = repository / relative
+        path.write_text(path.read_text(encoding='utf-8').replace('atc-testkit', 'hami-testkit').replace(
+            'atc_testkit', 'hami_testkit').replace('--frozen ', ''), encoding='utf-8')
+    (repository / 'vendor/atc_testkit-0.2.0-py3-none-any.whl').rename(repository / 'vendor/hami_testkit-0.2.0-py3-none-any.whl')
+    (repository / 'vendor/atc-testkit.json').rename(repository / 'vendor/hami-testkit.json')
+    return repository
+
+
+def test_a_project_with_the_earlier_record_keeps_its_contract_check(earlier_repository):
+    import testkit_contract
+    assert testkit_contract.record(earlier_repository).name == 'hami-testkit.json'
+    assert testkit_contract.problems(earlier_repository) == []
+    path = earlier_repository / 'pyproject.toml'
+    path.write_text(path.read_text(encoding='utf-8').replace('hami-testkit==0.2.0', 'hami-testkit>=0.2.0'), encoding='utf-8')
+    assert testkit_contract.problems(earlier_repository)
+
+
+def test_the_current_record_wins_over_an_earlier_one(repository):
+    import testkit_contract
+    (repository / 'vendor/hami-testkit.json').write_text('{}', encoding='utf-8')
+    assert testkit_contract.record(repository).name == 'atc-testkit.json'
+    assert testkit_contract.problems(repository) == []

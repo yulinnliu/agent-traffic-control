@@ -1,12 +1,12 @@
 from pathlib import Path
 import sys
-sys.path.insert(0, str(Path(__file__).parents[1] / 'hami-testkit/src'))
+sys.path.insert(0, str(Path(__file__).parents[1] / 'atc-testkit/src'))
 
 from dataclasses import replace
 import pytest
-from hami_testkit import selection as s
+from atc_testkit import selection as s
 import subprocess
-from hami_testkit.git import BaselineDelta, baseline_deltas, changed_paths, SelectionError, verify_push_checkout, git_env
+from atc_testkit.git import BaselineDelta, baseline_deltas, changed_paths, SelectionError, verify_push_checkout, git_env
 
 
 @pytest.fixture

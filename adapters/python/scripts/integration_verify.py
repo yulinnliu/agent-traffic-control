@@ -27,9 +27,9 @@ from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 
 ADAPTER = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ADAPTER / "hami-testkit/src"))
+sys.path.insert(0, str(ADAPTER / "atc-testkit/src"))
 
-from hami_testkit.git import git_env  # noqa: E402
+from atc_testkit.git import git_env  # noqa: E402
 
 ROOT = ADAPTER.parents[1]
 ADAPTER_DIR = "adapters/python"

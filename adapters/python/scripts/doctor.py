@@ -109,8 +109,8 @@ def diagnose(root: Path = ROOT, environ: dict[str, str] | None = None) -> list[C
         project_path = (root / entry["repo"]).resolve()
         if not project_path.is_dir():
             continue
-        if (project_path / 'vendor/hami-testkit.json').is_file():
-            import testkit_contract
+        import testkit_contract
+        if testkit_contract.record(project_path) is not None:
             problems = testkit_contract.problems(project_path, hooks=True)
             checks.append(Check(f"projects.{name}.testkit", "ERROR" if problems else "READY",
                                 '; '.join(problems) if problems else 'version, artifact, hook and CI contract current'))

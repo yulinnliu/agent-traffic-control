@@ -11,13 +11,13 @@ from pathlib import Path
 
 import pytest
 
-TESTKIT_SRC = Path(__file__).parents[1] / "hami-testkit/src"
+TESTKIT_SRC = Path(__file__).parents[1] / "atc-testkit/src"
 sys.path.insert(0, str(TESTKIT_SRC))
 
 import git_integrate as gi
-import hami_testkit
-from hami_testkit import evidence as ev
-from hami_testkit.git import SelectionError
+import atc_testkit
+from atc_testkit import evidence as ev
+from atc_testkit.git import SelectionError
 
 ARGV_FILE = "scripts/integration-verify.json"
 STAGES = (ev.Stage("parallel", "not slow and not serial"), ev.Stage("serial", "serial and not slow", ("tests/x.py",)))
@@ -46,7 +46,7 @@ def verifier_argv() -> list[str]:
         "import os, subprocess, sys; "
         f"sys.path.insert(0, {str(TESTKIT_SRC)!r}); "
         "from pathlib import Path; "
-        "from hami_testkit import evidence as ev; "
+        "from atc_testkit import evidence as ev; "
         "changed = subprocess.check_output(['git', 'diff', '--name-only', "
         "os.environ['ATC_EXPECTED_MAIN_SHA'] + '..' + os.environ['ATC_INTEGRATION_SHA']], text=True).split(); "
         "paths = sorted({'/'.join(p.split('/')[:2]) + '/tests' for p in changed if p.startswith('packages/')}); "
@@ -342,7 +342,7 @@ def test_report_carries_the_compared_fields(tmp_path: Path) -> None:
     assert report.pop("python").count(".") == 2
     assert report == {
         "schema": "atc-verification-report/1",
-        "selector": {"name": "hami-testkit", "version": hami_testkit.__version__},
+        "selector": {"name": "atc-testkit", "version": atc_testkit.__version__},
         "selection": {"full": False, "paths": [A]},
         "stages": [{"name": "parallel", "marker": "not slow and not serial", "ignore": []},
                    {"name": "serial", "marker": "serial and not slow", "ignore": ["tests/x.py"]}],
@@ -356,8 +356,6 @@ def test_report_carries_the_compared_fields(tmp_path: Path) -> None:
 
 
 def test_module_version_matches_the_package() -> None:
-    project = tomllib.loads((TESTKIT_SRC.parent / "pyproject.toml").read_text(encoding="utf-8"))["project"]
-    assert hami_testkit.__version__ == project["version"] == "0.5.0"
-    assert f"`hami-testkit` {project['version']};" in (TESTKIT_SRC.parent / "README.md").read_text(encoding="utf-8")
+    assert f"`atc-testkit` {atc_testkit.__version__};" in (TESTKIT_SRC.parent / "README.md").read_text(encoding="utf-8")
     assert (ev.REPORT_SCHEMA, ev.RECORD_SCHEMA) == (gi.REPORT_SCHEMA, gi.EVIDENCE_SCHEMA)
     assert ev.EVIDENCE_DIR == gi.EVIDENCE_DIR

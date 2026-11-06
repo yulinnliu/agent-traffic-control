@@ -198,11 +198,12 @@ def build_plan(project_path: Path, root: Path = ROOT) -> list[PlanItem]:
         )
     plan.append(policy_plan(project_path, template))
     plan.extend(governance_plan(project_path, root))
-    if (project_path / 'vendor/hami-testkit.json').is_file():
-        import testkit_contract
+    import testkit_contract
+    testkit_record = testkit_contract.record(project_path)
+    if testkit_record is not None:
         problems = testkit_contract.problems(project_path)
         plan.append(PlanItem('collision' if problems else 'skip',
-                             project_path / 'vendor/hami-testkit.json',
+                             testkit_record,
                              '; '.join(problems) if problems else 'testkit contract current; project configuration preserved'))
 
     canonical = canonical_skills(root)

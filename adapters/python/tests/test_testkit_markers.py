@@ -1,12 +1,12 @@
 from pathlib import Path
 import sys
-sys.path.insert(0, str(Path(__file__).parents[1] / 'hami-testkit/src'))
+sys.path.insert(0, str(Path(__file__).parents[1] / 'atc-testkit/src'))
 
 from dataclasses import dataclass
 
 import pytest
 
-from hami_testkit.markers import definition_nodeid, marker_contract_violations
+from atc_testkit.markers import definition_nodeid, marker_contract_violations
 
 
 

@@ -15,6 +15,8 @@ Commands map onto the scripts under `adapters/python/scripts/`:
     enforce    generate_enforcement.py   (+ --workspace <root>/workspace.yaml when present)
     classify   classify_change.py
     friction   friction.py
+    test       atc_testkit            run / mutants
+    tmp        atc_testkit            list / clean / prune
 
 The checkout root is, in order: `--root`, `$ATC_ROOT`, the nearest parent of
 the working directory holding `workspace.yaml`, else the checkout this
@@ -43,6 +45,7 @@ COMMANDS = {
     "classify": "classify_change",
     "friction": "friction",
 }
+TESTKIT_COMMANDS = ("test", "tmp")
 
 
 def resolve_root(explicit: str | None, environ: dict[str, str], cwd: Path) -> Path:
@@ -74,6 +77,9 @@ def main(argv: list[str] | None = None) -> int:
         print(usage())
         return 0
     command, rest = args[0], args[1:]
+    if command in TESTKIT_COMMANDS:
+        from atc_testkit import commands
+        return commands.main([command, *rest])
     if command not in COMMANDS:
         print(f"unknown command: {command}\n\n{usage()}", file=sys.stderr)
         return 2

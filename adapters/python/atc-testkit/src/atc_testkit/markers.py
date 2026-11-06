@@ -9,6 +9,15 @@ from typing import Protocol
 
 
 SEMANTIC_MARKERS = frozenset({"unit", "integration", "render", "statistical"})
+MARKER_DESCRIPTIONS = {
+    "unit": "exercises one production unit with fake dependencies or temporary paths",
+    "integration": "composes production components or crosses a CLI, persistent-store or subprocess boundary",
+    "render": "validates a page, report or visualization output contract",
+    "statistical": "validates a statistical property with synthetic samples or resampling",
+    "slow": "unsuitable for the fast development loop; runs in CI only and needs one semantic marker",
+    "serial": "sensitive to parallel load; runs without xdist workers",
+    "interactive_desktop": "needs the interactive Windows desktop",
+}
 
 
 class MarkedItem(Protocol):

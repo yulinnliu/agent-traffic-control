@@ -18,7 +18,7 @@ from . import __version__
 REPORT_SCHEMA = "atc-verification-report/1"
 RECORD_SCHEMA = "atc-verification-evidence/1"
 REPORT_ENV = "ATC_VERIFICATION_REPORT"
-SELECTOR_NAME = "hami-testkit"
+SELECTOR_NAME = "atc-testkit"
 DEPENDENCY_FILES = ("uv.lock", ".python-version")
 ABSENT = "absent"
 EVIDENCE_DIR = ("atc", "verification-evidence")

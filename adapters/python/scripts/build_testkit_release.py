@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import email
 import hashlib
 import json
 import os
@@ -12,18 +13,18 @@ import zipfile
 
 
 WORKSPACE = Path(__file__).resolve().parents[3]
-PACKAGE = WORKSPACE / "adapters/python/hami-testkit"
+PACKAGE = WORKSPACE / "adapters/python/atc-testkit"
 
 
 def source_record(package: Path) -> dict:
-    files = [package / "pyproject.toml", *sorted((package / "src/hami_testkit").rglob("*.py"))]
+    files = [package / "pyproject.toml", *sorted((package / "src/atc_testkit").rglob("*.py"))]
     digest = hashlib.sha256()
     for path in files:
         digest.update(path.relative_to(package).as_posix().encode() + b"\0" + path.read_bytes())
     return {
         "managed_by": "agent-traffic-control",
         "source_repository": "yulinnliu/agent-traffic-control",
-        "source_path": "adapters/python/hami-testkit",
+        "source_path": "adapters/python/atc-testkit",
         "source_sha256": digest.hexdigest(),
         "source_files": [path.relative_to(package).as_posix() for path in files],
     }
@@ -45,7 +46,7 @@ def validate_wheel(wheel: Path, snapshot: Path) -> None:
     """Require the complete wheel payload to match the canonical source files."""
     expected = {
         path.relative_to(snapshot / "src").as_posix(): path.read_bytes()
-        for path in (snapshot / "src/hami_testkit").rglob("*.py")
+        for path in (snapshot / "src/atc_testkit").rglob("*.py")
     }
     with zipfile.ZipFile(wheel) as archive:
         payload = [name for name in archive.namelist()
@@ -59,6 +60,14 @@ def validate_wheel(wheel: Path, snapshot: Path) -> None:
         for name, raw in expected.items():
             if archive.read(name) != raw:
                 raise ValueError(f"wheel source mismatch: modified={name}")
+
+
+def wheel_identity(wheel: Path) -> dict[str, str]:
+    """The name and version the built wheel's metadata carries; the package's ``__version__`` sets the version."""
+    with zipfile.ZipFile(wheel) as archive:
+        metadata, = (name for name in archive.namelist() if name.endswith(".dist-info/METADATA"))
+        message = email.message_from_bytes(archive.read(metadata))
+    return {"name": message["Name"], "version": message["Version"]}
 
 
 def publish_local(path: Path, data: bytes) -> None:
@@ -77,7 +86,7 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     args.output_dir.mkdir(parents=True, exist_ok=True)
     env = {**os.environ, "SOURCE_DATE_EPOCH": "315532800"}
-    with tempfile.TemporaryDirectory(prefix="hami-testkit-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="atc-testkit-") as temporary:
         snapshot = Path(temporary) / "source"
         source = snapshot_source(PACKAGE, snapshot)
         output = Path(temporary) / "dist"
@@ -87,14 +96,13 @@ def main(argv=None) -> int:
         validate_wheel(wheel, snapshot)
         if source_record(snapshot) != source:
             raise ValueError("build changed the canonical source snapshot")
-        import tomllib
-        project = tomllib.loads((snapshot / "pyproject.toml").read_text(encoding="utf-8"))["project"]
-        release = {"name": project["name"], "version": project["version"], **source,
+        identity = wheel_identity(wheel)
+        release = {**identity, **source,
                    "wheel": wheel.name, "wheel_sha256": hashlib.sha256(wheel.read_bytes()).hexdigest()}
         record = (json.dumps(release, indent=2) + "\n").encode()
         # Check both identities before writing either release component.
         destination = args.output_dir / wheel.name
-        manifest = args.output_dir / "hami-testkit.json"
+        manifest = args.output_dir / "atc-testkit.json"
         for path, data in ((destination, wheel.read_bytes()), (manifest, record)):
             if path.exists() and path.read_bytes() != data:
                 raise ValueError(f"immutable release differs: {path.name}; use a fresh version/output directory")

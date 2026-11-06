@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+from dataclasses import dataclass
 import hashlib
 import importlib.metadata
 import json
@@ -16,8 +17,38 @@ import zipfile
 import yaml
 
 
+@dataclass(frozen=True)
+class Names:
+    """The names one release generation of the testkit carries in a project."""
+    distribution: str
+    module: str
+    record: str
+
+    @property
+    def check_command(self) -> str:
+        return f"uv run python -m {self.module}.check --installed"
+
+
+CURRENT = Names("atc-testkit", "atc_testkit", "vendor/atc-testkit.json")
+EARLIER = Names("hami-testkit", "hami_testkit", "vendor/hami-testkit.json")
+PLUGIN = "atc_testkit.plugin"
+REQUIRED_STRINGS = ("gate", "hook", "workflow", "ci_job", "unmarked_baseline", "slow_ci_job")
+REQUIRED_LISTS = ("product_module_prefixes",)
+OPTIONAL_LISTS = ("credential_variables", "data_root_variables", "automation_markdown_prefixes", "lint_scope",
+                  "hook_uv_options", "ci_platforms")
+INITIALIZATION = re.compile(r"[A-Za-z_][\w.]*:[A-Za-z_]\w*")
+
+
+def adopted_names(root: Path) -> Names | None:
+    """The names of the release record the repository carries; the current record wins over an earlier one."""
+    for names in (CURRENT, EARLIER):
+        if (root / names.record).is_file():
+            return names
+    return None
+
+
 def adopted(root: Path) -> bool:
-    return (root / 'vendor/hami-testkit.json').is_file()
+    return adopted_names(root) is not None
 
 
 def _inside(root: Path, relative: str) -> Path:
@@ -27,21 +58,69 @@ def _inside(root: Path, relative: str) -> Path:
     return path
 
 
-def repository_problems(root: Path, *, installed: bool = False, hooks: bool = False) -> list[str]:
+def _strings(value: object) -> bool:
+    return isinstance(value, list) and all(isinstance(item, str) for item in value)
+
+
+def _data_problems(root: Path, project: dict, config: dict, workflow: dict) -> list[str]:
+    """The data of docs/TESTKIT.md § What a project supplies, and the markers and plugin of § Adoption and § Markers."""
+    problems = []
+    for key in REQUIRED_STRINGS:
+        if not isinstance(config.get(key), str) or not config[key]:
+            problems.append(f'[tool.atc-testkit] must name {key}')
+    for key in REQUIRED_LISTS:
+        if not _strings(config.get(key)) or not config[key]:
+            problems.append(f'[tool.atc-testkit] must list {key}')
+    for key in OPTIONAL_LISTS:
+        if key in config and not _strings(config[key]):
+            problems.append(f'[tool.atc-testkit] {key} must be a list of strings')
+    ignore = config.get('ignore', {})
+    if not isinstance(ignore, dict) or not all(key in ('nt', 'posix') and _strings(value) for key, value in ignore.items()):
+        problems.append('[tool.atc-testkit] ignore must map nt and posix to lists of paths')
+    if 'ci_init' in config and not (isinstance(config['ci_init'], str) and INITIALIZATION.fullmatch(config['ci_init'])):
+        problems.append('[tool.atc-testkit] ci_init must be module:function')
+    if isinstance(config.get('unmarked_baseline'), str) and not _inside(root, config['unmarked_baseline']).is_file():
+        problems.append(f'unmarked baseline is missing: {config["unmarked_baseline"]}')
+    if config.get('slow_ci_job') not in workflow['jobs']:
+        problems.append('[tool.atc-testkit] slow_ci_job must name a job of the workflow')
+    if project.get('tool', {}).get('pytest', {}).get('ini_options', {}).get('markers'):
+        problems.append('pyproject.toml must list no markers: the plugin registers them')
+    dev = project.get('dependency-groups', {}).get('dev', [])
+    if not any(isinstance(item, str) and re.match(r'pytest-xdist\b', item) for item in dev):
+        problems.append('development dependencies must include pytest-xdist')
+    conftest = root / 'conftest.py'
+    plugins = [node.value for node in ast.walk(ast.parse(conftest.read_text(encoding='utf-8')))
+               if isinstance(node, ast.Constant)] if conftest.is_file() else []
+    if PLUGIN not in plugins:
+        problems.append(f'root conftest.py must register {PLUGIN}')
+    return problems
+
+
+def _hook_pattern(names: Names, config: dict) -> str:
+    gate = re.escape(config['gate'])
+    if names is EARLIER:
+        return rf'^exec uv run .*python {gate} --run\s*$'
+    options = ''.join(re.escape(option) + ' ' for option in config.get('hook_uv_options', []))
+    return rf'^exec uv run --frozen {options}python {gate} --run\s*$'
+
+
+def repository_problems(root: Path, *, installed: bool = False, hooks: bool = False,
+                        names: Names | None = None) -> list[str]:
     """Validate static wiring, with optional environment and installed-hook checks."""
     root = root.resolve()
+    names = names or adopted_names(root) or CURRENT
     problems = []
     try:
         project = tomllib.loads((root / 'pyproject.toml').read_text(encoding='utf-8'))
-        config = project.get('tool', {}).get('hami-testkit', {})
-        release = json.loads((root / 'vendor/hami-testkit.json').read_text(encoding='utf-8'))
+        config = project.get('tool', {}).get(names.distribution, {})
+        release = json.loads((root / names.record).read_text(encoding='utf-8'))
         if release.get('managed_by') != 'agent-traffic-control':
             problems.append('testkit release record lacks managed ownership')
         version = release['version']
-        if f'hami-testkit=={version}' not in project.get('dependency-groups', {}).get('dev', []):
+        if f'{names.distribution}=={version}' not in project.get('dependency-groups', {}).get('dev', []):
             problems.append('development dependency must pin the release version')
         wheel_relative = 'vendor/' + release['wheel']
-        source = project.get('tool', {}).get('uv', {}).get('sources', {}).get('hami-testkit', {})
+        source = project.get('tool', {}).get('uv', {}).get('sources', {}).get(names.distribution, {})
         if source != {'path': wheel_relative}:
             problems.append('development source must reference the committed release wheel')
         wheel = _inside(root, wheel_relative)
@@ -49,7 +128,7 @@ def repository_problems(root: Path, *, installed: bool = False, hooks: bool = Fa
         if digest != release['wheel_sha256']:
             problems.append('committed wheel digest differs from release record')
         lock = tomllib.loads((root / 'uv.lock').read_text(encoding='utf-8'))
-        packages = [p for p in lock.get('package', []) if p.get('name') == 'hami-testkit']
+        packages = [p for p in lock.get('package', []) if p.get('name') == names.distribution]
         if len(packages) != 1 or packages[0].get('version') != version:
             problems.append('lockfile must contain the exact testkit release')
         elif (packages[0].get('source') != {'path': wheel_relative}
@@ -66,30 +145,30 @@ def repository_problems(root: Path, *, installed: bool = False, hooks: bool = Fa
         gate = _inside(root, config['gate'])
         imports = [n.module or '' for n in ast.walk(ast.parse(gate.read_text(encoding='utf-8')))
                    if isinstance(n, ast.ImportFrom)]
-        if not any(name == 'hami_testkit' or name.startswith('hami_testkit.') for name in imports):
+        if not any(name == names.module or name.startswith(names.module + '.') for name in imports):
             problems.append('configured gate does not import shared testkit')
         hook = _inside(root, config['hook'])
         hook_text = hook.read_text(encoding='utf-8')
-        command = rf'^exec uv run .*python {re.escape(config["gate"])} --run\s*$'
-        if not re.search(command, hook_text, re.MULTILINE):
+        if not re.search(_hook_pattern(names, config), hook_text, re.MULTILINE):
             problems.append('configured pre-push hook does not delegate to the gate')
         workflow = yaml.safe_load(_inside(root, config['workflow']).read_text(encoding='utf-8'))
         job = workflow['jobs'][config['ci_job']]
         steps = job.get('steps', [])
-        check_command = 'uv run python -m hami_testkit.check --installed'
-        check_steps = [(i, step) for i, step in enumerate(steps) if step.get('run', '').strip() == check_command]
+        check_steps = [(i, step) for i, step in enumerate(steps) if step.get('run', '').strip() == names.check_command]
         sync_steps = [i for i, step in enumerate(steps) if step.get('run', '').strip().startswith('uv sync ')]
         if ('if' in job or job.get('continue-on-error') or len(check_steps) != 1
                 or not sync_steps or check_steps[0][0] <= max(sync_steps)
                 or 'if' in check_steps[0][1] or check_steps[0][1].get('continue-on-error')):
             problems.append('CI must run an unconditional testkit check after dependency sync')
+        if names is CURRENT:
+            problems.extend(_data_problems(root, project, config, workflow))
         if installed:
-            distribution = importlib.metadata.distribution('hami-testkit')
+            distribution = importlib.metadata.distribution(names.distribution)
             if distribution.version != version:
                 problems.append('installed testkit version differs from release record')
             with zipfile.ZipFile(wheel) as archive:
                 for name in archive.namelist():
-                    if name.startswith('hami_testkit/') and name.endswith('.py'):
+                    if name.startswith(names.module + '/') and name.endswith('.py'):
                         if distribution.locate_file(name).read_bytes() != archive.read(name):
                             problems.append(f'installed testkit source differs: {name}')
         if hooks:

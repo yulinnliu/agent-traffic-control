@@ -664,7 +664,7 @@ def test_json_stop_carries_preflight(repo: Path, capsys: pytest.CaptureFixture[s
 
 REPORT = {
     "schema": "atc-verification-report/1",
-    "selector": {"name": "hami-testkit", "version": "0.5.0"},
+    "selector": {"name": "atc-testkit", "version": "0.5.0"},
     "selection": {"full": False, "paths": ["packages/a/tests"]},
     "stages": [{"name": "parallel", "marker": "not slow", "ignore": []}],
     "dependency_inputs": {"uv.lock": "0" * 64},
@@ -767,7 +767,7 @@ def test_verifier_without_report_integrates_and_writes_no_record(
     json.dumps({key: value for key, value in REPORT.items() if key != "selection"}),
     json.dumps({**REPORT, "selection": {"full": "yes", "paths": []}}),
     json.dumps({**REPORT, "selection": {"full": True, "paths": [1]}}),
-    json.dumps({**REPORT, "selector": {"name": "hami-testkit"}}),
+    json.dumps({**REPORT, "selector": {"name": "atc-testkit"}}),
     json.dumps({**REPORT, "stages": [{"name": "parallel", "marker": "not slow"}]}),
     json.dumps({**REPORT, "dependency_inputs": {"uv.lock": None}}),
     "",
