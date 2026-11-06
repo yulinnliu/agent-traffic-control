@@ -5,11 +5,13 @@ The two specs hold every rule; this plan cites them by section and adds none.
 A point the specs leave open is listed in § Points for the Owner with the
 step that meets it, and is settled in the spec before that step continues.
 
-Every step is one topic branch in the repository it names, reviewed by the
-`hami-review-relay` method under the class given, and integrated with
-`atc integrate` before the next step that depends on it. A step in a project
-repository follows that project's `AGENTS.md`; § Project plan entries says
-where each project records it.
+Step 1 is a set of measurements and commits nothing. Steps 2 to 5 and the
+reference clean-up of step 6 are each one topic branch in the repository
+named, reviewed by the `hami-review-relay` method under the class given, and
+integrated with `atc integrate` before the next step that depends on it. The
+Owner's deletions of step 6 are no topic. A step in a project repository
+follows that project's `AGENTS.md`; § Project plan entries says where each
+project records it.
 
 ## Order
 
@@ -19,20 +21,22 @@ where each project records it.
                                     └─ needs the governance change of § Separate authority
 ```
 
-Steps 4 and 5 do not depend on each other. Step 6 needs both.
+Steps 4 and 5 do not depend on each other. Step 6 needs both. Step 2 starts
+on the Owner's word after the report of step 1.
 
 ## 1. Verifications that may change the spec
 
-Both run before any code of step 2 is written. Each is a measurement, not a
-change to a project: its script lives in a scratch directory and nothing is
-committed in a project repository. The result is reported to the Owner with
-the numbers.
+The four measurements below run before any code of step 2 is written. Each
+is a measurement, not a change to a project: its script lives in a scratch
+directory and nothing is committed in a project repository. Every result is
+reported to the Owner with its numbers, whatever it shows, and step 2 starts
+on the Owner's word after that report.
 
 ### 1.1 xdist workers on a private desktop
 
-Question: does the `parallel` stage of `TESTKIT.md` § Stages work as written,
-that is, a pytest run with `-n min(8, cpu count) --dist loadscope` started on
-a private Windows desktop (`TESTKIT.md` § Private desktop)?
+Question: does the `parallel` stage of `TESTKIT.md` § Stages work as
+written, with its worker option, when started on a private Windows desktop
+(`TESTKIT.md` § Private desktop)?
 
 - Repository: `hami-quant-trading`, read only. The launcher is its
   `scripts/private_desktop.py`, which today starts only the serial stage
@@ -44,12 +48,12 @@ a private Windows desktop (`TESTKIT.md` § Private desktop)?
   control. Record: exit codes, the summary lines, whether execnet workers
   start, whether any window reaches the interactive desktop, wall clock of
   each run.
-- Back to the Owner when: workers fail to start or hang on a private desktop;
-  a test passes on the interactive desktop and fails on the private one for a
-  reason other than needing the interactive desktop (those are counted in
-  1.2); or the private run is slower than the interactive one by more than
-  the gate can absorb. Any of these changes the Desktop column of
-  `TESTKIT.md` § Stages.
+- The report names each of these when it occurs, because it changes the
+  Desktop column of `TESTKIT.md` § Stages: workers that fail to start or
+  hang on a private desktop; a test that passes on the interactive desktop
+  and fails on the private one for a reason other than needing the
+  interactive desktop (those are counted in 1.2). It gives the wall clock of
+  the private and the interactive run side by side.
 
 ### 1.2 Count of `interactive_desktop` tests
 
@@ -63,12 +67,32 @@ the `interactive` stage small enough that showing its windows is acceptable?
   marker when it fails only on the private desktop. Report per project: the
   count, the files, the wall clock of the would-be `interactive` stage, and
   the tests that open a window on the interactive desktop.
-- Back to the Owner when: the count is large enough that the `interactive`
-  stage still flashes windows for a noticeable part of a gate run; a test
-  needs the interactive desktop and is also `serial`-sensitive in a way the
-  stage table does not place; or a whole category (every Tk test, for
-  example) needs the marker, which would empty the private stages of the
-  tests that motivated them.
+- The report names each of these when it occurs: a test that needs the
+  interactive desktop and is also `serial`-sensitive in a way the stage
+  table does not place; a whole category (every Tk test, for example) that
+  needs the marker. It gives the share of a gate run's wall clock the
+  would-be `interactive` stage takes.
+
+### 1.3 Metadata cost under `AppData`
+
+Question: does the cost `ATC_HOME.md` § Location states for `AppData` hold
+on this host?
+
+- How: time one targeted set of each project with its base directory under
+  `%LOCALAPPDATA%\Temp` and under `%USERPROFILE%\.atc\tmp`, three runs
+  each. Report the wall clocks and their ratio.
+- Needs the write guard to allow `~/.atc` (§ Separate authority).
+
+### 1.4 Path length below `<tmp>`
+
+Question: does the bound `ATC_HOME.md` § Location puts on `<tmp>` leave the
+paths the tests build room under the Windows path limit?
+
+- How: for the targeted sets of 1.3, record the longest path created below
+  the base directory, for a scratch run and for a run without a scratch
+  (`ATC_HOME.md` § pytest without a scratch). Report the two lengths per
+  project and the room each leaves. Step 3 repeats the measurement for the
+  root's suite in a candidate.
 
 ## 2. The `atc-testkit` release
 
@@ -81,7 +105,8 @@ Files:
 - `adapters/python/hami-testkit/` becomes `adapters/python/atc-testkit/`:
   distribution `atc-testkit`, import package `atc_testkit`, config table
   `[tool.atc-testkit]`, release record `vendor/atc-testkit.json`
-  (`pyproject.toml`, `src/`, `README.md`).
+  (`pyproject.toml`, `src/`, `README.md`). The record's name is a point for
+  the Owner (§ Points for the Owner).
 - Existing modules carried over: `markers`, `selection`, `git`, `evidence`,
   `check`.
 - New modules, each written from the spec section and the code it replaces:
@@ -117,22 +142,28 @@ Files:
   - commands: `atc test run`, `atc test mutants` and
     `atc tmp list|clean|prune` (`TESTKIT.md` § Commands,
     `ATC_HOME.md` § Test scratch, § Scratch registry, § Deleting), which
-    that section places in the package. Their behaviour is that of
-    `run_tests.sh`, `mutants.py` and `clean_scratch.ps1` under
-    `shared/skills/hami-review-relay/references/`, in Python on every
-    platform.
+    that section places in the package. They are written from those
+    sections and take the place of `run_tests.sh`, `mutants.py` and
+    `clean_scratch.ps1` under
+    `shared/skills/hami-review-relay/references/`.
 - `check`: reads `[tool.atc-testkit]`, the new record name and the data of
   `TESTKIT.md` § What a project supplies; `python -m atc_testkit.check`.
-- `adapters/python/scripts/build_testkit_release.py`,
-  `testkit_contract.py`, `doctor.py`, `onboard_project.py`: the new names.
+- `adapters/python/scripts/build_testkit_release.py`: the new names.
+- `adapters/python/scripts/testkit_contract.py`, `doctor.py`,
+  `onboard_project.py`, and `validate_workspace.py` through
+  `testkit_contract`: they read `vendor/atc-testkit.json` and
+  `vendor/hami-testkit.json`, so a project that still carries the old record
+  keeps its contract check until its step 4 or 5. Step 6 drops the old name.
 - `adapters/python/scripts/integration_verify.py`: its import of the
   package's `git` module follows the rename; the script stays the root's own
   until step 3.
 - `adapters/python/tests/test_testkit_*.py` renamed with the package, plus
   one test file per new module with a test per refusal token and exit code
-  of the spec tables. `adapters/python/tests/test_clean_scratch.py` becomes
-  the test of `atc tmp clean`, keeping every case it has and adding the
-  registry, the reserved names, `--project` and `prune`.
+  of the spec tables. The test of `atc tmp clean` is a new file that
+  carries every case of `adapters/python/tests/test_clean_scratch.py` and
+  adds the registry, the reserved names, `--project` and `prune`;
+  `test_clean_scratch.py` stays the test of `clean_scratch.ps1` while that
+  script exists (step 6).
 - `adapters/python/README.md`: the package name and the new commands.
 
 Verification: `uv run --locked pytest` from `adapters/python` in an isolated
@@ -154,6 +185,11 @@ Lands together with: the `VERIFICATION.md` § Testing sentence
 (§ Separate authority). The release is not vendored into a project before
 that change is in `main`.
 
+Blocked until: the Owner's `write_scope_guard.py` allows `~/.atc`
+(§ Separate authority). The location tests need a root outside `AppData`
+and outside every repository, and the review walks the plugin to
+`<tmp>/systmp`.
+
 ## 3. Root tools
 
 Repository: the workspace root. Class: behaviour. Depends on step 2 for the
@@ -169,15 +205,14 @@ package.
    arguments and returns its exit code, on Windows and POSIX.
 3. `atc integrate` (`ATC_HOME.md` § Integration and the pre-push gate):
    `adapters/python/scripts/git_integrate.py` makes the location call before
-   it creates a file, places each candidate at `<tmp>/candidates/<id>` and
-   its report at `<tmp>/candidates/<id>.report.json` with the `<id>` of that
-   section, removes both when the run ends, and keeps its output capture
-   under `<tmp>/systmp`. `tests/test_git_integrate.py` follows, with a test
-   of the 64-character bound on the candidate path.
+   it creates a file, and places the candidate, its report and its output
+   capture, names the candidate and removes it as that section says.
+   `tests/test_git_integrate.py` follows, with a test of the section's bound
+   on the candidate path.
 4. `build_testkit_release.py`: the same location call.
-5. `adapters/python/check.ps1` (`ATC_HOME.md` § Resolving the locations,
-   § Cache, § pytest without a scratch): caches under `~/.atc/cache` unless
-   the caller set them, the location rule in shell, no `--basetemp`.
+5. `adapters/python/check.ps1`: the entry-point row of
+   `ATC_HOME.md` § Resolving the locations, the cache values of § Cache and
+   the base-directory rule of § pytest without a scratch.
 6. `adapters/python/tests/conftest.py`: registers the plugin from the in-tree
    source and sets no base directory of its own.
 7. The root's integration verifier
@@ -194,35 +229,41 @@ package.
    is settled here (§ Points for the Owner).
    `adapters/python/tests/test_integration_verify.py` follows.
 8. Root `AGENTS.md` `## Integration verification`: the paragraph of
-   differences is removed, the section keeps the argv file and timeout lines
-   `atc integrate` reads plus a pointer to `TESTKIT.md` § Integration
-   verifier, the rule that derives the timeout moves to
-   `adapters/python/README.md`, and the timeout is re-measured by that rule.
+   differences is removed and the timeout is re-measured. The section keeps
+   what `GIT_WORKFLOW.md` § Project verification section requires of it:
+   the argv file and timeout lines `atc integrate` reads, what the
+   verification covers by change class with the root's two static checks
+   named, and how the documentation-only exception is applied. The rule
+   that derives the timeout moves to `adapters/python/README.md`, and the
+   timeout line points there.
 9. `shared/skills/hami-review-relay/references/`: `run_tests.sh`,
-   `clean_scratch.ps1`, `mutants.py` and `mutants.example.json` are removed
-   in the same topic that changes the skill text (§ Separate authority); until
-   then both the scripts and the commands exist.
+   `mutants.py` and `mutants.example.json` are removed in the same topic
+   that changes the skill text (§ Separate authority); until then both the
+   scripts and the commands exist. `clean_scratch.ps1` stays until step 6,
+   because `atc tmp clean` refuses a directory outside `<tmp>`
+   (`ATC_HOME.md` § Deleting) and `%TEMP%\q` is retired with the script.
 
 Verification: the adapter suite; one mutant per guard; a real
 `atc test run` and `atc test mutants` against an exported copy of each
-project at its current `main`, compared line for line with the output of the
-scripts they replace; `atc tmp clean` on a scratch that holds a `.venv`
-junction; a real `atc integrate` in the root of a documentation topic and of
-this step's own topic, each with its candidate at `<tmp>/candidates/<id>`,
-its working directory under `<tmp>/systmp`, and both gone after the pass.
+project at its current `main`, with pytest's own output compared with that
+of the scripts they replace and everything else read against the spec;
+`atc tmp clean` on a scratch that holds a `.venv` junction; a real
+`atc integrate` in the root of a documentation topic and of this step's own
+topic, each with its candidate and its working directory where
+`ATC_HOME.md` § Integration and the pre-push gate puts them, and both gone
+after the pass; the longest path the root's suite creates in such a run
+(§ Unverified items).
 
 Review: behaviour; host state is read for the registry and the candidate
 directory. The deletion path of `atc tmp clean` is walked against the six
 steps of `ATC_HOME.md` § Deleting.
 
-Blocked until: the Owner's `write_scope_guard.py` allows `~/.atc`
-(§ Separate authority). A session cannot run items 2 to 7 for real before
-that.
-
 ## 4. hami-quant-trading moves onto the testkit
 
 Repository: `hami-quant-trading`. Class: behaviour. Depends on steps 2 and 3.
-The App's product code is untouched; every file below is test tooling.
+The App's product code is untouched; every file below is test tooling,
+with one exception under `packages/`, a test inventory that names a tooling
+script.
 
 - `vendor/`: the `atc-testkit` wheel and `vendor/atc-testkit.json` replace
   `hami_testkit-0.5.0-py3-none-any.whl` and `vendor/hami-testkit.json`;
@@ -250,10 +291,27 @@ The App's product code is untouched; every file below is test tooling.
 - Tests found in step 1.2: the `interactive_desktop` marker.
 - `.github/workflows/ci.yml`: the testkit's runner, the three stages, the
   `slow` invocation of `TESTKIT.md` § Stages in the job the project names,
-  and the `python -m atc_testkit.check --installed` step.
+  the targeted `workflow_dispatch` run through the same runner, and the
+  `python -m atc_testkit.check --installed` step.
+- `scripts/setup_clone.ps1`, `scripts/setup_clone.sh`: the new record name
+  and `python -m atc_testkit.check --installed --hooks`.
+- Files that pin what this step changes, updated in the same topic:
+  - `scripts/test_app_boundary.json`: its digests of
+    `scripts/tests/child_process_support.py`, `pytest_temp_root.py` and
+    `pytest_temp_root_probe.py`.
+  - `packages/trading-cli/tests/account_writer_inventory.json`: its entry
+    for `scripts/ci_pytest.py`, symbol `controller_context`.
+  - `scripts/pytest_unmarked_baseline.txt`: the entries of removed tests.
+  - `scripts/tests/test_shared_testkit.py`, `test_prepush_select.py`,
+    `test_trading_selection.py`: the package, record and module names.
+  - `scripts/verify_account_flow_step5_mutations.py`, `step6` and `step8`:
+    their use of `scripts/private_desktop.py`.
+  - Any further file a `git grep` of the old names at the project's `main`
+    returns when the step starts.
 - Documents: `AGENTS.md` § Test layout and § Integration verification,
   `scripts/tests/README.md`, `README.md`, `docs/specs/error_inventory.json`
-  where it lists verifier tokens.
+  where it lists verifier tokens, and `docs/specs/ACCOUNT_DRIVEN_FLOW.md`
+  where it names `scripts/run_targeted_tests.ps1`.
 - Token pins: `scripts/tests/test_integration_verify.py`,
   `scripts/tests/test_evidence_reuse.py`,
   `scripts/verify_integration_verify_mutations.py` and
@@ -300,6 +358,12 @@ Repository: `hami-quant`. Class: behaviour. Depends on steps 2 and 3.
   `ubuntu-latest`, the `slow` invocation of `TESTKIT.md` § Stages in the job
   the project names, and the Windows supervision job through the same
   runner.
+- `scripts/setup_clone.ps1`, `scripts/setup_clone.sh`: the new record name
+  and check command.
+- Files that pin what this step changes, updated in the same topic:
+  `tests/test_shared_testkit.py`, `tests/test_prepush_select.py`,
+  `tests/test_git_env_isolation.py`, and any further file a `git grep` of
+  the old names at the project's `main` returns when the step starts.
 - Documents: `AGENTS.md` § Commands and § Integration verification,
   `docs/agent-runbooks/quant-worktree-workflow.md` "Test-run isolation",
   `README.md`.
@@ -314,15 +378,18 @@ touched; the reviewer confirms it from the diff.
 ## 6. Retiring the old temporary locations
 
 Runs only after steps 4 and 5 are integrated and one gate run and one
-`atc integrate` in each project have passed on the new locations.
+`atc integrate` in each project have passed on the new locations. Its topic
+in the root removes `clean_scratch.ps1` and `test_clean_scratch.py` once
+`%TEMP%\q` is empty, and drops `vendor/hami-testkit.json` from the root
+tools of step 2.
 
 | Location | Written by | Retired by |
 | --- | --- | --- |
-| `%TEMP%\q`, `%TEMP%\q\LEDGER.txt` | `run_tests.sh`, `clean_scratch.ps1` | `clean_scratch.ps1` on every listed scratch, then the Owner removes the empty directory |
-| `%SystemDrive%\hami-pytest` | trading's `pytest_temp_root.py` | the Owner, after step 4 |
+| `%TEMP%\q`, `%TEMP%\q\LEDGER.txt` | `run_tests.sh`, `clean_scratch.ps1` | `clean_scratch.ps1` on every listed scratch, then the Owner removes the empty directory and the script is removed |
+| `%SystemDrive%\hami-pytest` | trading's `pytest_temp_root.py` | the Owner, step 4 having ended its use |
 | `C:\hqt`, `C:\hqt070s` | no known source | the Owner; this plan only confirms no file in either repository or in `shared/` names them |
-| `adapters/python/tests/.tmp-pytest` | the adapter's `conftest.py` | deleted with step 3; the `**/tests/.tmp*/` ignore line stays until no checkout has one |
-| `.tooling/uv-cache`, `.tooling/python`, `.tooling/pytest-tmp` | `check.ps1` | the Owner, after step 3; `.tooling/testkit-dist/` stays (`ATC_HOME.md` § Outside the ATC home) |
+| `adapters/python/tests/.tmp-pytest` | the adapter's `conftest.py` | deleted here, step 3 having ended its use; the `**/tests/.tmp*/` ignore line stays until no checkout has one |
+| `.tooling/uv-cache`, `.tooling/python`, `.tooling/pytest-tmp` | `check.ps1` | the Owner, step 3 having ended their use; `.tooling/testkit-dist/` stays (`ATC_HOME.md` § Outside the ATC home) |
 | `%TEMP%\atc-integration-candidates`, `%TEMP%\hami-trading-verify-*`, `%TEMP%\hami-targeted-*`, `%TEMP%\atc-root-verify-*` | `atc integrate`, the verifiers, `run_targeted_tests.ps1` | candidates through `git worktree remove` in the repository each tree's `.git` file names, report files and trees Git no longer knows by the Owner; the rest by the Owner |
 
 A session deletes nothing at a drive root and nothing outside the directories
@@ -332,8 +399,9 @@ to the Owner with sizes, not a command a session runs.
 Verification: a search of the root and both projects for each old location's
 name returns only history documents; `atc tmp list` shows the live scratches.
 
-Review: documentation only for the reference clean-up; no review for the
-Owner's deletions.
+Review: behaviour for the root topic, which removes a script and a record
+name the tools read; documentation only for the reference clean-up in each
+project; no review for the Owner's deletions.
 
 ## Project plan entries
 
@@ -360,22 +428,22 @@ Changes this plan depends on and a writer of the steps above does not make:
 | --- | --- | --- |
 | `shared/governance/VERIFICATION.md` § Testing: the sentence naming `hami-testkit` and `adapters/python/hami-testkit/README.md` | a governance change under `GOVERNANCE_CHANGES.md` | step 2 is vendored anywhere; then each project's pin advances with its step 4 or 5 |
 | `docs/LAYOUT.md`: `hami-testkit/` in § The checkout, and the place of `~/.atc` beside the checkout | the Owner's instruction for that document | step 2 lands |
-| `shared/skills/hami-review-relay/SKILL.md` and its rendered copies: `run_tests.sh`, `clean_scratch.ps1`, `mutants.py`, `%TEMP%\q`, `LEDGER.txt` become the `atc` commands and `<tmp>` | a skill change with its own review (`hami-writing-for-agents`), then `atc onboard --sync` into every project | the end of step 3 |
-| `~/.claude/hooks/write_scope_guard.py`: allow `~/.atc` | the Owner edits it | the first real run in step 3 |
+| `shared/skills/hami-review-relay/SKILL.md` and its rendered copies: `run_tests.sh`, `clean_scratch.ps1`, `mutants.py`, `%TEMP%\q`, `LEDGER.txt` become the `atc` commands and `<tmp>`, with `clean_scratch.ps1` kept for `%TEMP%\q` until step 6 | a skill change with its own review (`hami-writing-for-agents`), then `atc onboard --sync` into every project | the end of step 3 |
+| `~/.claude/hooks/write_scope_guard.py`: allow `~/.atc` | the Owner edits it | measurement 1.3 of step 1, and step 2 |
 | The release version number of `atc-testkit` | the Owner | step 2 |
 
 ## Unverified items
 
-Neither the spec writer nor the spec reviewer verified these. Each has the
-step that settles it; a result that contradicts the spec goes to the Owner
-before that step continues.
+Statements of the specs and of this plan that no run has confirmed. Each
+has the step that settles it; a result that contradicts the spec goes to the
+Owner before that step continues.
 
 | Item | Settled in | How |
 | --- | --- | --- |
 | `atc` on cloud writer hosts: `TESTKIT.md` § Commands assumes `atc` is installed where the test tools run; a cloud VM clone has no `workspace.yaml` and may have no `atc` | step 3 | install from a clone on a cloud host and run `atc test run` against a project clone; decide what a host without `atc` runs |
-| The ten-times `AppData` metadata cost in `ATC_HOME.md` § Location | step 1 | time one targeted set with its base under `%LOCALAPPDATA%\Temp` and under `%USERPROFILE%\.atc\tmp`. One data point exists: the root adapter suite took 276 s with its base in the checkout and 337 s with its base under `%TEMP%` |
+| The ten-times `AppData` metadata cost in `ATC_HOME.md` § Location | step 1 | measurement 1.3 |
 | PowerShell module-cache timing and trading's tests under a redirected profile (`TESTKIT.md` § Isolated environment redirects `USERPROFILE`, `APPDATA`, `LOCALAPPDATA`) | step 4 | run trading's PowerShell-launching test files with the redirected variables before the gate is switched |
-| The 40-character bound on `<tmp>` against `MAX_PATH` | steps 1 and 3 | measure the longest path each project's tests create below the base directory, for a scratch run and for a run without a scratch |
+| The 40-character bound on `<tmp>` against `MAX_PATH` | steps 1 and 3 | measurement 1.4 for the projects; step 3's verification for the root's suite in a candidate |
 | Tests and trading's mutation verifier that pin today's verifier tokens | steps 4 and 5 | listed in those steps; hami-quant's tokens differ from the spec's table today |
 | `atc integrate` on the workspace root: a candidate of the root, the `.venv` the verifier argv builds in it, and `git worktree remove` of a candidate that holds that `.venv` | the first root topic integrated, then step 2 | a documentation-only range exercises all three without the suite; step 2's own topic is the first full range |
 | The installed `atc` with a path dependency: `uv tool install -e adapters/python` and the source snapshot under `~/.local/atc-src` (`ATC_HOME.md` § Outside the ATC home) must carry `atc-testkit` beside the adapter | step 3 | install from the step's tree and run `atc tmp list` from a directory outside the checkout |
@@ -391,3 +459,6 @@ spec when the step named meets it.
    row, so no row carries a range Git cannot read. The root's verifier
    refuses it with `RANGE_UNREADABLE`, a token the table does not hold.
    Step 3 item 7 moves the verifier onto the skeleton.
+3. No spec names the release record a project vendors beside the wheel.
+   The code names it `vendor/hami-testkit.json`, and this plan writes
+   `vendor/atc-testkit.json` after the package. Step 2 renames it.
