@@ -241,6 +241,20 @@ def test_real_directories_stay_and_missing_ones_are_created(atc_tmp: Path) -> No
     assert locations.locate().systmp == atc_tmp / "systmp"
 
 
+def test_ci_with_no_named_directory_changes_nothing(atc_tmp: Path) -> None:
+    env = environment(CI="1", ATC_TMP=str(atc_tmp / "unused"))
+    before = dict(env)
+    assert locations.enter(environ=env) == Path(tempfile.gettempdir())
+    assert env == before and not (atc_tmp / "unused").exists()
+
+
+def test_ci_with_a_named_directory_makes_it_the_temporary_directory(atc_tmp: Path) -> None:
+    env = environment(CI="1", ATC_TMP=str(atc_tmp))
+    target = atc_tmp / "named"
+    assert locations.enter(target, env) == target and target.is_dir()
+    assert env == {"CI": "1", "ATC_TMP": str(atc_tmp), "TEMP": str(target), "TMP": str(target), "TMPDIR": str(target)}
+
+
 def test_ci_leaves_a_linked_root_alone_and_checks_the_places_below_it(atc_tmp: Path, tmp_path: Path) -> None:
     victim = tmp_path / "victim"
     victim.mkdir()
