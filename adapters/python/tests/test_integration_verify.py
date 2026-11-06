@@ -185,6 +185,7 @@ def test_product_module_imported_from_outside_the_candidate_is_refused(
 def test_this_checkout_imports_its_own_product_modules() -> None:
     project = iv.project(WORKSPACE)
     names = verifier.module_names(project)
+    assert {entry.name for entry in verifier._tree_entries(project)} == {"atc_cli", "atc_testkit"}
     assert {"atc_cli", "atc_testkit"} <= set(names)
     assert verifier.import_violations(names, WORKSPACE) == []
 
@@ -238,6 +239,14 @@ def test_unsuitable_temporary_root_exits_nine(candidate: Candidate, capsys: pyte
     code, err = candidate.verify(capsys)
     assert (code, err[0]) == (9, locations.UNSUITABLE)
     assert candidate.calls == []
+
+
+def test_the_adapter_suite_carries_the_plugin_from_its_tree_with_no_base_directory_of_its_own(
+        pytestconfig: pytest.Config) -> None:
+    plugin = pytestconfig.pluginmanager.get_plugin("atc_testkit.plugin")
+    assert plugin is not None and verifier.inside(plugin.__file__, ADAPTER / "atc-testkit/src")
+    assert "basetemp" not in (ADAPTER / "tests/conftest.py").read_text(encoding="utf-8")
+    assert "--basetemp" not in pytestconfig.getini("addopts")
 
 
 def test_the_verifier_imports_the_package_without_a_search_path_insert() -> None:

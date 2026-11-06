@@ -508,6 +508,22 @@ def test_an_unsuitable_root_exits_nine_before_anything_is_created(
 
 
 @pytest.mark.integration
+def test_a_candidates_directory_that_cannot_be_created_exits_nine(
+    repo: Path, atc_tmp: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tip = topic(repo, {"a.txt": "a2\n"})
+    mkdir = Path.mkdir
+
+    def refusing(self: Path, *args, **kwargs) -> None:
+        if self == atc_tmp / "candidates":
+            raise PermissionError("simulated")
+        mkdir(self, *args, **kwargs)
+    monkeypatch.setattr(Path, "mkdir", refusing)
+    assert integrate(repo, "topic", tip) == 9
+    assert capsys.readouterr().err.startswith(locations.UNSUITABLE + " cannot be created")
+
+
+@pytest.mark.integration
 def test_a_linked_candidates_directory_exits_nine(
     repo: Path, atc_tmp: Path, capsys: pytest.CaptureFixture[str], tmp_path: Path,
 ) -> None:

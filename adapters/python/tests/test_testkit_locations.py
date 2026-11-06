@@ -19,6 +19,8 @@ def environment(**values: str) -> dict[str, str]:
 
 def test_the_default_root_is_tmp_in_the_atc_home() -> None:
     home = Path.home()
+    if len(os.path.realpath(home / ".atc" / "tmp")) > locations.TMP_NAME_BOUND:
+        pytest.skip(f"the home directory {home} makes the default root longer than the bound")
     env = environment(USERPROFILE=str(home), HOME=str(home))
     assert locations.atc_home(env) == home / ".atc"
     assert locations.tmp_root(env) == home / ".atc" / "tmp"
