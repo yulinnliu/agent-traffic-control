@@ -6,8 +6,7 @@ from ``uv.lock`` under the candidate's ignored ``adapters/python/.venv/``. It ru
 and skips pytest for a documentation-only range. Pytest's base directory and the log of a failing check lie in
 a working directory under the system temporary directory, which is short enough for the repositories the tests
 build and is removed after a pass. On any failure the exit code is nonzero and the first stderr line is the
-reason token. Tokens follow ``docs/TESTKIT.md`` § Integration verifier; this script moves to the
-shared verifier when ``atc-testkit`` ships it.
+reason token. Tokens follow ``docs/TESTKIT.md`` § Integration verifier.
 
     uv run --quiet --locked --project adapters/python python adapters/python/scripts/integration_verify.py
 """
@@ -24,7 +23,7 @@ import sys
 import tempfile
 import time
 from collections.abc import Callable, Iterable, Mapping
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 ADAPTER = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ADAPTER / "hami-testkit/src"))
@@ -36,8 +35,7 @@ ADAPTER_DIR = "adapters/python"
 REQUIRED_ENV = ("ATC_EXPECTED_MAIN_SHA", "ATC_INTEGRATION_SHA", "ATC_CANDIDATE_DIR", "ATC_REVIEWED_SOURCE_SHA")
 FULL_OBJECT_ID = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
 PRODUCT_MODULES = ("atc_cli",)
-AUTOMATION_MARKDOWN_NAMES = frozenset({"AGENTS.md", "CLAUDE.md"})
-AUTOMATION_MARKDOWN_PREFIXES = ("shared/skills/", "shared/governance/", "shared/conformance/", "adapters/")
+DOCUMENTATION_PREFIX = "docs/"
 PYTEST_NO_TESTS_COLLECTED = 5
 FAILURE_LINE = re.compile(r"^(?:FAILED|ERROR) ")
 REPORTED_LINES = 20
@@ -123,7 +121,7 @@ def check_imports(candidate: str | Path) -> None:
 def changed_paths(root: Path, base: str, sha: str) -> list[str]:
     result = git(root, "diff", "--name-only", "--no-renames", f"{base}..{sha}")
     if result.returncode != 0:
-        raise VerifyError("SELECTION_FAILED", f"range {base}..{sha} is not readable in the candidate",
+        raise VerifyError("RANGE_UNREADABLE", f"range {base}..{sha} is not readable in the candidate",
                           result.stderr.strip())
     paths = sorted(line for line in result.stdout.splitlines() if line.strip())
     if not paths:
@@ -131,15 +129,10 @@ def changed_paths(root: Path, base: str, sha: str) -> list[str]:
     return paths
 
 
-def automation_markdown(path: str) -> bool:
-    """Markdown that is rendered into managed copies or read by the tests."""
-    return PurePosixPath(path).name in AUTOMATION_MARKDOWN_NAMES or path.startswith(AUTOMATION_MARKDOWN_PREFIXES)
-
-
 def documentation_only(paths: Iterable[str]) -> bool:
-    """Every changed path is Markdown and none is automation Markdown."""
+    """Every changed path is Markdown under ``docs/``."""
     paths = list(paths)
-    return bool(paths) and all(path.endswith(".md") and not automation_markdown(path) for path in paths)
+    return bool(paths) and all(path.startswith(DOCUMENTATION_PREFIX) and path.endswith(".md") for path in paths)
 
 
 def run_command(argv: list[str], cwd: Path) -> tuple[int, str]:
@@ -220,6 +213,8 @@ def main(environ: Mapping[str, str] | None = None, root: Path = ROOT, run: Run =
     except Exception as exc:  # noqa: BLE001 - any verifier fault refuses the candidate
         print("VERIFIER_ERROR", file=sys.stderr)
         print(f"{type(exc).__name__}: {exc}", file=sys.stderr)
+        if work is not None:
+            print(f"working directory kept: {work}", file=sys.stderr)
         return 1
     remove_tree(work)
     print(f"integration verification: PASS {sha}", flush=True)

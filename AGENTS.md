@@ -32,7 +32,7 @@ Then read `shared/governance/INDEX.md` and `CORE.md` from that exact same revisi
 `GIT_WORKFLOW.md` § Integration verifier source).
 
 - Verifier argv file: adapters/python/scripts/integration-verify.json
-- Verifier timeout: 1080
+- Verifier timeout: 1140
 
 The argv runs `adapters/python/scripts/integration_verify.py` in the
 candidate's own `adapters/python/.venv/` built from `uv.lock`; that script
@@ -41,9 +41,8 @@ nonzero with the reason token on the first stderr line and keeps the failing
 check's log in an `atc-root-verify-*` directory under the system temp
 directory. Pytest's base directory lies there too, because the candidate's
 path leaves the repositories the tests build no room under the Windows path
-limit. The verifier writes no
-verification report, so `atc integrate` records no evidence for this
-repository.
+limit. The verifier writes no verification report, so `atc integrate` records
+no evidence for this repository.
 
 Every range passes `git diff --check` of the range and the commands of the
 `python-adapter` job in `.github/workflows/validate.yml`, run from
@@ -54,10 +53,10 @@ and `uv run --locked pytest`. The candidate has no `workspace.yaml`,
 only, as CI does.
 
 The verifier applies `VERIFICATION.md` § Documentation-only verification
-itself: when every path in the range is Markdown and none is `AGENTS.md`,
-`CLAUDE.md` or a file under `shared/skills/`, `shared/governance/`,
-`shared/conformance/` or `adapters/`, the range is documentation-only and
-skips `pytest` alone. The caller never chooses the exception.
+itself: when every path in the range is Markdown under `docs/`, the range is
+documentation-only and skips `pytest` alone. Markdown anywhere else is
+rendered into managed copies or read by the tests, so it runs the suite. The
+caller never chooses the exception.
 
 The timeout is three times the measured wall clock of a full run, rounded up
 to a whole minute and never below 300 seconds; re-measure it when the suite's

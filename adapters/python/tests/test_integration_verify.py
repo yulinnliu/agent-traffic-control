@@ -4,6 +4,7 @@ import json
 import os
 import stat
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -118,17 +119,18 @@ def test_documentation_only_range_skips_pytest_only(candidate: Candidate, capsys
 
 
 @pytest.mark.parametrize(("paths", "expected"), [
-    (["docs/A.md", "README.md"], True),
+    (["docs/x.md"], True),
+    (["docs/x.md", "docs/local/y.md"], True),
     ([], False),
-    (["docs/A.md", "docs/a.txt"], False),
+    (["docs/x.md", "docs/x.txt"], False),
+    (["docs/x.md", "README.md"], False),
+    (["README.md"], False),
     (["AGENTS.md"], False),
-    (["CLAUDE.md"], False),
-    (["docs/AGENTS.md"], False),
-    (["shared/skills/demo/SKILL.md"], False),
-    (["shared/governance/CORE.md"], False),
-    (["shared/conformance/README.md"], False),
-    (["adapters/python/hami-testkit/README.md"], False),
-    (["docs/A.md", "shared/skills/demo/adapters/claude.md"], False),
+    (["shared/templates/PROJECT_AGENTS.md"], False),
+    ([".dsh/skills/x/SKILL.md"], False),
+    (["shared/skills/x.md"], False),
+    (["adapters/python/README.md"], False),
+    (["shared/docs/x.md"], False),
 ])
 def test_documentation_only_classification(paths: list[str], expected: bool) -> None:
     assert iv.documentation_only(paths) is expected
@@ -166,6 +168,15 @@ def test_working_directory_other_than_the_candidate_is_refused(
 ) -> None:
     candidate.advance()
     monkeypatch.chdir(candidate.root / iv.ADAPTER_DIR)
+    code, err = candidate.verify(capsys)
+    assert (code, err[0]) == (1, "CANDIDATE_DIR_MISMATCH")
+
+
+def test_working_directory_above_the_candidate_is_refused(
+    candidate: Candidate, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    candidate.advance()
+    monkeypatch.chdir(candidate.root.parent)
     code, err = candidate.verify(capsys)
     assert (code, err[0]) == (1, "CANDIDATE_DIR_MISMATCH")
 
@@ -219,6 +230,34 @@ def test_range_without_a_changed_path_is_refused(candidate: Candidate, capsys: p
     assert candidate.calls == []
 
 
+def test_unreadable_range_is_refused(
+    candidate: Candidate, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    candidate.advance()
+    real = iv.git
+
+    def git(root: Path, *args: str) -> subprocess.CompletedProcess:
+        if args[0] == "diff":
+            return subprocess.CompletedProcess(args, 128, "", "fatal: bad object\n")
+        return real(root, *args)
+
+    monkeypatch.setattr(iv, "git", git)
+    code, err = candidate.verify(capsys)
+    assert (code, err[0], err[-1]) == (1, "RANGE_UNREADABLE", "fatal: bad object")
+    assert candidate.calls == []
+
+
+def test_file_moved_into_docs_is_not_documentation_only(candidate: Candidate, capsys: pytest.CaptureFixture[str]) -> None:
+    candidate.main = candidate.advance("shared/skills/x.md", "# skill\n\nbody line one\nbody line two\n")
+    (candidate.root / "docs").mkdir()
+    run_git(candidate.root, "mv", "shared/skills/x.md", "docs/x.md")
+    run_git(candidate.root, "commit", "-q", "-m", "move")
+    assert run_git(candidate.root, "diff", "--name-only", f"{candidate.main}..HEAD") == "docs/x.md"
+    assert iv.main(candidate.env(), candidate.root, candidate.run) == 0
+    assert capsys.readouterr().out.splitlines()[0] == "classification: full"
+    assert "pytest" in candidate.started()
+
+
 def test_whitespace_error_in_the_range_is_refused(candidate: Candidate, capsys: pytest.CaptureFixture[str]) -> None:
     candidate.advance("docs/NOTE.md", "trailing \n")
     code, err = candidate.verify(capsys)
@@ -253,6 +292,24 @@ def test_failing_suite_reports_its_failure_lines_and_keeps_its_log(
     assert err[1] == f"{' '.join(candidate.calls[-1][0])} exited 1; log {log}"
     assert err[2:] == ["FAILED tests/test_x.py::test_y - boom", f"working directory kept: {work}"]
     assert "last line" in log.read_text(encoding="utf-8")
+
+
+def test_failing_check_reports_what_it_wrote_to_stderr(
+    candidate: Candidate, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    candidate.advance()
+    child = [sys.executable, "-c", "import sys; print('to stdout'); sys.stderr.write('to stderr\\n'); sys.exit(3)"]
+
+    def run(argv: list[str], cwd: Path) -> tuple[int, str]:
+        if name(argv) == "scripts/validate_workspace.py":
+            return iv.run_command(child, cwd)
+        return candidate.run(argv, cwd)
+
+    assert iv.main(candidate.env(), candidate.root, run) == 1
+    err = capsys.readouterr().err.splitlines()
+    (work,) = (tmp_path / "systmp").iterdir()
+    assert err[0] == "WORKSPACE_VALIDATION_FAILED" and "to stdout" in err and "to stderr" in err
+    assert "to stderr" in (work / "workspace_validation_failed.log").read_text(encoding="utf-8")
 
 
 def test_suite_that_collects_no_test_is_refused(candidate: Candidate, capsys: pytest.CaptureFixture[str]) -> None:
@@ -294,14 +351,32 @@ def test_tree_left_dirty_by_a_check_is_refused(
     assert err[1].endswith("new/left.txt" if change == "untracked" else "a.txt")
 
 
-def test_unexpected_fault_is_refused(candidate: Candidate, capsys: pytest.CaptureFixture[str]) -> None:
+def test_unexpected_fault_is_refused_and_names_the_kept_working_directory(
+    candidate: Candidate, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
     candidate.advance()
 
     def run(argv: list[str], cwd: Path) -> tuple[int, str]:
         raise OSError("uv is not installed")
 
     assert iv.main(candidate.env(), candidate.root, run) == 1
-    assert capsys.readouterr().err.splitlines() == ["VERIFIER_ERROR", "OSError: uv is not installed"]
+    (work,) = (tmp_path / "systmp").iterdir()
+    assert capsys.readouterr().err.splitlines() == [
+        "VERIFIER_ERROR", "OSError: uv is not installed", f"working directory kept: {work}"]
+
+
+def test_fault_before_the_working_directory_exists_is_refused(
+    candidate: Candidate, tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    candidate.advance()
+
+    def fault(_candidate: str) -> None:
+        raise RuntimeError("import machinery broke")
+
+    monkeypatch.setattr(iv, "check_imports", fault)
+    assert iv.main(candidate.env(), candidate.root, candidate.run) == 1
+    assert capsys.readouterr().err.splitlines() == ["VERIFIER_ERROR", "RuntimeError: import machinery broke"]
+    assert list((tmp_path / "systmp").iterdir()) == []
 
 
 def test_git_hook_variables_do_not_select_another_repository(
