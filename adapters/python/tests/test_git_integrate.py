@@ -965,3 +965,323 @@ def test_expired_records_are_removed_after_a_write(repo: Path) -> None:
     tip = topic(repo, {"a.txt": "a2\n"})
     assert integrate_with(repo, "topic", tip, report_command(json.dumps(REPORT))) == 0
     assert records(repo) == sorted([recent.name, foreign.name, f"{tip}.json"])
+
+
+# Declarations, refusal forms and target inference (`docs/ATC_CLI_PLAN.md` § 2 and § 3).
+
+
+def run(repo: Path, *args: str, root: Path | None = None, root_given: bool = False, cwd: Path | None = None) -> int:
+    """`atc integrate` with only the arguments given, from ``cwd``."""
+    return gi.main([*args], root=root or repo, root_given=root_given, cwd=str(cwd or repo))
+
+
+def stderr_lines(capsys: pytest.CaptureFixture[str]) -> list[str]:
+    return capsys.readouterr().err.splitlines()
+
+
+@pytest.mark.integration
+def test_the_resolved_values_are_the_first_stderr_line(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    tip = topic(repo, {"a.txt": "a2\n"})
+    assert integrate(repo, "topic", tip) == 0
+    lines = stderr_lines(capsys)
+    assert lines[0].startswith(f"resolved: repo={repo} main=main@")
+    assert f"branch=topic (--branch) reviewed={tip}" in lines[0]
+    assert f'authority="test-owner-authorization @ {tip}"' in lines[0]
+    assert lines[0].endswith("(--verify-command) timeout=300s (default)")
+    assert f"verify: candidate {tip} timeout 300s (default)" in lines
+
+
+@pytest.mark.integration
+def test_the_declared_argv_and_timeout_are_the_defaults(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    declare_verifier(repo, verify_command(), timeout="1234")
+    tip = topic(repo, {"a.txt": "a2\n"})
+    assert run(repo, "--repo", str(repo), "--reviewed", tip, "--authority-reference", "x") == 0
+    lines = stderr_lines(capsys)
+    assert lines[0].endswith("(AGENTS.md verify.json) timeout=1234s (AGENTS.md)")
+    assert not [line for line in lines if line.startswith("WARNING") and "atc tool checkout" not in line]
+    assert main_tip(repo) == tip
+
+
+@pytest.mark.integration
+def test_an_explicit_argv_or_timeout_that_differs_is_a_warning(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    declare_verifier(repo, verify_command(), timeout="1234")
+    tip = topic(repo, {"a.txt": "a2\n"})
+    other = json.dumps([sys.executable, "-c", "pass"])
+    assert integrate(repo, "topic", tip, "--verify-command", other, "--verify-timeout", "60") == 0
+    warnings = [line for line in stderr_lines(capsys) if line.startswith("WARNING")]
+    assert any(line.startswith("WARNING the verifier argv from --verify-command differs from verify.json") for line in warnings)
+    assert "WARNING --verify-timeout 60 differs from the 1234 seconds of AGENTS.md at main" in warnings
+
+
+@pytest.mark.integration
+def test_a_relative_argv_file_is_resolved_under_the_repository(
+    repo: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    tip = topic(repo, {"a.txt": "a2\n"})
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    assert run(
+        repo, "--repo", str(repo), "--reviewed", tip, "--authority-reference", "x",
+        "--verify-command-file", "verify.json", cwd=elsewhere,
+    ) == 0
+    assert f"(--verify-command-file {repo / 'verify.json'})" in stderr_lines(capsys)[0]
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("agents", [
+    "# AGENTS.md\n\nNo section.\n",
+    "# AGENTS.md\n\n## Integration verification\n\n- Verifier timeout: 60\n",
+])
+def test_a_main_without_the_verification_section_stops(
+    repo: Path, capsys: pytest.CaptureFixture[str], agents: str,
+) -> None:
+    commit(repo, "AGENTS.md", agents)
+    tip = topic(repo, {"a.txt": "a2\n"})
+    before = main_tip(repo)
+    assert integrate(repo, "topic", tip) == 1
+    first, after = refusal(capsys.readouterr().err)
+    assert first.startswith(f"STOP VERIFICATION_SECTION_MISSING: AGENTS.md at main {before}")
+    assert after.startswith("next: obtain the section from the owner")
+    assert main_tip(repo) == before
+    assert run_git(repo, "worktree", "list").count("\n") == 0
+
+
+@pytest.mark.integration
+def test_the_authority_sha_is_appended_and_checked(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    tip = topic(repo, {"a.txt": "a2\n"})
+    other = "0" * 40
+    args = ["--repo", str(repo), "--reviewed", tip]
+    assert run(repo, *args, "--authority-reference", f"a.txt @ {other}", "--json") == 2
+    captured = capsys.readouterr()
+    assert refusal(captured.err)[0] == f"ERROR AUTHORITY_SHA_MISMATCH the authority reference ends with @ {other}, but --reviewed is {tip}"
+    assert json.loads(captured.out) == {"command": "integrate", "refusal": {
+        "verdict": "ERROR", "reason": "AUTHORITY_SHA_MISMATCH",
+        "detail": f"the authority reference ends with @ {other}, but --reviewed is {tip}", "next": None,
+    }}
+    assert run(repo, *args, "--authority-reference", f"a.txt @ {tip.upper()}", "--json") == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["authority_reference"] == f"a.txt @ {tip}"
+    assert [w for w in data["warnings"] if "atc tool checkout" not in w] == []
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(("reference", "path"), [
+    ("docs/PLAN.md §2 step 3", "docs/PLAN.md"),
+    ("owner/repo topic per docs/RULES.md § Section", "docs/RULES.md"),
+])
+def test_an_authority_record_the_reviewed_commit_lacks_is_a_warning(
+    repo: Path, capsys: pytest.CaptureFixture[str], reference: str, path: str,
+) -> None:
+    tip = topic(repo, {"a.txt": "a2\n"})
+    assert run(repo, "--repo", str(repo), "--reviewed", tip, "--authority-reference", reference) == 0
+    assert f"WARNING the authority record {path} is not in the reviewed commit {tip}" in stderr_lines(capsys)
+
+
+@pytest.mark.integration
+def test_the_one_branch_at_the_reviewed_sha_is_inferred(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    tip = topic(repo, {"a.txt": "a2\n"}, branch="worktree-claude+demo")
+    commit(repo, "c.txt", "c\n")
+    assert run(repo, "--repo", str(repo), "--reviewed", tip, "--authority-reference", "x") == 0
+    assert "branch=worktree-claude+demo (inferred)" in stderr_lines(capsys)[0]
+    assert run_git(repo, "log", "-1", "--format=%s", "main") == "merge(demo): integrate reviewed changes"
+
+
+@pytest.mark.integration
+def test_several_branches_at_the_reviewed_sha_stop(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    tip = topic(repo, {"a.txt": "a2\n"})
+    run_git(repo, "branch", "copy", tip)
+    before = main_tip(repo)
+    assert run(repo, "--repo", str(repo), "--reviewed", tip, "--authority-reference", "x", "--json") == 1
+    captured = capsys.readouterr()
+    first, after = refusal(captured.err)
+    assert first == f"STOP BRANCH_AMBIGUOUS: several local branches point at the reviewed SHA {tip}: copy, topic"
+    assert after.startswith("next: run again with --branch")
+    assert json.loads(captured.out)["refusal"]["reason"] == "BRANCH_AMBIGUOUS"
+    assert main_tip(repo) == before
+    assert run(repo, "--repo", str(repo), "--branch", "topic", "--reviewed", tip, "--authority-reference", "x") == 0
+
+
+@pytest.mark.integration
+def test_no_branch_at_the_reviewed_sha_stops(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    tip = topic(repo, {"a.txt": "a2\n"})
+    run_git(repo, "branch", "-D", "topic")
+    assert run(repo, "--repo", str(repo), "--reviewed", tip, "--authority-reference", "x") == 1
+    first, after = refusal(capsys.readouterr().err)
+    assert first == f"STOP NO_BRANCH_AT_REVIEWED: no local branch points at or contains the reviewed SHA: {tip}"
+    assert after.startswith("next: ")
+
+
+@pytest.mark.integration
+def test_a_branch_past_the_reviewed_sha_is_unreviewed_commits(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    reviewed = stop_unreviewed(repo)
+    assert run(repo, "--repo", str(repo), "--reviewed", reviewed, "--authority-reference", "x") == 1
+    first, after = refusal(capsys.readouterr().err)
+    assert first.startswith(f"STOP UNREVIEWED_COMMITS: no local branch is at the reviewed SHA {reviewed}; these have commits after it: topic")
+    assert after == "next: review the delta, or re-review"
+
+
+@pytest.mark.integration
+def test_a_reviewed_sha_on_main_is_already_merged(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    tip = stop_already_merged(repo)
+    assert run(repo, "--repo", str(repo), "--reviewed", tip, "--authority-reference", "x") == 1
+    first, after = refusal(capsys.readouterr().err)
+    assert first.startswith("STOP ALREADY_MERGED: ")
+    assert after == "next: nothing to integrate; continue with GIT_WORKFLOW.md § Cleanup trigger"
+
+
+@pytest.mark.integration
+def test_checkout_stops_name_the_branch_and_the_paths(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    tip = stop_dirty(repo)
+    assert integrate(repo, "topic", tip) == 1
+    assert refusal(capsys.readouterr().err)[0].endswith("uncommitted changes to tracked files: b.txt")
+    run_git(repo, "checkout", "--", "b.txt")
+    run_git(repo, "switch", "-q", "-c", "elsewhere")
+    assert integrate(repo, "topic", tip) == 1
+    assert refusal(capsys.readouterr().err)[0] == "STOP CHECKOUT_NOT_ON_MAIN: the integration checkout is on elsewhere, not main"
+
+
+@pytest.mark.integration
+def test_every_integration_appends_its_record(repo: Path) -> None:
+    first = topic(repo, {"a.txt": "a2\n"}, branch="first")
+    assert integrate(repo, "first", first) == 0
+    second = topic(repo, {"b.txt": "b2\n"}, branch="second")
+    commit(repo, "c.txt", "c\n")
+    assert integrate(repo, "second", second) == 0
+    lines = (repo / ".git" / "atc" / "integrations.jsonl").read_text(encoding="utf-8").splitlines()
+    records = [json.loads(line) for line in lines]
+    assert [set(record) for record in records] == [{"candidate_sha", "reviewed", "authority_reference", "integrated_at"}] * 2
+    assert (records[0]["candidate_sha"], records[0]["reviewed"]) == (first, first)
+    assert (records[1]["candidate_sha"], records[1]["reviewed"]) == (main_tip(repo), second)
+    assert records[1]["authority_reference"] == f"test-owner-authorization @ {second}"
+
+
+@pytest.mark.integration
+def test_a_failed_verification_records_no_integration_and_keeps_both_tails(
+    repo: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    tip = topic(repo, {"a.txt": "a2\n"})
+    failing = json.dumps([sys.executable, "-c", "import sys; print('out line'); print('err line', file=sys.stderr); sys.exit(4)"])
+    assert integrate(repo, "topic", tip, "--verify-command", failing) == 3
+    lines = stderr_lines(capsys)
+    first, after = refusal("\n".join(lines))
+    assert first == f"STOP VERIFICATION_FAILED: candidate verification failed for {tip} (exit 4): err line"
+    assert after.startswith("next: correct the cause on the topic branch")
+    assert lines[lines.index(after) + 1:] == [
+        "verifier stdout (last 1 lines):", "  out line", "verifier stderr (last 1 lines):", "  err line",
+    ]
+    assert not (repo / ".git" / "atc" / "integrations.jsonl").exists()
+
+
+@pytest.mark.integration
+def test_a_later_run_finds_the_required_recovery(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    tip = topic(repo, {"a.txt": "a2\n"})
+    real_git = gi.git
+
+    def dirty_after_ff(repo_arg, *args, **kwargs):
+        result = real_git(repo_arg, *args, **kwargs)
+        if args[:2] == ("merge", "--ff-only"):
+            (repo / "a.txt").write_text("unexpected checkout mutation\n", encoding="utf-8")
+        return result
+
+    monkeypatch.setattr(gi, "git", dirty_after_ff)
+    assert integrate(repo, "topic", tip) == 3
+    monkeypatch.setattr(gi, "git", real_git)
+    capsys.readouterr()
+    assert run(repo, "--repo", str(repo), "--reviewed", tip, "--authority-reference", "x") == 3
+    first, after = refusal(capsys.readouterr().err)
+    assert first.startswith("STOP RECOVERY_REQUIRED: ")
+    assert after.startswith("next: reconcile main and its checkout with the retained candidate ref")
+
+
+@pytest.mark.integration
+def test_check_resolves_and_preflights_without_a_candidate(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    tip = topic(repo, {"a.txt": "a2\n"})
+    before = main_tip(repo)
+    assert run(repo, "--repo", str(repo), "--reviewed", tip, "--authority-reference", "x", "--check") == 0
+    captured = capsys.readouterr()
+    assert captured.out.startswith("CHECK FF FAST_FORWARD: ")
+    assert captured.err.startswith("resolved: ")
+    assert main_tip(repo) == before
+    assert run_git(repo, "worktree", "list").count("\n") == 0
+    assert not (repo / ".git" / "atc").exists()
+
+    commit(repo, "a.txt", "main\n")
+    run_git(repo, "switch", "-q", "topic")
+    commit(repo, "a.txt", "topic\n")
+    conflicting = run_git(repo, "rev-parse", "HEAD")
+    run_git(repo, "switch", "-q", "main")
+    assert run(repo, "--repo", str(repo), "--reviewed", conflicting, "--authority-reference", "x", "--check", "--json") == 1
+    captured = capsys.readouterr()
+    assert refusal(captured.err)[0].startswith("STOP CONFLICT: ")
+    data = json.loads(captured.out)
+    assert (data["check"], data["refusal"]["reason"], data["resolved"]["branch"]) == (True, "CONFLICT", "topic")
+
+
+@pytest.fixture
+def workspace(repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A workspace.yaml at ``tmp_path`` registering the fixture repository as `demo`."""
+    monkeypatch.delenv("ATC_ROOT", raising=False)
+    (tmp_path / "workspace.yaml").write_text(
+        f"version: 1\nworkspace_root: '{tmp_path}'\nprojects:\n  demo:\n"
+        "    repo: repo\n    worktrees: worktrees/demo\n    state: state/demo-data\n",
+        encoding="utf-8",
+    )
+    return tmp_path
+
+
+@pytest.mark.integration
+def test_project_resolves_through_the_workspace_map(repo: Path, workspace: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    tip = topic(repo, {"a.txt": "a2\n"})
+    assert run(repo, "--project", "demo", "--reviewed", tip, "--authority-reference", "x", root=workspace, cwd=workspace) == 0
+    assert f"resolved: repo={repo} " in stderr_lines(capsys)[0]
+    assert main_tip(repo) == tip
+
+
+@pytest.mark.integration
+def test_the_working_directory_names_the_project(repo: Path, workspace: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    tip = topic(repo, {"a.txt": "a2\n"})
+    args = ["--reviewed", tip, "--authority-reference", "x"]
+    assert run(repo, *args, root=workspace, cwd=workspace) == 2
+    assert refusal(capsys.readouterr().err)[0].startswith("ERROR UNKNOWN_PROJECT no --repo or --project")
+    assert run(repo, *args, root=workspace, cwd=repo) == 0
+    assert main_tip(repo) == tip
+
+
+@pytest.mark.integration
+def test_an_unknown_project_is_refused(repo: Path, workspace: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    tip = topic(repo, {"a.txt": "a2\n"})
+    assert run(repo, "--project", "other", "--reviewed", tip, "--authority-reference", "x", root=workspace) == 2
+    assert refusal(capsys.readouterr().err)[0].startswith("ERROR UNKNOWN_PROJECT other is not in")
+
+
+@pytest.mark.integration
+def test_an_explicit_root_beside_repo_is_refused(repo: Path, workspace: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    tip = topic(repo, {"a.txt": "a2\n"})
+    args = ["--repo", str(repo), "--reviewed", tip, "--authority-reference", "x"]
+    assert run(repo, *args, root=workspace, root_given=True) == 2
+    assert refusal(capsys.readouterr().err)[0].startswith("ERROR ROOT_WITH_REPO ")
+    assert main_tip(repo) != tip
+
+
+@pytest.mark.integration
+def test_atc_hands_its_root_to_integrate(repo: Path, workspace: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    import atc_cli
+
+    tip = topic(repo, {"a.txt": "a2\n"})
+    args = ["--reviewed", tip, "--authority-reference", "x"]
+    assert atc_cli.main(["--root", str(workspace), "integrate", "--repo", str(repo), *args]) == 2
+    assert refusal(capsys.readouterr().err)[0].startswith("ERROR ROOT_WITH_REPO ")
+    assert atc_cli.main(["--root", str(workspace), "integrate", "--project", "demo", *args]) == 0
+    assert main_tip(repo) == tip
+
+
+@pytest.mark.integration
+def test_the_tool_checkout_warning_names_its_branch_and_sha(repo: Path) -> None:
+    assert gi.tool_checkout_warning(repo) is None
+    run_git(repo, "switch", "-q", "-c", "elsewhere")
+    head = main_tip(repo)
+    assert gi.tool_checkout_warning(repo) == f"the atc tool checkout {repo} is on elsewhere at {head}; this run uses its code"
+    (repo / "a.txt").write_text("changed\n", encoding="utf-8")
+    assert gi.tool_checkout_warning(repo).endswith(f"at {head} with uncommitted changes; this run uses its code")
