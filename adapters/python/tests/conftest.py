@@ -35,11 +35,14 @@ def restored_process():
     tempfile.tempdir = temporary
 
 
-def _new_root() -> Path:
-    """A new directory within the bound on ``<tmp>``: inside the caller's root, or beside it when the name does not fit."""
+def _new_root(reserve: int = 0) -> Path:
+    """A new directory that leaves ``reserve`` characters within the bound on ``<tmp>``: inside the caller's root, or beside it."""
     caller = Path(os.path.realpath(os.environ.get("ATC_TMP") or Path.home() / ".atc" / "tmp"))
-    parent = caller if len(str(caller)) + 1 + ROOT_NAME_LENGTH <= locations.TMP_NAME_BOUND else caller.parent
-    length = min(ROOT_NAME_LENGTH, locations.TMP_NAME_BOUND - len(str(parent)) - 1)
+    room = locations.TMP_NAME_BOUND - reserve
+    parent = caller if len(str(caller)) + 1 + ROOT_NAME_LENGTH <= room else caller.parent
+    length = min(ROOT_NAME_LENGTH, room - len(str(parent)) - 1)
+    if length < 1:
+        pytest.skip(f"{caller} leaves no room for a directory within the bound")
     parent.mkdir(parents=True, exist_ok=True)
     while True:
         root = parent / secrets.token_hex(ROOT_NAME_LENGTH)[:length]
@@ -58,3 +61,11 @@ def atc_tmp(restored_process, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.delenv("CI", raising=False)
     yield root
     shutil.rmtree(root, onexc=_writable_retry)
+
+
+@pytest.fixture()
+def fake_home():
+    """A home directory whose default ``<tmp>``, ``.atc/tmp``, stays within the bound."""
+    home = Path(os.path.realpath(_new_root(len(os.path.join(".atc", "tmp")) + 1)))
+    yield home
+    shutil.rmtree(home, onexc=_writable_retry)

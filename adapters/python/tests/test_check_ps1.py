@@ -26,12 +26,14 @@ VALUES = ("TEMP", "TMP", "TMPDIR")
 
 
 class Check:
-    """``check.ps1`` with a ``uv`` that records its arguments and environment."""
+    """``check.ps1`` with a ``uv`` that records its arguments and environment, and a home directory of its own."""
 
     def __init__(self, directory: Path):
         self.log = directory / "uv.log"
         tools = directory / "tools"
         tools.mkdir()
+        home = directory / "home"
+        home.mkdir()
         (tools / "fake_uv.py").write_text(FAKE_UV, encoding="utf-8")
         if os.name == "nt":
             (tools / "uv.cmd").write_text(f'@"{sys.executable}" "{tools / "fake_uv.py"}" %*\r\n', encoding="utf-8")
@@ -39,7 +41,8 @@ class Check:
             (tools / "uv").write_text(f'#!/bin/sh\nexec "{sys.executable}" "{tools / "fake_uv.py"}" "$@"\n', encoding="utf-8")
             (tools / "uv").chmod(0o755)
         self.env = {name: value for name, value in os.environ.items() if name.upper() not in {"CI", "UV_CACHE_DIR", "UV_PYTHON_INSTALL_DIR"}}
-        self.env.update(FAKE_UV_LOG=str(self.log), PATH=str(tools) + os.pathsep + os.environ["PATH"])
+        self.env.update(FAKE_UV_LOG=str(self.log), PATH=str(tools) + os.pathsep + os.environ["PATH"],
+                        HOME=str(home), USERPROFILE=str(home))
 
     def run(self, *arguments: str, **env: str) -> subprocess.CompletedProcess[str]:
         return children.run([SHELL, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(SCRIPT), *arguments],
@@ -96,15 +99,14 @@ def test_ci_keeps_the_platform_directory_and_sets_no_location(check: Check, atc_
     assert "UV_CACHE_DIR" in env and not (atc_tmp / "systmp").exists()
 
 
-def test_the_default_root_lies_in_the_home_directory(check: Check, monkeypatch: pytest.MonkeyPatch) -> None:
-    default = Path.home() / ".atc" / "tmp"
-    if len(os.path.realpath(default)) > locations.TMP_NAME_BOUND:
-        pytest.skip(f"the home directory makes {default} longer than the bound")
+def test_the_default_root_lies_in_the_home_directory(check: Check, fake_home: Path) -> None:
+    default = fake_home / ".atc" / "tmp"
     del check.env["ATC_TMP"]
-    run = check.run()
+    run = check.run(USERPROFILE=str(fake_home), HOME=str(fake_home))
     assert run.returncode == 0, run.stdout + run.stderr
     env = check.calls()[0]["env"]
-    assert (env["ATC_TMP"], env["TEMP"]) == (os.path.realpath(default), os.path.realpath(default / "systmp"))
+    assert (env["ATC_TMP"], env["TEMP"]) == (str(default), str(default / "systmp"))
+    assert (default / "systmp").is_dir()
 
 
 def test_a_default_root_past_the_bound_is_refused(check: Check, atc_tmp: Path) -> None:
