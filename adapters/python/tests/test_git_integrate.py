@@ -1095,7 +1095,7 @@ def test_several_branches_at_the_reviewed_sha_stop(repo: Path, capsys: pytest.Ca
     captured = capsys.readouterr()
     first, after = refusal(captured.err)
     assert first == f"STOP BRANCH_AMBIGUOUS: several local branches point at the reviewed SHA {tip}: copy, topic"
-    assert after.startswith("next: run again with --branch")
+    assert after == "next: run again with `--branch` naming the reviewed topic branch among those listed"
     assert json.loads(captured.out)["refusal"]["reason"] == "BRANCH_AMBIGUOUS"
     assert main_tip(repo) == before
     assert run(repo, "--repo", str(repo), "--branch", "topic", "--reviewed", tip, "--authority-reference", "x") == 0
@@ -1108,7 +1108,7 @@ def test_no_branch_at_the_reviewed_sha_stops(repo: Path, capsys: pytest.CaptureF
     assert run(repo, "--repo", str(repo), "--reviewed", tip, "--authority-reference", "x") == 1
     first, after = refusal(capsys.readouterr().err)
     assert first == f"STOP NO_BRANCH_AT_REVIEWED: no local branch points at or contains the reviewed SHA: {tip}"
-    assert after.startswith("next: ")
+    assert after == "next: restore the reviewed topic branch at the reviewed SHA, or run again with the full SHA the formal review named"
 
 
 @pytest.mark.integration

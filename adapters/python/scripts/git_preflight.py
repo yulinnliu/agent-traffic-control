@@ -80,7 +80,7 @@ NEXT = {
     "CHECKOUT_DIRTY": "have the owner of the listed paths commit or remove them, then run again",
     "CONFLICT": _RECONCILE,
     "OVERLAP": "a reviewer judges semantic overlap, then prepare a merge candidate or " + _RECONCILE,
-    "BRANCH_AMBIGUOUS": "run again with --branch naming the reviewed topic branch among the listed ones",
+    "BRANCH_AMBIGUOUS": "run again with `--branch` naming the reviewed topic branch among those listed",
     "NO_BRANCH_AT_REVIEWED": "restore the reviewed topic branch at the reviewed SHA, or " + _RUN_WITH_REVIEWED,
 }
 
