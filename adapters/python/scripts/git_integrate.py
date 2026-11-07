@@ -434,6 +434,16 @@ def _record_integration(repo: Path, record: dict) -> Path:
     common = Path(_git_ok(repo, "rev-parse", "--path-format=absolute", "--git-common-dir"))
     path = common.joinpath(*INTEGRATIONS)
     path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        lines = []
+    for line in lines:
+        try:
+            if json.loads(line).get("candidate_sha") == record["candidate_sha"]:
+                return path  # a run that stopped for recovery already recorded it
+        except (json.JSONDecodeError, AttributeError):
+            continue
     with path.open("a", encoding="utf-8", newline="\n") as handle:
         handle.write(json.dumps(record, sort_keys=True) + "\n")
     return path
@@ -714,6 +724,10 @@ def integrate(t: Target) -> tuple[int, dict]:
             integration_updated = True
             main_after = rev(repo, main)
             result["main_after"] = main_after
+            if main_after == candidate_sha:
+                # main holds the candidate, so the integration happened even
+                # when its checkout needs recovery below.
+                _note_integration(repo, result, candidate_sha, reviewed, t.authority_reference)
             if main_after != candidate_sha or rev(repo, "HEAD") != candidate_sha:
                 raise stop(
                     "RECOVERY_REQUIRED",
@@ -727,7 +741,6 @@ def integrate(t: Target) -> tuple[int, dict]:
                     f"main advanced to {candidate_sha} but checkout is dirty ({status}); retained {candidate_ref}",
                     after_candidate=True,
                 )
-            _note_integration(repo, result, candidate_sha, reviewed, t.authority_reference)
             if verifier_report is not None:
                 try:
                     result["evidence"] = str(_write_evidence(repo, {
