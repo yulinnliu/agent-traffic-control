@@ -88,13 +88,14 @@ if os.name == "nt":
                 raise OSError("CHILD_JOB_TERMINATE_FAILED")
 
         def members(self) -> list[int]:
-            """The process IDs the Job lists; a Job drops a process from this list before its teardown ends."""
+            """The process IDs the Job lists; a Job drops a process from this list before its teardown ends, and counts it
+            as assigned until then, so a list with room for every assigned process is complete."""
             room = _MEMBER_ROOM
             while True:
                 value = _process_id_list(room)
                 succeeded = self.kernel.QueryInformationJobObject(self.handle, 3, ctypes.byref(value),
                                                                   ctypes.sizeof(value), None)
-                if succeeded and value.listed == value.assigned:
+                if succeeded and value.assigned <= room:
                     return [int(pid) for pid in value.ids[:value.listed]]
                 if value.assigned <= room:
                     raise OSError("CHILD_JOB_QUERY_FAILED")

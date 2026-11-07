@@ -169,6 +169,32 @@ def test_the_member_list_grows_to_hold_every_member(tmp_path: Path, monkeypatch:
 
 
 @windows
+@pytest.mark.unit
+def test_a_member_in_teardown_is_counted_as_assigned_and_the_list_stays_complete(monkeypatch: pytest.MonkeyPatch) -> None:
+    process = children.start([sys.executable, "-c", SLEEP])
+    tree = next(entry[1] for entry in children._started if entry[0] is process)
+
+    process_id_list = children._process_id_list
+
+    def ending_member(room: int):
+        value = process_id_list(room)
+        value.assigned, value.listed, value.ids[0] = 2, 1, 4242
+        return value
+
+    class Kernel:
+        def QueryInformationJobObject(self, *_arguments) -> int:
+            return 1
+
+    monkeypatch.setattr(children, "_process_id_list", ending_member)
+    monkeypatch.setattr(tree, "kernel", Kernel())
+    try:
+        assert tree.members() == [4242]
+    finally:
+        monkeypatch.undo()
+        children.reap()
+
+
+@windows
 def test_a_failed_query_is_named() -> None:
     process = children.start([sys.executable, "-c", SLEEP])
     tree = next(entry[1] for entry in children._started if entry[0] is process)
