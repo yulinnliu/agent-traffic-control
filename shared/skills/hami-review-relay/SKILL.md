@@ -108,9 +108,9 @@ one `atc test mutants` call.
    (`git archive <sha>`) and run it through `atc test run` as "Writer: the
    step report" says, which points imports at the copy and isolates data
    roots; strip ambient credentials from the shell that runs it. Tests and
-   mutants never run in a live worktree. Prepare and delete a `.venv` in the copy as "Writer: the
-   step report" says. An exported tree can differ only in line endings, so compare files
-   with carriage returns ignored. Done when an import-location guard proves
+   mutants never run in a live worktree. Prepare and delete a `.venv` in the
+   copy as "Writer: the step report" says. An exported tree can differ only
+   in line endings, so compare files with carriage returns ignored. Done when an import-location guard proves
    the copy, not an installed checkout, is what runs.
 3. **Walk the real path.** Trace from the user-facing entry to the external
    effect (the order request, the published event, the written record) and
@@ -125,11 +125,13 @@ one `atc test mutants` call.
    as a test gap or argued equivalent.
    `atc test mutants <scratch> <sha> <worktree> <mutants.json> --python <py> --tests <path>...`
    performs this step on the copy at `<tmp>/<scratch>/tree`. `<mutants.json>`
-   lists mutants, each a label and a list of edits `{path, old, new}`, every
-   `old` occurring exactly once in its file. A red unmutated run prints
-   `BASELINE-RED` and applies no mutant; each mutant then prints `KILLED`,
-   `SURVIVED` or `INCONCLUSIVE`, each touched file `restored-ok` or
-   `RESTORE-MISMATCH`, and the last line `done: M mutants, S survived <labels>`.
+   is a JSON array of `{"label": ..., "edits": [{"path", "old", "new"}]}`,
+   every `old` occurring exactly once in its file. A red unmutated run prints
+   `BASELINE-RED` and applies no mutant. Each mutant prints `KILLED` or
+   `SURVIVED`; an `INCONCLUSIVE` mutant stops the run and leaves the rest
+   unrun. Each touched file then prints `restored-ok` or `RESTORE-MISMATCH`,
+   and the last line reads `done: M mutants, S survived <labels>`, or
+   `done: N of M mutants, S survived <labels>` after a stop.
 5. **Search by behaviour.** Look for a guard by its refusal token or the
    behaviour it produces; a single keyword search misses guards. Also search
    the repo for the same mechanism already solved elsewhere (a sibling script,
