@@ -1,7 +1,4 @@
-"""docs/ATC_HOME.md § Scratch registry and § Deleting: ``atc tmp list``, ``clean`` and ``prune``.
-
-Carries every case of ``test_clean_scratch.py`` for the replacement of ``clean_scratch.ps1``.
-"""
+"""docs/ATC_HOME.md § Scratch registry and § Deleting: ``atc tmp list``, ``clean`` and ``prune``."""
 from __future__ import annotations
 
 import ast

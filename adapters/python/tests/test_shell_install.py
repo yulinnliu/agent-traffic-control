@@ -40,14 +40,14 @@ def test_directory_without_skill_md_is_a_collision(tmp_path: Path) -> None:
 
 def test_managed_directory_is_repaired_whatever_its_file_names(tmp_path: Path) -> None:
     repo = make_repo(tmp_path)
-    assert sh("link-skills.sh", repo.as_posix(), "hami-review-relay").returncode == 0
+    assert sh("link-skills.sh", repo.as_posix(), "hami-handoff-reminder").returncode == 0
     check = sh("check-skills.sh", repo.as_posix())
-    assert check.returncode == 0 and "current    .claude/skills/hami-review-relay" in check.stdout
-    adapter = repo / ".claude/skills/hami-review-relay"
-    shipped = adapter / "references/clean_scratch.ps1"
+    assert check.returncode == 0 and "current    .claude/skills/hami-handoff-reminder" in check.stdout
+    adapter = repo / ".claude/skills/hami-handoff-reminder"
+    shipped = adapter / "references/handoff-document.md"
     original = shipped.read_bytes()
     shipped.write_text("edited\n", encoding="utf-8")
-    assert "drifted    .claude/skills/hami-review-relay" in sh("check-skills.sh", repo.as_posix()).stdout
+    assert "drifted    .claude/skills/hami-handoff-reminder" in sh("check-skills.sh", repo.as_posix()).stdout
     shipped.write_bytes(original)
     # A space splits a name under the default IFS; with globbing on, "[ab].md" expands against
     # the caller's directory, here the adapter itself, to "a.md".
@@ -55,13 +55,13 @@ def test_managed_directory_is_repaired_whatever_its_file_names(tmp_path: Path) -
     for extra in extras:
         write(extra, "x\n")
     check = sh("check-skills.sh", repo.as_posix())
-    assert check.returncode == 1 and "drifted    .claude/skills/hami-review-relay" in check.stdout
-    link = sh("link-skills.sh", repo.as_posix(), "hami-review-relay", cwd=adapter)
-    assert link.returncode == 0 and "updated    .claude/skills/hami-review-relay" in link.stdout
+    assert check.returncode == 1 and "drifted    .claude/skills/hami-handoff-reminder" in check.stdout
+    link = sh("link-skills.sh", repo.as_posix(), "hami-handoff-reminder", cwd=adapter)
+    assert link.returncode == 0 and "updated    .claude/skills/hami-handoff-reminder" in link.stdout
     assert not [extra for extra in extras if extra.exists()]
     assert shipped.read_bytes().replace(b"\r", b"") == original.replace(b"\r", b"")
     check = sh("check-skills.sh", repo.as_posix())
-    assert check.returncode == 0 and "current    .claude/skills/hami-review-relay" in check.stdout
+    assert check.returncode == 0 and "current    .claude/skills/hami-handoff-reminder" in check.stdout
 
 
 def test_dangling_skill_md_link_is_relinked_only_when_alone(tmp_path: Path) -> None:

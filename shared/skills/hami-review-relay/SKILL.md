@@ -74,10 +74,6 @@ A tree that runs source child processes needs a `.venv`:
   which copies the whole venv here.
 - `atc tmp clean` takes a scratch's `.venv` and `tree\.venv` out as links
   ("Reviewer: after integration").
-- `atc tmp clean` refuses a scratch under `%TEMP%\q`; delete those with
-  `powershell -NoProfile -ExecutionPolicy Bypass -File shared/skills/hami-review-relay/references/clean_scratch.ps1 <dir>...`
-  from the root of the ATC checkout. It takes links out as links and stops on
-  any link it does not expect.
 - A worktree's `.venv` junction comes out as the link alone, with
   `cmd //c rmdir` on its literal path, before the worktree's own cleanup.
 
