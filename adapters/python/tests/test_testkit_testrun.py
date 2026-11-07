@@ -437,20 +437,39 @@ def test_a_result_line_stays_on_stdout_and_a_refusal_goes_to_stderr(atc_tmp: Pat
     assert captured.out.startswith("REFUSED ") and captured.err == ""
 
 
-def test_mutants_need_the_export(tree: Path, atc_tmp: Path, tmp_path: Path) -> None:
+def test_mutants_need_the_export(export: Export, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     listing = tmp_path / "m.json"
     listing.write_text("[]", encoding="utf-8")
-    run = run_command("test", "mutants", "m", "0" * 40, str(tree), str(listing), "--python", sys.executable, "--tests", "tests")
-    assert run.returncode == 9 and run.stderr.startswith("TREE_NOT_FOUND ")
+    other = export.place.parent / "other"
+    code = commands.main(["test", "mutants", other.name, export.sha, str(export.worktree), str(listing),
+                          "--python", sys.executable, "--tests", "tests"])
+    assert code == 9 and capsys.readouterr().err.startswith("TREE_NOT_FOUND ")
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("sha", ["0" * 40, "not-a-revision"])
+def test_mutants_refuse_a_sha_that_names_no_commit_before_the_baseline(
+        export: Export, tmp_path: Path, capsys: pytest.CaptureFixture[str], sha: str) -> None:
+    listing = tmp_path / "m.json"
+    listing.write_text(json.dumps([KILLED]), encoding="utf-8")
+    other = export.place.parent / "other"
+    code = commands.main(["test", "mutants", other.name, sha, str(export.worktree), str(listing),
+                          "--python", sys.executable, "--tests", "tests"])
+    captured = capsys.readouterr()
+    assert code == 9 and captured.err.startswith(f"SHA_NOT_FOUND {sha} names no commit in ")
+    assert captured.out == "" and not other.exists()
 
 
 # dispatch
 
 
 @pytest.mark.parametrize("arguments", [("test",), ("test", "other"), ("tmp",), ("tmp", "list", "x"), ("tmp", "clean"),
-                                       ("tmp", "clean", "--project"), ("other",)])
-def test_a_wrong_command_exits_two(arguments: tuple[str, ...], atc_tmp: Path) -> None:
+                                       ("tmp", "clean", "--tree-name"), ("tmp", "clean", "--project"),
+                                       ("tmp", "clean", "--tree"), ("other",)])
+def test_a_wrong_command_exits_two(arguments: tuple[str, ...], atc_tmp: Path, capsys: pytest.CaptureFixture[str]) -> None:
     assert commands.main(list(arguments)) == 2
+    captured = capsys.readouterr()
+    assert captured.out == "" and captured.err.startswith("usage: atc ")
 
 
 @pytest.mark.parametrize(("arguments", "attribute", "module", "expected"), [
@@ -459,6 +478,7 @@ def test_a_wrong_command_exits_two(arguments: tuple[str, ...], atc_tmp: Path) ->
     (["tmp", "list"], "list_scratches", scratch, ()),
     (["tmp", "prune"], "prune", scratch, ()),
     (["tmp", "clean", "a", "b"], "clean", scratch, (["a", "b"],)),
+    (["tmp", "clean", "--tree-name", "p"], "clean", scratch, ((), "p")),
     (["tmp", "clean", "--project", "p"], "clean", scratch, ((), "p")),
 ])
 def test_atc_reaches_the_package_with_its_arguments_and_returns_its_exit_code(
@@ -467,3 +487,13 @@ def test_atc_reaches_the_package_with_its_arguments_and_returns_its_exit_code(
     monkeypatch.setattr(module, attribute, lambda *args: seen.append(args) or 41)
     assert atc_cli.main(arguments) == 41
     assert seen == [expected]
+
+
+@pytest.mark.integration
+def test_the_earlier_tree_name_option_prints_its_replacement(monkeypatch: pytest.MonkeyPatch,
+                                                             capsys: pytest.CaptureFixture[str]) -> None:
+    monkeypatch.setattr(scratch, "clean", lambda *args: 0)
+    assert commands.main(["tmp", "clean", "--project", "p"]) == 0
+    assert capsys.readouterr().err == "NOTE --project is accepted through atc-testkit 0.7.x; use --tree-name\n"
+    assert commands.main(["tmp", "clean", "--tree-name", "p"]) == 0
+    assert capsys.readouterr().err == ""

@@ -758,7 +758,7 @@ def check_projects(canonical: dict[str, dict], project_checkouts: dict[str, Path
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(allow_abbrev=False, description=__doc__)
     parser.add_argument(
         "--projects",
         action="store_true",

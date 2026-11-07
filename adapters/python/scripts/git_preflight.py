@@ -281,13 +281,13 @@ def render(report: Report) -> str:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(allow_abbrev=False, description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
-    merge = sub.add_parser("merge", help="evaluate the integration table for a topic branch")
+    merge = sub.add_parser("merge", allow_abbrev=False, help="evaluate the integration table for a topic branch")
     merge.add_argument("--repo", type=Path, required=True, help="integration checkout")
     merge.add_argument("--branch", required=True, help="topic branch")
     merge.add_argument("--reviewed", help="SHA named by the latest formal review")
-    cleanup = sub.add_parser("cleanup", help="check whether a linked worktree is safe to remove")
+    cleanup = sub.add_parser("cleanup", allow_abbrev=False, help="check whether a linked worktree is safe to remove")
     cleanup.add_argument("--repo", type=Path, required=True, help="integration checkout")
     cleanup.add_argument("--worktree", type=Path, required=True, help="linked worktree path")
     for p in (merge, cleanup):

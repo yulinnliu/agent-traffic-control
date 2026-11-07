@@ -186,7 +186,7 @@ def repository_problems(root: Path, *, installed: bool = False, hooks: bool = Fa
 
 
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(allow_abbrev=False, description=__doc__)
     parser.add_argument('--root', type=Path, default=Path.cwd())
     parser.add_argument('--installed', action='store_true')
     parser.add_argument('--hooks', action='store_true')

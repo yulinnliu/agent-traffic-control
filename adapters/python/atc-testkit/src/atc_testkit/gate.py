@@ -113,7 +113,7 @@ def _run_tests(project: Project, push_lines: list[str], pytest_paths: list[str],
 
 def main(project: Project, argv: Sequence[str] | None = None, stdin: Iterable[str] | None = None,
          run: stages.Run = stages.run_logged) -> int:
-    parser = argparse.ArgumentParser(description="Pre-push gate")
+    parser = argparse.ArgumentParser(allow_abbrev=False, description="Pre-push gate")
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--run", action="store_true", help="read the pushed refs from stdin and run the gate")
     mode.add_argument("--paths", nargs="+", help="print the selection for these paths and run nothing")

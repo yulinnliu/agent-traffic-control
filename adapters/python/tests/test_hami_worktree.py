@@ -1166,10 +1166,10 @@ def squashed_topic(ws, capsys):
     return path, {"tip": tip, "base": base, "integration": integration, "ref": "refs/tags/retain/sq"}
 
 
-def squash_args(facts, **override):
+def squash_args(facts, reviewed_option="--reviewed", **override):
     values = {"expected_head": facts["tip"], "reviewed_sha": facts["tip"], "expected_main": facts["base"],
               "integrated_as": facts["integration"], "retained_ref": facts["ref"], **override}
-    return ("--squash-integrated", "--expected-head", values["expected_head"], "--reviewed-sha", values["reviewed_sha"],
+    return ("--squash-integrated", "--expected-head", values["expected_head"], reviewed_option, values["reviewed_sha"],
             "--expected-main", values["expected_main"], "--integrated-as", values["integrated_as"],
             "--retained-ref", values["retained_ref"])
 
@@ -1184,10 +1184,11 @@ def assert_kept(ws, path, facts):
     assert ws.lock_reason(path) == "codex:sq:s1"
 
 
-def test_squash_cleanup_removes_the_worktree_and_keeps_the_retained_ref(ws, capsys):
+@pytest.mark.parametrize("reviewed_option", ["--reviewed", "--reviewed-sha"])
+def test_squash_cleanup_removes_the_worktree_and_keeps_the_retained_ref(ws, capsys, reviewed_option):
     path, facts = squashed_topic(ws, capsys)
     ws.run(capsys, "create", "claude", "other", "--session", "other-session")
-    status, results = squash_cleanup(ws, capsys, facts)
+    status, results = squash_cleanup(ws, capsys, facts, reviewed_option=reviewed_option)
     result = single(results)
     evidence = result["evidence"]
     assert (status, result["reason"], evidence["branch_kept"]) == (0, "OK", False), evidence.get("git")
@@ -1349,12 +1350,13 @@ def test_cleanup_complete_is_omitted_when_the_branch_state_cannot_be_observed(ws
 
 @pytest.mark.parametrize("extra", [
     ("--squash-integrated",),
+    ("--reviewed", "a" * 40),
     ("--reviewed-sha", "a" * 40),
     ("--retained-ref", "refs/tags/x"),
     ("--abandon", "--archive-tag", "archive/x"),
 ])
 def test_squash_cleanup_options_are_a_mutually_exclusive_mode(ws, capsys, extra):
-    base = ("--expected-head", "a" * 40, "--reviewed-sha", "a" * 40, "--expected-main", "b" * 40,
+    base = ("--expected-head", "a" * 40, "--reviewed", "a" * 40, "--expected-main", "b" * 40,
             "--integrated-as", "c" * 40, "--retained-ref", "refs/tags/x")
     argv = (*extra, *base, "--squash-integrated") if extra[0] == "--abandon" else extra
     with pytest.raises(SystemExit) as exc:

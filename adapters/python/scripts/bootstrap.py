@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Set up this checkout as a workspace root and bring projects under it.
 
-    bootstrap.py init   [--governance-source OWNER/REPO] [--force]
-    bootstrap.py add    NAME [--repo URL] [--skills a,b]
-    bootstrap.py status
+    atc bootstrap init   [--governance-source OWNER/REPO] [--force]
+    atc bootstrap add    NAME [--repo URL] [--skills a,b]
+    atc bootstrap status
 
 `init` writes `workspace.yaml` with this checkout as `workspace_root`,
 creates `projects/`, `worktrees/` and `state/`, and prints how to put the
@@ -184,19 +184,19 @@ def status(root: Path) -> int:
 
 
 def main(argv: list[str] | None = None, root: Path = ROOT) -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(allow_abbrev=False, description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
-    p_init = sub.add_parser("init")
+    p_init = sub.add_parser("init", allow_abbrev=False)
     p_init.add_argument("--governance-source", metavar="OWNER/REPO")
     p_init.add_argument("--force", action="store_true")
-    p_add = sub.add_parser("add")
+    p_add = sub.add_parser("add", allow_abbrev=False)
     p_add.add_argument("name")
     p_add.add_argument("--repo", help="git URL to clone into projects/NAME")
     p_add.add_argument("--skills", default="", help="comma-separated opt-in skills to install")
-    p_sync = sub.add_parser("sync")
+    p_sync = sub.add_parser("sync", allow_abbrev=False)
     p_sync.add_argument("name", nargs="?")
     p_sync.add_argument("--prune", action="store_true", help="delete orphaned managed adapters")
-    sub.add_parser("status")
+    sub.add_parser("status", allow_abbrev=False)
     args = parser.parse_args(argv)
     if args.command == "init":
         return init(root, args.governance_source, args.force)

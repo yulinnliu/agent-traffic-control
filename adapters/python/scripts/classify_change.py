@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Classify a delegated change LOW or HIGH under an escalation policy.
 
-    classify_change.py --policy escalation.yaml --changed <file> [--severity low|med|high]
+    atc classify --policy escalation.yaml --changed <file> [--severity low|med|high]
 
 <file> lists one repo-relative changed path per line. LOW means the topic is
 ready for a human fast-forward; HIGH means an independent review runs first.
@@ -45,7 +45,7 @@ def classify(policy: dict, changed: list[str], severity: str | None) -> tuple[st
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(allow_abbrev=False, description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--policy", type=Path, required=True)
     parser.add_argument("--changed", type=Path, required=True)
     parser.add_argument("--severity", choices=sorted(SEVERITY, key=SEVERITY.get))

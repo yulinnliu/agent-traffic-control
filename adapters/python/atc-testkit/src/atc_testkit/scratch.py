@@ -289,11 +289,12 @@ def _clean_one(directory: str, root: Path, say: Callable[[str], None]) -> int:
         return 1
 
 
-def clean(arguments: Sequence[str], project: str | None = None, *, say: Callable[[str], None] = print,
+def clean(arguments: Sequence[str], tree_name: str | None = None, *, say: Callable[[str], None] = print,
           environ=None) -> int:
-    """``atc tmp clean``: the highest exit code across the directories."""
+    """``atc tmp clean``: the highest exit code across the directories; ``tree_name`` picks registry rows."""
     root = locations.locate(environ).tmp
-    chosen = [row.scratch for row in registered(root) if row.project == project] if project is not None else arguments
+    chosen = ([row.scratch for row in registered(root) if row.project == tree_name] if tree_name is not None
+              else arguments)
     directories = []
     for argument in chosen:
         directory, why = _resolve_for_clean(argument, root)

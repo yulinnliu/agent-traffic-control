@@ -182,9 +182,9 @@ def print_summary(events_file: Path, group_field: str) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(allow_abbrev=False, description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
-    add = subparsers.add_parser("add", help="append one incident")
+    add = subparsers.add_parser("add", allow_abbrev=False, help="append one incident")
     add.add_argument("--kind", required=True, choices=ALLOWED_KINDS)
     add.add_argument("--project", required=True)
     add.add_argument("--tool", required=True)
@@ -196,13 +196,13 @@ def build_parser() -> argparse.ArgumentParser:
     add.add_argument("--evidence", required=True)
     add.add_argument("--recurrence-key", required=True)
 
-    list_parser = subparsers.add_parser("list", help="list projected incidents")
+    list_parser = subparsers.add_parser("list", allow_abbrev=False, help="list projected incidents")
     list_parser.add_argument("--open", action="store_true", dest="open_only", required=True)
 
-    summary = subparsers.add_parser("summary", help="summarize incident recurrence")
+    summary = subparsers.add_parser("summary", allow_abbrev=False, help="summarize incident recurrence")
     summary.add_argument("--group", choices=("recurrence_key",), default="recurrence_key")
 
-    resolve = subparsers.add_parser("resolve", help="append a resolution event")
+    resolve = subparsers.add_parser("resolve", allow_abbrev=False, help="append a resolution event")
     resolve.add_argument("event_id")
     resolve.add_argument("--evidence", required=True)
     return parser

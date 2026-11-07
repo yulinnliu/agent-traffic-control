@@ -980,7 +980,7 @@ class _Parser(argparse.ArgumentParser):
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = _Parser(description=__doc__.splitlines()[0])
+    parser = _Parser(allow_abbrev=False, description=__doc__.splitlines()[0])
     target = parser.add_mutually_exclusive_group()
     target.add_argument("--repo", type=Path, help="main checkout of the repository; the workspace root takes this form")
     target.add_argument("--project", help="registered project name from workspace.yaml")

@@ -271,6 +271,14 @@ requires. Every variable ATC itself defines starts with `ATC_`.
 depends on the package by its path in the tree, and `atc` dispatches to it;
 `atc integrate` takes the location rule from the same package.
 
+`atc <command> [<subcommand>] --help` prints a usage line that starts with
+`usage: atc <command> [<subcommand>]` and exits 0; output the console cannot
+encode is written as backslash escapes. A wrong form prints the usage on
+stderr and exits 2, and no option is matched by an abbreviation. A command
+that imports a module the installed `atc` lacks stops with
+`ERROR MISSING_DEPENDENCY` (exit 2) naming the module and the reinstall
+command of the root's `AGENTS.md`.
+
 ### `atc test run <tree> <scratch> <python> <label> <pytest args...>`
 
 One isolated pytest run inside `<tree>`, a worktree or an exported copy, in
@@ -300,6 +308,9 @@ the scratch `<scratch>` (`ATC_HOME.md` § Test scratch). In order:
 Applies each mutant alone to `<scratch>/tree`, the export of `<sha>`, through
 `atc test run`.
 
+- `<sha>` must name a commit in `<worktree>` (`git rev-parse --verify`):
+  `SHA_NOT_FOUND` (exit 9) before the scratch is touched, then
+  `PYTHON_NOT_FOUND` and the scratch refusals of `atc test run` (exit 9).
 - The tests run once unmutated first; a failing baseline prints
   `BASELINE-RED` and exits 1 before any mutant is applied.
 - A mutant is a label and a list of edits `{path, old, new}`. An `old` that

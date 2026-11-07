@@ -17,7 +17,7 @@ Usage:
   hami_worktree.py audit   --project P --contract 1 [--owner O] [--topic T] [--json]
   hami_worktree.py cleanup --project P --owner O --topic T --contract 1 [--json]
     [--abandon --archive-tag archive/NAME --expected-head FULL_SHA]
-    [--squash-integrated --expected-head FULL_SHA --reviewed-sha FULL_SHA --expected-main FULL_SHA
+    [--squash-integrated --expected-head FULL_SHA --reviewed FULL_SHA --expected-main FULL_SHA
      --integrated-as FULL_SHA --retained-ref refs/tags/NAME]
 
 Exit status: 0 for OK; 1 for a refusal or an audit finding; 2 for a usage,
@@ -612,7 +612,7 @@ def squash_identity(repo: str, target: str, branch: str, tip: str, expected_head
     The current ``main`` is resolved on every call, so a later call sees a moved or rewound ``main``.
     """
     if tip != expected_head or squash.reviewed_sha != expected_head:
-        raise Stop(Result("HEAD_MISMATCH", target, "topic HEAD, --expected-head and --reviewed-sha must be the same commit",
+        raise Stop(Result("HEAD_MISMATCH", target, "topic HEAD, --expected-head and --reviewed must be the same commit",
                           {"expected_head": expected_head, "reviewed_sha": squash.reviewed_sha, "head": tip}))
     integration = commit_of(repo, squash.integrated_as)
     parents = git(repo, "rev-list", "--parents", "-n", "1", squash.integrated_as, readonly=True).stdout.split()[1:]
@@ -891,9 +891,9 @@ def full_sha_arg(value: str) -> str:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(allow_abbrev=False, description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
-    commands = {name: sub.add_parser(name) for name in ("create", "resume", "audit", "cleanup")}
+    commands = {name: sub.add_parser(name, allow_abbrev=False) for name in ("create", "resume", "audit", "cleanup")}
     for name, p in commands.items():
         identity_required = name != "audit"
         p.add_argument("--project")
@@ -910,7 +910,9 @@ def build_parser() -> argparse.ArgumentParser:
     commands["cleanup"].add_argument("--expected-head", type=full_sha_arg)
     commands["cleanup"].add_argument("--squash-integrated", action="store_true",
                                     help="clean up a topic integrated by an authorized same-tree squash")
-    commands["cleanup"].add_argument("--reviewed-sha", type=full_sha_arg)
+    commands["cleanup"].add_argument("--reviewed", dest="reviewed_sha", type=full_sha_arg,
+                                    help="full SHA the review named; equal to --expected-head")
+    commands["cleanup"].add_argument("--reviewed-sha", dest="reviewed_sha", type=full_sha_arg, help=argparse.SUPPRESS)
     commands["cleanup"].add_argument("--expected-main", type=full_sha_arg)
     commands["cleanup"].add_argument("--integrated-as", type=full_sha_arg)
     commands["cleanup"].add_argument("--retained-ref")
@@ -919,7 +921,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def cleanup_mode(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
     """Accept exactly one of: plain cleanup, abandonment, or verified squash cleanup."""
-    squash_fields = {"--reviewed-sha": args.reviewed_sha, "--expected-main": args.expected_main,
+    squash_fields = {"--reviewed": args.reviewed_sha, "--expected-main": args.expected_main,
                      "--integrated-as": args.integrated_as, "--retained-ref": args.retained_ref}
     if args.squash_integrated:
         if args.abandon or args.archive_tag:
@@ -928,7 +930,7 @@ def cleanup_mode(parser: argparse.ArgumentParser, args: argparse.Namespace) -> N
         if missing:
             parser.error(f"squash cleanup requires {', '.join(missing)}")
     elif any(squash_fields.values()):
-        parser.error("--reviewed-sha, --expected-main, --integrated-as and --retained-ref require --squash-integrated")
+        parser.error("--reviewed, --expected-main, --integrated-as and --retained-ref require --squash-integrated")
     elif any((args.abandon, args.archive_tag, args.expected_head)) and not all((args.abandon, args.archive_tag, args.expected_head)):
         parser.error("abandoned cleanup requires --abandon, --archive-tag and --expected-head together")
 

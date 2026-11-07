@@ -84,7 +84,7 @@ def publish_local(path: Path, data: bytes) -> None:
 
 
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(allow_abbrev=False, description=__doc__)
     parser.add_argument("--output-dir", type=Path, default=WORKSPACE / ".tooling/testkit-dist")
     args = parser.parse_args(argv)
     try:

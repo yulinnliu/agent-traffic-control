@@ -2,7 +2,7 @@
 """Load a policy directory, validate each file against its schema, and refuse
 contradictions.
 
-    policies.py check <dir> [--schemas <dir>]
+    atc policies check <dir> [--schemas <dir>]
 
 <dir> holds any of hard-deny.yaml, approval-required.yaml,
 permission-presets.yaml and escalation.yaml. Each present file must match its
@@ -116,9 +116,9 @@ def contradictions(loaded: dict[str, dict]) -> list[str]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(allow_abbrev=False, description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
-    check = sub.add_parser("check", help="validate a policy directory")
+    check = sub.add_parser("check", allow_abbrev=False, help="validate a policy directory")
     check.add_argument("directory", type=Path)
     check.add_argument("--schemas", type=Path, default=SCHEMAS)
     args = parser.parse_args(argv)

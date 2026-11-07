@@ -24,6 +24,10 @@ package was installed from. `integrate` resolves `--project` and the
 working directory's project in that root's workspace.yaml and refuses an
 explicit `--root` beside `--repo`. Skills call `atc` by name, so a repository that
 uses them needs nothing but this command on PATH.
+
+`atc <command> --help` describes one command. A module the installed `atc`
+lacks stops the command with `ERROR MISSING_DEPENDENCY` and the reinstall
+command of the root's AGENTS.md.
 """
 
 from __future__ import annotations
@@ -65,7 +69,18 @@ def usage() -> str:
     return __doc__.strip()
 
 
+def reinstall_command() -> str:
+    return f'uv tool install -e "{SCRIPTS.parent}" --force'
+
+
+def _escape_unencodable_output() -> None:
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="backslashreplace")
+
+
 def main(argv: list[str] | None = None) -> int:
+    _escape_unencodable_output()
     args = list(sys.argv[1:] if argv is None else argv)
     explicit_root = None
     if args[:1] == ["--root"]:
@@ -79,12 +94,26 @@ def main(argv: list[str] | None = None) -> int:
         print(usage())
         return 0
     command, rest = args[0], args[1:]
+    if command not in COMMANDS and command not in TESTKIT_COMMANDS:
+        print(f"unknown command: {command}\n\n{usage()}", file=sys.stderr)
+        return 2
+    program = sys.argv[0]
+    sys.argv[0] = f"atc {command}"
+    try:
+        return _dispatch(command, rest, explicit_root)
+    except ModuleNotFoundError as error:
+        print(f"ERROR MISSING_DEPENDENCY atc {command} needs the module {error.name!r}, which this "
+              f"installation lacks; reinstall it with: {reinstall_command()}", file=sys.stderr)
+        return 2
+    finally:
+        sys.argv[0] = program
+
+
+def _dispatch(command: str, rest: list[str], explicit_root: str | None) -> int:
+    """Run one command; ``sys.argv[0]`` is ``atc <command>``, the program name argparse shows."""
     if command in TESTKIT_COMMANDS:
         from atc_testkit import commands
         return commands.main([command, *rest])
-    if command not in COMMANDS:
-        print(f"unknown command: {command}\n\n{usage()}", file=sys.stderr)
-        return 2
     root = resolve_root(explicit_root, dict(os.environ), Path.cwd())
     if str(SCRIPTS) not in sys.path:
         sys.path.insert(0, str(SCRIPTS))
@@ -94,6 +123,9 @@ def main(argv: list[str] | None = None) -> int:
     if command == "integrate":
         return module.main(rest, root=root, root_given=explicit_root is not None)
     if command == "doctor":
+        if rest[:1] in (["-h"], ["--help"]):
+            print(f"usage: atc doctor\n\n{module.__doc__.strip()}")
+            return 0
         return module.main(root)
     if command == "validate" and "--root" not in rest and not any(a.startswith("--root=") for a in rest):
         rest = [*rest, "--root", str(root)]

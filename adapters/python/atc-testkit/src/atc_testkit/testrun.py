@@ -190,6 +190,18 @@ def run(argv: Sequence[str], environ: MutableMapping[str, str] | None = None) ->
     return execute(tree, place, python, label, arguments, environ).code
 
 
+def verify_commit(worktree: str, sha: str) -> None:
+    """Refuse a ``<sha>`` that names no commit in ``worktree`` with ``SHA_NOT_FOUND`` (exit 9)."""
+    try:
+        found = subprocess.run(["git", "-C", worktree, "rev-parse", "--verify", "--quiet", f"{sha}^{{commit}}"],
+                               capture_output=True, text=True, env=git_env(), stdin=subprocess.DEVNULL,
+                               creationflags=scratch.WINDOW_HIDDEN)
+    except OSError as error:
+        raise Refusal("SHA_NOT_FOUND", f"{sha} in {worktree}: {error}") from error
+    if found.returncode != 0:
+        raise Refusal("SHA_NOT_FOUND", f"{sha} names no commit in {worktree}")
+
+
 def _blob(worktree: str, sha: str, path: str) -> bytes:
     return subprocess.run(["git", "-C", worktree, "show", f"{sha}:{path}"], capture_output=True, check=True,
                           env=git_env(), stdin=subprocess.DEVNULL, creationflags=scratch.WINDOW_HIDDEN).stdout
@@ -246,16 +258,23 @@ def _apply(tree: Path, mutant: Mapping, touched: set[str], originals: dict[Path,
 
 def mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None = None) -> int:
     """``atc test mutants <scratch> <sha> <worktree> <mutants.json> --python <py> --tests <path>...``."""
-    parser = argparse.ArgumentParser(prog="atc test mutants")
-    parser.add_argument("scratch")
-    parser.add_argument("sha")
-    parser.add_argument("worktree")
-    parser.add_argument("mutants")
-    parser.add_argument("--python", required=True)
-    parser.add_argument("--tests", nargs="+", required=True)
+    parser = argparse.ArgumentParser(
+        prog="atc test mutants", allow_abbrev=False,
+        description="Apply each mutant alone to <scratch>/tree and run the tests on it (docs/TESTKIT.md § Commands).",
+        epilog="Exit: 0 with no survivor and every file restored; 1 for a red baseline, a survivor, an aborted run "
+               "or a restore mismatch; 9 for a refusal before the baseline, 8 for an import-guard refusal.")
+    parser.add_argument("scratch", help="scratch name; <scratch>/tree holds the export of <sha>")
+    parser.add_argument("sha", help="commit the export was made from; touched files are compared with it at the end")
+    parser.add_argument("worktree", help="repository that holds <sha>")
+    parser.add_argument("mutants", metavar="mutants.json",
+                        help="JSON list of mutants: {label, edits: [{path, old, new}]}, paths relative to the tree")
+    parser.add_argument("--python", required=True, help="interpreter that runs pytest: a path, or a name on PATH")
+    parser.add_argument("--tests", nargs="+", required=True, help="pytest arguments naming the tests that judge a mutant")
     args = parser.parse_args(argv)
     environ = os.environ if environ is None else environ
-    worktree, python = os.path.abspath(args.worktree), resolve_python(args.python)
+    worktree = os.path.abspath(args.worktree)
+    verify_commit(worktree, args.sha)
+    python = resolve_python(args.python)
     entries = json.loads(Path(args.mutants).read_text(encoding="utf-8-sig"))
     _root, place = prepare_scratch(args.scratch, environ)
     tree = place / "tree"

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generate each harness's native deny configuration from hard-deny.yaml.
 
-    generate_enforcement.py --policies <dir> --out <dir>
+    atc enforce --policies <dir> --out <dir>
         [--workspace FILE [--local-out <dir>]]
         [--check [--live-claude PATH] [--live-claude-local PATH] [--live-codex PATH] [--live-hook PATH]]
 
@@ -239,7 +239,7 @@ def drift(files: dict[str, str], out: Path) -> list[str]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(allow_abbrev=False, description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--policies", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--check", action="store_true", help="exit 1 if --out differs from the generated output")

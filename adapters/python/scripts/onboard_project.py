@@ -393,7 +393,7 @@ def run(mode: str, targets: list[tuple[str, Path]], root: Path = ROOT, prune: bo
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(allow_abbrev=False, description=__doc__)
     modes = parser.add_mutually_exclusive_group(required=True)
     modes.add_argument("--check", action="store_const", const="check", dest="mode")
     modes.add_argument("--apply", action="store_const", const="apply", dest="mode")
