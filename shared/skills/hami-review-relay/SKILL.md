@@ -158,13 +158,15 @@ one `atc test mutants` call.
   missing `## Integration verification` section, leaves the PASS without an
   instruction: give the user the stop and its `next:` line. In a repository
   without managed worktrees, `STOP CHECKOUT_NOT_ON_MAIN` naming the topic
-  branch is the expected check result, and the writer's run after
-  `switch main` assesses the rest. The instruction carries, with every value
+  branch is the expected check result: the PASS still carries the
+  instruction, the "verified" paragraph quotes that `STOP` line and every
+  `WARNING` line, and the writer's run after `switch main` assesses a dirty
+  checkout and `FF` or `NO_FF`. The instruction carries, with every value
   filled in:
   - `atc integrate --project <name> --reviewed <full SHA> --authority-reference "<record>"`,
     with the project's `workspace.yaml` name and the exact 40-character
-    reviewed SHA. The workspace root is not a `workspace.yaml` project and
-    takes `--repo <root checkout>` in place of `--project`. The command names
+    reviewed SHA. The workspace root takes `--repo <root checkout>` in place
+    of `--project`. The command names
     no branch, verifier or timeout: the tool finds the branch from the
     reviewed SHA and reads the verifier argv file and timeout from the
     `## Integration verification` section of `AGENTS.md` at `main`.
