@@ -665,8 +665,8 @@ def test_malformed_verify_command_is_refused_before_any_candidate_work(
 def test_verify_command_sources_are_exclusive_and_default_to_the_declaration(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     tip = topic(repo, {"a.txt": "a2\n"})
     base = ["--repo", str(repo), "--branch", "topic", "--reviewed", tip, "--authority-reference", "x"]
-    with pytest.raises(SystemExit, match="2"):
-        gi.main([*base, "--verify-command", verify_command(), "--verify-command-file", "v.json"])
+    assert gi.main([*base, "--verify-command", verify_command(), "--verify-command-file", "v.json"]) == 2
+    assert capsys.readouterr().err.startswith("ERROR USAGE argument --verify-command-file: not allowed with argument --verify-command")
     assert gi.main(base) == 0
     assert main_tip(repo) == tip
 

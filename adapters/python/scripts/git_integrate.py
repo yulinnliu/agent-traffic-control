@@ -995,8 +995,15 @@ def render_result(result: dict) -> str:
     return line
 
 
+class _Parser(argparse.ArgumentParser):
+    """Argument errors take the `ERROR <TOKEN> <detail>` form of § Command results."""
+
+    def error(self, message: str):
+        raise Refused("USAGE", message)
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = _Parser(description=__doc__.splitlines()[0])
     target = parser.add_mutually_exclusive_group()
     target.add_argument("--repo", type=Path, help="main checkout of the repository; the workspace root takes this form")
     target.add_argument("--project", help="registered project name from workspace.yaml")
@@ -1075,7 +1082,11 @@ def main(argv: list[str] | None = None, root: Path = hw.ROOT, root_given: bool =
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(errors="backslashreplace")
-    args = build_parser().parse_args(argv)
+    try:
+        args = build_parser().parse_args(argv)
+    except Refused as refusal:
+        print("\n".join(refusal.lines()), file=sys.stderr)
+        return refusal.code
     payload = {"command": "integrate"}
     try:
         locations.enter()
