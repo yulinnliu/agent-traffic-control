@@ -10,7 +10,7 @@
 # reparse points reaches the recursive delete. Each <dir> ends on one line:
 # DELETED, SKIPPED (not found) or REFUSED, with the reason in parentheses; the exit
 # code is the highest across all <dir>s. A deleted or missing <dir> has its lines
-# removed from %TEMP%\q\LEDGER.txt, the list run_tests.sh appends each scratch to.
+# removed from %TEMP%\q\LEDGER.txt, the list of scratches under %TEMP%\q.
 
 $ErrorActionPreference = 'Stop'
 

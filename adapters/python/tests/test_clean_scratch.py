@@ -1,17 +1,14 @@
-"""hami-review-relay's clean_scratch.ps1 and the LEDGER.txt line run_tests.sh appends."""
+"""hami-review-relay's clean_scratch.ps1."""
 from __future__ import annotations
 
 import os
-import re
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
 
 PS = shutil.which("powershell")
-BASH = shutil.which("bash")
 REFS = Path(__file__).resolve().parents[3] / "shared/skills/hami-review-relay/references"
 CLEAN = REFS / "clean_scratch.ps1"
 pytestmark = pytest.mark.skipif(os.name != "nt" or PS is None, reason="Windows PowerShell only")
@@ -162,27 +159,3 @@ def test_the_only_recursive_delete_rescans_for_links_first() -> None:
     assert text.count("Remove-Item") == 1
     body = text[text.index("function Remove-Tree"):text.index("Remove-Item")]
     assert "$left = Get-Links $dir" in body and "if ($left.Count -gt 0)" in body and "return " in body
-
-
-@pytest.mark.skipif(BASH is None, reason="no bash on PATH")
-def test_run_tests_ledger_line_is_what_clean_scratch_deletes(tmp_path: Path, atc_tmp: Path) -> None:
-    # The scratch must stay within run_tests.sh's 64-character limit, so its
-    # %TEMP% is a root that stays within the location rule's bound.
-    temp = atc_tmp
-    tree = tmp_path / "tree"
-    tree.mkdir()
-    outside = temp / "outside"
-
-    def run_tests(where: Path) -> None:
-        subprocess.run([BASH, str(REFS / "run_tests.sh"), str(tree), str(where), sys.executable, "L", "--co"],
-                       capture_output=True, text=True, env=env_for(temp), check=False)
-
-    run_tests(outside)
-    assert outside.is_dir() and not (temp / "q").exists()
-    run_tests(temp / "q" / "s")
-    ledger = (temp / "q/LEDGER.txt").read_text(encoding="utf-8")
-    scratch_win = os.path.realpath(temp / "q" / "s")
-    assert re.fullmatch(re.escape(f"{scratch_win}\t{tree}\t") + r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ\n", ledger), ledger
-    run = clean(temp, scratch_win)
-    assert run.returncode == 0 and lines(run) == [f"deleted {scratch_win}".lower()]
-    assert (temp / "q/LEDGER.txt").read_text(encoding="utf-8") == ""

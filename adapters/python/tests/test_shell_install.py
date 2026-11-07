@@ -44,7 +44,7 @@ def test_managed_directory_is_repaired_whatever_its_file_names(tmp_path: Path) -
     check = sh("check-skills.sh", repo.as_posix())
     assert check.returncode == 0 and "current    .claude/skills/hami-review-relay" in check.stdout
     adapter = repo / ".claude/skills/hami-review-relay"
-    shipped = adapter / "references/run_tests.sh"
+    shipped = adapter / "references/clean_scratch.ps1"
     original = shipped.read_bytes()
     shipped.write_text("edited\n", encoding="utf-8")
     assert "drifted    .claude/skills/hami-review-relay" in sh("check-skills.sh", repo.as_posix()).stdout
