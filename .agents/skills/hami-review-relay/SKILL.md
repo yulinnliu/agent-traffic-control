@@ -61,21 +61,27 @@ only on the fetched tip; never continue from a stale base.
 After a PASS the reviewed SHA is frozen; fixes go in new commits.
 
 Run targeted tests against the worktree with
-`shared/skills/hami-review-relay/references/run_tests.sh <worktree> <scratch> <python> <label> <tests...>`
-from the root of the ATC checkout. It points `QUANT_DATA_ROOT` at the scratch
-directory, unsets every `HAMI_*` variable so the host's project settings stay
-out of the run, and proves the imports come from the worktree.
+`atc test run <worktree> <scratch> <python> <label> <pytest args...>`.
+`<scratch>` is a name; the run creates it as `<tmp>/<scratch>`, where `<tmp>`
+is `~/.atc/tmp`, or `ATC_TMP` when that is set. The run removes every `HAMI_*`
+variable so the host's project settings stay out of it, points each data-root
+variable the tree's `[tool.atc-testkit]` names, or `QUANT_DATA_ROOT` when it
+names none, at `<scratch>/qdr`, makes the scratch the temporary directory,
+and proves with its import-location guard that the imports come from the
+tree (`COPY_IMPORT_MISMATCH`, exit 8).
 
 A tree that runs source child processes needs a `.venv`:
 
 - Prepare it as the project's `AGENTS.md` says; never with Git Bash `ln -s`,
   which copies the whole venv here.
-- Delete scratch directories under `%TEMP%\q` with
+- `atc tmp clean` takes a scratch's `.venv` and `tree\.venv` out as links
+  ("Reviewer: after integration").
+- `atc tmp clean` refuses a scratch under `%TEMP%\q`; delete those with
   `powershell -NoProfile -ExecutionPolicy Bypass -File shared/skills/hami-review-relay/references/clean_scratch.ps1 <dir>...`
-  from the root of the ATC checkout; it takes links out as links and stops on
-  any link it does not expect. A worktree's `.venv` junction comes out the same
-  way, as the link alone with `cmd //c rmdir` on its literal path, before the
-  worktree's own cleanup.
+  from the root of the ATC checkout. It takes links out as links and stops on
+  any link it does not expect.
+- A worktree's `.venv` junction comes out as the link alone, with
+  `cmd //c rmdir` on its literal path, before the worktree's own cleanup.
 
 ## Reviewer: the review
 
@@ -91,7 +97,7 @@ its stated criterion:
 Read the diff at the reviewed SHA (`git diff <base>..<tip>`), and a whole
 file only for what the diff cannot settle. Send test and mutant output to a
 file in the scratch directory and read its summary lines; run all mutants in
-one `mutants.py` call.
+one `atc test mutants` call.
 
 1. **Pin the revision.** First confirm the previous topic's closure read-only:
    the `main` position and `atc worktree audit`. Then review exactly the tip
@@ -100,10 +106,11 @@ one `mutants.py` call.
    was renamed, or a count changed), re-check against current state and
    continue; do not stop to ask the user to verify a premise you can check
    yourself. Done when the branch tip equals that SHA.
-2. **Build a scratch copy.** Export that exact tree to a scratch directory
-   `%TEMP%\q\<name>` (`git archive <sha>`), point imports at the copy, isolate
-   data roots and strip ambient credentials; tests and mutants never run in a
-   live worktree. Prepare and delete a `.venv` in the copy as "Writer: the
+2. **Build a scratch copy.** Export that exact tree to `<tmp>/<scratch>/tree`
+   (`git archive <sha>`) and run it through `atc test run` as "Writer: the
+   step report" says, which points imports at the copy and isolates data
+   roots; strip ambient credentials from the shell that runs it. Tests and
+   mutants never run in a live worktree. Prepare and delete a `.venv` in the copy as "Writer: the
    step report" says. An exported tree can differ only in line endings, so compare files
    with carriage returns ignored. Done when an import-location guard proves
    the copy, not an installed checkout, is what runs.
@@ -118,9 +125,13 @@ one `mutants.py` call.
    single-string mutant per guard, one at a time, restored after each run. Done when every file in the copy is
    proven equal to its Git object again and every surviving mutant is listed
    as a test gap or argued equivalent.
-   `shared/skills/hami-review-relay/references/mutants.py` and `run_tests.sh`,
-   run from the root of the ATC checkout, perform steps 2 and 4 from a mutants
-   list.
+   `atc test mutants <scratch> <sha> <worktree> <mutants.json> --python <py> --tests <path>...`
+   performs this step on the copy at `<tmp>/<scratch>/tree`. `<mutants.json>`
+   lists mutants, each a label and a list of edits `{path, old, new}`, every
+   `old` occurring exactly once in its file. A red unmutated run prints
+   `BASELINE-RED` and applies no mutant; each mutant then prints `KILLED`,
+   `SURVIVED` or `INCONCLUSIVE`, each touched file `restored-ok` or
+   `RESTORE-MISMATCH`, and the last line `done: M mutants, S survived <labels>`.
 5. **Search by behaviour.** Look for a guard by its refusal token or the
    behaviour it produces; a single keyword search misses guards. Also search
    the repo for the same mechanism already solved elsewhere (a sibling script,
@@ -195,5 +206,12 @@ branch, and the handoff check ran, or the stop is with the user.
 ## Reviewer: after integration
 
 Once you confirm a topic integrated (the `main` position in step 1 of the next
-review), delete that topic's scratch directories with `clean_scratch.ps1`
-right away; `%TEMP%\q\LEDGER.txt` lists the candidates, one scratch per line.
+review), delete that topic's scratches right away with
+`atc tmp clean <dir>...`, or with `atc tmp clean --project <name>` when every
+scratch of that project is done. `atc tmp list` lists the candidates with
+their project, tree and size. Each `<dir>` ends on `DELETED`, `SKIPPED` or
+`REFUSED`; a `REFUSED` leaves that scratch as it is for the user.
+
+A failing verifier or gate run leaves its working directory under
+`<tmp>/systmp` for inspection; it stays until `atc tmp prune` deletes it,
+seven days after its last change.
