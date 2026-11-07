@@ -20,7 +20,9 @@ Commands map onto the scripts under `adapters/python/scripts/`:
 
 The checkout root is, in order: `--root`, `$ATC_ROOT`, the nearest parent of
 the working directory holding `workspace.yaml`, else the checkout this
-package was installed from. Skills call `atc` by name, so a repository that
+package was installed from. `integrate` resolves `--project` and the
+working directory's project in that root's workspace.yaml and refuses an
+explicit `--root` beside `--repo`. Skills call `atc` by name, so a repository that
 uses them needs nothing but this command on PATH.
 """
 
@@ -89,6 +91,8 @@ def main(argv: list[str] | None = None) -> int:
     module = __import__(COMMANDS[command])
     if command in ("worktree", "onboard", "bootstrap"):
         return module.main(rest, root=root)
+    if command == "integrate":
+        return module.main(rest, root=root, root_given=explicit_root is not None)
     if command == "doctor":
         return module.main(root)
     if command == "validate" and "--root" not in rest and not any(a.startswith("--root=") for a in rest):
