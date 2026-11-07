@@ -1189,10 +1189,104 @@ def test_a_later_run_finds_the_required_recovery(
     assert integrate(repo, "topic", tip) == 3
     monkeypatch.setattr(gi, "git", real_git)
     capsys.readouterr()
-    assert run(repo, "--repo", str(repo), "--reviewed", tip, "--authority-reference", "x") == 3
+    # main holds the candidate, so the stopped run already recorded the integration.
+    record_file = repo / ".git" / "atc" / "integrations.jsonl"
+    assert [json.loads(line)["candidate_sha"] for line in record_file.read_text(encoding="utf-8").splitlines()] == [tip]
+    refs = run_git(repo, "for-each-ref", "--format=%(refname)", "refs/atc/integration-candidates")
+    args = ["--repo", str(repo), "--reviewed", tip, "--authority-reference", "x"]
+    assert run(repo, *args, "--check") == 3
+    assert refusal(capsys.readouterr().err)[0].startswith("STOP RECOVERY_REQUIRED: ")
+    assert run_git(repo, "for-each-ref", "--format=%(refname)", "refs/atc/integration-candidates") == refs
+    assert run(repo, *args) == 3
     first, after = refusal(capsys.readouterr().err)
     assert first.startswith("STOP RECOVERY_REQUIRED: ")
     assert after.startswith("next: reconcile main and its checkout with the retained candidate ref")
+    run_git(repo, "checkout", "--", "a.txt")
+    assert run(repo, *args, "--check") == 0
+    assert capsys.readouterr().out.startswith("CHECK RECOVERED CANDIDATE_ALREADY_ON_MAIN: ")
+    assert run(repo, *args) == 0
+    assert run_git(repo, "for-each-ref", "--format=%(refname)", "refs/atc/integration-candidates") == ""
+    assert len(record_file.read_text(encoding="utf-8").splitlines()) == 1
+
+
+@pytest.mark.integration
+def test_a_stopped_update_is_recorded_when_another_request_drops_its_ref(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    first_tip = topic(repo, {"a.txt": "first\n"}, branch="topic-one")
+    second_tip = topic(repo, {"b.txt": "second\n"}, branch="topic-two")
+    real_git = gi.git
+
+    def head_moves_after_ff(repo_arg, *args, **kwargs):
+        result = real_git(repo_arg, *args, **kwargs)
+        if args[:2] == ("merge", "--ff-only"):
+            real_git(repo, "switch", "-q", "--detach", "main~1")
+        return result
+
+    monkeypatch.setattr(gi, "git", head_moves_after_ff)
+    assert integrate(repo, "topic-one", first_tip) == 3
+    monkeypatch.setattr(gi, "git", real_git)
+    run_git(repo, "switch", "-q", "main")
+    assert integrate(repo, "topic-two", second_tip) == 0
+    assert "main_retains_commit_ref_removed_request_not_matched" in capsys.readouterr().err
+    records = [json.loads(line) for line in (repo / ".git" / "atc" / "integrations.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert [(r["candidate_sha"], r["reviewed"]) for r in records] == [(first_tip, first_tip), (main_tip(repo), second_tip)]
+
+
+@pytest.mark.integration
+def test_main_moved_since_its_declaration_was_read_is_ref_drift(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    tip = topic(repo, {"a.txt": "a2\n"})
+    real = gi.resolve
+    moved = []
+
+    def resolve_then_advance(*args):
+        target = real(*args)
+        moved.append(commit(repo, "c.txt", "c\n"))
+        return target
+
+    monkeypatch.setattr(gi, "resolve", resolve_then_advance)
+    assert integrate(repo, "topic", tip) == 1
+    first, after = refusal(capsys.readouterr().err)
+    assert first.startswith("STOP REF_DRIFT: main moved from ")
+    assert after == "next: run again; the preflight reassesses the table against the new refs"
+    assert main_tip(repo) == moved[0]
+    assert run_git(repo, "worktree", "list").count("\n") == 0
+
+
+@pytest.mark.integration
+def test_the_declaration_comes_from_main_not_the_topic(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    declare_verifier(repo, verify_command(), timeout="1234")
+    tip = topic(repo, {"AGENTS.md": "# AGENTS.md\n\n## Integration verification\n\n- Verifier argv file: other.json\n- Verifier timeout: 5\n"})
+    assert run(repo, "--repo", str(repo), "--reviewed", tip, "--authority-reference", "x") == 0
+    assert stderr_lines(capsys)[0].endswith("(AGENTS.md verify.json) timeout=1234s (AGENTS.md)")
+    assert main_tip(repo) == tip
+
+
+@pytest.mark.integration
+def test_a_verifier_that_cannot_start_is_an_error(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    tip = topic(repo, {"a.txt": "a2\n"})
+    before = main_tip(repo)
+    missing = json.dumps(["missing/atc-verifier-that-does-not-exist"])
+    assert integrate(repo, "topic", tip, "--verify-command", missing) == 2
+    error = capsys.readouterr().err
+    assert refusal(error)[0].startswith("ERROR VERIFIER_NOT_STARTED could not start candidate verifier: ")
+    assert "Traceback" not in error
+    assert main_tip(repo) == before
+    assert run_git(repo, "worktree", "list").count("\n") == 0
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("args", [
+    ["--authority-reference", "x"],
+    ["--reviewed", "0" * 40, "--authority-reference", "x", "--verify-command", "[]", "--verify-command-file", "v.json"],
+])
+def test_argument_errors_take_the_error_form(repo: Path, capsys: pytest.CaptureFixture[str], args: list[str]) -> None:
+    assert gi.main(["--repo", str(repo), *args]) == 2
+    lines = capsys.readouterr().err.splitlines()
+    assert lines[0].startswith("ERROR USAGE ")
+    assert len(lines) == 1
 
 
 @pytest.mark.integration
