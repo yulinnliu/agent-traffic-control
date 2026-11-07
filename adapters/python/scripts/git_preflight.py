@@ -12,6 +12,9 @@ Usage:
   git_preflight.py merge --repo <checkout> --branch <topic> [--reviewed <sha>] [--main main] [--json]
   git_preflight.py cleanup --repo <checkout> --worktree <path> [--main main] [--json]
 
+A STOP verdict carries a `next:` line naming the step that resolves it
+(governance `GIT_WORKFLOW.md` § Integrate and § Command results).
+
 Exit status: 0 for FF, NO_FF or REMOVABLE; 1 for STOP or KEEP; 2 for a usage
 or git error.
 """
@@ -53,6 +56,32 @@ REASONS = {
     "NOT_MERGED": "the worktree's tip is not reachable from main",
     "WORKTREE_DIRTY": "the worktree has uncommitted or untracked changes",
     "SAFE_TO_REMOVE": "tip reachable from main and tree clean; remove through the repo's own tooling",
+    "BRANCH_AMBIGUOUS": "several local branches point at the reviewed SHA",
+    "NO_BRANCH_AT_REVIEWED": "no local branch points at or contains the reviewed SHA",
+}
+
+_RUN_WITH_REVIEWED = "run again with the full SHA the formal review named"
+_REVIEW_DELTA = "review the delta, or re-review"
+_RECONCILE = (
+    "reconcile on the topic branch with a new commit (merge main in, or fix forward), "
+    "never by rewriting; re-review that commit"
+)
+
+# The step that resolves each stop: the `Integrate` table's step for a stop
+# that is a row of it, otherwise the `Command results` table's step.
+NEXT = {
+    "NO_REVIEWED_SHA": _RUN_WITH_REVIEWED,
+    "REVIEWED_SHA_INVALID": _RUN_WITH_REVIEWED,
+    "REVIEWED_SHA_UNKNOWN": _RUN_WITH_REVIEWED,
+    "REVIEW_REWRITTEN": _REVIEW_DELTA,
+    "UNREVIEWED_COMMITS": _REVIEW_DELTA,
+    "ALREADY_MERGED": "nothing to integrate; continue with GIT_WORKFLOW.md § Cleanup trigger",
+    "CHECKOUT_NOT_ON_MAIN": "check out main in the integration checkout, then run again",
+    "CHECKOUT_DIRTY": "have the owner of the listed paths commit or remove them, then run again",
+    "CONFLICT": _RECONCILE,
+    "OVERLAP": "a reviewer judges semantic overlap, then prepare a merge candidate or " + _RECONCILE,
+    "BRANCH_AMBIGUOUS": "run again with `--branch` naming the reviewed topic branch among those listed",
+    "NO_BRANCH_AT_REVIEWED": "restore the reviewed topic branch at the reviewed SHA, or " + _RUN_WITH_REVIEWED,
 }
 
 
@@ -67,9 +96,12 @@ class Report:
     reason: str
     detail: str = ""
     evidence: dict = field(default_factory=dict)
+    next: str | None = None
 
     def __post_init__(self) -> None:
-        self.detail = REASONS[self.reason]
+        self.detail = self.detail or REASONS[self.reason]
+        if self.verdict == "STOP":
+            self.next = NEXT[self.reason]
 
 
 def git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess:
@@ -126,14 +158,18 @@ def merge_preflight(repo: Path, branch: str, reviewed: str | None, main: str = "
         "reviewed_state": None,
         "unreviewed_commits": None,
         "checkout_branch": git(repo, "branch", "--show-current").stdout.strip() or None,
-        "checkout_clean": not git(repo, "status", "--porcelain", "--untracked-files=no").stdout.strip(),
+        "checkout_dirty_paths": [
+            line[3:] for line in git(repo, "status", "--porcelain", "--untracked-files=no").stdout.splitlines()
+        ],
         "conflict": None,
         "conflict_files": [],
         "overlap_files": [],
     }
 
-    def report(verdict: str, reason: str) -> Report:
-        return Report("merge", verdict, reason, evidence=ev)
+    ev["checkout_clean"] = not ev["checkout_dirty_paths"]
+
+    def report(verdict: str, reason: str, detail: str = "") -> Report:
+        return Report("merge", verdict, reason, detail, evidence=ev)
 
     if reviewed is None:
         ev["reviewed_state"] = "missing"
@@ -160,9 +196,13 @@ def merge_preflight(repo: Path, branch: str, reviewed: str | None, main: str = "
     if is_ancestor(repo, topic_tip, main_tip):
         return report("STOP", "ALREADY_MERGED")
     if ev["checkout_branch"] != main:
-        return report("STOP", "CHECKOUT_NOT_ON_MAIN")
+        on = ev["checkout_branch"] or "a detached HEAD"
+        return report("STOP", "CHECKOUT_NOT_ON_MAIN", f"the integration checkout is on {on}, not {main}")
     if not ev["checkout_clean"]:
-        return report("STOP", "CHECKOUT_DIRTY")
+        return report(
+            "STOP", "CHECKOUT_DIRTY",
+            f"{REASONS['CHECKOUT_DIRTY']}: {', '.join(ev['checkout_dirty_paths'])}",
+        )
     if merge_base == main_tip:
         return report("FF", "FAST_FORWARD")
 
@@ -231,6 +271,8 @@ def cleanup_preflight(repo: Path, worktree: Path, main: str = "main") -> Report:
 
 def render(report: Report) -> str:
     lines = [f"{report.verdict} {report.reason}: {report.detail}"]
+    if report.next:
+        lines.append(f"next: {report.next}")
     for key, value in report.evidence.items():
         if isinstance(value, list):
             value = ", ".join(value) if value else "-"

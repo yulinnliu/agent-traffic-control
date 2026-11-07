@@ -175,3 +175,16 @@ def test_cli_json_and_exit_codes(repo: Path, capsys: pytest.CaptureFixture[str])
     assert gp.main(["merge", "--repo", str(repo), "--branch", "topic"]) == 1
     assert capsys.readouterr().out.startswith("STOP NO_REVIEWED_SHA")
     assert gp.main(["merge", "--repo", str(repo), "--branch", "missing", "--reviewed", tip]) == 2
+
+
+@pytest.mark.integration
+def test_every_stop_names_its_next_step(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    assert set(gp.NEXT) == {reason for reason in gp.REASONS if reason not in (
+        "FAST_FORWARD", "COMPATIBLE", "NOT_A_WORKTREE", "MAIN_CHECKOUT", "NOT_MERGED", "WORKTREE_DIRTY", "SAFE_TO_REMOVE",
+    )}
+    tip = topic(repo, {"a.txt": "a2\n"})
+    (repo / "b.txt").write_text("dirty\n", encoding="utf-8")
+    assert gp.main(["merge", "--repo", str(repo), "--branch", "topic", "--reviewed", tip]) == 1
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0] == "STOP CHECKOUT_DIRTY: the integration checkout has uncommitted changes to tracked files: b.txt"
+    assert lines[1] == "next: have the owner of the listed paths commit or remove them, then run again"

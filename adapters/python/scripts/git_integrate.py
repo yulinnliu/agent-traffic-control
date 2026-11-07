@@ -1,17 +1,8 @@
 #!/usr/bin/env python3
-"""Candidate-first integration for a reviewed topic in the local main checkout.
+"""Candidate-first integration of a reviewed topic into the local main checkout.
 
-The caller must establish integrate_main authority before invoking this tool
-and supply the repository's required verification command. The command is run
-against an isolated candidate checkout with ATC_INTEGRATION_SHA bound to its
-immutable commit ID. The tool serializes cooperative ATC writers with an
-Integration Slot and never blindly resets main after a failed update.
-
-Usage:
-  git_integrate.py --repo <main checkout> --branch <topic> --reviewed <40-hex sha>
-      --authority-reference <record>
-      (--verify-command <JSON argv> | --verify-command-file <JSON argv file>)
-      [--verify-timeout <seconds>] [--main main] [--json]
+Rules: governance `GIT_WORKFLOW.md` § Integrate, § Integration verifier source
+and § Command results; options: `--help`.
 """
 from __future__ import annotations
 
@@ -21,18 +12,22 @@ import os
 import platform
 import re
 import secrets
+import shutil
 import signal
 import subprocess
 import sys
 import time
 import uuid
 import tempfile
-from dataclasses import asdict
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
 from atc_testkit import locations
-from git_preflight import GitError, git, merge_preflight, render, rev, same_path
+import git_preflight as gp
+import hami_worktree as hw
+import verification_section
+from git_preflight import GitError, git, is_ancestor, merge_preflight, render, rev, same_path
 from integration_slot import IntegrationSlot
 
 FULL_SHA = re.compile(r"[0-9a-f]{40}")
@@ -43,10 +38,62 @@ REPORT_SCHEMA = "atc-verification-report/1"
 EVIDENCE_SCHEMA = "atc-verification-evidence/1"
 EVIDENCE_DIR = ("atc", "verification-evidence")
 EVIDENCE_RETENTION_SECONDS = 14 * 24 * 3600
+INTEGRATIONS = ("atc", "integrations.jsonl")
+CANDIDATE_REFS = "refs/atc/integration-candidates"
+AUTHORITY_ENDING = re.compile(r"\s@\s+(\S+)$")
+TAIL_LINES = 20
+
+STOP_BEFORE_CANDIDATE = 1
+ERROR = 2
+STOP_AFTER_CANDIDATE = 3
+
+_RERUN = "run again; the preflight reassesses the table against the new refs"
+_CORRECT = (
+    "correct the cause on the topic branch with a new commit and re-review it, "
+    "or correct the project's verifier, then run again"
+)
+# Stops outside the preflight table (`GIT_WORKFLOW.md` § Command results).
+NEXT = {
+    **gp.NEXT,
+    "VERIFICATION_SECTION_MISSING": (
+        "obtain the section from the owner, add it under GIT_WORKFLOW.md § Project verification section, "
+        "then run again"
+    ),
+    "REF_DRIFT": _RERUN,
+    "VERIFICATION_FAILED": _CORRECT,
+    "VERIFICATION_TIMEOUT": _CORRECT,
+    "CANDIDATE_CHANGED": _CORRECT,
+    "RECOVERY_REQUIRED": (
+        "reconcile main and its checkout with the retained candidate ref the detail names "
+        "before any other integration of this repository"
+    ),
+}
 
 
 class Refused(Exception):
-    pass
+    """A refusal: `STOP <TOKEN>` with exit 1 or 3, or `ERROR <TOKEN>` with exit 2."""
+
+    def __init__(self, token: str, detail: str, code: int = ERROR, extra: list[str] | None = None) -> None:
+        super().__init__(detail)
+        self.token, self.detail, self.code = token, detail, code
+        self.next = NEXT[token] if code != ERROR else None
+        self.extra = extra or []
+
+    @property
+    def kind(self) -> str:
+        return "ERROR" if self.code == ERROR else "STOP"
+
+    def lines(self) -> list[str]:
+        if self.code == ERROR:
+            return [f"ERROR {self.token} {self.detail}", *self.extra]
+        return [f"STOP {self.token}: {self.detail}", f"next: {self.next}", *self.extra]
+
+    def as_dict(self) -> dict:
+        return {"verdict": self.kind, "reason": self.token, "detail": self.detail, "next": self.next}
+
+
+def stop(token: str, detail: str, *, after_candidate: bool = False, extra: list[str] | None = None) -> Refused:
+    return Refused(token, detail, STOP_AFTER_CANDIDATE if after_candidate else STOP_BEFORE_CANDIDATE, extra)
 
 
 def topic_name(branch: str) -> str:
@@ -62,12 +109,12 @@ def topic_name(branch: str) -> str:
 def check_checkout(repo: Path) -> None:
     top = git(repo, "rev-parse", "--show-toplevel").stdout.strip()
     if not same_path(Path(top), repo):
-        raise Refused(f"--repo must be the top of the checkout: {top}")
+        raise Refused("REPO_NOT_TOP", f"--repo must be the top of the checkout: {top}")
     git_dir, common_dir = git(
         repo, "rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir"
     ).stdout.splitlines()
     if not same_path(Path(git_dir), Path(common_dir)):
-        raise Refused("--repo is a linked worktree; use the main checkout")
+        raise Refused("REPO_LINKED_WORKTREE", "--repo is a linked worktree; use the main checkout")
 
 
 def _git_ok(repo: Path, *args: str) -> str:
@@ -205,15 +252,17 @@ def _create_kill_on_close_job():
     return job
 
 
+
 def _run_verifier(
     argv: list[str], cwd: Path, env: dict[str, str], timeout: float, captures: Path,
-) -> tuple[int, str, str, str | None]:
+) -> tuple[int | None, str, str, str | None]:
     """Run the verifier with a bounded wall clock and end its whole process tree.
 
     Output goes to temporary files in ``captures`` rather than pipes so a descendant that
     outlives the verifier cannot hold the wait open past the timeout. When the
     verifier returns or times out, every process it started is terminated.
-    The last element names a weaker isolation the run had to fall back to.
+    Returns the exit code (``None`` on timeout), both streams, and the weaker
+    isolation the run had to fall back to, if any.
     """
     tree = _ProcessTree()
     try:
@@ -224,13 +273,12 @@ def _run_verifier(
                     **tree.popen_kwargs(),
                 )
             except OSError as exc:
-                raise Refused(f"could not start candidate verifier: {exc}") from exc
+                raise Refused("VERIFIER_NOT_STARTED", f"could not start candidate verifier: {exc}") from exc
             tree.adopt(process)
             try:
-                returncode = process.wait(timeout=timeout)
-            except subprocess.TimeoutExpired as exc:
-                tree.terminate(process)
-                raise Refused(f"candidate verification timed out after {timeout:g}s") from exc
+                returncode: int | None = process.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                returncode = None
             tree.terminate(process)
             out.seek(0)
             err.seek(0)
@@ -244,13 +292,23 @@ def _run_verifier(
         tree.close()
 
 
+def _tails(stdout: str, stderr: str) -> list[str]:
+    """The last lines of both verifier streams, for the lines after a refusal."""
+    lines = []
+    for name, text in (("stdout", stdout), ("stderr", stderr)):
+        tail = text.rstrip().splitlines()[-TAIL_LINES:]
+        if tail:
+            lines += [f"verifier {name} (last {len(tail)} lines):", *(f"  {line}" for line in tail)]
+    return lines
+
+
 def parse_verify_command(command: str) -> list[str]:
     try:
         argv = json.loads(command)
     except json.JSONDecodeError as exc:
-        raise Refused("the verifier argv (--verify-command or --verify-command-file) must be a JSON array of executable and arguments") from exc
+        raise Refused("VERIFIER_ARGV_INVALID", "the verifier argv (--verify-command or --verify-command-file) must be a JSON array of executable and arguments") from exc
     if not isinstance(argv, list) or not argv or not all(isinstance(item, str) and item for item in argv):
-        raise Refused("the verifier argv (--verify-command or --verify-command-file) must be a non-empty JSON array of strings")
+        raise Refused("VERIFIER_ARGV_INVALID", "the verifier argv (--verify-command or --verify-command-file) must be a non-empty JSON array of strings")
     return argv
 
 
@@ -314,6 +372,7 @@ def _write_evidence(repo: Path, record: dict) -> Path:
     return target
 
 
+
 def _verify_candidate(
     argv: list[str], candidate_dir: Path, candidate_sha: str, expected_main: str, reviewed: str,
     timeout: float, captures: Path, report_path: Path,
@@ -328,31 +387,82 @@ def _verify_candidate(
         "ATC_VERIFICATION_REPORT": str(report_path),
     })
     returncode, stdout, stderr, warning = _run_verifier(argv, candidate_dir, env, timeout, captures)
+    if returncode is None:
+        raise stop(
+            "VERIFICATION_TIMEOUT", f"candidate verification timed out after {timeout:g}s for {candidate_sha}",
+            after_candidate=True, extra=_tails(stdout, stderr),
+        )
     if returncode:
-        detail = (stderr or stdout).strip()
-        raise Refused(
-            f"candidate verification failed for {candidate_sha} (exit {returncode}): {detail}"
+        last = (stderr.strip() or stdout.strip()).splitlines()
+        raise stop(
+            "VERIFICATION_FAILED",
+            f"candidate verification failed for {candidate_sha} (exit {returncode}): {last[-1] if last else 'no output'}",
+            after_candidate=True, extra=_tails(stdout, stderr),
         )
     if rev(candidate_dir, "HEAD") != candidate_sha:
-        raise Refused("verification command changed candidate HEAD; candidate SHA is no longer bound")
+        raise stop("CANDIDATE_CHANGED", "verification command changed candidate HEAD; candidate SHA is no longer bound", after_candidate=True)
     if git(candidate_dir, "status", "--porcelain").stdout.strip():
-        raise Refused("verification command dirtied candidate checkout; refusing integration")
+        raise stop("CANDIDATE_CHANGED", "verification command dirtied candidate checkout; refusing integration", after_candidate=True)
     return warning
 
 
+def _record_integration(repo: Path, record: dict) -> Path:
+    """Append one integration to `<git common dir>/atc/integrations.jsonl`."""
+    common = Path(_git_ok(repo, "rev-parse", "--path-format=absolute", "--git-common-dir"))
+    path = common.joinpath(*INTEGRATIONS)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        lines = []
+    for line in lines:
+        try:
+            if json.loads(line).get("candidate_sha") == record["candidate_sha"]:
+                return path  # a run that stopped for recovery already recorded it
+        except (json.JSONDecodeError, AttributeError):
+            continue
+    with path.open("a", encoding="utf-8", newline="\n") as handle:
+        handle.write(json.dumps(record, sort_keys=True) + "\n")
+    return path
+
+
+def _note_integration(repo: Path, result: dict, candidate_sha: str, reviewed: str, authority_reference: str) -> None:
+    try:
+        result["integration_record"] = str(_record_integration(repo, {
+            "candidate_sha": candidate_sha,
+            "reviewed": reviewed,
+            "authority_reference": authority_reference,
+            "integrated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        }))
+    except (OSError, GitError) as exc:
+        result["integration_record"] = None
+        result["integration_record_warning"] = f"could not append the integration record: {exc}"
+
+
+def _local_branches(repo: Path, main: str, *selector: str) -> list[str]:
+    names = git(repo, "for-each-ref", "--format=%(refname:short)", *selector, "refs/heads/").stdout.split()
+    return sorted(name for name in names if name != main)
+
+
+def _recovery_ref_at(repo: Path, sha: str) -> bool:
+    return any(
+        line.split(" ", 1)[-1] == sha
+        for line in git(repo, "for-each-ref", "--format=%(refname) %(objectname)", CANDIDATE_REFS).stdout.splitlines()
+    )
+
 
 def _recover_interrupted_update(
-    repo: Path, main: str, branch: str, reviewed: str, authority_reference: str,
-    recovered_candidates: list[dict],
+    repo: Path, main: str, branch: str | None, reviewed: str, authority_reference: str,
+    recovered_candidates: list[dict], *, check: bool = False,
 ) -> tuple[int, dict] | None:
-    """Reconcile a verified candidate already installed on main after a crash."""
+    """Reconcile a verified candidate already installed on main after a crash.
+
+    With ``check`` it only reports what the run would do and changes nothing.
+    """
     main_tip = rev(repo, main)
     if main_tip is None:
         return None
-    refs = git(
-        repo, "for-each-ref", "--format=%(refname) %(objectname)",
-        "refs/atc/integration-candidates",
-    ).stdout.splitlines()
+    refs = git(repo, "for-each-ref", "--format=%(refname) %(objectname)", CANDIDATE_REFS).stdout.splitlines()
     matching = []
     for line in refs:
         ref_name, _, sha = line.partition(" ")
@@ -364,11 +474,11 @@ def _recover_interrupted_update(
     # A recovery ref is evidence of a retained candidate, not proof that this
     # invocation requested that candidate. Never report another request as ours.
     reviewed_tip = rev(repo, reviewed)
-    branch_tip = rev(repo, branch)
+    branch_at_reviewed = rev(repo, branch) == reviewed if branch else bool(_local_branches(repo, main, "--points-at", reviewed))
     parents = git(repo, "rev-list", "--parents", "-n", "1", main_tip).stdout.split()
     candidate_matches_request = (
         reviewed_tip == reviewed
-        and branch_tip == reviewed
+        and branch_at_reviewed
         and (main_tip == reviewed or (len(parents) == 3 and parents[2] == reviewed))
     )
     head = rev(repo, "HEAD")
@@ -379,6 +489,8 @@ def _recover_interrupted_update(
         # another request release it.
         if head != main_tip or status:
             disposition = "main_retains_commit_ref_retained_checkout_inconsistent"
+        elif check:
+            disposition = "main_retains_commit_ref_would_be_removed_request_not_matched"
         else:
             removed = [
                 git(repo, "update-ref", "-d", ref_name, main_tip, check=False).returncode == 0
@@ -418,52 +530,76 @@ def _recover_interrupted_update(
     if head != main_tip or status:
         result.update(
             recovery_status="REQUIRES_MANUAL_RECONCILIATION",
-            error=f"candidate is main={main_tip}, but HEAD={head} and status={status!r}; retained recovery ref",
             recovery_required=True,
+            refusal=stop(
+                "RECOVERY_REQUIRED",
+                f"candidate is main={main_tip}, but HEAD={head} and status={status!r}; retained {matching[0]}",
+                after_candidate=True,
+            ),
         )
-        return 1, result
+        return STOP_AFTER_CANDIDATE, result
+    if check:
+        return 0, result
     for ref_name in matching:
         git(repo, "update-ref", "-d", ref_name, main_tip)
     result["candidate_ref"] = None
+    _note_integration(repo, result, main_tip, reviewed, authority_reference)
     return 0, result
 
 
-def integrate(
-    repo: Path, branch: str, reviewed: str, main: str = "main", verify_command: str | None = None,
-    authority_reference: str | None = None, verify_timeout: float = 300.0,
-) -> tuple[int, dict]:
-    if not authority_reference or not authority_reference.strip():
-        raise Refused("--authority-reference is required to record the integrate_main authority source")
-    if not verify_command or not verify_command.strip():
-        raise Refused("a verifier argv (--verify-command or --verify-command-file) is required; main cannot advance without candidate verification")
-    verify_argv = parse_verify_command(verify_command)
+@dataclass
+class Target:
+    """Every value an integration runs with, resolved before anything runs."""
 
+    repo: Path
+    main: str
+    main_tip: str
+    branch: str | None
+    branch_source: str
+    reviewed: str
+    authority_reference: str
+    verify_argv: list[str]
+    argv_source: str
+    timeout: float
+    timeout_source: str
+    warnings: list[str] = field(default_factory=list)
+
+    def line(self) -> str:
+        return (
+            f"resolved: repo={self.repo} main={self.main}@{self.main_tip} "
+            f"branch={self.branch or '-'} ({self.branch_source}) reviewed={self.reviewed} "
+            f"authority={json.dumps(self.authority_reference, ensure_ascii=False)} "
+            f"verifier={json.dumps(self.verify_argv, ensure_ascii=False)} ({self.argv_source}) "
+            f"timeout={self.timeout:g}s ({self.timeout_source})"
+        )
+
+
+def integrate(t: Target) -> tuple[int, dict]:
+    repo, main, branch, reviewed = t.repo, t.main, t.branch, t.reviewed
     with IntegrationSlot(repo):
         main_tip_for_refs = rev(repo, main)
-        ref_lines = git(
-            repo, "for-each-ref", "--format=%(refname) %(objectname)",
-            "refs/atc/integration-candidates",
-        ).stdout.splitlines()
         stale_candidate_refs = []
-        for line in ref_lines:
+        for line in git(repo, "for-each-ref", "--format=%(refname) %(objectname)", CANDIDATE_REFS).stdout.splitlines():
             name, _, sha = line.partition(" ")
             if sha != main_tip_for_refs:
                 stale_candidate_refs.append({"ref": name, "sha": sha})
         recovered_candidates: list[dict] = []
         recovered = _recover_interrupted_update(
-            repo, main, branch, reviewed, authority_reference or "", recovered_candidates
+            repo, main, branch, reviewed, t.authority_reference, recovered_candidates
         )
         if recovered is not None:
             code, recovered_result = recovered
             if stale_candidate_refs:
                 recovered_result["stale_candidate_refs"] = stale_candidate_refs
             return code, recovered_result
+        if branch is None:
+            raise stop("ALREADY_MERGED", f"the reviewed SHA {reviewed} is already reachable from {main}; nothing to integrate")
         report = merge_preflight(repo, branch, reviewed, main)
         main_before = report.evidence["main_tip"]
         source_before = report.evidence["topic_tip"]
         result = {
             "command": "integrate",
-            "authority_reference": authority_reference,
+            "authority_reference": t.authority_reference,
             "verdict": report.verdict,
             "reason": report.reason,
             "main_before": main_before,
@@ -485,10 +621,14 @@ def integrate(
         if stale_candidate_refs:
             result["stale_candidate_refs"] = stale_candidate_refs
         if report.verdict == "STOP":
-            return 1, {**result, "report": report}
+            return STOP_BEFORE_CANDIDATE, {**result, "report": report}
 
+        if main_before != t.main_tip:
+            return STOP_BEFORE_CANDIDATE, {**result, "refusal": stop(
+                "REF_DRIFT", f"{main} moved from {t.main_tip}, whose verification section was read, to {main_before}; main unchanged",
+            )}
         if rev(repo, main) != main_before or rev(repo, "HEAD") != main_before:
-            return 1, {**result, "error": f"{main} moved after preflight; main unchanged"}
+            return STOP_BEFORE_CANDIDATE, {**result, "refusal": stop("REF_DRIFT", f"{main} moved after preflight; main unchanged")}
 
         places = locations.locate()
         candidate_root = places.tmp / locations.CANDIDATES
@@ -505,7 +645,7 @@ def integrate(
             base = main_before if report.verdict == "NO_FF" else reviewed
             add = git(repo, "worktree", "add", "--detach", str(candidate_dir), base, check=False)
             if add.returncode:
-                raise Refused(f"could not create isolated candidate worktree: {(add.stderr or add.stdout).strip()}")
+                raise Refused("CANDIDATE_NOT_CREATED", f"could not create isolated candidate worktree: {(add.stderr or add.stdout).strip()}")
             candidate_created = True
 
             if report.verdict == "NO_FF":
@@ -516,22 +656,26 @@ def integrate(
                 )
                 if merged.returncode:
                     git(candidate_dir, "merge", "--abort", check=False)
-                    raise Refused(f"candidate merge failed: {(merged.stderr or merged.stdout).strip()}")
+                    raise Refused("CANDIDATE_MERGE_FAILED", f"candidate merge failed: {(merged.stderr or merged.stdout).strip()}")
             candidate_sha = rev(candidate_dir, "HEAD")
             if candidate_sha is None or not FULL_SHA.fullmatch(candidate_sha):
-                raise Refused("candidate did not resolve to a full commit SHA")
+                raise Refused("CANDIDATE_NOT_CREATED", "candidate did not resolve to a full commit SHA")
             result["candidate_sha"] = candidate_sha
             if report.verdict == "NO_FF":
                 first, second = _git_ok(candidate_dir, "rev-parse", f"{candidate_sha}^1", f"{candidate_sha}^2").split()
                 result.update(first_parent=first, second_parent=second)
                 if (first, second) != (main_before, reviewed):
-                    raise Refused(f"candidate parent mismatch: {first} {second}; expected {main_before} {reviewed}")
+                    raise stop(
+                        "CANDIDATE_CHANGED", f"candidate parent mismatch: {first} {second}; expected {main_before} {reviewed}",
+                        after_candidate=True,
+                    )
             elif candidate_sha != reviewed:
-                raise Refused(f"FF candidate is {candidate_sha}, expected reviewed SHA {reviewed}")
+                raise stop("CANDIDATE_CHANGED", f"FF candidate is {candidate_sha}, expected reviewed SHA {reviewed}", after_candidate=True)
 
+            print(f"verify: candidate {candidate_sha} timeout {t.timeout:g}s ({t.timeout_source})", file=sys.stderr)
             verification_started = time.monotonic()
             verification_warning = _verify_candidate(
-                verify_argv, candidate_dir, candidate_sha, main_before, reviewed, verify_timeout, places.systmp,
+                t.verify_argv, candidate_dir, candidate_sha, main_before, reviewed, t.timeout, places.systmp,
                 report_path,
             )
             result["verification"] = "PASS"
@@ -542,37 +686,44 @@ def integrate(
 
             # Final source and target checks are inside the cooperative slot.
             if rev(repo, branch) != source_before or source_before != reviewed:
-                raise Refused("source tip changed after candidate verification; main unchanged")
+                raise stop("REF_DRIFT", "source tip changed after candidate verification; main unchanged", after_candidate=True)
             if rev(repo, main) != main_before or rev(repo, "HEAD") != main_before:
-                raise Refused(f"{main} drifted after candidate verification; main unchanged")
+                raise stop("REF_DRIFT", f"{main} drifted after candidate verification; main unchanged", after_candidate=True)
             if git(repo, "status", "--porcelain", "--untracked-files=no").stdout.strip():
-                raise Refused("integration checkout became dirty; main unchanged")
+                raise stop("REF_DRIFT", "integration checkout became dirty; main unchanged", after_candidate=True)
 
-            candidate_ref = f"refs/atc/integration-candidates/{candidate_sha}"
+            candidate_ref = f"{CANDIDATE_REFS}/{candidate_sha}"
             ref_create = git(repo, "update-ref", candidate_ref, candidate_sha, check=False)
             if ref_create.returncode:
-                raise Refused(f"could not retain candidate recovery ref: {(ref_create.stderr or ref_create.stdout).strip()}")
+                raise Refused("CANDIDATE_REF_FAILED", f"could not retain candidate recovery ref: {(ref_create.stderr or ref_create.stdout).strip()}")
             result["candidate_ref"] = candidate_ref
 
             update = git(repo, "merge", "--ff-only", candidate_sha, check=False)
             if update.returncode:
-                raise Refused(
-                    f"checkout-aware fast-forward rejected candidate; main was not reset: "
-                    f"{(update.stderr or update.stdout).strip()}"
+                raise stop(
+                    "REF_DRIFT",
+                    f"checkout-aware fast-forward rejected candidate; main was not reset: {(update.stderr or update.stdout).strip()}",
+                    after_candidate=True,
                 )
             integration_updated = True
             main_after = rev(repo, main)
             result["main_after"] = main_after
+            if main_after == candidate_sha:
+                # main holds the candidate, so the integration happened even
+                # when its checkout needs recovery below.
+                _note_integration(repo, result, candidate_sha, reviewed, t.authority_reference)
             if main_after != candidate_sha or rev(repo, "HEAD") != candidate_sha:
-                raise Refused(
-                    f"recovery required: main={main_after}, HEAD={rev(repo, 'HEAD')}, "
-                    f"candidate={candidate_sha}; retained {candidate_ref}"
+                raise stop(
+                    "RECOVERY_REQUIRED",
+                    f"main={main_after}, HEAD={rev(repo, 'HEAD')}, candidate={candidate_sha}; retained {candidate_ref}",
+                    after_candidate=True,
                 )
             status = git(repo, "status", "--porcelain", "--untracked-files=no").stdout.strip()
             if status:
-                raise Refused(
-                    f"recovery required: main advanced to {candidate_sha} but checkout is dirty "
-                    f"({status}); retained {candidate_ref}"
+                raise stop(
+                    "RECOVERY_REQUIRED",
+                    f"main advanced to {candidate_sha} but checkout is dirty ({status}); retained {candidate_ref}",
+                    after_candidate=True,
                 )
             if verifier_report is not None:
                 try:
@@ -584,8 +735,8 @@ def integrate(
                         "expected_main": main_before,
                         "reviewed": reviewed,
                         "verdict": result["verdict"],
-                        "authority_reference": authority_reference,
-                        "verify_argv": verify_argv,
+                        "authority_reference": t.authority_reference,
+                        "verify_argv": t.verify_argv,
                         "platform": {"system": sys.platform, "machine": platform.machine()},
                         "verified_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                         "duration_seconds": result["verification_seconds"],
@@ -595,10 +746,10 @@ def integrate(
                     result["evidence_reason"] = "WRITE_FAILED"
             return 0, result
         except Refused as exc:
-            result["error"] = str(exc)
+            result["refusal"] = exc
             if integration_updated:
                 result["recovery_required"] = True
-            return 1, result
+            return exc.code, result
         finally:
             report_path.unlink(missing_ok=True)
             cleanup_error = _remove_candidate(repo, candidate_dir) if candidate_created else None
@@ -616,6 +767,200 @@ def integrate(
                 result["candidate_ref"] = None
 
 
+def resolve_repo(args: argparse.Namespace, root: Path, root_given: bool, cwd: str) -> Path:
+    """`--repo`, else `--project` through workspace.yaml, else the project holding ``cwd``."""
+    if args.repo is not None:
+        if root_given:
+            raise Refused(
+                "ROOT_WITH_REPO",
+                "--root names the workspace that --project or the working directory resolves in; "
+                "--repo names the checkout itself, so give --root or --repo, not both",
+            )
+        return args.repo
+    try:
+        ws = hw.load_workspace(root, dict(os.environ))
+    except hw.Stop as exc:
+        raise Refused(exc.result.code, f"{exc.result.target}: {exc.result.detail}") from exc
+    registered = f"registered: {', '.join(sorted(ws.projects)) or 'none'}"
+    if args.project is not None:
+        project = ws.projects.get(args.project)
+        if project is None:
+            raise Refused("UNKNOWN_PROJECT", f"{args.project} is not in {root / 'workspace.yaml'}; {registered}")
+    else:
+        project = hw.infer_project(ws, cwd)
+        if project is None:
+            raise Refused(
+                "UNKNOWN_PROJECT",
+                f"no --repo or --project and the working directory {cwd} is in no registered project; "
+                f"{registered}; the workspace root takes --repo",
+            )
+    return Path(project.repo)
+
+
+def infer_branch(repo: Path, reviewed: str, main: str, main_tip: str) -> tuple[str | None, str]:
+    """The branch to integrate from the reviewed SHA, or the stop of `GIT_WORKFLOW.md` § Command results."""
+    if is_ancestor(repo, reviewed, main_tip):
+        if _recovery_ref_at(repo, main_tip):
+            # A crash after the update left the candidate on main; the slot's
+            # recovery decides whether it is this request's.
+            at = _local_branches(repo, main, "--points-at", reviewed)
+            return (at[0] if len(at) == 1 else None), "recovery"
+        raise stop("ALREADY_MERGED", f"the reviewed SHA {reviewed} is already reachable from {main}; nothing to integrate")
+    at = _local_branches(repo, main, "--points-at", reviewed)
+    if len(at) == 1:
+        return at[0], "inferred"
+    if at:
+        raise stop("BRANCH_AMBIGUOUS", f"{gp.REASONS['BRANCH_AMBIGUOUS']} {reviewed}: {', '.join(at)}")
+    containing = _local_branches(repo, main, "--contains", reviewed)
+    if containing:
+        raise stop(
+            "UNREVIEWED_COMMITS",
+            f"no local branch is at the reviewed SHA {reviewed}; these have commits after it: {', '.join(containing)}",
+        )
+    raise stop("NO_BRANCH_AT_REVIEWED", f"{gp.REASONS['NO_BRANCH_AT_REVIEWED']}: {reviewed}")
+
+
+def resolve_authority(given: str, reviewed: str) -> tuple[str, str]:
+    """The reference ending in ` @ <reviewed>`, and its record part (§ Authority reference)."""
+    record = given.strip()
+    match = AUTHORITY_ENDING.search(record)
+    if match:
+        if match[1].lower() != reviewed:
+            raise Refused(
+                "AUTHORITY_SHA_MISMATCH",
+                f"the authority reference ends with @ {match[1]}, but --reviewed is {reviewed}",
+            )
+        record = record[:match.start()].rstrip()
+    if not record:
+        raise Refused("AUTHORITY_REFERENCE_MISSING", "--authority-reference is required to record the integrate_main authority source")
+    return f"{record} @ {reviewed}", record
+
+
+def authority_record_warning(repo: Path, record: str, reviewed: str) -> str | None:
+    """A warning when the record part names a file the reviewed commit does not hold."""
+    words = record.split()
+    path = words[words.index("per") + 1] if "per" in words[:-1] else words[0]
+    if "/" not in path and not re.search(r"\.[A-Za-z0-9]+$", path):
+        return None
+    if git(repo, "cat-file", "-e", f"{reviewed}:{path}", check=False).returncode == 0:
+        return None
+    return f"the authority record {path} is not in the reviewed commit {reviewed}"
+
+
+def declared_verifier(repo: Path, main: str, main_tip: str) -> tuple[verification_section.Declaration, list[str] | None, str | None]:
+    """The main revision's declaration, its argv, and why that argv is unusable, if it is."""
+    shown = git(repo, "show", f"{main_tip}:AGENTS.md", check=False)
+    declared = verification_section.declaration(shown.stdout) if shown.returncode == 0 else None
+    where = f"AGENTS.md at {main} {main_tip}"
+    if declared is None:
+        raise stop("VERIFICATION_SECTION_MISSING", f"{where} has no '{verification_section.HEADING}' section")
+    if declared.argv_file is None:
+        raise stop("VERIFICATION_SECTION_MISSING", f"{where}: '{verification_section.HEADING}' has no 'Verifier argv file:' line")
+    argv_text = git(repo, "show", f"{main_tip}:{declared.argv_file}", check=False)
+    if argv_text.returncode:
+        return declared, None, f"{main} {main_tip} holds no {declared.argv_file}"
+    try:
+        return declared, parse_verify_command(argv_text.stdout.lstrip("﻿")), None
+    except Refused as exc:
+        return declared, None, f"{declared.argv_file} at {main}: {exc.detail}"
+
+
+def check_executable(argv0: str) -> None:
+    """The verifier's executable is on PATH; a path names a file of the candidate."""
+    if any(sep and sep in argv0 for sep in (os.sep, os.altsep, "/")):
+        return
+    if shutil.which(argv0) is None:
+        raise Refused("VERIFIER_NOT_FOUND", f"the verifier executable {argv0} is not on PATH")
+
+
+def tool_checkout_warning(checkout: Path = hw.ROOT) -> str | None:
+    """A warning when the checkout this code runs from is not a clean `main`."""
+    if git(checkout, "rev-parse", "--show-toplevel", check=False).returncode:
+        return None
+    branch = git(checkout, "branch", "--show-current", check=False).stdout.strip()
+    dirty = bool(git(checkout, "status", "--porcelain", "--untracked-files=no", check=False).stdout.strip())
+    if branch == "main" and not dirty:
+        return None
+    sha = git(checkout, "rev-parse", "HEAD", check=False).stdout.strip()
+    state = f"on {branch}" if branch else "on a detached HEAD"
+    return (
+        f"the atc tool checkout {checkout} is {state} at {sha}"
+        f"{' with uncommitted changes' if dirty else ''}; this run uses its code"
+    )
+
+
+def resolve(args: argparse.Namespace, root: Path, root_given: bool, cwd: str) -> Target:
+    reviewed = args.reviewed.strip().lower()
+    if not FULL_SHA.fullmatch(reviewed):
+        raise stop("REVIEWED_SHA_INVALID", f"--reviewed must be the full 40-character SHA: {args.reviewed}")
+    repo = resolve_repo(args, root, root_given, cwd)
+    check_checkout(repo)
+    main = args.main
+    main_tip = rev(repo, main)
+    if main_tip is None:
+        raise Refused("GIT", f"cannot resolve {main} in {repo}")
+    if rev(repo, reviewed) != reviewed:
+        raise stop("REVIEWED_SHA_UNKNOWN", f"{gp.REASONS['REVIEWED_SHA_UNKNOWN']}: {reviewed}")
+    warnings: list[str] = []
+    authority, record = resolve_authority(args.authority_reference, reviewed)
+    if warning := authority_record_warning(repo, record, reviewed):
+        warnings.append(warning)
+    if args.branch is not None:
+        branch, branch_source = args.branch, "--branch"
+    else:
+        branch, branch_source = infer_branch(repo, reviewed, main, main_tip)
+
+    declared, declared_argv, problem = declared_verifier(repo, main, main_tip)
+    explicit = None
+    if args.verify_command is not None:
+        explicit, argv_source = args.verify_command, "--verify-command"
+    elif args.verify_command_file is not None:
+        path = args.verify_command_file if args.verify_command_file.is_absolute() else repo / args.verify_command_file
+        try:
+            explicit = path.read_text(encoding="utf-8-sig")
+        except OSError as exc:
+            raise Refused("VERIFIER_ARGV_UNREADABLE", f"could not read --verify-command-file: {exc}") from exc
+        argv_source = f"--verify-command-file {path}"
+    if explicit is not None:
+        if not explicit.strip():
+            raise Refused(
+                "VERIFIER_ARGV_MISSING",
+                "a verifier argv (--verify-command or --verify-command-file) is required; "
+                "main cannot advance without candidate verification",
+            )
+        argv = parse_verify_command(explicit)
+        if argv != declared_argv:
+            warnings.append(
+                f"the verifier argv from {argv_source} differs from {declared.argv_file} that AGENTS.md declares at {main}: "
+                f"{json.dumps(declared_argv) if declared_argv else problem}"
+            )
+    elif declared_argv is None:
+        raise Refused("VERIFIER_ARGV_INVALID", f"AGENTS.md declares the verifier argv file {declared.argv_file}, but {problem}")
+    else:
+        argv, argv_source = declared_argv, f"AGENTS.md {declared.argv_file}"
+
+    declared_timeout = verification_section.DEFAULT_TIMEOUT if declared.timeout is None else declared.timeout
+    declared_from = "the default" if declared.timeout is None else f"AGENTS.md at {main}"
+    if args.verify_timeout is not None:
+        if args.verify_timeout <= 0:
+            raise Refused("VERIFY_TIMEOUT_INVALID", "--verify-timeout must be greater than zero")
+        timeout, timeout_source = args.verify_timeout, "--verify-timeout"
+        if timeout != declared_timeout:
+            warnings.append(f"--verify-timeout {timeout:g} differs from the {declared_timeout:g} seconds of {declared_from}")
+    else:
+        timeout, timeout_source = declared_timeout, "default" if declared.timeout is None else "AGENTS.md"
+        if timeout <= 0:
+            raise Refused("VERIFY_TIMEOUT_INVALID", f"AGENTS.md at {main} declares a verifier timeout that is not greater than zero")
+
+    check_executable(argv[0])
+    if warning := tool_checkout_warning():
+        warnings.append(warning)
+    return Target(
+        repo, main, main_tip, branch, branch_source, reviewed, authority,
+        argv, argv_source, timeout, timeout_source, warnings,
+    )
+
+
 def render_result(result: dict) -> str:
     line = f"{result['verdict']} main {result['main_before']} -> {result['main_after']}"
     if result.get("candidate_sha"):
@@ -627,53 +972,126 @@ def render_result(result: dict) -> str:
     return line
 
 
+class _Parser(argparse.ArgumentParser):
+    """Argument errors take the `ERROR <TOKEN> <detail>` form of § Command results."""
+
+    def error(self, message: str):
+        raise Refused("USAGE", message)
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--repo", type=Path, required=True, help="main checkout of the project repository")
-    parser.add_argument("--branch", required=True, help="reviewed topic branch")
+    parser = _Parser(description=__doc__.splitlines()[0])
+    target = parser.add_mutually_exclusive_group()
+    target.add_argument("--repo", type=Path, help="main checkout of the repository; the workspace root takes this form")
+    target.add_argument("--project", help="registered project name from workspace.yaml")
+    parser.add_argument("--branch", help="reviewed topic branch (default: the one local branch at --reviewed)")
     parser.add_argument("--reviewed", required=True, help="full 40-character SHA named by the review")
     parser.add_argument("--main", default="main", help="integration branch (default: main)")
-    parser.add_argument("--authority-reference", required=True, help="reference to the existing record granting integrate_main authority")
-    verifier = parser.add_mutually_exclusive_group(required=True)
-    verifier.add_argument("--verify-command", help="verification argv as a JSON string array, run in the candidate checkout")
+    parser.add_argument(
+        "--authority-reference", required=True,
+        help="record granting integrate_main authority; ' @ <reviewed>' is appended when absent",
+    )
+    verifier = parser.add_mutually_exclusive_group()
+    verifier.add_argument("--verify-command", help="verification argv as a JSON string array, in place of the declared one")
     verifier.add_argument(
         "--verify-command-file", type=Path,
-        help="file holding the verification argv as a JSON string array (shell-quoting safe)",
+        help="file holding the verification argv as a JSON string array; a relative path is under the repository",
     )
-    parser.add_argument("--verify-timeout", type=float, default=300.0, help="maximum verifier runtime in seconds (default: 300)")
+    parser.add_argument(
+        "--verify-timeout", type=float,
+        help="maximum verifier runtime in seconds (default: the AGENTS.md declaration, else 300)",
+    )
+    parser.add_argument("--check", action="store_true", help="resolve, preflight and warn; take no slot and create no candidate")
     parser.add_argument("--json", action="store_true", help="print the result as JSON")
     return parser
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+def _report_refusal(report: gp.Report) -> dict:
+    return {"verdict": report.verdict, "reason": report.reason, "detail": report.detail, "next": report.next}
+
+
+def _print_stop_report(report: gp.Report, payload: dict, as_json: bool) -> None:
+    lines = render(report).splitlines()
+    print("\n".join(lines[:2]), file=sys.stderr)
+    if as_json:
+        print(json.dumps({**payload, "preflight": asdict(report), "refusal": _report_refusal(report)}, indent=2))
+    else:
+        print("\n".join(lines[2:]))
+
+
+def _print_refusal(refusal: Refused, payload: dict, as_json: bool) -> None:
+    print("\n".join(refusal.lines()), file=sys.stderr)
+    if as_json:
+        print(json.dumps({**payload, "refusal": refusal.as_dict()}, indent=2))
+
+
+def check(t: Target, as_json: bool) -> int:
+    payload = {"command": "integrate", "check": True, "resolved": {**asdict(t), "repo": str(t.repo)}}
+    recovered = _recover_interrupted_update(t.repo, t.main, t.branch, t.reviewed, t.authority_reference, [], check=True)
+    if recovered is not None:
+        code, result = recovered
+        refusal = result.pop("refusal", None)
+        if refusal is not None:
+            _print_refusal(refusal, {**payload, **result}, as_json)
+        elif as_json:
+            print(json.dumps({**payload, **result}, indent=2))
+        else:
+            print(f"CHECK {result['verdict']} {result['reason']}: main {result['main_after']} is the candidate of this request")
+        return code
+    if t.branch is None:
+        _print_refusal(
+            stop("ALREADY_MERGED", f"the reviewed SHA {t.reviewed} is already reachable from {t.main}; nothing to integrate"),
+            payload, as_json,
+        )
+        return STOP_BEFORE_CANDIDATE
+    report = merge_preflight(t.repo, t.branch, t.reviewed, t.main)
+    if report.verdict == "STOP":
+        _print_stop_report(report, payload, as_json)
+        return STOP_BEFORE_CANDIDATE
+    if as_json:
+        print(json.dumps({**payload, "preflight": asdict(report)}, indent=2))
+    else:
+        print(f"CHECK {render(report)}")
+    return 0
+
+
+def main(argv: list[str] | None = None, root: Path = hw.ROOT, root_given: bool = False, cwd: str | None = None) -> int:
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="backslashreplace")
+    try:
+        args = build_parser().parse_args(argv)
+    except Refused as refusal:
+        print("\n".join(refusal.lines()), file=sys.stderr)
+        return refusal.code
+    payload = {"command": "integrate"}
     try:
         locations.enter()
-        if not FULL_SHA.fullmatch(args.reviewed):
-            raise Refused(f"--reviewed must be a full 40-character lowercase SHA: {args.reviewed}")
-        check_checkout(args.repo)
-        if args.verify_timeout <= 0:
-            raise Refused("--verify-timeout must be greater than zero")
-        verify_command = args.verify_command
-        if args.verify_command_file is not None:
-            try:
-                verify_command = args.verify_command_file.read_text(encoding="utf-8-sig")
-            except OSError as exc:
-                raise Refused(f"could not read --verify-command-file: {exc}") from exc
-        code, result = integrate(
-            args.repo, args.branch, args.reviewed, args.main, verify_command,
-            args.authority_reference, args.verify_timeout,
-        )
+        target = resolve(args, root, root_given, cwd or os.getcwd())
+        print(target.line(), file=sys.stderr)
+        for warning in target.warnings:
+            print(f"WARNING {warning}", file=sys.stderr)
+        if args.check:
+            return check(target, args.json)
+        code, result = integrate(target)
     except locations.Refusal as refusal:
         print(f"{refusal.token} {refusal.detail}", file=sys.stderr)
+        if args.json:
+            print(json.dumps({**payload, "refusal": {
+                "verdict": "REFUSAL", "reason": refusal.token, "detail": refusal.detail, "next": None,
+            }}, indent=2))
         return refusal.code
-    except (Refused, GitError, RuntimeError) as exc:
-        print(f"ERROR {exc}", file=sys.stderr)
-        return 2
+    except Refused as refusal:
+        _print_refusal(refusal, payload, args.json)
+        return refusal.code
+    except (GitError, RuntimeError) as exc:
+        _print_refusal(Refused("GIT" if isinstance(exc, GitError) else "RUNTIME", str(exc)), payload, args.json)
+        return ERROR
+    result["warnings"] = target.warnings
     report = result.pop("report", None)
-    error = result.pop("error", None)
+    refusal = result.pop("refusal", None)
     if not args.json:
-        for key in ("verification_warning", "candidate_cleanup_warning"):
+        for key in ("verification_warning", "candidate_cleanup_warning", "integration_record_warning"):
             if result.get(key):
                 print(f"WARNING {result[key]}", file=sys.stderr)
         for entry in result.get("recovered_candidates", []):
@@ -683,11 +1101,9 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
     if report is not None:
-        print(json.dumps({**result, "preflight": asdict(report)}, indent=2) if args.json else render(report))
-    elif error is not None:
-        print(f"ERROR {error}", file=sys.stderr)
-        if args.json:
-            print(json.dumps(result, indent=2))
+        _print_stop_report(report, result, args.json)
+    elif refusal is not None:
+        _print_refusal(refusal, result, args.json)
     else:
         print(json.dumps(result, indent=2) if args.json else render_result(result))
     return code

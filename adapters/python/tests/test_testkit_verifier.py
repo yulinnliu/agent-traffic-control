@@ -438,6 +438,10 @@ def integration_repo(tmp_path: Path, atc_tmp: Path, monkeypatch: pytest.MonkeyPa
     (root / ".gitignore").write_text("__pycache__/\n", encoding="utf-8")
     (root / ".gitattributes").write_text("* text=auto eol=lf\n", encoding="utf-8")
     (root / "pyproject.toml").write_text('[tool.pytest.ini_options]\npythonpath = ["src"]\n', encoding="utf-8")
+    (root / "verify.json").write_text(json.dumps([sys.executable, "verify.py"]), encoding="utf-8")
+    (root / "AGENTS.md").write_text(
+        "# AGENTS.md\n\n## Integration verification\n\n- Verifier argv file: verify.json\n", encoding="utf-8",
+    )
     git(root, "init", "-q", "-b", "main")
     git(root, "add", ".")
     git(root, "commit", "-q", "-m", "base")
@@ -475,7 +479,7 @@ def test_atc_integrate_reports_the_skeletons_refusal_token(integration_repo: Pat
     git(integration_repo, "switch", "-q", "main")
     (integration_repo / ".git/atc-test-tip").write_text(tip, encoding="utf-8")
     before = git(integration_repo, "rev-parse", "main")
-    assert integrate(integration_repo) == 1
+    assert integrate(integration_repo) == 3
     captured = capsys.readouterr()
     assert "TESTS_FAILED" in captured.out + captured.err
     assert git(integration_repo, "rev-parse", "main") == before
