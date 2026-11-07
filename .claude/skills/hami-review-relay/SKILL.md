@@ -216,8 +216,8 @@ branch, and the handoff check ran, or the stop is with the user.
 
 Once you confirm a topic integrated (the `main` position in step 1 of the next
 review), delete that topic's scratches right away with
-`atc tmp clean <dir>...`, or with `atc tmp clean --project <name>` when every
-scratch of that project is done. `atc tmp list` lists the candidates with
+`atc tmp clean <dir>...`, or with `atc tmp clean --tree-name <name>` when every
+scratch of that tree is done. `atc tmp list` lists the candidates with
 their project, tree and size. Each `<dir>` ends on `DELETED`, `SKIPPED` or
 `REFUSED`; a `REFUSED` leaves that scratch as it is for the user.
 
