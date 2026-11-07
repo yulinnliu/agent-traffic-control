@@ -82,7 +82,7 @@ authority.
 | `audit [--owner O] [--topic T]` | list a project's worktrees with lock, clean and merged state | nothing; read-only |
 | `cleanup --owner O --topic T` | the task is integrated and the worktree is no longer needed | re-checks identity, merged and clean, then removes the worktree and deletes its branch |
 | `cleanup --owner O --topic T --abandon --archive-tag archive/NAME --expected-head FULL_SHA` | task authority explicitly abandons this exact topic tip | requires a clean tree and a local archive tag at the exact tip; removes the worktree and compare-and-deletes its branch while retaining the tag |
-| `cleanup --owner O --topic T --squash-integrated --expected-head FULL_SHA --reviewed-sha FULL_SHA --expected-main FULL_SHA --integrated-as FULL_SHA --retained-ref refs/tags/NAME` | the topic was integrated by an authorized same-tree squash and cleanup is authorized | requires a clean tree, a single-parent squash commit on the recorded main tip with the topic tip's tree, reachable from current `main`, and an existing retained ref that reaches the tip; removes the worktree and compare-and-deletes its branch while retaining the ref |
+| `cleanup --owner O --topic T --squash-integrated --expected-head FULL_SHA --reviewed FULL_SHA --expected-main FULL_SHA --integrated-as FULL_SHA --retained-ref refs/tags/NAME` | the topic was integrated by an authorized same-tree squash and cleanup is authorized | requires a clean tree, a single-parent squash commit on the recorded main tip with the topic tip's tree, reachable from current `main`, and an existing retained ref that reaches the tip; removes the worktree and compare-and-deletes its branch while retaining the ref |
 
 ## Results
 
@@ -140,7 +140,7 @@ missing lock and `PATH_UNSAFE` are findings.
   clean tree whose commits are retained by `main` or the bound archive tag; the CLI restores the lock
   and reports the lock state it actually observed.
 - Squash cleanup (`--squash-integrated`) takes `--expected-head`,
-  `--reviewed-sha`, `--expected-main`, `--integrated-as` and `--retained-ref`
+  `--reviewed`, `--expected-main`, `--integrated-as` and `--retained-ref`
   together and never with `--abandon` or `--archive-tag`. The CLI verifies Git
   facts only: the topic tip equals the reviewed SHA, the squash commit has
   exactly one parent equal to the recorded main tip, its tree equals the tip's
