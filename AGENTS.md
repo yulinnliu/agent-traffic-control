@@ -32,7 +32,7 @@ Then read `shared/governance/INDEX.md` and `CORE.md` from that exact same revisi
 `GIT_WORKFLOW.md` § Integration verifier source).
 
 - Verifier argv file: adapters/python/scripts/integration-verify.json
-- Verifier timeout: 1140
+- Verifier timeout: 1740
   (`adapters/python/README.md` states how this value is derived)
 
 The argv runs `adapters/python/scripts/integration_verify.py` in the
@@ -56,6 +56,14 @@ itself: when every path in the range is Markdown under `docs/`, the range is
 documentation-only and skips `pytest` alone. Markdown anywhere else is
 rendered into managed copies or read by the tests, so it runs the suite. The
 caller never chooses the exception.
+
+The installed `atc` is an editable install of `adapters/python`: it reads the
+checkout's code and holds the dependencies of the moment it was installed. An
+integrated range that changes the dependencies in
+`adapters/python/pyproject.toml` is followed, on each host with an installed
+`atc`, by `uv tool install -e "<checkout>/adapters/python" --force`. Until
+then a command that imports a new dependency stops with
+`ModuleNotFoundError`, and `uv run --locked atc` from `adapters/python` works.
 
 ## This host
 

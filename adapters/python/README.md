@@ -7,7 +7,8 @@ by this code. Python 3.12 or newer, provisioned by `uv` from the
 
 One command fronts the scripts: `uv run atc <command>` here, or
 `uv tool install -e .` once per machine to have `atc` on PATH, which is how
-the skills call it. `atc` resolves the checkout from `--root`, `ATC_ROOT`,
+the skills call it; the root `AGENTS.md` states when it is installed again.
+`atc` resolves the checkout from `--root`, `ATC_ROOT`,
 the nearest `workspace.yaml` above the working directory, or its own install
 location, in that order.
 
