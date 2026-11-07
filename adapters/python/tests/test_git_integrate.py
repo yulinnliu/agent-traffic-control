@@ -45,7 +45,16 @@ def repo(tmp_path: Path, atc_tmp: Path, monkeypatch: pytest.MonkeyPatch) -> Path
     run_git(root, "init", "-q", "-b", "main")
     commit(root, "a.txt", "a\n")
     commit(root, "b.txt", "b\n")
+    declare_verifier(root, verify_command())
     return root
+
+
+def declare_verifier(repo: Path, argv: str, timeout: str | None = None) -> str:
+    """Commit the verification section and argv file `atc integrate` reads from main."""
+    (repo / "verify.json").write_text(argv, encoding="utf-8")
+    run_git(repo, "add", "--", "verify.json")
+    lines = "- Verifier argv file: verify.json\n" + (f"- Verifier timeout: {timeout}\n" if timeout else "")
+    return commit(repo, "AGENTS.md", f"# AGENTS.md\n\n## Integration verification\n\n{lines}\n## Other\n")
 
 
 def topic(repo: Path, edits: dict[str, str], branch: str = "topic") -> str:
@@ -68,6 +77,13 @@ def verify_command() -> str:
         "assert not subprocess.check_output(['git','status','--porcelain'],text=True).strip()"
     )
     return json.dumps([sys.executable, "-c", script])
+
+
+def refusal(err: str) -> tuple[str, str]:
+    """The refusal line of stderr and the line after it."""
+    lines = err.splitlines()
+    at = next(i for i, line in enumerate(lines) if line.startswith(("STOP ", "ERROR ")))
+    return lines[at], (lines[at + 1] if at + 1 < len(lines) else "")
 
 
 def integrate(repo: Path, branch: str, reviewed: str, *extra: str) -> int:
@@ -183,18 +199,29 @@ def test_preflight_stop_leaves_main_unchanged(repo: Path, capsys: pytest.Capture
     head = run_git(repo, "rev-parse", "HEAD")
     status = run_git(repo, "status", "--porcelain")
     assert integrate(repo, "topic", reviewed) == 1
-    assert capsys.readouterr().out.startswith(f"STOP {reason}")
+    first, after = refusal(capsys.readouterr().err)
+    assert first.startswith(f"STOP {reason}: ")
+    assert after.startswith("next: ")
     assert (main_tip(repo), run_git(repo, "rev-parse", "HEAD"), run_git(repo, "status", "--porcelain")) == (before, head, status)
     assert not (repo / ".git" / "MERGE_HEAD").exists()
 
 
-@pytest.mark.parametrize("cut", [lambda sha: sha[:12], lambda sha: sha.upper()])
-def test_reviewed_must_be_full_lowercase_sha(repo: Path, capsys: pytest.CaptureFixture[str], cut) -> None:
+@pytest.mark.integration
+def test_a_short_reviewed_sha_stops(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     tip = topic(repo, {"a.txt": "a2\n"})
     before = main_tip(repo)
-    assert integrate(repo, "topic", cut(tip)) == 2
-    assert "full 40-character lowercase SHA" in capsys.readouterr().err
+    assert integrate(repo, "topic", tip[:12]) == 1
+    first, after = refusal(capsys.readouterr().err)
+    assert first.startswith("STOP REVIEWED_SHA_INVALID: --reviewed must be the full 40-character SHA")
+    assert after == "next: run again with the full SHA the formal review named"
     assert main_tip(repo) == before
+
+
+@pytest.mark.integration
+def test_an_uppercase_reviewed_sha_is_lowered(repo: Path) -> None:
+    tip = topic(repo, {"a.txt": "a2\n"})
+    assert integrate(repo, "topic", tip.upper()) == 0
+    assert main_tip(repo) == tip
 
 
 def test_linked_worktree_is_refused(repo: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -326,7 +353,7 @@ def test_verifier_timeout_is_reported_and_main_stays_unchanged(
     tip = topic(repo, {"a.txt": "a2\n"})
     before = main_tip(repo)
     slow = json.dumps([sys.executable, "-c", "import time; time.sleep(2)"])
-    assert integrate(repo, "topic", tip, "--verify-command", slow, "--verify-timeout", "0.05") == 1
+    assert integrate(repo, "topic", tip, "--verify-command", slow, "--verify-timeout", "0.05") == 3
     assert "candidate verification timed out" in capsys.readouterr().err
     assert main_tip(repo) == before
 
@@ -337,11 +364,12 @@ def test_missing_verifier_is_reported_without_traceback(
     tip = topic(repo, {"a.txt": "a2\n"})
     before = main_tip(repo)
     missing = json.dumps(["atc-verifier-command-that-does-not-exist"])
-    assert integrate(repo, "topic", tip, "--verify-command", missing) == 1
+    assert integrate(repo, "topic", tip, "--verify-command", missing) == 2
     error = capsys.readouterr().err
-    assert "could not start candidate verifier" in error
+    assert refusal(error)[0] == "ERROR VERIFIER_NOT_FOUND the verifier executable atc-verifier-command-that-does-not-exist is not on PATH"
     assert "Traceback" not in error
     assert main_tip(repo) == before
+    assert run_git(repo, "worktree", "list").count("\n") == 0
 
 
 def pid_alive(pid: int) -> bool:
@@ -401,7 +429,7 @@ def test_verifier_timeout_kills_descendant_processes(
     pid_file = tmp_path / "sleeper.pid"
     verifier = descendant_verifier(pid_file, reparent=reparent, wrapper_exits=False)
     started = time.monotonic()
-    assert integrate(repo, "topic", tip, "--verify-command", verifier, "--verify-timeout", "1") == 1
+    assert integrate(repo, "topic", tip, "--verify-command", verifier, "--verify-timeout", "1") == 3
     elapsed = time.monotonic() - started
     assert "candidate verification timed out" in capsys.readouterr().err
     assert elapsed < 20, f"timeout was not enforced while a descendant held the verifier open ({elapsed:.1f}s)"
@@ -431,9 +459,9 @@ SEEN_BY_THE_VERIFIER = (
 def verifier_view(repo: Path, capsys: pytest.CaptureFixture[str]) -> dict:
     """What a verifier that prints its locations and refuses saw of an integration of a new topic."""
     tip = topic(repo, {"a.txt": "a2\n"})
-    assert integrate_with(repo, "topic", tip, json.dumps([sys.executable, "-c", SEEN_BY_THE_VERIFIER])) == 1
+    assert integrate_with(repo, "topic", tip, json.dumps([sys.executable, "-c", SEEN_BY_THE_VERIFIER])) == 3
     err = capsys.readouterr().err
-    return json.loads(err[err.index("{"):err.index("}") + 1])
+    return json.loads(next(line.strip() for line in err.splitlines() if line.strip().startswith('{"cwd"')))
 
 
 @pytest.mark.integration
@@ -503,7 +531,7 @@ def test_an_unsuitable_root_exits_nine_before_anything_is_created(
     monkeypatch.setenv("ATC_TMP", value)
     before = sorted(atc_tmp.iterdir())
     assert integrate(repo, "topic", tip) == 9
-    assert capsys.readouterr().err.startswith(locations.UNSUITABLE)
+    assert capsys.readouterr().err.splitlines()[-1].startswith(locations.UNSUITABLE)
     assert sorted(atc_tmp.iterdir()) == before and main_tip(repo) != tip
 
 
@@ -520,7 +548,7 @@ def test_a_candidates_directory_that_cannot_be_created_exits_nine(
         mkdir(self, *args, **kwargs)
     monkeypatch.setattr(Path, "mkdir", refusing)
     assert integrate(repo, "topic", tip) == 9
-    assert capsys.readouterr().err.startswith(locations.UNSUITABLE + " cannot be created")
+    assert capsys.readouterr().err.splitlines()[-1].startswith(locations.UNSUITABLE + " cannot be created")
 
 
 @pytest.mark.integration
@@ -535,7 +563,7 @@ def test_a_linked_candidates_directory_exits_nine(
     else:
         (atc_tmp / "candidates").symlink_to(target, target_is_directory=True)
     assert integrate(repo, "topic", tip) == 9
-    assert capsys.readouterr().err.startswith(locations.UNSUITABLE) and list(target.iterdir()) == []
+    assert capsys.readouterr().err.splitlines()[-1].startswith(locations.UNSUITABLE) and list(target.iterdir()) == []
 
 
 def test_text_mode_warns_when_candidate_worktree_is_retained(
@@ -633,13 +661,14 @@ def test_malformed_verify_command_is_refused_before_any_candidate_work(
     assert run_git(repo, "worktree", "list").count("\n") == 0
 
 
-def test_verify_command_sources_are_exclusive_and_required(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+@pytest.mark.integration
+def test_verify_command_sources_are_exclusive_and_default_to_the_declaration(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     tip = topic(repo, {"a.txt": "a2\n"})
     base = ["--repo", str(repo), "--branch", "topic", "--reviewed", tip, "--authority-reference", "x"]
     with pytest.raises(SystemExit, match="2"):
-        gi.main(base)
-    with pytest.raises(SystemExit, match="2"):
         gi.main([*base, "--verify-command", verify_command(), "--verify-command-file", "v.json"])
+    assert gi.main(base) == 0
+    assert main_tip(repo) == tip
 
 
 def test_other_request_keeps_recovery_ref_while_checkout_needs_reconciliation(
@@ -656,14 +685,14 @@ def test_other_request_keeps_recovery_ref_while_checkout_needs_reconciliation(
         return result
 
     monkeypatch.setattr(gi, "git", dirty_after_ff)
-    assert integrate(repo, "topic-one", first_tip, "--json") == 1
+    assert integrate(repo, "topic-one", first_tip, "--json") == 3
     monkeypatch.setattr(gi, "git", real_git)
     recovery_ref = json.loads(capsys.readouterr().out)["candidate_ref"]
     assert run_git(repo, "for-each-ref", "--format=%(refname)", "refs/atc/integration-candidates") == recovery_ref
 
     assert integrate(repo, "topic-two", second_tip) == 1
     captured = capsys.readouterr()
-    assert "CHECKOUT_DIRTY" in captured.out
+    assert refusal(captured.err)[0].startswith("STOP CHECKOUT_DIRTY: ")
     assert "main_retains_commit_ref_retained_checkout_inconsistent" in captured.err
     assert run_git(repo, "for-each-ref", "--format=%(refname)", "refs/atc/integration-candidates") == recovery_ref
     assert main_tip(repo) == first_tip
@@ -673,7 +702,7 @@ def test_candidate_verification_failure_leaves_main_unchanged(repo: Path, capsys
     tip = topic(repo, {"a.txt": "a2\n"})
     before = main_tip(repo)
     fail_command = json.dumps([sys.executable, "-c", "import sys; print('verifier diagnostic: 3 failed', file=sys.stderr); raise SystemExit(9)"])
-    assert integrate(repo, "topic", tip, "--verify-command", fail_command) == 1
+    assert integrate(repo, "topic", tip, "--verify-command", fail_command) == 3
     error = capsys.readouterr().err
     assert "candidate verification failed" in error
     assert "(exit 9): verifier diagnostic: 3 failed" in error
@@ -698,9 +727,10 @@ def test_post_integration_checkout_change_keeps_recovery_ref(
         return result
 
     monkeypatch.setattr(gi, "git", dirty_after_ff)
-    assert integrate(repo, "topic", tip, "--json") == 1
+    assert integrate(repo, "topic", tip, "--json") == 3
     data = json.loads(capsys.readouterr().out)
     assert data["recovery_required"] is True
+    assert data["refusal"]["reason"] == "RECOVERY_REQUIRED"
     assert data["main_after"] == tip
     assert data["candidate_ref"] == f"refs/atc/integration-candidates/{tip}"
     assert run_git(repo, "for-each-ref", "--format=%(refname)", "refs/atc/integration-candidates") == data["candidate_ref"]
@@ -720,7 +750,7 @@ def test_no_ff_parents_mismatch_fails_verification(repo: Path, monkeypatch: pyte
         return real(repo_arg, *args, **kwargs)
 
     monkeypatch.setattr(gi, "git", advance_before_merge)
-    assert integrate(repo, "topic", tip) == 1
+    assert integrate(repo, "topic", tip) == 3
     assert "main drifted after candidate verification" in capsys.readouterr().err
     assert main_tip(repo) == moved[0]
     assert run_git(repo, "status", "--porcelain") == ""
@@ -737,21 +767,23 @@ def test_failed_merge_is_aborted(repo: Path, monkeypatch: pytest.MonkeyPatch, ca
         return report
 
     monkeypatch.setattr(gi, "merge_preflight", claims_compatible)
-    assert integrate(repo, "topic", tip) == 1
-    assert "candidate merge failed" in capsys.readouterr().err
+    assert integrate(repo, "topic", tip) == 2
+    assert "ERROR CANDIDATE_MERGE_FAILED candidate merge failed" in capsys.readouterr().err
     assert main_tip(repo) == before
     assert run_git(repo, "status", "--porcelain") == ""
 
 
 def test_json_fields(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    keys = {"command", "authority_reference", "verdict", "reason", "main_before", "main_after", "reviewed", "source_before", "candidate_sha", "first_parent", "second_parent", "message", "verification", "verification_seconds", "evidence", "evidence_reason", "candidate_ref"}
+    keys = {"command", "authority_reference", "verdict", "reason", "main_before", "main_after", "reviewed", "source_before", "candidate_sha", "first_parent", "second_parent", "message", "verification", "verification_seconds", "evidence", "evidence_reason", "candidate_ref", "integration_record", "warnings"}
     before = main_tip(repo)
     tip = topic(repo, {"a.txt": "a2\n"}, branch="first")
     assert integrate(repo, "first", tip, "--json") == 0
     data = json.loads(capsys.readouterr().out)
     assert data.pop("verification_seconds") >= 0
+    assert Path(data.pop("integration_record")) == repo / ".git" / "atc" / "integrations.jsonl"
+    assert [w for w in data.pop("warnings") if "atc tool checkout" not in w] == []
     assert data == {
-        "command": "integrate", "authority_reference": "test-owner-authorization", "verdict": "FF", "reason": "FAST_FORWARD", "main_before": before,
+        "command": "integrate", "authority_reference": f"test-owner-authorization @ {tip}", "verdict": "FF", "reason": "FAST_FORWARD", "main_before": before,
         "main_after": tip, "reviewed": tip, "source_before": tip, "candidate_sha": tip,
         "first_parent": None, "second_parent": None, "message": None, "verification": "PASS",
         "evidence": None, "evidence_reason": "NO_REPORT", "candidate_ref": None,
@@ -839,7 +871,7 @@ def test_valid_report_writes_evidence_record(repo: Path, capsys: pytest.CaptureF
         "schema": "atc-verification-evidence/1", "candidate_sha": tip,
         "tree": run_git(repo, "rev-parse", f"{tip}^{{tree}}"), "clean": True,
         "expected_main": before, "reviewed": tip, "verdict": "FF",
-        "authority_reference": "test-owner-authorization", "verify_argv": json.loads(command),
+        "authority_reference": f"test-owner-authorization @ {tip}", "verify_argv": json.loads(command),
         "platform": {"system": sys.platform, "machine": platform.machine()},
         "report": REPORT,
     }
@@ -902,7 +934,7 @@ def test_invalid_report_integrates_and_writes_no_record(
 def test_failed_verification_writes_no_record(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     before = main_tip(repo)
     tip = topic(repo, {"a.txt": "a2\n"})
-    assert integrate_with(repo, "topic", tip, report_command(json.dumps(REPORT), fail=True), "--json") == 1
+    assert integrate_with(repo, "topic", tip, report_command(json.dumps(REPORT), fail=True), "--json") == 3
     data = json.loads(capsys.readouterr().out)
     assert (data["verification"], data["evidence"], data["evidence_reason"]) == ("NOT_RUN", None, None)
     assert main_tip(repo) == before

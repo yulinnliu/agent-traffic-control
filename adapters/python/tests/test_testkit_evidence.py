@@ -76,6 +76,7 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     commit(root, "uv.lock", "lock 1\n")
     commit(root, ".python-version", "3.13\n")
     commit(root, ARGV_FILE, json.dumps(verifier_argv()))
+    commit(root, "AGENTS.md", f"# AGENTS.md\n\n## Integration verification\n\n- Verifier argv file: {ARGV_FILE}\n")
     return root
 
 
