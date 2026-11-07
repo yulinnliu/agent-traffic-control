@@ -37,7 +37,7 @@ import sys
 from pathlib import Path
 
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"
-CHECKOUT = SCRIPTS.parents[1]
+CHECKOUT = SCRIPTS.parents[2]
 COMMANDS = {
     "worktree": "hami_worktree",
     "preflight": "git_preflight",

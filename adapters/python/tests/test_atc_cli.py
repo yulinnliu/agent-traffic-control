@@ -95,3 +95,8 @@ def test_a_missing_dependency_names_the_reinstall_command(monkeypatch: pytest.Mo
     expected = f'uv tool install -e "{Path(atc_cli.__file__).resolve().parents[2]}" --force'
     assert err.startswith("ERROR MISSING_DEPENDENCY atc classify needs the module 'atc_missing_dependency_probe'")
     assert expected in err and "Traceback" not in err
+
+
+def test_without_a_named_root_outside_any_workspace_the_root_is_this_checkout(tmp_path: Path) -> None:
+    root = atc_cli.resolve_root(None, {}, tmp_path)
+    assert (root / "adapters" / "python" / "src" / "atc_cli").is_dir() and (root / "shared" / "governance").is_dir()
