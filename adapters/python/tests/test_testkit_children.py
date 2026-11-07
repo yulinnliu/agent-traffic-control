@@ -304,3 +304,34 @@ def test_survivors_recognise_the_short_path_form(atc_tmp: Path) -> None:
     long_name.mkdir()
     short = children._short_path(long_name)
     assert children.survivors(long_name, [host(999002, 1, f"python {short}\\x")]) or short == str(long_name)
+
+
+@pytest.mark.unit
+def test_a_survivor_that_finishes_within_the_wait_is_not_reported(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    listings = [[host(999002, 1, f"python {tmp_path}/x")]] * 3 + [[]]
+    monkeypatch.setattr(children, "list_processes", lambda: listings.pop(0) if len(listings) > 1 else listings[0])
+    assert children.lasting_survivors(tmp_path, seconds=10.0) == []
+    assert listings == [[]]
+
+
+@pytest.mark.unit
+def test_a_survivor_still_listed_after_the_wait_is_reported(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    lasting = host(999002, 1, f"python {tmp_path}/x")
+    monkeypatch.setattr(children, "list_processes", lambda: [lasting])
+    started = time.monotonic()
+    assert children.lasting_survivors(tmp_path, seconds=0.2) == [lasting]
+    assert time.monotonic() - started >= 0.2
+
+
+@windows
+@pytest.mark.unit
+def test_a_tree_ended_outside_the_hold_leaves_no_lasting_survivor(tmp_path: Path) -> None:
+    pid_file = tmp_path / "pid"
+    process = children.start([sys.executable, "-c", GRANDCHILD, str(pid_file)])
+    wait_for_text(pid_file)
+    tree = next(entry[1] for entry in children._started if entry[0] is process)
+    try:
+        tree.terminate()
+        assert children.lasting_survivors(tmp_path) == []
+    finally:
+        children.reap()

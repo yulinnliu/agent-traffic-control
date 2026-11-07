@@ -88,8 +88,8 @@ if os.name == "nt":
                 raise OSError("CHILD_JOB_TERMINATE_FAILED")
 
         def members(self) -> list[int]:
-            """The process IDs the Job lists; a Job drops a process from this list before its teardown ends, and counts it
-            as assigned until then, so a list with room for every assigned process is complete."""
+            """The process IDs the Job lists. A process in teardown leaves this list before it leaves the assigned count,
+            so a list with room for every assigned process is complete; it leaves both before it has finished."""
             room = _MEMBER_ROOM
             while True:
                 value = _process_id_list(room)
@@ -336,3 +336,17 @@ def survivors(root: Path, processes: list[HostProcess] | None = None) -> list[Ho
         pid = parents.get(pid, 0)
     return [process for process in processes
             if process.pid not in excluded and pattern.search(process.command.replace("/", "\\").lower())]
+
+
+def lasting_survivors(root: Path, seconds: float = REAP_SECONDS) -> list[HostProcess]:
+    """The ``survivors`` of ``root`` still listed after up to ``seconds``.
+
+    A process ended outside the Job's hold, such as by a test's own ``terminate`` cascading through a kill-on-close
+    Job, stays listed for the rest of its teardown after its Job no longer counts it.
+    """
+    deadline = time.monotonic() + seconds
+    while True:
+        found = survivors(root)
+        if not found or time.monotonic() >= deadline:
+            return found
+        time.sleep(0.05)

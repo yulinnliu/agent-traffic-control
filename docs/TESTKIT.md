@@ -213,7 +213,10 @@ A test starts a child process through the testkit's `start` or `run`.
 - At the end of a session the controlling process lists every live process
   whose command line names that session's pytest base directory, excluding
   itself and its ancestors, and fails the run with `CHILD_PROCESSES_ALIVE`
-  when one exists. Sessions with different base directories never fail one
+  when one is still listed after up to 10 seconds. A process that a test ended
+  itself, for example through a kill-on-close Job of its own, leaves the
+  testkit's Job before its teardown finishes, and that wait covers the rest of
+  it. Sessions with different base directories never fail one
   another; two runs given the same scratch at the same time share one and are
   not supported.
 - The testkit reads the process list and command lines itself, through the

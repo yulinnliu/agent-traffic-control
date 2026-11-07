@@ -58,7 +58,7 @@ def pytest_sessionfinish(session, exitstatus):
     if hasattr(config, "workerinput") or base is None:
         return
     try:
-        alive = [f"{process.pid} {process.command}" for process in children.survivors(base)]
+        alive = [f"{process.pid} {process.command}" for process in children.lasting_survivors(base)]
     except Exception as error:  # noqa: BLE001 - an unknown process list fails the run
         alive = [f"process inventory failed: {error!r}"]
     if alive:
