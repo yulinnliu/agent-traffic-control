@@ -181,6 +181,17 @@ def test_a_short_form_root_reaches_the_children_as_its_long_name(check: Check, a
     assert (env["ATC_TMP"], env["TEMP"]) == (str(atc_tmp), str(atc_tmp / "systmp"))
 
 
+def test_a_root_below_a_link_reaches_the_children_with_the_link_resolved(check: Check, atc_tmp: Path) -> None:
+    if len(str(atc_tmp)) + len("\\j\\x") > locations.TMP_NAME_BOUND:
+        pytest.skip(f"{atc_tmp} leaves no room below the bound")
+    make_junction(atc_tmp / "j", atc_tmp / "e")
+    (atc_tmp / "e" / "x").mkdir()
+    root = atc_tmp / "j" / "x"
+    run = check.run(ATC_TMP=str(root))
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert check.calls()[0]["env"]["ATC_TMP"] == str(atc_tmp / "e" / "x") == str(locations.locate({**os.environ, "ATC_TMP": str(root)}).tmp)
+
+
 def test_a_root_at_the_bound_is_accepted_and_the_values_carry_its_long_name(check: Check, atc_tmp: Path) -> None:
     room = locations.TMP_NAME_BOUND - len(str(atc_tmp)) - 1
     if room < 1:
