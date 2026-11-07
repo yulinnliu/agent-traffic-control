@@ -499,6 +499,8 @@ The first stderr line of a refusal takes one of these forms:
 | --- | --- |
 | No reviewed SHA, or one that is invalid or names no commit | Run again with the full SHA the formal review named |
 | Topic already merged into `main` | Nothing to integrate; continue with `Cleanup trigger` |
+| Several local branches at the reviewed SHA | Run again with `--branch` naming the reviewed topic branch among those listed |
+| No local branch at the reviewed SHA, and none containing it | Restore the reviewed topic branch at the reviewed SHA, or run again with the full SHA the formal review named |
 | Integration checkout not on `main` | Check out `main` in the integration checkout, then run again |
 | Integration checkout has uncommitted changes | Have the owner of the listed paths commit or remove them, then run again |
 | Missing `## Integration verification` section | Obtain the section from the owner, add it under `Project verification section`, then run again |
