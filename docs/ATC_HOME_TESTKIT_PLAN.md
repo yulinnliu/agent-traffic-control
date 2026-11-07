@@ -100,9 +100,7 @@ Files:
 - `adapters/python/scripts/build_testkit_release.py`: the new names.
 - `adapters/python/scripts/testkit_contract.py`, `doctor.py`,
   `onboard_project.py`, and `validate_workspace.py` through
-  `testkit_contract`: they read `vendor/atc-testkit.json` and
-  `vendor/hami-testkit.json`, so a project that still carries the old record
-  keeps its contract check until its step 4 or 5. Step 6 drops the old name.
+  `testkit_contract`: they read only `vendor/atc-testkit.json`.
 - `adapters/python/scripts/integration_verify.py`: its import of the
   package's `git` module follows the rename; the script stays the root's own
   until step 3.
