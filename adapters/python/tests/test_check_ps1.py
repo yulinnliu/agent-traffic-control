@@ -103,7 +103,8 @@ def test_the_default_root_lies_in_the_home_directory(check: Check, monkeypatch: 
     del check.env["ATC_TMP"]
     run = check.run()
     assert run.returncode == 0, run.stdout + run.stderr
-    assert check.calls()[0]["env"]["TEMP"] == os.path.realpath(default / "systmp")
+    env = check.calls()[0]["env"]
+    assert (env["ATC_TMP"], env["TEMP"]) == (os.path.realpath(default), os.path.realpath(default / "systmp"))
 
 
 def test_a_default_root_past_the_bound_is_refused(check: Check, atc_tmp: Path) -> None:
@@ -143,13 +144,16 @@ def unsuitable_root(kind: str, base: Path) -> str:
     raise AssertionError(kind)
 
 
-@pytest.mark.parametrize("kind", ["relative", "file", "link", "app data", "git", "too long", "systmp file", "candidates link"])
-def test_an_unsuitable_root_exits_nine_as_the_package_refuses_it(check: Check, atc_tmp: Path, kind: str) -> None:
+@pytest.mark.parametrize(("kind", "reason"), [
+    ("relative", "is not absolute"), ("file", "is not a directory"), ("link", "is a link"),
+    ("app data", "lies inside AppData"), ("git", "holds .git"), ("too long", "limit 40"),
+    ("systmp file", "is not a directory"), ("candidates link", "is a link")])
+def test_an_unsuitable_root_exits_nine_as_the_package_refuses_it(check: Check, atc_tmp: Path, kind: str, reason: str) -> None:
     root = unsuitable_root(kind, atc_tmp)
     before = sorted(path.name for path in atc_tmp.iterdir())
     run = check.run(ATC_TMP=root)
     assert run.returncode == 9, run.stdout + run.stderr
-    assert run.stderr.startswith(locations.UNSUITABLE + " ")
+    assert run.stderr.startswith(locations.UNSUITABLE + " ") and reason in run.stderr
     assert check.calls() == [] and sorted(path.name for path in atc_tmp.iterdir()) == before
     with pytest.raises(locations.Refusal):
         locations.locate({**os.environ, "ATC_TMP": root})
@@ -164,6 +168,17 @@ def test_the_bound_applies_to_the_long_name_of_a_short_form(check: Check, atc_tm
         pytest.skip("this volume keeps no 8.3 names")
     run = check.run(ATC_TMP=short)
     assert run.returncode == 9 and "limit 40" in run.stderr
+
+
+@pytest.mark.skipif(os.name != "nt", reason="8.3 names")
+def test_a_short_form_root_reaches_the_children_as_its_long_name(check: Check, atc_tmp: Path) -> None:
+    short = children._short_path(atc_tmp)
+    if short == str(atc_tmp):
+        pytest.skip("this path has no 8.3 form")
+    run = check.run(ATC_TMP=short)
+    assert run.returncode == 0, run.stdout + run.stderr
+    env = check.calls()[0]["env"]
+    assert (env["ATC_TMP"], env["TEMP"]) == (str(atc_tmp), str(atc_tmp / "systmp"))
 
 
 def test_a_root_at_the_bound_is_accepted_and_the_values_carry_its_long_name(check: Check, atc_tmp: Path) -> None:
