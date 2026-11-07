@@ -88,7 +88,10 @@ def test_xdist_is_turned_off_when_installed_and_the_cache_provider_always(tree: 
 
 
 def test_a_relative_tree_and_python_resolve_against_the_caller(tree: Path, atc_tmp: Path) -> None:
-    run = run_command("test", "run", "tree", "s", os.path.relpath(sys.executable, tree.parent), "l", "tests", cwd=tree.parent)
+    run = run_command("test", "run", "tree", "s", sys.executable, "l", "tests", cwd=tree.parent)
+    assert run.returncode == 0, run.stdout + run.stderr
+    python = Path(sys.executable)
+    run = run_command("test", "run", str(tree), "s", os.path.join(os.curdir, python.name), "l", "tests", cwd=python.parent)
     assert run.returncode == 0, run.stdout + run.stderr
 
 
