@@ -15,7 +15,7 @@ import time
 import tomllib
 from typing import NamedTuple
 
-from . import isolation, locations
+from . import isolation, locations, stages
 from .git import git_env
 from .locations import CANDIDATES, Refusal, SYSTMP, is_link as _is_link
 
@@ -221,12 +221,12 @@ def scratch_links(directory: str) -> Callable[[str], bool]:
 
 
 def working_directory_links(work: str | os.PathLike[str]) -> Callable[[str], bool]:
-    """The links a run's working directory may hold: any inside a stage's base directory."""
+    """The links a run's working directory may hold: any inside the base directory of a stage or the test command."""
     prefix = os.path.normcase(os.fspath(work)) + os.sep
 
     def expected(link: str) -> bool:
         parts = os.path.normcase(link).removeprefix(prefix).split(os.sep)
-        return len(parts) > 2 and parts[1] == "bt"
+        return len(parts) > 2 and parts[1] == "bt" and parts[0] in stages.BASE_DIRECTORY_STAGES
     return expected
 
 

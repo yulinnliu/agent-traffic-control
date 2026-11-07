@@ -164,8 +164,9 @@ expected, except a working directory of the verifier or of the gate.
 - Under `<tmp>/systmp` it takes every entry other than `pytest-of-*`. This
   includes the working directory a failed verifier or gate run left for
   inspection, named `w` and six lowercase hexadecimal digits. Links inside a
-  stage's base directory, `<work>/<stage>/bt`, are the run's own: they are
-  expected, removed as links and never entered.
+  base directory, `<work>/<stage>/bt`, are the run's own: they are expected,
+  removed as links and never entered. `<stage>` is a stage of `TESTKIT.md`
+  § Stages or `tests`, the workspace root's test command.
 - Under `<tmp>/candidates` it removes a candidate tree through
   `git worktree remove` in the repository that owns it, which the tree's own
   `.git` file names; a tree Git refuses to

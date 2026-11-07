@@ -421,11 +421,12 @@ def test_prune_refuses_a_link_and_a_directory_that_holds_one(tmp_path: Path, atc
 
 
 @pytest.mark.integration
-def test_prune_takes_a_kept_working_directory_and_never_enters_its_links(tmp_path: Path, atc_tmp: Path) -> None:
-    work = write(atc_tmp / "systmp/wab12cd/tests/log.txt").parent.parent
+@pytest.mark.parametrize("stage", ["tests", "parallel", "serial", "interactive"])
+def test_prune_takes_a_kept_working_directory_and_never_enters_its_links(tmp_path: Path, atc_tmp: Path, stage: str) -> None:
+    work = write(atc_tmp / "systmp/wab12cd" / stage / "log.txt").parent.parent
     kept = target(tmp_path, "a")
-    (work / "tests/bt/test0").mkdir(parents=True)
-    link_directory(work / "tests/bt/test0/data", kept)
+    (work / stage / "bt/test0").mkdir(parents=True)
+    link_directory(work / stage / "bt/test0/data", kept)
     age(work, 8)
     assert prune() == (0, [f"DELETED {work}"])
     assert not work.exists() and (kept / "keep.txt").is_file()
@@ -438,6 +439,28 @@ def test_prune_refuses_a_working_directory_with_a_link_outside_a_base_directory(
     age(work, 8)
     assert prune() == (1, [f"ANOMALY {work / 'tests/data'}", f"REFUSED {work} (1 unexpected links)"])
     assert (work / "tests/log.txt").is_file()
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("first", ["home", "collection", "static", "slow"])
+def test_prune_refuses_a_link_under_a_bt_of_a_directory_that_names_no_stage(tmp_path: Path, atc_tmp: Path, first: str) -> None:
+    work = write(atc_tmp / "systmp/wab12cd" / first / "log.txt").parent.parent
+    kept = target(tmp_path, "a")
+    (work / first / "bt").mkdir()
+    link_directory(work / first / "bt/x", kept)
+    age(work, 8)
+    assert prune() == (1, [f"ANOMALY {work / first / 'bt/x'}", f"REFUSED {work} (1 unexpected links)"])
+    assert (kept / "keep.txt").is_file() and (work / first / "log.txt").is_file()
+
+
+@pytest.mark.integration
+def test_prune_refuses_a_base_directory_that_is_itself_a_link(tmp_path: Path, atc_tmp: Path) -> None:
+    work = write(atc_tmp / "systmp/wab12cd/tests/log.txt").parent.parent
+    kept = target(tmp_path, "a")
+    link_directory(work / "tests/bt", kept)
+    age(work, 8)
+    assert prune() == (1, [f"ANOMALY {work / 'tests/bt'}", f"REFUSED {work} (1 unexpected links)"])
+    assert (kept / "keep.txt").is_file() and (work / "tests/log.txt").is_file()
 
 
 @pytest.mark.integration

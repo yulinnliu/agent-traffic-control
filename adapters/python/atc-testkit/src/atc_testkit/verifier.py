@@ -236,8 +236,9 @@ class _Checks:
         """The root form's one test command, with its base directory in the working directory."""
         command = self.project.test_command
         log = self.work / "tests.log"
-        argv = [*command.argv, "--basetemp", str(self.isolated.base_directory("tests"))]
-        code = self.run_logged(argv, cwd=self.project.root / command.cwd, env=self.isolated.environment("tests"),
+        argv = [*command.argv, "--basetemp", str(self.isolated.base_directory(stages.TEST_COMMAND_STAGE))]
+        code = self.run_logged(argv, cwd=self.project.root / command.cwd,
+                               env=self.isolated.environment(stages.TEST_COMMAND_STAGE),
                                log=log, private=True)
         if code == stages.PYTEST_NO_TESTS_COLLECTED:
             raise VerifyError(stages.NO_TESTS_COLLECTED, f"{' '.join(argv)} collected no test")
