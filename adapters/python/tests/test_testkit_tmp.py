@@ -513,7 +513,7 @@ def test_prune_removes_a_candidate_through_its_repository(repository: Path, atc_
     age(tree, 8)
     code, lines = prune()
     assert code == 0 and sorted(lines) == sorted([f"DELETED {tree}", f"DELETED {report}"])
-    assert not tree.exists() and "abc" not in git(repository, "worktree", "list", "--porcelain")
+    assert not tree.exists() and tree.as_posix() not in git(repository, "worktree", "list", "--porcelain")
 
 
 def test_a_candidate_git_refuses_is_left_with_gits_message(repository: Path, atc_tmp: Path) -> None:
