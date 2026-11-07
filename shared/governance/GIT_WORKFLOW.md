@@ -482,17 +482,29 @@ authorizes force push, remote deletion, or cleanup of another writer's work.
 | Exit | Meaning |
 | --- | --- |
 | 0 | Integrated, or a preflight verdict of `FF`, `NO_FF` or `REMOVABLE` |
-| 1 | Stopped before a candidate exists: a `STOP` row of the `Integrate` table, a missing `## Integration verification` section, or ref drift found before the candidate |
+| 1 | Stopped before a candidate exists: a preflight `STOP` or cleanup `KEEP` verdict, a missing `## Integration verification` section, or ref drift found before the candidate |
 | 2 | `ERROR`: an invalid invocation or a Git or runtime fault |
-| 3 | Stopped after the candidate exists: the verifier failed or timed out, the candidate changed, or the refs drifted before the update; `main` is unchanged unless the detail reports a required recovery |
+| 3 | Stopped after the candidate exists: the verifier failed or timed out, the candidate changed, or the refs drifted before the update, each with `main` unchanged; or a required recovery, where `main` or its checkout no longer matches the candidate after the update, found by that update or at the start of a later run |
 
 The first stderr line of a refusal takes one of these forms:
 
 - `STOP <TOKEN>: <detail>` for exits 1 and 3, followed by a `next:` line
-  naming the step the `Integrate` table gives for that stop;
+  naming the step that resolves the stop: the `Integrate` table's step for a
+  stop that is a row of it, otherwise the step below;
 - `ERROR <TOKEN> <detail>` for exit 2;
 - `<TOKEN> <detail>` for a refusal from `atc-testkit`, with the exit code
   `docs/TESTKIT.md` assigns that token.
+
+| Stop | Next step |
+| --- | --- |
+| No reviewed SHA, or one that is invalid or names no commit | Run again with the full SHA the formal review named |
+| Topic already merged into `main` | Nothing to integrate; continue with `Cleanup trigger` |
+| Integration checkout not on `main` | Check out `main` in the integration checkout, then run again |
+| Integration checkout has uncommitted changes | Have the owner of the listed paths commit or remove them, then run again |
+| Missing `## Integration verification` section | Obtain the section from the owner, add it under `Project verification section`, then run again |
+| Ref drift, before the candidate or before the update | Run again; the preflight reassesses the table against the new refs |
+| Verifier failed or timed out, or the candidate changed | Correct the cause on the topic branch with a new commit and re-review it, or correct the project's verifier, then run again |
+| Required recovery | Reconcile `main` and its checkout with the retained candidate ref the detail names before any other integration of this repository |
 
 ## Publication boundary
 
