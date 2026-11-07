@@ -192,9 +192,10 @@ for the compatible-merge row.
 
 The Python integration adapter acquires the repository Integration Slot before
 preflight, prepares the integration revision in an isolated candidate worktree,
-and requires an explicit verification command before updating `main`. Supply
-the full reviewed SHA, the authority reference and the verification argv in the
-forms `Integration verifier source` below defines. The command
+and requires a passing verification command before updating `main`. Supply
+the full reviewed SHA and the authority reference in the forms
+`Integration verifier source` below defines; that section also names where the
+verification argv comes from. The command
 runs from the candidate checkout with these environment variables:
 
 - `ATC_INTEGRATION_SHA`: immutable candidate commit SHA;
@@ -209,6 +210,12 @@ record for the candidate under the repository's Git common directory after
 `main` is updated and read back. A missing or invalid report leaves
 integration unaffected and writes no record. The report and record formats
 are defined in `shared/conformance/verification-evidence/README.md`.
+
+Apart from that evidence, the adapter records every integration that updates
+`main`, with or without a verification report, as one JSON line in
+`<git common dir>/atc/integrations.jsonl`: the candidate SHA, the reviewed
+SHA, the authority reference and the time. The pre-push gate reads only the
+verification evidence of `Test evidence` below, never this record.
 
 The verifier must test the candidate identified by `ATC_INTEGRATION_SHA`, not
 resolve a moving branch name. A nonzero result, changed candidate HEAD, dirty
@@ -359,26 +366,34 @@ Formal evidence follows `VERIFICATION.md`; changing the delivered revision inval
 
 ## Integration verifier source
 
-`atc integrate` requires an `--authority-reference` and an explicit
-verification argv, given as a JSON string array in a file
-(`--verify-command-file`) or inline (`--verify-command`). The adapter records
-the authority reference as provenance; the authority itself comes from the
-integration authorization `Integrate` above requires. The verifier comes from
-the project's `AGENTS.md` section below; a caller whose project has none stops
-and obtains one from the owner.
+`atc integrate` requires an `--authority-reference`. The adapter records it
+as provenance; the authority itself comes from the integration authorization
+`Integrate` above requires.
+
+The verifier argv file and timeout come from the `## Integration verification`
+section of `AGENTS.md` at the `main` revision being integrated into (`Project
+verification section` below). An explicit argv file
+(`--verify-command-file`), inline argv (`--verify-command`, a JSON string
+array) or timeout (`--verify-timeout`) is allowed and is used in place of the
+declared value; one that differs from the declaration is reported as a
+warning. A repository whose `main` revision has no such section stops the
+integration; the caller obtains one from the owner.
 
 ### Authority reference
 
 The authority reference names the task in the identity form `CORE.md`
-§ Task identity gives the project, followed by ` @ ` and the reviewed full SHA:
+§ Task identity gives the project and ends with ` @ <sha>`, where `<sha>` is
+the reviewed full SHA. The adapter appends ` @ <sha>` from `--reviewed` when
+the reference has no such ending, and refuses a reference whose ending SHA
+differs from `--reviewed`. Every form puts the SHA last:
 
 - plan work: the plan file path, section and step
   (`<plan path> §<section> step <n> @ <sha>`);
 - a numbered task record: the record in the form the project's `AGENTS.md`
-  declares, then ` @ ` and the reviewed SHA;
-- work outside a plan or task record: repository, branch and reviewed SHA,
-  then `per` the governing document's file and section
-  (`<owner>/<repo> <branch> @ <sha> per <file> § <section>`).
+  declares, then ` @ <sha>`;
+- work outside a plan or task record: repository and branch, then `per` the
+  governing document's file and section
+  (`<owner>/<repo> <branch> per <file> § <section> @ <sha>`).
 
 ### Project verification section
 
@@ -459,6 +474,25 @@ cleanup-ready. For Hami Managed Worktree contract 1, use its existing
 `hami-worktree` capability for local cleanup; do not bypass its identity,
 lock, clean-tree or merged-state checks. Nothing here automatically
 authorizes force push, remote deletion, or cleanup of another writer's work.
+
+## Command results
+
+`atc integrate` and `atc preflight` end with one of these exit codes:
+
+| Exit | Meaning |
+| --- | --- |
+| 0 | Integrated, or a preflight verdict of `FF`, `NO_FF` or `REMOVABLE` |
+| 1 | Stopped before a candidate exists: a `STOP` row of the `Integrate` table, a missing `## Integration verification` section, or ref drift found before the candidate |
+| 2 | `ERROR`: an invalid invocation or a Git or runtime fault |
+| 3 | Stopped after the candidate exists: the verifier failed or timed out, the candidate changed, or the refs drifted before the update; `main` is unchanged unless the detail reports a required recovery |
+
+The first stderr line of a refusal takes one of these forms:
+
+- `STOP <TOKEN>: <detail>` for exits 1 and 3, followed by a `next:` line
+  naming the step the `Integrate` table gives for that stop;
+- `ERROR <TOKEN> <detail>` for exit 2;
+- `<TOKEN> <detail>` for a refusal from `atc-testkit`, with the exit code
+  `docs/TESTKIT.md` assigns that token.
 
 ## Publication boundary
 
