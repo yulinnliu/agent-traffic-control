@@ -4,12 +4,13 @@ import importlib.util
 import sys
 
 SOURCE = Path(__file__).resolve().parents[1] / 'atc-testkit/src/atc_testkit/check.py'
-RECORDS = ('vendor/atc-testkit.json', 'vendor/hami-testkit.json')
+RECORD = 'vendor/atc-testkit.json'
 
 
 def record(project: Path) -> Path | None:
-    """The release record a project carries, the current name first."""
-    return next((project / name for name in RECORDS if (project / name).is_file()), None)
+    """The release record a project carries."""
+    path = project / RECORD
+    return path if path.is_file() else None
 
 
 def problems(project: Path, *, hooks: bool = False) -> list[str]:

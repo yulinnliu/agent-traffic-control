@@ -183,30 +183,9 @@ ignore = { posix = ["tests/x.py"], nt = [] }'''), encoding='utf-8')
     assert repository_problems(repository) == []
 
 
-@pytest.fixture
-def earlier_repository(repository):
-    '''A project that still carries the earlier release's names and none of the newer data.'''
-    for relative in ('pyproject.toml', 'uv.lock', 'scripts/prepush_select.py', '.github/workflows/ci.yml',
-                     'vendor/atc-testkit.json', 'scripts/git-hooks/pre-push'):
-        path = repository / relative
-        path.write_text(path.read_text(encoding='utf-8').replace('atc-testkit', 'hami-testkit').replace(
-            'atc_testkit', 'hami_testkit').replace('--frozen ', ''), encoding='utf-8')
-    (repository / 'vendor/atc_testkit-0.2.0-py3-none-any.whl').rename(repository / 'vendor/hami_testkit-0.2.0-py3-none-any.whl')
-    (repository / 'vendor/atc-testkit.json').rename(repository / 'vendor/hami-testkit.json')
-    return repository
-
-
-def test_a_project_with_the_earlier_record_keeps_its_contract_check(earlier_repository):
+def test_the_earlier_record_name_carries_no_contract_check(repository):
     import testkit_contract
-    assert testkit_contract.record(earlier_repository).name == 'hami-testkit.json'
-    assert testkit_contract.problems(earlier_repository) == []
-    path = earlier_repository / 'pyproject.toml'
-    path.write_text(path.read_text(encoding='utf-8').replace('hami-testkit==0.2.0', 'hami-testkit>=0.2.0'), encoding='utf-8')
-    assert testkit_contract.problems(earlier_repository)
-
-
-def test_the_current_record_wins_over_an_earlier_one(repository):
-    import testkit_contract
-    (repository / 'vendor/hami-testkit.json').write_text('{}', encoding='utf-8')
     assert testkit_contract.record(repository).name == 'atc-testkit.json'
+    (repository / 'vendor/atc-testkit.json').rename(repository / 'vendor/hami-testkit.json')
+    assert testkit_contract.record(repository) is None
     assert testkit_contract.problems(repository) == []
