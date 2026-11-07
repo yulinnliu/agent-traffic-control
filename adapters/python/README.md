@@ -25,13 +25,18 @@ location, in that order.
 | `worktree` | `hami_worktree.py` | `create`, `resume`, `audit`, `cleanup` per-topic worktrees with identity in git |
 | `friction` | `friction.py` | append incident and resolution events; summaries |
 | `test` | `atc-testkit` | `run TREE SCRATCH PYTHON LABEL [pytest args]`: a test tree under a scratch of `~/.atc/tmp`; `mutants`: one guard mutant at a time on an exported commit |
-| `tmp` | `atc-testkit` | `list`, `clean DIR... \| --project NAME`, `prune`: the scratch registry and what is older than seven days |
+| `tmp` | `atc-testkit` | `list`, `clean DIR... \| --tree-name NAME`, `prune`: the scratch registry and what is older than seven days |
 | | `check_workspace.py` | runs the validator and records a failure as friction evidence |
 | | `integration_verify.py` | the verifier `atc integrate` runs in a candidate of this checkout (root `AGENTS.md` § Integration verification) |
 | | `build_testkit_release.py` | builds the `atc-testkit` wheel and digest record for consuming projects |
 
 `src/atc_cli/` is the dispatcher; the scripts stay runnable directly with
 `uv run python scripts/<name>.py`.
+
+`atc worktree cleanup` also accepts `--reviewed-sha FULL_SHA` in place of
+`--reviewed FULL_SHA`, unlisted in its help, through `atc-testkit` 0.7.x; from
+0.8.0 it accepts only `--reviewed`. `atc tmp clean --project` has the same end
+(`docs/ATC_HOME.md` § Deleting).
 
 `atc-testkit/` is the pytest adapter of the verification contract: marker
 classification, change-impact selection, temporary locations, the stages, the
