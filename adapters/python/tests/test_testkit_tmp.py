@@ -13,7 +13,7 @@ import subprocess
 import pytest
 
 import atc_testkit
-from atc_testkit import locations, scratch
+from atc_testkit import isolation, locations, scratch
 
 
 def link_directory(link: Path, target: Path) -> None:
@@ -418,6 +418,41 @@ def test_prune_refuses_a_link_and_a_directory_that_holds_one(tmp_path: Path, atc
     assert lines == [f"REFUSED {systmp / 'alink'} (is itself a link)", f"ANOMALY {held / 'bt/inner'}",
                      f"REFUSED {held} (1 unexpected links)"]
     assert (systmp / "alink/keep.txt").is_file() and (held / "file.txt").is_file()
+
+
+@pytest.mark.integration
+def test_prune_takes_a_kept_working_directory_and_never_enters_its_links(tmp_path: Path, atc_tmp: Path) -> None:
+    work = write(atc_tmp / "systmp/wab12cd/tests/log.txt").parent.parent
+    kept = target(tmp_path, "a")
+    (work / "tests/bt/test0").mkdir(parents=True)
+    link_directory(work / "tests/bt/test0/data", kept)
+    age(work, 8)
+    assert prune() == (0, [f"DELETED {work}"])
+    assert not work.exists() and (kept / "keep.txt").is_file()
+
+
+@pytest.mark.integration
+def test_prune_refuses_a_working_directory_with_a_link_outside_a_base_directory(tmp_path: Path, atc_tmp: Path) -> None:
+    work = write(atc_tmp / "systmp/wab12cd/tests/log.txt").parent.parent
+    link_directory(work / "tests/data", target(tmp_path, "a"))
+    age(work, 8)
+    assert prune() == (1, [f"ANOMALY {work / 'tests/data'}", f"REFUSED {work} (1 unexpected links)"])
+    assert (work / "tests/log.txt").is_file()
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("name", ["wab12c", "wab12cd0", "xab12cd", "wAB12CD"])
+def test_prune_expects_no_link_in_a_directory_not_named_as_a_working_directory(tmp_path: Path, atc_tmp: Path, name: str) -> None:
+    held = write(atc_tmp / "systmp" / name / "tests/log.txt").parent.parent
+    (held / "tests/bt").mkdir()
+    link_directory(held / "tests/bt/data", target(tmp_path, "a"))
+    age(held, 8)
+    assert prune() == (1, [f"ANOMALY {held / 'tests/bt/data'}", f"REFUSED {held} (1 unexpected links)"])
+
+
+@pytest.mark.integration
+def test_a_created_working_directory_has_the_name_prune_knows(atc_tmp: Path) -> None:
+    assert isolation.WORK_NAME.fullmatch(isolation.create_working_directory().name)
 
 
 def test_prune_reports_old_registered_scratches_and_deletes_none(atc_tmp: Path) -> None:

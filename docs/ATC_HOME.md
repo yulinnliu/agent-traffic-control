@@ -159,11 +159,13 @@ at steps 3 to 5, 2 for a refusal at step 1.
 `atc tmp prune` deletes entries whose last modification is older than seven
 days. An entry that is a link prints `REFUSED` and is left. A plain file is
 deleted as a file. A directory goes through steps 4 and 5 with no link
-expected.
+expected, except a working directory of the verifier or of the gate.
 
 - Under `<tmp>/systmp` it takes every entry other than `pytest-of-*`. This
   includes the working directory a failed verifier or gate run left for
-  inspection.
+  inspection, named `w` and six lowercase hexadecimal digits. Links inside a
+  stage's base directory, `<work>/<stage>/bt`, are the run's own: they are
+  expected, removed as links and never entered.
 - Under `<tmp>/candidates` it removes a candidate tree through
   `git worktree remove` in the repository that owns it, which the tree's own
   `.git` file names; a tree Git refuses to

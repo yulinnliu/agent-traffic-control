@@ -15,7 +15,7 @@ import time
 import tomllib
 from typing import NamedTuple
 
-from . import locations
+from . import isolation, locations
 from .git import git_env
 from .locations import CANDIDATES, Refusal, SYSTMP, is_link as _is_link
 
@@ -340,13 +340,14 @@ def _old(status: os.stat_result, now: datetime) -> bool:
     return datetime.fromtimestamp(status.st_mtime, UTC) < now - PRUNE_AGE
 
 
-def _prune_entry(path: str, status: os.stat_result, say: Callable[[str], None]) -> int:
+def _prune_entry(path: str, status: os.stat_result, say: Callable[[str], None],
+                 expected: Callable[[str], bool] = no_link) -> int:
     try:
         if _is_link(status):
             say(f"REFUSED {path} (is itself a link)")
             return 1
         if stat.S_ISDIR(status.st_mode):
-            why = remove_tree(path, no_link, say)
+            why = remove_tree(path, expected, say)
             if why:
                 say(f"REFUSED {path} ({why})")
                 return 1
@@ -357,6 +358,12 @@ def _prune_entry(path: str, status: os.stat_result, say: Callable[[str], None]) 
     except Exception as error:  # noqa: BLE001 - an error while handling an entry is its refusal
         say(f"REFUSED {path} (error: {error})")
         return 1
+
+
+def _prune_system_entry(path: str, status: os.stat_result, say: Callable[[str], None]) -> int:
+    """An entry of ``systmp``: a working directory holds its run's links, every other directory none."""
+    working = isolation.WORK_NAME.fullmatch(os.path.basename(path))
+    return _prune_entry(path, status, say, working_directory_links(path) if working else no_link)
 
 
 def _owning_repository(tree: str) -> str | None:
@@ -399,7 +406,7 @@ def prune(*, say: Callable[[str], None] = print, environ=None, now: datetime | N
     places = locations.locate(environ)
     now = now or datetime.now(UTC)
     code = 0
-    for parent, handle, skip in ((places.systmp, _prune_entry, "pytest-of-*"),
+    for parent, handle, skip in ((places.systmp, _prune_system_entry, "pytest-of-*"),
                                  (places.tmp / CANDIDATES, _prune_candidate, None)):
         try:
             parent_status = os.lstat(parent)

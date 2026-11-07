@@ -4,12 +4,14 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping, MutableMapping
 import os
 from pathlib import Path
+import re
 import secrets
 
 from . import locations
 
 CREDENTIAL_SUFFIXES = ("_API_KEY", "_API_SECRET", "_SECRET", "_TOKEN", "_PASSWORD")
 WORK_NAME_BOUND = 8
+WORK_NAME = re.compile(r"w[0-9a-f]{6}")
 GITCONFIG = "[user]\n\tname = ATC Test\n\temail = atc-test@example.invalid\n[core]\n\tlongpaths = true\n"
 XDG_VARIABLES = ("XDG_CACHE_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME")
 PROFILE_VARIABLES = frozenset({"HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", *XDG_VARIABLES,
