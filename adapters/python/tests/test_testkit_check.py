@@ -183,6 +183,13 @@ ignore = { posix = ["tests/x.py"], nt = [] }'''), encoding='utf-8')
     assert repository_problems(repository) == []
 
 
+@pytest.mark.unit
+def test_the_checker_reads_only_the_atc_testkit_record(repository):
+    (repository / 'vendor/atc-testkit.json').rename(repository / 'vendor/hami-testkit.json')
+    problems = repository_problems(repository)
+    assert len(problems) == 1 and problems[0].startswith('testkit contract unavailable: FileNotFoundError')
+
+
 def test_the_earlier_record_name_carries_no_contract_check(repository):
     import testkit_contract
     assert testkit_contract.record(repository).name == 'atc-testkit.json'
