@@ -27,4 +27,4 @@ def caller_root(request, restored_process, monkeypatch: pytest.MonkeyPatch):
 def test_a_caller_root_gives_an_accepted_root_with_room_for_a_test_s_own_root(caller_root: Path, request) -> None:
     root = request.getfixturevalue("atc_tmp")
     assert root != caller_root and locations.locate(os.environ).tmp == root
-    assert locations.long_name(locations.tmp_root({"ATC_TMP": str(root / "root-link")})) == str(root / "root-link")
+    assert locations.long_name(locations.tmp_root({"ATC_TMP": str(root / "new")})) == str(root / "new")

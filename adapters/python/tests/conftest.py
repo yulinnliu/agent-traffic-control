@@ -15,7 +15,7 @@ pytest_plugins = ("atc_testkit.plugin",)
 
 ROOT_NAME_LENGTH = 9
 SHORTEST_ROOT_NAME = 3
-ROOT_MARGIN = len("/root-link")
+ROOT_MARGIN = len("/new")
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
