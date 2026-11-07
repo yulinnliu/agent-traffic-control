@@ -1,31 +1,8 @@
 #!/usr/bin/env python3
-"""Candidate-first integration for a reviewed topic in the local main checkout.
+"""Candidate-first integration of a reviewed topic into the local main checkout.
 
-The caller must establish integrate_main authority before invoking this tool.
-The verifier argv file and timeout come from the `## Integration verification`
-section of AGENTS.md at the `main` revision; an explicit value replaces the
-declared one and a differing one prints a warning. The verifier runs against
-an isolated candidate checkout with ATC_INTEGRATION_SHA bound to its immutable
-commit ID. The tool serializes cooperative ATC writers with an Integration
-Slot and never blindly resets main after a failed update. Governance:
-`GIT_WORKFLOW.md` § Integrate, § Integration verifier source and § Command
-results.
-
-The project is `--repo` (a checkout, including the workspace root), else
-`--project` from workspace.yaml, else the registered project whose repository
-or worktrees root holds the working directory. Without `--branch` the branch
-is the one local branch at `--reviewed`. `--check` runs every inference, the
-preflight and the warnings, and takes no slot and creates no candidate.
-
-Usage:
-  git_integrate.py [--repo <main checkout> | --project <name>] [--branch <topic>]
-      --reviewed <40-hex sha> --authority-reference <record>
-      [--verify-command <JSON argv> | --verify-command-file <JSON argv file>]
-      [--verify-timeout <seconds>] [--main main] [--check] [--json]
-
-Exit status: 0 integrated or a passing check; 1 stopped before a candidate
-exists; 2 an invalid invocation or a Git or runtime fault; 3 stopped after the
-candidate exists, or a required recovery.
+Rules: governance `GIT_WORKFLOW.md` § Integrate, § Integration verifier source
+and § Command results; options: `--help`.
 """
 from __future__ import annotations
 
@@ -821,7 +798,7 @@ def resolve_repo(args: argparse.Namespace, root: Path, root_given: bool, cwd: st
 
 
 def infer_branch(repo: Path, reviewed: str, main: str, main_tip: str) -> tuple[str | None, str]:
-    """The branch to integrate from the reviewed SHA (`ATC_CLI_PLAN.md` § 3 item 2 order)."""
+    """The branch to integrate from the reviewed SHA, or the stop of `GIT_WORKFLOW.md` § Command results."""
     if is_ancestor(repo, reviewed, main_tip):
         if _recovery_ref_at(repo, main_tip):
             # A crash after the update left the candidate on main; the slot's
