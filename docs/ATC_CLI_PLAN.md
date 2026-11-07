@@ -124,6 +124,8 @@ it changes `atc-testkit` and takes the version the Owner sets.
 4. `--reviewed` is the one name for the reviewed SHA across `integrate`,
    `preflight` and `worktree cleanup`; option abbreviation is off in every
    parser.
+5. An option renamed in this section changes, in the same topic, every skill
+   and doc that teaches it.
 
 ## 5. Skill text
 
