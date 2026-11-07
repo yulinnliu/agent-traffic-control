@@ -476,9 +476,12 @@ def _recovery_ref_at(repo: Path, sha: str) -> bool:
 
 def _recover_interrupted_update(
     repo: Path, main: str, branch: str | None, reviewed: str, authority_reference: str,
-    recovered_candidates: list[dict],
+    recovered_candidates: list[dict], *, check: bool = False,
 ) -> tuple[int, dict] | None:
-    """Reconcile a verified candidate already installed on main after a crash."""
+    """Reconcile a verified candidate already installed on main after a crash.
+
+    With ``check`` it only reports what the run would do and changes nothing.
+    """
     main_tip = rev(repo, main)
     if main_tip is None:
         return None
@@ -509,6 +512,8 @@ def _recover_interrupted_update(
         # another request release it.
         if head != main_tip or status:
             disposition = "main_retains_commit_ref_retained_checkout_inconsistent"
+        elif check:
+            disposition = "main_retains_commit_ref_would_be_removed_request_not_matched"
         else:
             removed = [
                 git(repo, "update-ref", "-d", ref_name, main_tip, check=False).returncode == 0
@@ -556,6 +561,8 @@ def _recover_interrupted_update(
             ),
         )
         return STOP_AFTER_CANDIDATE, result
+    if check:
+        return 0, result
     for ref_name in matching:
         git(repo, "update-ref", "-d", ref_name, main_tip)
     result["candidate_ref"] = None
@@ -1036,6 +1043,17 @@ def _print_refusal(refusal: Refused, payload: dict, as_json: bool) -> None:
 
 def check(t: Target, as_json: bool) -> int:
     payload = {"command": "integrate", "check": True, "resolved": {**asdict(t), "repo": str(t.repo)}}
+    recovered = _recover_interrupted_update(t.repo, t.main, t.branch, t.reviewed, t.authority_reference, [], check=True)
+    if recovered is not None:
+        code, result = recovered
+        refusal = result.pop("refusal", None)
+        if refusal is not None:
+            _print_refusal(refusal, {**payload, **result}, as_json)
+        elif as_json:
+            print(json.dumps({**payload, **result}, indent=2))
+        else:
+            print(f"CHECK {result['verdict']} {result['reason']}: main {result['main_after']} is the candidate of this request")
+        return code
     if t.branch is None:
         _print_refusal(
             stop("ALREADY_MERGED", f"the reviewed SHA {t.reviewed} is already reachable from {t.main}; nothing to integrate"),
