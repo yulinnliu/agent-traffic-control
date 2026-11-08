@@ -70,10 +70,12 @@ step can proceed.
 topic history**. Before formal review, history may still be rewritten under the
 existing lifecycle. If a rebase or other rewrite changes the topic's ancestry
 onto a newer integration baseline, update `base_sha` to that new baseline and
-report the change. Adding a later merge from `main` without rewriting the
-existing topic history does not retroactively redefine the original
-`base_sha`; the merge commit itself records that additional ancestry and must
-be included in the delivered/reviewed history.
+report the change. A rebase whose review carries over (`After formal review`)
+does the same: `base_sha` becomes the `main` it was rebased onto, which the
+integration record holds as `main_before`. Adding a later merge from `main`
+without rewriting the existing topic history does not retroactively redefine
+the original `base_sha`; the merge commit itself records that additional
+ancestry and must be included in the delivered/reviewed history.
 
 For **Hami Managed Worktree**, the current adapter creates a new worktree from
 the authoritative integration checkout's current `main`. Therefore it is
@@ -82,6 +84,12 @@ compatible with a new task only when that creation base equals the task's bound
 do not rewrite the task's base merely to fit the adapter; select another
 compatible execution context. No managed-worktree runtime change is required
 for this rule.
+
+To continue a topic already published on `origin`, the adapter's
+`create --base-sha` starts the worktree at the exact tip of that topic's own
+branch on `origin` and refuses any other commit. That tip is the worktree's
+creation base; the task's bound `base_sha` remains the topic's original
+integration baseline.
 
 ## Topic branch
 
@@ -174,6 +182,14 @@ for alignment with task-oriented branch naming.
   is void: the branch needs a full re-review.
 - Rewriting anyway (for example, task authority explicitly chooses a rebase) is allowed only as an
   explicit decision, and voids the review the same way.
+- The one exception is the rebase `Integrate` requires of an unpublished topic
+  whose base `main` has advanced. The review carries over to the rebased tip
+  only when that tip is based on the current `main`, neither range holds a
+  merge commit, the commit count and order are unchanged, every
+  `git patch-id --stable` matches, and replaying the reviewed commits onto
+  `main` is conflict-free and yields the rebased tree. `atc integrate
+  --rebased` checks this and still runs the full verification on the rebased
+  tip. Otherwise the rebased tip needs a fresh review.
 
 ## Integrate
 
@@ -188,7 +204,16 @@ and target refs immediately before the update.
 
 `atc integrate` executes this table: each row maps to one verdict, `STOP`
 with its reason code for a stop row, `FF` for the fast-forward row and `NO_FF`
-for the compatible-merge row.
+for the compatible-merge row. The unpublished-topic row stops as
+`REBASE_REQUIRED`, or as `CONFLICT` or `OVERLAP` when the trial merge finds
+one, each with a `next:` naming the rebase.
+
+Before evaluating the table, `atc integrate` (`--check` included) runs
+`git fetch origin`. A local `main` behind or diverged from `origin/main` stops
+before verification; integrate onto a `main` that contains `origin/main`. A
+local `main` ahead of `origin/main` proceeds. A topic is published when an
+`origin` branch tip equals the reviewed SHA as fetched; in a repository
+without an `origin` remote, which fetches nothing, every topic is unpublished.
 
 The Python integration adapter acquires the repository Integration Slot before
 preflight, prepares the integration revision in an isolated candidate worktree,
@@ -214,8 +239,12 @@ are defined in `shared/conformance/verification-evidence/README.md`.
 Apart from that evidence, the adapter records every integration that updates
 `main`, with or without a verification report, as one JSON line in
 `<git common dir>/atc/integrations.jsonl`: the candidate SHA, the reviewed
-SHA, the authority reference and the time. The pre-push gate reads only the
-verification evidence of `Test evidence` below, never this record.
+SHA, the `main` it was integrated onto (`main_before`), the authority
+reference and the time. For a carried-over review, `reviewed` holds the
+rebased tip and `carried_over_from` the SHA the review named; the evidence
+record carries the same pair. The pre-push gate reads only the verification
+evidence of `Test evidence` below, never this record; `atc preflight push`
+reads it to group the commits of a push (`Publication boundary`).
 
 The verifier must test the candidate identified by `ATC_INTEGRATION_SHA`, not
 resolve a moving branch name. A nonzero result, changed candidate HEAD, dirty
@@ -235,9 +264,16 @@ serialized by the lock.
 | --- | --- |
 | Tip ≠ reviewed SHA, or reviewed SHA not an ancestor of the tip | Stop: review the delta, or re-review |
 | `main` is the merge-base (fast-forward possible) | Verify the reviewed tip, then `git merge --ff-only <verified-full-sha>` |
-| `main` advanced; the merge would conflict | Stop: reconcile on the topic branch with a new commit (merge `main` in, or fix forward), never by rewriting; re-review that commit |
-| `main` advanced; some file changed on both sides | Stop: a reviewer judges semantic overlap, then prepare a merge candidate or reconcile as above |
-| `main` advanced; no conflict, no shared file | Prepare and verify a merge candidate under the procedure below, then advance `main` to it |
+| `main` advanced; topic unpublished | Stop: rebase onto `main`, then integrate the rebased tip with `--rebased`, which carries the review over under `After formal review`; a rebase that resolves conflicts, or any refused carry-over, needs a fresh review |
+| `main` advanced; topic published; the merge would conflict | Stop: reconcile on the topic branch with a new commit (merge `main` in, or fix forward), never by rewriting; re-review that commit |
+| `main` advanced; topic published; some file changed on both sides | Stop: a reviewer judges semantic overlap, then prepare a merge candidate or reconcile as above |
+| `main` advanced; topic published; no conflict, no shared file | Prepare and verify a merge candidate under the procedure below, then advance `main` to it |
+
+With `--reviewed <reviewed SHA> --rebased <rebased tip>`, the rebased tip
+takes the place of the reviewed SHA throughout the table: the first row
+compares the branch tip with the rebased tip, and the fast-forward row
+verifies and integrates it. The carry-over check runs after the table and
+before any candidate exists.
 
 ### Repository integration queue
 
@@ -326,7 +362,8 @@ caller checks the squash commit message and the integration record. The worktree
 is never removed by hand.
 
 `atc preflight merge` checks review binding and integration topology
-read-only and prints the verdict, a reason code, and the evidence. Its verdict
+read-only and prints the verdict, a reason code, and the evidence. It reads
+`origin` as last fetched and runs no fetch itself. Its verdict
 is a topology decision; integration still requires the authority and
 verification steps above:
 
@@ -481,8 +518,8 @@ authorizes force push, remote deletion, or cleanup of another writer's work.
 
 | Exit | Meaning |
 | --- | --- |
-| 0 | Integrated, or a preflight verdict of `FF`, `NO_FF` or `REMOVABLE` |
-| 1 | Stopped before a candidate exists: a preflight `STOP` or cleanup `KEEP` verdict, a missing `## Integration verification` section, or ref drift found before the candidate |
+| 0 | Integrated, or a preflight verdict of `FF`, `NO_FF`, `REMOVABLE` or `PUSH` |
+| 1 | Stopped before a candidate exists: a preflight `STOP` or cleanup `KEEP` verdict, a missing `## Integration verification` section, ref drift found before the candidate, a failed fetch, a local `main` behind or diverged from `origin/main`, a required rebase, or a refused carry-over |
 | 2 | `ERROR`: an invalid invocation or a Git or runtime fault |
 | 3 | Stopped after the candidate exists: the verifier failed or timed out, the candidate changed, or the refs drifted before the update, each with `main` unchanged; or a required recovery, where `main` or its checkout no longer matches the candidate after the update, found by that update or at the start of a later run |
 
@@ -504,6 +541,10 @@ The first stderr line of a refusal takes one of these forms:
 | Integration checkout not on `main` | Check out `main` in the integration checkout, then run again |
 | Integration checkout has uncommitted changes | Have the owner of the listed paths commit or remove them, then run again |
 | Missing `## Integration verification` section | Obtain the section from the owner, add it under `Project verification section`, then run again |
+| `git fetch origin` failed | Restore access to `origin`, then run again |
+| Local `main` behind `origin/main` | Fast-forward local `main` to `origin/main`, then run again; the topic is reassessed against the new `main` |
+| Local `main` diverged from `origin/main` | The owner decides how the local-only commits reach `origin`; run again once `main` contains `origin/main` |
+| Carry-over refused | The rebased tip needs a fresh review; integrate the SHA that review names |
 | Ref drift, before the candidate or before the update | Run again; the preflight reassesses the table against the new refs |
 | Verifier failed or timed out, or the candidate changed | Correct the cause on the topic branch with a new commit and re-review it, or correct the project's verifier, then run again |
 | Required recovery | Reconcile `main` and its checkout with the retained candidate ref the detail names before any other integration of this repository |
@@ -511,3 +552,9 @@ The first stderr line of a refusal takes one of these forms:
 ## Publication boundary
 
 Publishing a ref/revision is separately governed by `DELIVERY.md`.
+
+`push_main` authority for a push of `main` must cover every commit in
+`origin/main..main`, including commits other topics integrated. List them
+before the push with `atc preflight push`, which fetches `origin` first; the
+`push:` lines of `atc integrate` give the same list and flag each commit
+outside that integration as lacking push approval.

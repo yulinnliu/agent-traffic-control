@@ -33,10 +33,11 @@ access.
 | enforcement generation | `generate-enforcement/` | `generated:`, `ok: enforcement configs are current`, `drift:` (files and `live-claude`/`live-codex`/`live-hook`), `unresolved-token`, plus golden files per harness |
 | escalation gate | `classify-change/` | `LOW: <reason>`, `HIGH: <reason>` |
 
-Merge preflight (`FF`, `NO_FF`, `STOP`) and worktree identity (`CREATED`,
-`RESUMED`, `IDENTITY_MISMATCH`, `IDENTITY_AMBIGUOUS`, `ALREADY_EXISTS`,
-`REMOVABLE`) need live git repositories. Their cases are the Python suites
-`tests/test_git_preflight.py` and `tests/test_hami_worktree.py`, which build
+Merge preflight (`FF`, `NO_FF`, `STOP`), push preflight (`PUSH`, `STOP`) and
+worktree identity (`CREATED`, `RESUMED`, `IDENTITY_MISMATCH`,
+`IDENTITY_AMBIGUOUS`, `ALREADY_EXISTS`, `REMOVABLE`) need live git
+repositories. Their cases are the Python suites `tests/test_git_preflight.py`,
+`tests/test_integrate_moving_main.py` and `tests/test_hami_worktree.py`, which build
 each repository in code; a second implementation ports those suites until
 fixtures with an `init.json` repository description exist here.
 
