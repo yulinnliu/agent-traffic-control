@@ -1,4 +1,4 @@
-"""docs/ATC_CLI_PLAN.md § 4 Command surface: help, missing dependencies and option names of every ``atc`` command."""
+"""docs/TESTKIT.md § Commands: help, missing dependencies and option names of every ``atc`` command."""
 from __future__ import annotations
 
 import argparse

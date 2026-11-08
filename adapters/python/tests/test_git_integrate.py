@@ -988,7 +988,7 @@ def test_expired_records_are_removed_after_a_write(repo: Path) -> None:
     assert records(repo) == sorted([recent.name, foreign.name, f"{tip}.json"])
 
 
-# Declarations, refusal forms and target inference (`docs/ATC_CLI_PLAN.md` § 2 and § 3).
+# Declarations, refusal forms and target inference (`shared/governance/GIT_WORKFLOW.md` § Integrate, § Integration verifier source with § Authority reference, and § Command results).
 
 
 def run(repo: Path, *args: str, root: Path | None = None, root_given: bool = False, cwd: Path | None = None) -> int:

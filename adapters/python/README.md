@@ -22,6 +22,7 @@ location, in that order.
 | `enforce` | `generate_enforcement.py` | `--policies DIR --out DIR [--check]`: harness deny configs from hard deny, see `docs/ENFORCEMENT.md` |
 | `classify` | `classify_change.py` | `--policy escalation.yaml --changed FILE [--severity]`: `LOW` or `HIGH` |
 | `preflight` | `git_preflight.py` | `merge` verdict `FF` / `NO_FF` / `STOP`; `cleanup` verdict `REMOVABLE`; reads only |
+| `integrate` | `git_integrate.py` | `--project NAME \| --repo DIR --reviewed SHA --authority-reference REF`: the caller types the reviewed SHA and the record part of the reference, never inferred; the branch is found from the reviewed SHA, so `--branch` names it only when several local branches sit there; `--check` resolves, preflights and warns without a slot or candidate |
 | `worktree` | `hami_worktree.py` | `create`, `resume`, `audit`, `cleanup` per-topic worktrees with identity in git |
 | `friction` | `friction.py` | append incident and resolution events; summaries |
 | `test` | `atc-testkit` | `run TREE SCRATCH PYTHON LABEL [pytest args]`: a test tree under a scratch of `~/.atc/tmp`; `mutants`: one guard mutant at a time on an exported commit |
