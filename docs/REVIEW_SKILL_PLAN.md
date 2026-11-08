@@ -34,9 +34,10 @@ PASS may carry an integration instruction. Three things change:
 
 Out of scope: governance files under `shared/governance/` beyond the two
 `hami-worktree` citations of § 3; the project repositories beyond the
-rendered adapters and citations of § 5, each synced in its own round; module
-and file names inside `adapters/python/` (`hami_worktree.py` and its tests);
-the Agensi listing of the skills, a later follow-up.
+rendered adapters and citations of § 5, each synced in its own round;
+module, file and probe-file names inside `adapters/python/`
+(`hami_worktree.py`, its tests, and the `hami-worktree-probe-` prefix of its
+probe file); the Agensi listing of the skills, a later follow-up.
 
 ## Final shape
 
@@ -80,8 +81,12 @@ a registered project after its round of § 5):
 .agents/skills/atc-coordinator/SKILL.md     body
 .agents/skills/atc-coordinator/references/briefs.md
 .claude/skills/atc-worktree/, .agents/skills/atc-worktree/, .dsh/skills/atc-worktree/
-.claude/skills/atc-shared-skill/, .agents/skills/atc-shared-skill/, .dsh/skills/atc-shared-skill/
+.claude/skills/atc-shared-skill/, .agents/skills/atc-shared-skill/
 ```
+
+A `.dsh/skills/` copy exists only for a skill that declares `contract`
+(`adapter_dirs` in `adapters/python/scripts/validate_workspace.py`), so
+`atc-worktree` has one and `atc-shared-skill` does not.
 
 The Claude Code adapter of `atc-coordinator` carries
 `disable-model-invocation: true`, rendered from its `invocation: user`.
@@ -145,13 +150,17 @@ No adapter directory named `hami-review-relay`, `hami-worktree` or
      pasting the instruction into the writer, or a coordinator that has the
      Owner's word for that SHA) runs or forwards the instruction. When
      `main` has moved after the word was given, the topic follows
-     `GIT_WORKFLOW.md` § Integrate: an unpublished topic stops as
-     `REBASE_REQUIRED`, is rebased onto `main` and integrates with
+     `GIT_WORKFLOW.md` § Integrate. An unpublished topic stops on a stop
+     whose `next:` names a rebase (`REBASE_REQUIRED`, or `OVERLAP` or
+     `CONFLICT`), is rebased onto `main` and integrates with
      `--reviewed <reviewed SHA> --rebased <rebased tip>`, which carries the
      review over when its check passes and otherwise stops as
-     `CARRY_OVER_REFUSED`, needing a fresh review; a published topic
-     integrates as `NO_FF`. Either way the word is asked for again on the
-     SHA that will become `main`. The rest of the section stays: the
+     `CARRY_OVER_REFUSED`, needing a fresh review. A published topic
+     integrates as `NO_FF` when it is compatible; on `CONFLICT` or
+     `OVERLAP` it stops for a reconcile commit on the topic and a review of
+     that commit. Either way the word is asked for again on the SHA being
+     integrated: the rebased tip, or for `NO_FF` the reviewed SHA. The rest
+     of the section stays: the
      `--check` rule, the `STOP CHECKOUT_NOT_ON_MAIN` case, the `--repo` form
      for the root and the cleanup commands.
    - "Writer: after integration" and "Reviewer: after integration" stay in
@@ -260,15 +269,16 @@ steps, each ending on its done condition:
      root checkout, give the Owner the reviewed SHA, the check line and the
      instruction, and ask for the word on that exact SHA; only the Owner
      gives it.
-   - On `STOP REBASE_REQUIRED`, have the writer rebase onto `main` and run
-     `atc integrate --check --reviewed <reviewed SHA> --rebased <rebased
-     tip>`. When the carry-over holds, ask the Owner for the word on the
-     rebased tip, naming the carried-from SHA and the `main` commits in
-     between; on `CARRY_OVER_REFUSED`, the reviewer re-reviews the rebased
-     tip first.
-   - On `STOP MAIN_BEHIND_ORIGIN`, `MAIN_DIVERGED_FROM_ORIGIN` or
-     `FETCH_FAILED`, follow the next step the stop names in
-     `GIT_WORKFLOW.md` § Command results before asking for any word.
+   - On a `STOP` whose `next:` names a rebase (`REBASE_REQUIRED`, or
+     `OVERLAP` or `CONFLICT` of an unpublished topic), have the writer
+     rebase onto `main` and run `atc integrate --check --reviewed <reviewed
+     SHA> --rebased <rebased tip>`. When the carry-over holds, ask the Owner
+     for the word on the rebased tip, naming the carried-from SHA and the
+     `main` commits in between; on `CARRY_OVER_REFUSED`, the reviewer
+     re-reviews the rebased tip first.
+   - On any other `STOP`, follow its `next:` line (`GIT_WORKFLOW.md`
+     § Command results); a `next:` that names a re-review goes back to the
+     reviewer before any word is asked for.
    With the word, run the instruction, or forward it to the writer with the
    Owner's words quoted, and check the result as `atc-review` "Writer:
    after integration" says. Done when the Owner's word is recorded with its
@@ -300,11 +310,14 @@ and confirms no tool name in the body and no project-specific value in
 
 1. `git mv shared/skills/hami-worktree shared/skills/atc-worktree` and
    `git mv shared/skills/hami-shared-skill shared/skills/atc-shared-skill`;
-   in each `SKILL.md` only `name:` and the skill citations change.
+   in each `SKILL.md` only `name:` and the skill citations change. In
+   `atc-worktree` those are the description's "through the shared
+   hami-worktree CLI" and "lacks the `hami-worktree` capability"; its
+   heading "Hami Managed Worktree" stays as the concept name.
 2. Citations inside the workspace root, each renamed with its meaning kept:
    - the canonical skills that cite them (`atc-review` cites
      `atc-worktree`; `hami-writing-for-agents` `SKILL-MECHANICS.md` cites
-     `atc-shared-skill`; `atc-shared-skill` cites itself);
+     `atc-shared-skill`);
    - `adapters/python/scripts/hami_worktree.py`, the docstring line naming
      the canonical skill path;
    - `adapters/python/scripts/doctor.py`, the check label `hami-worktree`,
@@ -313,26 +326,23 @@ and confirms no tool name in the body and no project-specific value in
      `link-skills.sh` arguments and the `.claude/skills/hami-worktree/`
      paths;
    - `shared/governance/GIT_WORKFLOW.md`, the two citations of the
-     `hami-worktree` capability (§ Integrate and § Cleanup trigger),
-     under the Owner's explicit authorization for this topic; the concept
-     name "Hami Managed Worktree" in `GIT_WORKFLOW.md` and `DELIVERY.md`
-     stays.
-3. Without that authorization, the two governance citations stay, and the
-   topic's step report lists them as citations of the former name for a
-   later governance round.
+     `hami-worktree` capability (§ Integrate and § Cleanup trigger), a
+     semantics-preserving correction for a renamed tool that
+     `GOVERNANCE_CHANGES.md` § Editing canonical rules and policy lets
+     proceed without waiting for activation authority; the concept name
+     "Hami Managed Worktree" in `GIT_WORKFLOW.md` and `DELIVERY.md` stays.
 
 Verification: a search of the root tree, outside `projects/`, `worktrees/`
 and `state/`, finds no live citation of `hami-worktree` or
-`hami-shared-skill` apart from the module and test file names of the out of
-scope list, the concept name, and, without the authorization, the two
-governance citations.
+`hami-shared-skill` apart from the module, file and probe-file names of the
+out of scope list and the concept name.
 
 ## 4. Render, citations, tests
 
-1. The root's old adapter directories, `.claude/skills/hami-review-relay/`,
-   `.agents/skills/hami-review-relay/` and the `hami-worktree` and
-   `hami-shared-skill` directories under `.claude/skills/`,
-   `.agents/skills/` and `.dsh/skills/`, are removed with `git rm -r`.
+1. The root's old adapter directories are removed with `git rm -r`:
+   `hami-review-relay`, `hami-worktree` and `hami-shared-skill` under
+   `.claude/skills/` and `.agents/skills/`, and `hami-worktree` under
+   `.dsh/skills/`.
    `atc onboard --sync --root-only` renders the root's adapters from the
    canonical skills and carries no orphan pruning (`root_adapter_plan` in
    `adapters/python/scripts/onboard_project.py`); `--prune` acts on
@@ -346,9 +356,12 @@ governance citations.
 3. `README.md` and `README.zh-TW.md`: the skill list names `atc-review`,
    `atc-worktree` and `atc-shared-skill` with the carrier-neutral wording
    for `atc-review`; one line each is added for `atc-coordinator`; a
-   sentence states the prefix rule of Decisions.
-4. `adapters/python/tests/test_shell_install.py`, `test_tooling.py` and
-   `test_hami_worktree.py` name the old skills as existing canonical skills
+   sentence states the prefix rule of Decisions. Outside the skill list,
+   `hami-worktree` also appears in the `link-skills.sh` example, the
+   "Skills that run a tool" sentence and the `--skills` example of each
+   README; each names `atc-worktree`.
+4. `adapters/python/tests/test_shell_install.py` and `test_tooling.py` name
+   the old skills as existing canonical skills or as the doctor check label
    in several assertions; each names the new skill with its meaning kept.
    A search of the root tree, outside `projects/`, `worktrees/` and
    `state/`, finds every other live citation; `.agents/handoffs/` is
@@ -356,7 +369,8 @@ governance citations.
 5. Verification of the topic: `git diff --check`; from `adapters/python`,
    `uv run --locked pytest tests/test_shell_install.py
    tests/test_onboard_prune.py tests/test_tooling.py
-   tests/test_hami_worktree.py` (the suite's `addopts` carries `-q`); the
+   tests/test_hami_worktree.py` (the last because the module's docstring
+   changes; the suite's `addopts` carries `-q`); the
    searches of item 4 and § 3 return no live citation of the former names
    beyond the exceptions § 3 lists; the rule-preservation check of § 1.
 
@@ -377,7 +391,10 @@ After the topic of §§ 1 to 4 integrates:
    render (`build_plan` renders a skill without `adoption: baseline`
    wherever its adapter file exists). The same topic renames the project's
    live citations of the former names in its documentation; task records
-   and other history keep the name they were written with.
+   and other history keep the name they were written with, and the
+   vendored `.atc/governance/` changes only through its pin advancing.
+   Until a project's round, a sync of that project runs without `--prune`,
+   so `hami-worktree` is never pruned before `atc-worktree` is seeded.
 3. `atc-coordinator` is seeded only in the projects the Owner names, in
    that project's sync topic, the same way as `atc-worktree`.
 4. Verification per project: `atc onboard --check <project>` lists nothing
@@ -389,5 +406,3 @@ After the topic of §§ 1 to 4 integrates:
 
 - Which projects opt in to `atc-coordinator` first; ria-project runs
   coordinator sessions.
-- Whether this topic carries the authorization to rename the two
-  `hami-worktree` citations in `shared/governance/GIT_WORKFLOW.md` (§ 3).
