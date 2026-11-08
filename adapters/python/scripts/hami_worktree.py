@@ -12,7 +12,7 @@ code and next step.
 project's repository or worktrees root; an explicit value always wins.
 
 Usage:
-  hami_worktree.py create  --project P --owner O --topic T --contract 1 [--session S] [--json]
+  hami_worktree.py create  --project P --owner O --topic T --contract 1 [--session S] [--base-sha FULL_SHA] [--json]
   hami_worktree.py resume  --project P --owner O --topic T --contract 1 [--session S] [--rebind-session] [--json]
   hami_worktree.py audit   --project P --contract 1 [--owner O] [--topic T] [--json]
   hami_worktree.py cleanup --project P --owner O --topic T --contract 1 [--json]
@@ -46,6 +46,7 @@ OWNERS = ("claude", "codex", "dsh")
 TOPIC = re.compile(r"[a-z0-9][a-z0-9-]{0,47}")
 V1_NAME = re.compile(rf"({'|'.join(OWNERS)})\+({TOPIC.pattern})")
 BRANCH_PREFIX = "worktree-"
+REMOTE = "origin"
 NO_SESSION = "-"
 FILE_ATTRIBUTE_REPARSE_POINT = 0x400
 # A probe covers only the deepest existing directory, so a refusal deeper in a
@@ -54,6 +55,7 @@ PERMISSION_TEXT = re.compile(r"permission denied|access is denied|operation not 
 
 NEXT = {
     "OK": "continue",
+    "RECOVERED": "continue; the half-finished cleanup is complete",
     "ALREADY_EXISTS": "use resume",
     "NOT_FOUND": "create it if this is a new task; otherwise confirm the topic",
     "IDENTITY_MISMATCH": "stop and hand to the user",
@@ -63,6 +65,7 @@ NEXT = {
     "DIRTY": "commit or clean the worktree, then retry",
     "UNMERGED": "integrate it per the lifecycle first, otherwise keep the worktree",
     "ALREADY_INTEGRATED": "run cleanup without --squash-integrated",
+    "BASE_MISMATCH": "pass the exact tip of the topic's own branch on origin, or create from main without --base-sha",
     "ARCHIVE_MISMATCH": "keep the worktree; verify the local archive tag or retained ref preserves the expected HEAD",
     "HEAD_MISMATCH": "keep the worktree; confirm the exact HEAD authorized for abandonment or squash cleanup",
     "MAP_INVALID": "fix workspace.yaml (or the ATC_ROOT override)",
@@ -73,6 +76,7 @@ NEXT = {
 }
 ENVIRONMENT_CODES = {"MAP_INVALID", "UNKNOWN_PROJECT", "CONTRACT_INCOMPATIBLE", "PERMISSION_DENIED", "UNSUPPORTED_ENVIRONMENT"}
 AUDIT_NON_FINDINGS = {"OK", "LEGACY_TARGET"}
+SUCCESS_CODES = {"OK", "RECOVERED"}
 
 
 @dataclass
@@ -435,7 +439,43 @@ def create_conflict(repo: str, owner: str, topic: str, target: str, branch: str)
     return None
 
 
-def cmd_create(ctx: Context, owner: str, topic: str, session: str) -> Result:
+def remote_tip(repo: str, branch: str, target: str) -> str | None:
+    """The tip of ``refs/heads/<branch>`` asked of origin itself; None when origin has no such branch."""
+    ref = "refs/heads/" + branch
+    listed = git(repo, "ls-remote", "--exit-code", REMOTE, ref, readonly=True)
+    if listed.returncode not in (0, 2):
+        raise Stop(Result("UNSUPPORTED_ENVIRONMENT", target, f"cannot query {REMOTE}: {first_line(listed.stderr)}"))
+    # A pattern also matches longer refs ending in it; only the exact ref counts.
+    tips = [oid.strip() for oid, _, name in (line.partition("\t") for line in listed.stdout.splitlines()) if name.strip() == ref]
+    return tips[0] if tips else None
+
+
+def published_base(repo: str, branch: str, base_sha: str, target: str) -> Result | None:
+    """Refuse ``--base-sha`` unless it is the exact tip of the topic's own branch on origin."""
+    tip = remote_tip(repo, branch, target)
+    if tip is None:
+        return Result("BASE_MISMATCH", target, f"{branch} does not exist on {REMOTE}", {"base_sha": base_sha})
+    if tip != base_sha:
+        return Result("BASE_MISMATCH", target, f"--base-sha is not the tip of {branch} on {REMOTE}",
+                      {"base_sha": base_sha, "remote_tip": tip})
+    return None
+
+
+def fetch_published_base(repo: str, branch: str, base_sha: str, target: str) -> Result | None:
+    """Fetch the topic's branch into its remote-tracking ref; the fetched tip must still be ``base_sha``."""
+    tracking = f"refs/remotes/{REMOTE}/{branch}"
+    fetched = git(repo, "fetch", "--no-tags", REMOTE, f"+refs/heads/{branch}:{tracking}")
+    if fetched.returncode != 0:
+        code = "PERMISSION_DENIED" if PERMISSION_TEXT.search(fetched.stderr) else "UNSUPPORTED_ENVIRONMENT"
+        return Result(code, target, f"cannot fetch {branch} from {REMOTE}", {"git": first_line(fetched.stderr)})
+    tip = commit_of(repo, tracking)
+    if tip != base_sha:
+        return Result("BASE_MISMATCH", target, f"--base-sha is not the tip of {branch} on {REMOTE}",
+                      {"base_sha": base_sha, "remote_tip": tip})
+    return None
+
+
+def cmd_create(ctx: Context, owner: str, topic: str, session: str, base_sha: str | None = None) -> Result:
     name, branch = durable(owner, topic)
     target = os.path.join(ctx.project.worktrees, name)
     repo = ctx.project.repo
@@ -444,9 +484,15 @@ def cmd_create(ctx: Context, owner: str, topic: str, session: str) -> Result:
     if conflict is not None:
         return conflict
     check_resolved(target)
-    base = git(repo, "rev-parse", "--verify", "--quiet", "main^{commit}", readonly=True).stdout.strip()
-    if not base:
-        return Result("UNSUPPORTED_ENVIRONMENT", repo, "cannot resolve main")
+    if base_sha is None:
+        base = git(repo, "rev-parse", "--verify", "--quiet", "main^{commit}", readonly=True).stdout.strip()
+        if not base:
+            return Result("UNSUPPORTED_ENVIRONMENT", repo, "cannot resolve main")
+    else:
+        refusal = published_base(repo, branch, base_sha, target)
+        if refusal is not None:
+            return refusal
+        base = base_sha
     if not supports_lock_reason(repo):
         return Result("UNSUPPORTED_ENVIRONMENT", repo, "git worktree add does not support --lock --reason")
     require_writable(repo, target)
@@ -454,10 +500,18 @@ def cmd_create(ctx: Context, owner: str, topic: str, session: str) -> Result:
     destination = nearest_existing(ctx.project.worktrees)
     if not subdir_creatable(destination):
         return Result("PERMISSION_DENIED", target, f"cannot create directories under {destination} from this session")
+    created = {"branch": branch, "base": base}
+    if base_sha is not None:
+        fetch = commit_of(repo, base) != base
+        if fetch:
+            refusal = fetch_published_base(repo, branch, base, target)
+            if refusal is not None:
+                return refusal
+        created.update(base_source=f"{REMOTE}/{branch}", fetched=fetch)
     # The SHA, not the name, so the reported base is exactly the commit the worktree starts from.
     added = git(repo, "worktree", "add", "--lock", "--reason", f"{owner}:{topic}:{session}", "-b", branch, target, base)
     if added.returncode == 0:
-        return Result("OK", target, evidence={"branch": branch, "base": base})
+        return Result("OK", target, evidence=created)
     evidence = {"git": first_line(added.stderr)}
     conflict = create_conflict(repo, owner, topic, target, branch)
     if conflict is not None:
@@ -693,12 +747,66 @@ def cleanup_branch_config(repo: str, branch: str) -> dict:
     return {"branch_config": "removed"}
 
 
+def remove_empty_directory(path: str) -> None:
+    """``rmdir`` removes only an empty directory, so an entry that arrives after the check stops it."""
+    os.rmdir(path)
+
+
+def recover_cleanup(ctx: Context, owner: str, topic: str, refusal: Result) -> Result:
+    """Finish a cleanup Git half-completed, or return ``refusal`` naming the condition that does not hold.
+
+    All three hold: the path is not registered as a worktree (``refusal`` establishes it), the
+    directory is empty with no reparse point, and the topic branch is merged into ``main``.
+    """
+    repo, target = ctx.project.repo, refusal.target
+    branch = durable(owner, topic)[1]
+
+    def refuse(condition: str) -> Result:
+        refusal.evidence["recovery_refused"] = condition
+        return refusal
+
+    if is_reparse(target) or not os.path.isdir(target):
+        return refuse("not a plain directory")
+    with os.scandir(target) as entries:
+        if next(entries, None) is not None:
+            return refuse("directory not empty")
+    tip = commit_of(repo, "refs/heads/" + branch)
+    if tip is None:
+        return refuse(f"branch {branch} missing")
+    main_tip = commit_of(repo, "main")
+    if main_tip is None:
+        return Result("UNSUPPORTED_ENVIRONMENT", target, "cannot resolve main")
+    if not is_ancestor(repo, tip, main_tip):
+        return refuse(f"branch {branch} not merged into main")
+    require_writable(repo, target)
+    if any(key(e["worktree"]) == key(target) for e in list_worktrees(repo)[1:]):
+        return refuse("registered")
+    try:
+        remove_empty_directory(target)
+    except OSError as exc:
+        return Result("PERMISSION_DENIED", target, f"cannot remove the empty directory ({exc.strerror or exc})",
+                      {"branch": branch, "branch_kept": True})
+    # Compare-and-delete: a branch that moved since the merge check is kept.
+    deleted = git(repo, "update-ref", "-d", "refs/heads/" + branch, tip)
+    kept = deleted.returncode != 0
+    evidence: dict = {"branch": branch, "head": tip, "branch_kept": kept}
+    if kept:
+        evidence["git"] = first_line(deleted.stderr)
+    else:
+        evidence.update(cleanup_branch_config(repo, branch))
+    evidence.update(completion_evidence(repo, target, branch, kept))
+    return Result("RECOVERED", target, "removed the empty directory and the merged branch", evidence)
+
+
 def cmd_cleanup(ctx: Context, owner: str, topic: str, *, abandon: bool = False, archive_tag: str | None = None,
                 expected_head: str | None = None, squash: SquashRequest | None = None) -> Result:
     repo = ctx.project.repo
     try:
         target, entry = resolve_existing(ctx, owner, topic)
     except Stop as stop:
+        plain = not abandon and squash is None
+        if plain and (stop.result.code, stop.result.detail) == ("PATH_UNSAFE", "unregistered"):
+            return recover_cleanup(ctx, owner, topic, stop.result)
         if stop.result.code == "NOT_FOUND":
             present = branch_present(repo, durable(owner, topic)[1])
             if present is not None:
@@ -903,6 +1011,8 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--json", action="store_true")
     for name in ("create", "resume"):
         commands[name].add_argument("--session", type=session_arg, default=NO_SESSION)
+    commands["create"].add_argument("--base-sha", type=full_sha_arg,
+                                   help="start from this exact tip of the topic's own branch on origin")
     commands["resume"].add_argument("--rebind-session", action="store_true")
     commands["cleanup"].add_argument("--abandon", action="store_true",
                                     help="explicitly abandon a clean topic preserved by a local archive tag")
@@ -959,7 +1069,7 @@ def run(args: argparse.Namespace, root: Path, environ: dict[str, str], home: str
         if args.command == "audit":
             return cmd_audit(ctx, args.owner, args.topic)
         if args.command == "create":
-            return [cmd_create(ctx, args.owner, args.topic, args.session)]
+            return [cmd_create(ctx, args.owner, args.topic, args.session, args.base_sha)]
         if args.command == "resume":
             return [cmd_resume(ctx, args.owner, args.topic, args.session, args.rebind_session)]
         squash = SquashRequest(args.reviewed_sha, args.expected_main, args.integrated_as, args.retained_ref) if args.squash_integrated else None
@@ -974,7 +1084,7 @@ def run(args: argparse.Namespace, root: Path, environ: dict[str, str], home: str
 def verdict(command: str, result: Result) -> str:
     if result.code in ENVIRONMENT_CODES:
         return "ERROR"
-    return "OK" if result.code in (AUDIT_NON_FINDINGS if command == "audit" else {"OK"}) else "STOP"
+    return "OK" if result.code in (AUDIT_NON_FINDINGS if command == "audit" else SUCCESS_CODES) else "STOP"
 
 
 def exit_status(command: str, results: list[Result]) -> int:

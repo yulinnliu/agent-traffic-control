@@ -1378,3 +1378,159 @@ def test_plain_cleanup_with_a_kept_branch_is_not_complete(ws, capsys):
     status, results = ws.run(capsys, "cleanup")
     evidence = single(results)["evidence"]
     assert (status, evidence["branch_kept"], evidence["worktree_removed"], evidence["cleanup_complete"]) == (0, True, True, False)
+
+
+# Create from a published topic tip
+
+
+def publish_topic(ws: Workspace, tmp_path: Path, branch: str = "worktree-claude+topic") -> str:
+    """Give the repo an origin holding ``branch`` one commit past main, made in another clone."""
+    origin = tmp_path / "origin.git"
+    if not origin.exists():
+        run_git(tmp_path, "init", "-q", "--bare", "-b", "main", str(origin))
+        run_git(ws.repo, "remote", "add", "origin", str(origin))
+        run_git(ws.repo, "push", "-q", "origin", "main")
+    other = tmp_path / f"other-{branch.replace('+', '-')}"
+    run_git(tmp_path, "clone", "-q", str(origin), str(other))
+    run_git(other, "switch", "-q", "-c", branch)
+    tip = commit(other, "published.txt", f"{branch}\n")
+    run_git(other, "push", "-q", "origin", branch)
+    return tip
+
+
+@pytest.mark.integration
+def test_create_from_the_published_tip_of_the_topic_branch(ws: Workspace, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    tip = publish_topic(ws, tmp_path)
+    status, results = ws.run(capsys, "create", "claude", "topic", "--session", "s1", "--base-sha", tip.upper())
+    result = single(results)
+    path = ws.path("claude", "topic")
+    assert (status, result["reason"], result["target"]) == (0, "OK", str(path))
+    assert result["evidence"] == {"branch": "worktree-claude+topic", "base": tip,
+                                  "base_source": "origin/worktree-claude+topic", "fetched": True}
+    assert run_git(path, "rev-parse", "HEAD") == tip
+    assert run_git(path, "branch", "--show-current") == "worktree-claude+topic"
+    assert ws.lock_reason(path) == "claude:topic:s1"
+
+
+@pytest.mark.integration
+def test_create_from_a_published_tip_already_present_does_not_fetch(ws: Workspace, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    tip = publish_topic(ws, tmp_path)
+    run_git(ws.repo, "fetch", "-q", "origin")
+    status, results = ws.run(capsys, "create", "claude", "topic", "--base-sha", tip)
+    assert (status, single(results)["evidence"]["fetched"]) == (0, False)
+    assert run_git(ws.path("claude", "topic"), "rev-parse", "HEAD") == tip
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("fault", ["main", "parent", "other-owner", "unpublished"])
+def test_create_refuses_a_base_that_is_not_the_published_topic_tip(ws: Workspace, tmp_path: Path, fault: str, capsys: pytest.CaptureFixture[str]) -> None:
+    tip = publish_topic(ws, tmp_path, "worktree-codex+topic" if fault in ("other-owner", "unpublished") else "worktree-claude+topic")
+    run_git(ws.repo, "fetch", "-q", "origin")
+    base = {"main": run_git(ws.repo, "rev-parse", "main"), "parent": run_git(ws.repo, "rev-parse", f"{tip}~1"),
+            "other-owner": tip, "unpublished": commit(ws.repo, "local.txt", "local\n")}[fault]
+    if fault == "unpublished":
+        run_git(ws.repo, "reset", "-q", "--hard", "HEAD~1")
+    status, results = ws.run(capsys, "create", "claude", "topic", "--base-sha", base)
+    result = single(results)
+    assert (status, result["reason"], result["evidence"]["base_sha"]) == (1, "BASE_MISMATCH", base)
+    if fault in ("main", "parent"):
+        assert result["evidence"]["remote_tip"] == tip
+    assert not ws.path("claude", "topic").exists()
+    assert run_git(ws.repo, "branch", "--list", "worktree-claude+topic") == ""
+
+
+@pytest.mark.integration
+def test_create_with_a_base_and_no_origin_is_an_environment_problem(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    main = run_git(ws.repo, "rev-parse", "main")
+    status, results = ws.run(capsys, "create", "claude", "topic", "--base-sha", main)
+    assert (status, single(results)["reason"]) == (2, "UNSUPPORTED_ENVIRONMENT")
+    assert not ws.path("claude", "topic").exists()
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("value", ["abc123", "g" * 40, "a" * 41])
+def test_base_sha_must_be_a_full_commit_sha(ws: Workspace, value: str, capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as exc:
+        ws.run(capsys, "create", "claude", "topic", "--base-sha", value)
+    assert exc.value.code == 2
+
+
+# Cleanup that Git half-completed
+
+
+def half_cleaned(ws: Workspace, capsys: pytest.CaptureFixture[str], merged: bool = True) -> Path:
+    """The state a busy directory leaves: unregistered, files gone, empty directory and branch kept."""
+    ws.run(capsys, "create")
+    path = ws.path("claude", "topic")
+    if merged:
+        merge_into_main(ws, path)
+    else:
+        commit(path, "work.txt", "work\n")
+    run_git(ws.repo, "worktree", "unlock", str(path))
+    run_git(ws.repo, "worktree", "remove", "--force", str(path))
+    path.mkdir()
+    return path
+
+
+@pytest.mark.integration
+def test_cleanup_recovers_an_unregistered_empty_directory_with_a_merged_branch(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    path = half_cleaned(ws, capsys)
+    run_git(ws.repo, "config", "branch.worktree-claude+topic.description", "kept")
+    status, results = ws.run(capsys, "cleanup")
+    result = single(results)
+    assert (status, result["reason"], result["target"]) == (0, "RECOVERED", str(path))
+    assert result["evidence"]["branch_kept"] is False
+    assert (result["evidence"]["cleanup_complete"], result["evidence"]["branch_config"]) == (True, "removed")
+    assert not path.exists()
+    assert run_git(ws.repo, "branch", "--list", "worktree-claude+topic") == ""
+    assert single(ws.run(capsys, "cleanup")[1])["reason"] == "NOT_FOUND"
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("fault", ["file", "hidden-dir", "reparse-child", "unmerged", "branch-missing", "abandon-mode"])
+def test_cleanup_refuses_recovery_unless_all_three_conditions_hold(ws: Workspace, tmp_path: Path, fault: str, capsys: pytest.CaptureFixture[str]) -> None:
+    path = half_cleaned(ws, capsys, merged=fault != "unmerged")
+    if fault == "file":
+        (path / "left.txt").write_text("x", encoding="utf-8")
+    elif fault == "hidden-dir":
+        (path / ".git").mkdir()
+    elif fault == "reparse-child":
+        (tmp_path / "elsewhere").mkdir()
+        make_link(path / "link", tmp_path / "elsewhere")
+    elif fault == "branch-missing":
+        run_git(ws.repo, "branch", "-D", "worktree-claude+topic")
+    before = run_git(ws.repo, "for-each-ref", "refs/heads")
+    extra = ("--abandon", "--archive-tag", "archive/x", "--expected-head", "a" * 40) if fault == "abandon-mode" else ()
+    status, results = ws.run(capsys, "cleanup", "claude", "topic", *extra)
+    result = single(results)
+    assert (status, result["reason"], result["detail"]) == (1, "PATH_UNSAFE", "unregistered")
+    assert path.is_dir()
+    assert run_git(ws.repo, "for-each-ref", "refs/heads") == before
+    if fault == "reparse-child":
+        assert (tmp_path / "elsewhere").is_dir()
+
+
+@pytest.mark.integration
+def test_cleanup_refuses_recovery_of_a_reparse_point_at_the_target(ws: Workspace, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    path = half_cleaned(ws, capsys)
+    path.rmdir()
+    (tmp_path / "elsewhere").mkdir()
+    make_link(path, tmp_path / "elsewhere")
+    status, results = ws.run(capsys, "cleanup")
+    assert (status, single(results)["reason"], results[0]["detail"]) == (1, "PATH_UNSAFE", "reparse")
+    assert os.path.lexists(path)
+    assert run_git(ws.repo, "branch", "--list", "worktree-claude+topic") != ""
+
+
+@pytest.mark.integration
+def test_recovery_of_a_busy_directory_keeps_the_branch(ws: Workspace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    path = half_cleaned(ws, capsys)
+
+    def busy(target: str) -> None:
+        raise PermissionError(13, "Access is denied", target)
+
+    monkeypatch.setattr(hw, "remove_empty_directory", busy)
+    status, results = ws.run(capsys, "cleanup")
+    assert (status, single(results)["reason"]) == (2, "PERMISSION_DENIED")
+    assert path.is_dir()
+    assert run_git(ws.repo, "branch", "--list", "worktree-claude+topic") != ""

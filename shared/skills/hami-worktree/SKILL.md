@@ -67,20 +67,22 @@ machine-readable result: `contract`, `command`, and per target `verdict`
 Pick the command from the task: a new task is `create`, continuing one is
 `resume`. There is deliberately no "create or resume".
 
-A topic published from elsewhere (a branch ahead of local `main` with no
-managed worktree yet) has no base option on `create`. Route it as a recorded
-exception: `create` the topic from `main`, then, inside the new worktree,
-`git -C <path> merge --ff-only <published tip>` (it succeeds only when `main`
-is an ancestor of that tip), and report the route and both SHAs to the task
-authority.
+A topic already published on `origin` with no managed worktree here is
+continued with `create --base-sha`, given the exact 40-character tip of the
+topic's own branch on `origin` (`worktree-<owner>+<topic>` for this owner and
+topic). The CLI asks `origin` for that branch, refuses any other SHA with
+`BASE_MISMATCH` and creates nothing, fetches the tip when it is not present
+locally, and starts the new branch at that SHA. Report the published tip as the
+worktree's base.
 
 | Command | Use | Changes |
 | --- | --- | --- |
 | `create --owner O --topic T [--session S]` | start a new task | adds the worktree on a new branch from local `main`, locked with the reason above |
+| `create ... --base-sha FULL_SHA` | continue a topic published on `origin` that has no worktree here | verifies the SHA is the exact tip of the topic's branch on `origin`, fetches it if missing, adds the worktree on a new branch at that SHA, locked as above |
 | `resume --owner O --topic T [--session S]` | continue a task in a new session | nothing; reports how many commits `main` has moved since the worktree's tip |
 | `resume ... --rebind-session` | the task authority explicitly asked to resume this topic from this session | rewrites the lock's session field (unlock then lock; not atomic) |
 | `audit [--owner O] [--topic T]` | list a project's worktrees with lock, clean and merged state | nothing; read-only |
-| `cleanup --owner O --topic T` | the task is integrated and the worktree is no longer needed | re-checks identity, merged and clean, then removes the worktree and deletes its branch |
+| `cleanup --owner O --topic T` | the task is integrated and the worktree is no longer needed | re-checks identity, merged and clean, then removes the worktree and deletes its branch; finishes a removal Git left half-done (below) |
 | `cleanup --owner O --topic T --abandon --archive-tag archive/NAME --expected-head FULL_SHA` | task authority explicitly abandons this exact topic tip | requires a clean tree and a local archive tag at the exact tip; removes the worktree and compare-and-deletes its branch while retaining the tag |
 | `cleanup --owner O --topic T --squash-integrated --expected-head FULL_SHA --reviewed FULL_SHA --expected-main FULL_SHA --integrated-as FULL_SHA --retained-ref refs/tags/NAME` | the topic was integrated by an authorized same-tree squash and cleanup is authorized | requires a clean tree, a single-parent squash commit on the recorded main tip with the topic tip's tree, reachable from current `main`, and an existing retained ref that reaches the tip; removes the worktree and compare-and-deletes its branch while retaining the ref |
 
@@ -93,6 +95,7 @@ usage, environment, permission or contract problem.
 | Code | Next step |
 | --- | --- |
 | `OK` | continue |
+| `RECOVERED` | `cleanup` finished a removal Git left half-done; continue |
 | `ALREADY_EXISTS` | use `resume` |
 | `NOT_FOUND` | `create` it if this is a new task; otherwise confirm the topic |
 | `IDENTITY_MISMATCH` | stop and hand to the user — the directory, branch, lock or caller disagree about who owns it |
@@ -102,12 +105,13 @@ usage, environment, permission or contract problem.
 | `DIRTY` | commit or clean the worktree, then retry |
 | `UNMERGED` | integrate it per the lifecycle first, otherwise keep the worktree; explicitly authorized abandonment uses the archive-bound cleanup option; under `--squash-integrated`, `detail` names the recorded integration fact that does not hold |
 | `ALREADY_INTEGRATED` | the topic tip is already reachable from `main`; run `cleanup` without `--squash-integrated` |
+| `BASE_MISMATCH` | `--base-sha` is not the exact tip of the topic's own branch on `origin`, or that branch does not exist there; `evidence` holds `base_sha` and, when the branch exists, `remote_tip`. Confirm the published tip with the task authority, or `create` from `main` without the option |
 | `ARCHIVE_MISMATCH` | keep the worktree; verify the local archive tag or retained ref preserves the expected HEAD |
 | `HEAD_MISMATCH` | keep the worktree; confirm the exact HEAD authorized for abandonment or squash cleanup |
 | `MAP_INVALID` | fix `workspace.yaml` at the root `atc` resolved (or the `ATC_ROOT` override, if set) |
 | `UNKNOWN_PROJECT` | fix `--project` |
 | `CONTRACT_INCOMPATIBLE` | stop; report the contract your adapter expects and the one the workspace provides |
-| `PERMISSION_DENIED` | the sandbox, an ACL or a busy directory blocked Git metadata or the worktrees root. On `create`, `resume` or `audit`: leave the directory or get approval, then retry once. On `cleanup`: Git may already have unregistered the worktree, so run `audit` for the topic before anything else; a missing registration means the cleanup half-completed, and the leftover directory and branch go to the user |
+| `PERMISSION_DENIED` | the sandbox, an ACL or a busy directory blocked Git metadata or the worktrees root; leave the directory or get approval, then retry once. A retried `cleanup` finishes a removal Git left half-done and reports `RECOVERED` |
 | `UNSUPPORTED_ENVIRONMENT` | a local capability is missing or unverifiable (Git, `main`, lock-reason support, another tool's worktree root that cannot be read); stop retrying |
 
 In `audit`, `LEGACY_TARGET` is informational; only identity conflicts, a
@@ -121,8 +125,16 @@ missing lock and `PATH_UNSAFE` are findings.
   `cleanup` after it.
 - Run `cleanup` from a working directory outside the worktree, as its own
   call after the last command that ran inside it (a merge step included). A
-  shell still sitting in the tree keeps the directory busy and the removal
-  stops halfway.
+  shell still sitting in the tree keeps the directory busy: Git unregisters the
+  worktree and deletes its files, the empty directory and the branch remain,
+  and `cleanup` returns `PERMISSION_DENIED`. Leave the directory and run the
+  same `cleanup` again. It finishes the removal and reports `RECOVERED` only
+  when the path is not registered as a worktree, the directory is empty (no
+  files, no reparse points) and the topic branch is merged into `main`; it
+  removes the empty directory and compare-and-deletes the branch. If any of the
+  three fails it refuses with `PATH_UNSAFE` `unregistered`, `evidence`
+  `recovery_refused` names the failing condition, and nothing is deleted.
+  Abandoned and squash cleanup never recover this way.
 - The lock stays from `create` until `cleanup`. It guards against removal and
   records identity; it is not an edit lock. Never lock, unlock, move, prune or
   remove a worktree by hand.
