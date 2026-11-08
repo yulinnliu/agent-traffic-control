@@ -39,7 +39,8 @@ candidate_sha        full commit ID the verifier ran against
 tree                 tree ID of that commit
 clean                true: candidate HEAD unchanged and status empty after the verifier
 expected_main        main before the integration
-reviewed             reviewed source SHA
+reviewed             reviewed source SHA; the rebased tip of a carried-over approval
+carried_over_from    present only for a carried-over approval: the reviewed SHA it came from
 verdict              "FF" | "NO_FF"
 authority_reference  as supplied to the adapter
 verify_argv          the verifier argv that ran

@@ -135,6 +135,11 @@ def test_recorded_python_version_is_not_compared(repo: Path, verified: str) -> N
 
 def test_merge_result_does_not_reuse_the_reviewed_tip_record(repo: Path) -> None:
     tip = topic(repo, {"packages/a/src/x.py": "x = 1\n"}, "first")
+    # A published topic integrates as a merge.
+    origin = repo.parent / "origin.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(origin)], capture_output=True, check=True)
+    run_git(repo, "remote", "add", "origin", str(origin))
+    run_git(repo, "push", "-q", "origin", "first")
     commit(repo, "packages/b/src/y.py", "y = 1\n")
     integrate(repo, "first", tip)
     merged = run_git(repo, "rev-parse", "main")

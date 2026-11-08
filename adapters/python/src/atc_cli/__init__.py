@@ -5,7 +5,7 @@
 Commands map onto the scripts under `adapters/python/scripts/`:
 
     worktree   hami_worktree.py   create / resume / audit / cleanup
-    preflight  git_preflight.py   merge / cleanup verdicts
+    preflight  git_preflight.py   merge / cleanup / push verdicts
     integrate  git_integrate.py   advance local main to a reviewed topic
     validate   validate_workspace.py
     onboard    onboard_project.py

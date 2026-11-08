@@ -47,6 +47,16 @@ def topic(repo: Path, edits: dict[str, str]) -> str:
     return tip
 
 
+def publish(repo: Path, *refs: str) -> Path:
+    """Push ``refs`` to a bare `origin` beside the repository, added on first use."""
+    origin = repo.parent / "origin.git"
+    if not origin.exists():
+        run_git(repo.parent, "init", "-q", "--bare", "-b", "main", str(origin))
+        run_git(repo, "remote", "add", "origin", str(origin))
+    run_git(repo, "push", "-q", "origin", *refs)
+    return origin
+
+
 def test_fast_forward_when_main_is_merge_base(repo: Path) -> None:
     tip = topic(repo, {"a.txt": "a2\n"})
     report = gp.merge_preflight(repo, "topic", tip)
@@ -58,6 +68,7 @@ def test_fast_forward_when_main_is_merge_base(repo: Path) -> None:
 
 def test_no_ff_when_main_advanced_on_other_files(repo: Path) -> None:
     tip = topic(repo, {"a.txt": "a2\n"})
+    publish(repo, "topic")
     commit(repo, "c.txt", "c\n")
     report = gp.merge_preflight(repo, "topic", tip[:10])
     assert (report.verdict, report.reason) == ("NO_FF", "COMPATIBLE")
@@ -181,6 +192,7 @@ def test_cli_json_and_exit_codes(repo: Path, capsys: pytest.CaptureFixture[str])
 def test_every_stop_names_its_next_step(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     assert set(gp.NEXT) == {reason for reason in gp.REASONS if reason not in (
         "FAST_FORWARD", "COMPATIBLE", "NOT_A_WORKTREE", "MAIN_CHECKOUT", "NOT_MERGED", "WORKTREE_DIRTY", "SAFE_TO_REMOVE",
+        "PUSH_LISTED",
     )}
     tip = topic(repo, {"a.txt": "a2\n"})
     (repo / "b.txt").write_text("dirty\n", encoding="utf-8")

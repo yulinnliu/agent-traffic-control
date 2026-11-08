@@ -3,20 +3,24 @@
 
 `merge` evaluates that file's integration table for one topic branch and
 prints a verdict (FF / NO_FF / STOP), a stable reason code, and the evidence
-behind it. `cleanup` reports whether a linked worktree is safe to hand to the
-repo's own removal tooling (REMOVABLE / KEEP). Neither command writes to the
-repository: conflicts are detected with `git merge-tree --write-tree`, which
-creates only unreferenced objects.
+behind it; it compares against `origin` as last fetched. `cleanup` reports
+whether a linked worktree is safe to hand to the repo's own removal tooling
+(REMOVABLE / KEEP). `push` runs `git fetch origin` and lists every commit a
+push of main would carry, grouped by the integration that brought it in
+(PUSH / STOP). None of them writes a branch, the index or the working tree:
+conflicts are detected with `git merge-tree --write-tree`, which creates only
+unreferenced objects, and the fetch updates only remote-tracking refs.
 
 Usage:
   git_preflight.py merge --repo <checkout> --branch <topic> [--reviewed <sha>] [--main main] [--json]
   git_preflight.py cleanup --repo <checkout> --worktree <path> [--main main] [--json]
+  git_preflight.py push --repo <checkout> [--main main] [--json]
 
 A STOP verdict carries a `next:` line naming the step that resolves it
 (governance `GIT_WORKFLOW.md` § Integrate and § Command results).
 
-Exit status: 0 for FF, NO_FF or REMOVABLE; 1 for STOP or KEEP; 2 for a usage
-or git error.
+Exit status: 0 for FF, NO_FF, REMOVABLE or PUSH; 1 for STOP or KEEP; 2 for a
+usage or git error.
 """
 
 from __future__ import annotations
@@ -33,6 +37,8 @@ from pathlib import Path
 # Hook-exported variables would redirect every `git -C <repo>` call to the
 # hook's own repository.
 SCRUBBED_ENV = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY")
+REMOTE = "origin"
+INTEGRATIONS = ("atc", "integrations.jsonl")
 
 # A review binds to an object ID, never to a ref or revision expression that
 # can move after the review.
@@ -56,12 +62,25 @@ REASONS = {
     "NOT_MERGED": "the worktree's tip is not reachable from main",
     "WORKTREE_DIRTY": "the worktree has uncommitted or untracked changes",
     "SAFE_TO_REMOVE": "tip reachable from main and tree clean; remove through the repo's own tooling",
+    "PUSH_LISTED": "every commit a push of main would carry is listed",
     "BRANCH_AMBIGUOUS": "several local branches point at the reviewed SHA",
     "NO_BRANCH_AT_REVIEWED": "no local branch points at or contains the reviewed SHA",
+    "FETCH_FAILED": "git fetch origin failed; main cannot be compared with origin",
+    "MAIN_BEHIND_ORIGIN": "local main is behind origin/main",
+    "MAIN_DIVERGED_FROM_ORIGIN": "local main and origin/main have diverged",
+    "REBASE_REQUIRED": (
+        "main advanced and the topic is unpublished (no origin branch is at the reviewed SHA); "
+        "rebase it onto main"
+    ),
 }
 
 _RUN_WITH_REVIEWED = "run again with the full SHA the formal review named"
 _REVIEW_DELTA = "review the delta, or re-review"
+_REBASE = (
+    "rebase the unpublished topic onto main, then run again with --rebased <rebased tip>; "
+    "the approval carries over only when the rebase is clean and every patch-id matches, "
+    "otherwise the rebased tip needs a fresh review"
+)
 _RECONCILE = (
     "reconcile on the topic branch with a new commit (merge main in, or fix forward), "
     "never by rewriting; re-review that commit"
@@ -82,6 +101,26 @@ NEXT = {
     "OVERLAP": "a reviewer judges semantic overlap, then prepare a merge candidate or " + _RECONCILE,
     "BRANCH_AMBIGUOUS": "run again with `--branch` naming the reviewed topic branch among those listed",
     "NO_BRANCH_AT_REVIEWED": "restore the reviewed topic branch at the reviewed SHA, or " + _RUN_WITH_REVIEWED,
+    "FETCH_FAILED": "restore access to origin (network, credentials), then run again",
+    "MAIN_BEHIND_ORIGIN": (
+        "fast-forward local main to origin/main in the integration checkout "
+        "(git merge --ff-only origin/main), then run again; the topic is reassessed against the new main"
+    ),
+    "MAIN_DIVERGED_FROM_ORIGIN": (
+        "the owner decides how the local-only main commits reach origin "
+        "(each is integrated again onto origin/main); run again once main contains origin/main"
+    ),
+    "REBASE_REQUIRED": _REBASE,
+}
+
+# An unpublished topic reaches the current main by a rebase, so these stops
+# name that step instead of a reconciling commit.
+NEXT_UNPUBLISHED = {
+    "CONFLICT": (
+        "rebase the unpublished topic onto main and resolve the conflicts; "
+        "the rebased tip needs a fresh review"
+    ),
+    "OVERLAP": _REBASE,
 }
 
 
@@ -100,21 +139,25 @@ class Report:
 
     def __post_init__(self) -> None:
         self.detail = self.detail or REASONS[self.reason]
-        if self.verdict == "STOP":
+        if self.verdict == "STOP" and self.next is None:
             self.next = NEXT[self.reason]
 
 
-def git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess:
+def git(
+    repo: Path, *args: str, check: bool = True, extra_env: dict[str, str] | None = None, input: str | None = None,
+) -> subprocess.CompletedProcess:
     env = {key: value for key, value in os.environ.items() if key not in SCRUBBED_ENV}
     # Stops `git status` from refreshing and rewriting the index of a checkout
     # another agent may be using.
     env["GIT_OPTIONAL_LOCKS"] = "0"
+    env.update(extra_env or {})
     result = subprocess.run(
         ["git", "-C", str(repo), *args],
         capture_output=True,
         text=True,
         encoding="utf-8",
         env=env,
+        input=input,
     )
     if check and result.returncode != 0:
         raise GitError(f"git {' '.join(args)}: {result.stderr.strip() or result.returncode}")
@@ -132,6 +175,52 @@ def is_ancestor(repo: Path, ancestor: str, descendant: str) -> bool:
 
 def count(repo: Path, range_spec: str) -> int:
     return int(git(repo, "rev-list", "--count", range_spec).stdout.strip())
+
+
+def has_remote(repo: Path) -> bool:
+    return REMOTE in git(repo, "remote").stdout.split()
+
+
+def fetch_origin(repo: Path) -> str | None:
+    """`git fetch origin`; the error text when it fails. A repository without `origin` fetches nothing."""
+    if not has_remote(repo):
+        return None
+    fetched = git(repo, "fetch", "--quiet", REMOTE, check=False, extra_env={"GIT_TERMINAL_PROMPT": "0"})
+    if fetched.returncode:
+        text = (fetched.stderr or fetched.stdout).splitlines()
+        return "; ".join(line.strip() for line in text if line.strip()) or f"exit {fetched.returncode}"
+    return None
+
+
+def origin_tip(repo: Path, main: str) -> str | None:
+    return rev(repo, f"refs/remotes/{REMOTE}/{main}")
+
+
+def published_refs(repo: Path, sha: str) -> list[str]:
+    """The origin branches whose tip is ``sha``, as last fetched."""
+    names = git(repo, "for-each-ref", "--format=%(refname)", "--points-at", sha, f"refs/remotes/{REMOTE}/").stdout.split()
+    return sorted(name.removeprefix("refs/remotes/") for name in names if name != f"refs/remotes/{REMOTE}/HEAD")
+
+
+def origin_state(repo: Path, main: str, main_tip: str) -> dict:
+    """Local main against origin/main as last fetched: both tips and the commits each side lacks."""
+    remote = origin_tip(repo, main)
+    ahead = count(repo, f"{remote}..{main_tip}") if remote else None
+    behind = count(repo, f"{main_tip}..{remote}") if remote else None
+    return {"origin_main_tip": remote, "main_ahead_of_origin": ahead, "main_behind_origin": behind}
+
+
+def origin_stop(state: dict, main: str, main_tip: str) -> tuple[str, str] | None:
+    """The stop for a local main that lacks origin/main commits: its reason and detail."""
+    ahead, behind, remote = state["main_ahead_of_origin"], state["main_behind_origin"], state["origin_main_tip"]
+    if not behind:
+        return None
+    if ahead:
+        return "MAIN_DIVERGED_FROM_ORIGIN", (
+            f"local {main} {main_tip} has {ahead} commits origin/{main} lacks, "
+            f"and origin/{main} {remote} has {behind} commits local {main} lacks"
+        )
+    return "MAIN_BEHIND_ORIGIN", f"local {main} {main_tip} is {behind} commits behind origin/{main} {remote}"
 
 
 def changed_files(repo: Path, base: str, tip: str) -> set[str]:
@@ -164,12 +253,20 @@ def merge_preflight(repo: Path, branch: str, reviewed: str | None, main: str = "
         "conflict": None,
         "conflict_files": [],
         "overlap_files": [],
+        **origin_state(repo, main, main_tip),
+        "published_refs": [],
     }
 
     ev["checkout_clean"] = not ev["checkout_dirty_paths"]
 
     def report(verdict: str, reason: str, detail: str = "") -> Report:
         return Report("merge", verdict, reason, detail, evidence=ev)
+
+    def unpublished_stop(reason: str) -> Report:
+        stopped = report("STOP", reason)
+        if not ev["published_refs"]:
+            stopped.next = NEXT_UNPUBLISHED[reason]
+        return stopped
 
     if reviewed is None:
         ev["reviewed_state"] = "missing"
@@ -192,6 +289,7 @@ def merge_preflight(repo: Path, branch: str, reviewed: str | None, main: str = "
         ev["reviewed_state"] = "ancestor"
         return report("STOP", "UNREVIEWED_COMMITS")
     ev["reviewed_state"] = "tip"
+    ev["published_refs"] = published_refs(repo, topic_tip)
 
     if is_ancestor(repo, topic_tip, main_tip):
         return report("STOP", "ALREADY_MERGED")
@@ -203,6 +301,8 @@ def merge_preflight(repo: Path, branch: str, reviewed: str | None, main: str = "
             "STOP", "CHECKOUT_DIRTY",
             f"{REASONS['CHECKOUT_DIRTY']}: {', '.join(ev['checkout_dirty_paths'])}",
         )
+    if behind := origin_stop(ev, main, main_tip):
+        return report("STOP", *behind)
     if merge_base == main_tip:
         return report("FF", "FAST_FORWARD")
 
@@ -212,11 +312,17 @@ def merge_preflight(repo: Path, branch: str, reviewed: str | None, main: str = "
     ev["conflict"] = trial.returncode == 1
     if ev["conflict"]:
         ev["conflict_files"] = sorted({line for line in trial.stdout.splitlines()[1:] if line})
-        return report("STOP", "CONFLICT")
+        return unpublished_stop("CONFLICT")
     overlap = changed_files(repo, merge_base, topic_tip) & changed_files(repo, merge_base, main_tip)
     ev["overlap_files"] = sorted(overlap)
     if overlap:
-        return report("STOP", "OVERLAP")
+        return unpublished_stop("OVERLAP")
+    if not ev["published_refs"]:
+        return report(
+            "STOP", "REBASE_REQUIRED",
+            f"main advanced by {ev['main_advanced_by']} commits since the topic's base {merge_base} "
+            f"and no origin branch is at the reviewed SHA {topic_tip}; rebase the topic onto main {main_tip}",
+        )
     return report("NO_FF", "COMPATIBLE")
 
 
@@ -269,6 +375,117 @@ def cleanup_preflight(repo: Path, worktree: Path, main: str = "main") -> Report:
     return report("REMOVABLE", "SAFE_TO_REMOVE")
 
 
+def read_integrations(repo: Path) -> list[dict]:
+    """The records `atc integrate` appended to `<git common dir>/atc/integrations.jsonl`."""
+    common = Path(git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip())
+    try:
+        lines = common.joinpath(*INTEGRATIONS).read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    records = []
+    for line in lines:
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(record, dict) and isinstance(record.get("candidate_sha"), str):
+            records.append(record)
+    return records
+
+
+def push_listing(repo: Path, main: str = "main", own: set[str] | str | None = None) -> dict:
+    """Every commit in origin/main..main, oldest first, with the integration that brought it in.
+
+    An integration owns the commits from its recorded ``main_before`` to its
+    candidate; a record without ``main_before`` owns those its candidate reaches
+    that origin/main and every earlier integration in the range do not. Ownership
+    stays with the earliest integration. ``own`` is the commits that
+    carry this run's push approval, or the candidate SHA of the integration
+    that owns them; every other commit is flagged.
+    """
+    main_tip = rev(repo, main)
+    if main_tip is None:
+        raise GitError(f"cannot resolve {main}")
+    remote = origin_tip(repo, main)
+    commits = []
+    if remote:
+        out = git(repo, "log", "--reverse", "--format=%H %s", f"{remote}..{main_tip}").stdout
+        commits = [tuple(line.split(" ", 1)) if " " in line else (line, "") for line in out.splitlines() if line]
+    position = {sha: index for index, (sha, _) in enumerate(commits)}
+    records: dict[str, dict] = {}
+    for record in read_integrations(repo):
+        if record["candidate_sha"] in position:
+            records.setdefault(record["candidate_sha"], record)
+    owner: dict[str, dict] = {}
+    excluded = [remote] if remote else []
+    for candidate in sorted(records, key=position.__getitem__):
+        base = records[candidate].get("main_before")
+        bounds = [base] if isinstance(base, str) and rev(repo, base) == base else []
+        for sha in git(repo, "rev-list", candidate, "--not", *excluded, *bounds).stdout.split():
+            owner.setdefault(sha, records[candidate])
+        excluded.append(candidate)
+    if isinstance(own, str):
+        own = {sha for sha, record in owner.items() if record["candidate_sha"] == own}
+    entries = []
+    for sha, subject in commits:
+        record = owner.get(sha, {})
+        entries.append({
+            "sha": sha,
+            "subject": subject,
+            "integration": record.get("candidate_sha"),
+            "reviewed": record.get("reviewed"),
+            "authority_reference": record.get("authority_reference"),
+            "push_approval": None if own is None else sha in own,
+        })
+    return {"main": main, "main_tip": main_tip, "origin_main_tip": remote, "commits": entries}
+
+
+def render_push(listing: dict) -> list[str]:
+    """The listing as text: one line per commit, flagged when it lacks this run's push approval.
+
+    A repository without origin/main has nothing to push to and lists nothing.
+    """
+    entries = listing["commits"]
+    remote = listing["origin_main_tip"]
+    if remote is None:
+        return []
+    lines = [f"push: {len(entries)} commits origin/{listing['main']} {remote} -> {listing['main']} {listing['main_tip']}"]
+    for entry in entries:
+        source = (
+            f"integration {entry['integration']} reviewed {entry['reviewed']} "
+            f"authority {json.dumps(entry['authority_reference'], ensure_ascii=False)}"
+            if entry["integration"] else "no integration record"
+        )
+        if entry["push_approval"] is True:
+            mark = "this integration"
+        elif entry["push_approval"] is False:
+            mark = f"NO PUSH APPROVAL: {source}"
+        else:
+            mark = source
+        lines.append(f"  {entry['sha']} {entry['subject']}  [{mark}]")
+    return lines
+
+
+def push_preflight(repo: Path, main: str = "main", own: set[str] | str | None = None) -> tuple[Report, dict | None]:
+    """Fetch origin, then list what a push of main would carry; stop when main lacks origin commits."""
+    error = fetch_origin(repo)
+    if error:
+        return Report("push", "STOP", "FETCH_FAILED", f"{REASONS['FETCH_FAILED']}: {error}"), None
+    main_tip = rev(repo, main)
+    if main_tip is None:
+        raise GitError(f"cannot resolve {main}")
+    state = origin_state(repo, main, main_tip)
+    if behind := origin_stop(state, main, main_tip):
+        return Report("push", "STOP", *behind, evidence={"main_tip": main_tip, **state}), None
+    listing = push_listing(repo, main, own)
+    count_ = len(listing["commits"])
+    unapproved = sum(entry["push_approval"] is False for entry in listing["commits"])
+    detail = f"{count_} commits in origin/{main}..{main}"
+    if unapproved:
+        detail += f"; {unapproved} lack this integration's push approval"
+    return Report("push", "PUSH", "PUSH_LISTED", detail, evidence={"main_tip": main_tip, **state}), listing
+
+
 def render(report: Report) -> str:
     lines = [f"{report.verdict} {report.reason}: {report.detail}"]
     if report.next:
@@ -290,7 +507,12 @@ def build_parser() -> argparse.ArgumentParser:
     cleanup = sub.add_parser("cleanup", allow_abbrev=False, help="check whether a linked worktree is safe to remove")
     cleanup.add_argument("--repo", type=Path, required=True, help="integration checkout")
     cleanup.add_argument("--worktree", type=Path, required=True, help="linked worktree path")
-    for p in (merge, cleanup):
+    push = sub.add_parser("push", allow_abbrev=False, help="fetch origin and list what a push of main would carry")
+    push.add_argument("--repo", type=Path, required=True, help="integration checkout")
+    push.add_argument(
+        "--integration", help="candidate SHA whose commits carry push approval; every other commit is flagged",
+    )
+    for p in (merge, cleanup, push):
         p.add_argument("--main", default="main", help="integration branch (default: main)")
         p.add_argument("--json", action="store_true", help="print the report as JSON")
     return parser
@@ -298,16 +520,27 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    listing = None
     try:
         if args.command == "merge":
             report = merge_preflight(args.repo, args.branch, args.reviewed, args.main)
+        elif args.command == "push":
+            own = rev(args.repo, args.integration) if args.integration else None
+            if args.integration and own is None:
+                raise GitError(f"cannot resolve --integration {args.integration}")
+            report, listing = push_preflight(args.repo, args.main, own)
         else:
             report = cleanup_preflight(args.repo, args.worktree, args.main)
     except GitError as exc:
         print(f"ERROR {exc}", file=sys.stderr)
         return 2
-    print(json.dumps(asdict(report), indent=2) if args.json else render(report))
-    return 0 if report.verdict in ("FF", "NO_FF", "REMOVABLE") else 1
+    if args.json:
+        print(json.dumps({**asdict(report), **({"push": listing} if listing else {})}, indent=2))
+    else:
+        print(render(report))
+        if listing:
+            print("\n".join(render_push(listing)))
+    return 0 if report.verdict in ("FF", "NO_FF", "REMOVABLE", "PUSH") else 1
 
 
 if __name__ == "__main__":

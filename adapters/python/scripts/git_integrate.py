@@ -67,6 +67,7 @@ NEXT = {
         "reconcile main and its checkout with the retained candidate ref the detail names "
         "before any other integration of this repository"
     ),
+    "CARRY_OVER_REFUSED": "the rebased tip needs a fresh review; integrate the SHA that review names",
 }
 
 
@@ -426,11 +427,16 @@ def _record_integration(repo: Path, record: dict) -> Path:
     return path
 
 
-def _note_integration(repo: Path, result: dict, candidate_sha: str, reviewed: str, authority_reference: str) -> None:
+def _note_integration(
+    repo: Path, result: dict, candidate_sha: str, reviewed: str, authority_reference: str,
+    carried_from: str | None = None, main_before: str | None = None,
+) -> None:
     try:
         result["integration_record"] = str(_record_integration(repo, {
             "candidate_sha": candidate_sha,
             "reviewed": reviewed,
+            **({"main_before": main_before} if main_before else {}),
+            **({"carried_over_from": carried_from} if carried_from else {}),
             "authority_reference": authority_reference,
             "integrated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         }))
@@ -547,9 +553,85 @@ def _recover_interrupted_update(
     return 0, result
 
 
+def _patch_ids(repo: Path, commits: list[str]) -> list[str]:
+    """`git patch-id --stable` of each commit, in order; an empty change has the empty ID."""
+    if not commits:
+        return []
+    patches = git(repo, "diff-tree", "--stdin", "-p", "--no-color", input="\n".join(commits) + "\n").stdout
+    ids = {}
+    for line in git(repo, "patch-id", "--stable", input=patches).stdout.splitlines():
+        patch_id, _, sha = line.partition(" ")
+        ids[sha] = patch_id
+    return [ids.get(sha, "") for sha in commits]
+
+
+def _commits(repo: Path, range_spec: str) -> tuple[list[str], int]:
+    """The commits of the range oldest first, and how many of them are merges."""
+    listed = git(repo, "rev-list", "--reverse", range_spec).stdout.split()
+    merges = len(git(repo, "rev-list", "--merges", range_spec).stdout.split())
+    return listed, merges
+
+
+def carry_over(repo: Path, main: str, approved: str, rebased: str, main_tip: str) -> dict:
+    """Prove ``rebased`` is a clean rebase of the unpublished ``approved`` onto ``main_tip``.
+
+    Same commit count and order, every `git patch-id --stable` equal, and a
+    conflict-free replay of the approved commits onto ``main_tip`` that yields
+    the rebased tree. Writes only unreferenced objects; any failure is
+    `CARRY_OVER_REFUSED`.
+    """
+    def refuse(detail: str) -> Refused:
+        return stop("CARRY_OVER_REFUSED", f"{detail}; the approval for {approved} does not carry over to {rebased}")
+
+    published = gp.published_refs(repo, approved)
+    if published:
+        raise refuse(f"the reviewed SHA is published at {', '.join(published)}; a published topic integrates as NO_FF")
+    if not is_ancestor(repo, main_tip, rebased):
+        raise refuse(f"the rebased tip is not based on {main} {main_tip}; rebase onto the current {main}")
+    old_base = _git_ok(repo, "merge-base", approved, main_tip)
+    old, old_merges = _commits(repo, f"{old_base}..{approved}")
+    new, new_merges = _commits(repo, f"{main_tip}..{rebased}")
+    if old_merges or new_merges:
+        raise refuse(f"the reviewed range holds {old_merges} and the rebased range {new_merges} merge commits")
+    if len(old) != len(new):
+        raise refuse(f"the reviewed range {old_base}..{approved} has {len(old)} commits, the rebased range {main_tip}..{rebased} {len(new)}")
+    for index, (a, b, id_a, id_b) in enumerate(zip(old, new, _patch_ids(repo, old), _patch_ids(repo, new)), 1):
+        if not id_a or id_a != id_b:
+            raise refuse(f"commit {index}: patch-id of {b} ({id_b or 'empty'}) differs from {a} ({id_a or 'empty'})")
+    replay = main_tip
+    for sha in old:
+        merged = git(
+            repo, "merge-tree", "--write-tree", "--name-only", "--no-messages", f"--merge-base={sha}^", replay, sha,
+            check=False,
+        )
+        if merged.returncode == 1:
+            files = ", ".join(line for line in merged.stdout.splitlines()[1:] if line) or "-"
+            raise refuse(f"replaying {sha} onto {main} conflicts in {files}")
+        if merged.returncode:
+            raise GitError(f"git merge-tree: {merged.stderr.strip() or merged.returncode}")
+        replay = _git_ok(repo, "commit-tree", merged.stdout.splitlines()[0], "-p", replay, "-m", f"replay {sha}")
+    if _git_ok(repo, "rev-parse", f"{replay}^{{tree}}") != _git_ok(repo, "rev-parse", f"{rebased}^{{tree}}"):
+        raise refuse(f"the clean replay of {old_base}..{approved} onto {main_tip} differs from the rebased tree")
+    between = git(repo, "log", "--reverse", "--format=%H %s", f"{old_base}..{main_tip}").stdout.splitlines()
+    return {"carried_over_from": approved, "rebased": rebased, "commits": len(old), "main_between": between}
+
+
+def render_carry_over(carried: dict) -> list[str]:
+    return [
+        f"carried over: the approval for reviewed {carried['carried_over_from']} applies to rebased {carried['rebased']} "
+        f"({carried['commits']} commits, every patch-id equal, clean replay)",
+        f"main commits between: {len(carried['main_between'])}",
+        *(f"  {line}" for line in carried["main_between"]),
+    ]
+
+
 @dataclass
 class Target:
-    """Every value an integration runs with, resolved before anything runs."""
+    """Every value an integration runs with, resolved before anything runs.
+
+    ``reviewed`` is the source integrated; with ``--rebased`` it is the rebased
+    tip and ``carried_from`` the reviewed SHA whose approval carries over.
+    """
 
     repo: Path
     main: str
@@ -563,11 +645,14 @@ class Target:
     timeout: float
     timeout_source: str
     warnings: list[str] = field(default_factory=list)
+    carried_from: str | None = None
+    fetched: str = "none"
 
     def line(self) -> str:
+        carried = f" carried_from={self.carried_from}" if self.carried_from else ""
         return (
-            f"resolved: repo={self.repo} main={self.main}@{self.main_tip} "
-            f"branch={self.branch or '-'} ({self.branch_source}) reviewed={self.reviewed} "
+            f"resolved: repo={self.repo} main={self.main}@{self.main_tip} fetched={self.fetched} "
+            f"branch={self.branch or '-'} ({self.branch_source}) reviewed={self.reviewed}{carried} "
             f"authority={json.dumps(self.authority_reference, ensure_ascii=False)} "
             f"verifier={json.dumps(self.verify_argv, ensure_ascii=False)} ({self.argv_source}) "
             f"timeout={self.timeout:g}s ({self.timeout_source})"
@@ -622,6 +707,11 @@ def integrate(t: Target) -> tuple[int, dict]:
             result["stale_candidate_refs"] = stale_candidate_refs
         if report.verdict == "STOP":
             return STOP_BEFORE_CANDIDATE, {**result, "report": report}
+        if t.carried_from:
+            try:
+                result["carried_over"] = carry_over(repo, main, t.carried_from, reviewed, main_before)
+            except Refused as exc:
+                return exc.code, {**result, "refusal": exc}
 
         if main_before != t.main_tip:
             return STOP_BEFORE_CANDIDATE, {**result, "refusal": stop(
@@ -711,7 +801,9 @@ def integrate(t: Target) -> tuple[int, dict]:
             if main_after == candidate_sha:
                 # main holds the candidate, so the integration happened even
                 # when its checkout needs recovery below.
-                _note_integration(repo, result, candidate_sha, reviewed, t.authority_reference)
+                _note_integration(
+                    repo, result, candidate_sha, reviewed, t.authority_reference, t.carried_from, main_before,
+                )
             if main_after != candidate_sha or rev(repo, "HEAD") != candidate_sha:
                 raise stop(
                     "RECOVERY_REQUIRED",
@@ -735,6 +827,7 @@ def integrate(t: Target) -> tuple[int, dict]:
                         "expected_main": main_before,
                         "reviewed": reviewed,
                         "verdict": result["verdict"],
+                        **({"carried_over_from": t.carried_from} if t.carried_from else {}),
                         "authority_reference": t.authority_reference,
                         "verify_argv": t.verify_argv,
                         "platform": {"system": sys.platform, "machine": platform.machine()},
@@ -744,6 +837,11 @@ def integrate(t: Target) -> tuple[int, dict]:
                     }))
                 except (OSError, GitError):
                     result["evidence_reason"] = "WRITE_FAILED"
+            try:
+                own = set(git(repo, "rev-list", f"{main_before}..{candidate_sha}").stdout.split())
+                result["push"] = gp.push_listing(repo, main, own)
+            except GitError as exc:
+                result["push_warning"] = f"could not list origin/{main}..{main}: {exc}"
             return 0, result
         except Refused as exc:
             result["refusal"] = exc
@@ -895,6 +993,11 @@ def resolve(args: argparse.Namespace, root: Path, root_given: bool, cwd: str) ->
         raise stop("REVIEWED_SHA_INVALID", f"--reviewed must be the full 40-character SHA: {args.reviewed}")
     repo = resolve_repo(args, root, root_given, cwd)
     check_checkout(repo)
+    fetched = "none"
+    if gp.has_remote(repo):
+        if error := gp.fetch_origin(repo):
+            raise stop("FETCH_FAILED", f"{gp.REASONS['FETCH_FAILED']}: {error}")
+        fetched = gp.REMOTE
     main = args.main
     main_tip = rev(repo, main)
     if main_tip is None:
@@ -905,6 +1008,16 @@ def resolve(args: argparse.Namespace, root: Path, root_given: bool, cwd: str) ->
     authority, record = resolve_authority(args.authority_reference, reviewed)
     if warning := authority_record_warning(repo, record, reviewed):
         warnings.append(warning)
+    carried_from = None
+    if args.rebased is not None:
+        rebased = args.rebased.strip().lower()
+        if not FULL_SHA.fullmatch(rebased):
+            raise stop("REVIEWED_SHA_INVALID", f"--rebased must be the full 40-character SHA: {args.rebased}")
+        if rev(repo, rebased) != rebased:
+            raise stop("REVIEWED_SHA_UNKNOWN", f"--rebased names no commit in this repository: {rebased}")
+        if rebased == reviewed:
+            raise Refused("USAGE", "--rebased equals --reviewed; integrate the reviewed SHA without --rebased")
+        carried_from, reviewed = reviewed, rebased
     if args.branch is not None:
         branch, branch_source = args.branch, "--branch"
     else:
@@ -957,7 +1070,7 @@ def resolve(args: argparse.Namespace, root: Path, root_given: bool, cwd: str) ->
         warnings.append(warning)
     return Target(
         repo, main, main_tip, branch, branch_source, reviewed, authority,
-        argv, argv_source, timeout, timeout_source, warnings,
+        argv, argv_source, timeout, timeout_source, warnings, carried_from, fetched,
     )
 
 
@@ -986,6 +1099,11 @@ def build_parser() -> argparse.ArgumentParser:
     target.add_argument("--project", help="registered project name from workspace.yaml")
     parser.add_argument("--branch", help="reviewed topic branch (default: the one local branch at --reviewed)")
     parser.add_argument("--reviewed", required=True, help="full 40-character SHA named by the review")
+    parser.add_argument(
+        "--rebased",
+        help="full SHA of the unpublished topic rebased onto main; integrates it carrying over the approval "
+        "of --reviewed when the rebase is clean and every patch-id matches",
+    )
     parser.add_argument("--main", default="main", help="integration branch (default: main)")
     parser.add_argument(
         "--authority-reference", required=True,
@@ -1048,10 +1166,19 @@ def check(t: Target, as_json: bool) -> int:
     if report.verdict == "STOP":
         _print_stop_report(report, payload, as_json)
         return STOP_BEFORE_CANDIDATE
+    carried = None
+    if t.carried_from:
+        try:
+            carried = carry_over(t.repo, t.main, t.carried_from, t.reviewed, report.evidence["main_tip"])
+        except Refused as refusal:
+            _print_refusal(refusal, {**payload, "preflight": asdict(report)}, as_json)
+            return refusal.code
     if as_json:
-        print(json.dumps({**payload, "preflight": asdict(report)}, indent=2))
+        print(json.dumps({**payload, "preflight": asdict(report), **({"carried_over": carried} if carried else {})}, indent=2))
     else:
         print(f"CHECK {render(report)}")
+        if carried:
+            print("\n".join(render_carry_over(carried)))
     return 0
 
 
@@ -1091,9 +1218,16 @@ def main(argv: list[str] | None = None, root: Path = hw.ROOT, root_given: bool =
     report = result.pop("report", None)
     refusal = result.pop("refusal", None)
     if not args.json:
-        for key in ("verification_warning", "candidate_cleanup_warning", "integration_record_warning"):
+        for key in ("verification_warning", "candidate_cleanup_warning", "integration_record_warning", "push_warning"):
             if result.get(key):
                 print(f"WARNING {result[key]}", file=sys.stderr)
+        unapproved = [entry for entry in (result.get("push") or {}).get("commits", []) if not entry["push_approval"]]
+        if unapproved:
+            print(
+                f"WARNING {len(unapproved)} commits in origin/{target.main}..{target.main} come from other integrations "
+                "or none; a push carries them and needs push approval for each",
+                file=sys.stderr,
+            )
         for entry in result.get("recovered_candidates", []):
             print(
                 f"NOTE recovery ref for candidate {entry['candidate_sha']}: {entry['disposition']}"
@@ -1104,8 +1238,15 @@ def main(argv: list[str] | None = None, root: Path = hw.ROOT, root_given: bool =
         _print_stop_report(report, result, args.json)
     elif refusal is not None:
         _print_refusal(refusal, result, args.json)
+    elif args.json:
+        print(json.dumps(result, indent=2))
     else:
-        print(json.dumps(result, indent=2) if args.json else render_result(result))
+        lines = [render_result(result)]
+        if result.get("carried_over"):
+            lines += render_carry_over(result["carried_over"])
+        if result.get("push"):
+            lines += gp.render_push(result["push"])
+        print("\n".join(lines))
     return code
 
 

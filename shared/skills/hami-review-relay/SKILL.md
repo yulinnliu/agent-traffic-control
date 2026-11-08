@@ -148,11 +148,15 @@ one `atc test mutants` call.
   integration, the integration instruction. The user pasting it approves
   integration and then default cleanup of the topic. Before writing it, run
   `atc integrate --check` with the same arguments as the integrate command
-  below; it is read-only. The PASS carries the instruction only when the
-  check prints `CHECK FF` or `CHECK NO_FF`; quote that line and every
-  `WARNING` line in the "verified" paragraph. A `STOP` line, such as a
-  missing `## Integration verification` section, leaves the PASS without an
-  instruction: give the user the stop and its `next:` line. In a repository
+  below; it runs `git fetch origin` and otherwise only reads. The PASS
+  carries the instruction only when the check prints `CHECK FF` or
+  `CHECK NO_FF`; quote that line and every `WARNING` line in the "verified"
+  paragraph. A `STOP` line, such as a missing `## Integration verification`
+  section, leaves the PASS without an instruction: give the user the stop and
+  its `next:` line. A stop whose `next:` names a rebase (`REBASE_REQUIRED`,
+  or `OVERLAP` or `CONFLICT` of an unpublished topic) still carries the
+  instruction, with that stop quoted: the writer rebases and integrates the
+  rebased tip as "Writer: after integration" says. In a repository
   without managed worktrees, `STOP CHECKOUT_NOT_ON_MAIN` naming the topic
   branch is the expected check result: the PASS still carries the
   instruction, the "verified" paragraph quotes that `STOP` line and every
@@ -196,6 +200,16 @@ other action need their own instruction.
    equals the reviewed SHA; `NO_FF` matches when the second parent equals the
    reviewed SHA and the first parent equals the `main` the line reports as
    before.
+   - When it stops with a `next:` that names a rebase, rebase the topic
+     branch onto `main`, give the user the rebased tip for approval, and run
+     the same command with `--rebased <rebased tip>` added. `FF` then matches
+     when the new `main` equals the rebased tip and the `carried over:` line
+     names the reviewed SHA. `CARRY_OVER_REFUSED` sends the rebased tip to the
+     reviewer for a fresh review.
+   - The `push:` lines list every commit a push of `main` would carry; give
+     the user each `NO PUSH APPROVAL` line with any push request.
+     `atc preflight push --repo <main checkout>` prints the same list
+     before a later push.
 2. On a match, run the cleanup command: the worktree cleanup under
    hami-worktree's run rules, or the `branch -d`.
 3. Run the hami-handoff-reminder check and report the result lines to the

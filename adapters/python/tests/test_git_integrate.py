@@ -70,6 +70,21 @@ def main_tip(repo: Path) -> str:
     return run_git(repo, "rev-parse", "main")
 
 
+def add_origin(repo: Path) -> Path:
+    """A bare `origin` beside the repository, added once."""
+    origin = repo.parent / "origin.git"
+    if not origin.exists():
+        subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(origin)], capture_output=True, check=True)
+        run_git(repo, "remote", "add", "origin", str(origin))
+    return origin
+
+
+def publish(repo: Path, *refs: str) -> None:
+    """Push ``refs`` to origin, so a topic branch there is at its reviewed SHA."""
+    add_origin(repo)
+    run_git(repo, "push", "-q", "origin", *refs)
+
+
 def verify_command() -> str:
     script = (
         "import os,subprocess; "
@@ -104,6 +119,7 @@ def test_fast_forward_advances_main_to_reviewed(repo: Path, capsys: pytest.Captu
 
 def test_no_ff_merges_with_subject_and_parents(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     tip = topic(repo, {"a.txt": "a2\n"}, branch="worktree-claude+demo-topic")
+    publish(repo, "worktree-claude+demo-topic")
     before = commit(repo, "c.txt", "c\n")
     assert integrate(repo, "worktree-claude+demo-topic", tip) == 0
     after = main_tip(repo)
@@ -126,6 +142,7 @@ def test_topic_name(branch: str, expected: str) -> None:
 @pytest.mark.parametrize("branch", ["topic/x-y", "task/x-y"])
 def test_no_ff_subject_strips_prefix(repo: Path, branch: str) -> None:
     tip = topic(repo, {"a.txt": "a2\n"}, branch=branch)
+    publish(repo, branch)
     commit(repo, "c.txt", "c\n")
     assert integrate(repo, branch, tip) == 0
     assert run_git(repo, "log", "-1", "--format=%s", "main") == "merge(x-y): integrate reviewed changes"
@@ -740,6 +757,7 @@ def test_post_integration_checkout_change_keeps_recovery_ref(
 
 def test_no_ff_parents_mismatch_fails_verification(repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     tip = topic(repo, {"a.txt": "a2\n"})
+    publish(repo, "topic")
     commit(repo, "c.txt", "c\n")
     real = gi.git
     moved = []
@@ -774,7 +792,7 @@ def test_failed_merge_is_aborted(repo: Path, monkeypatch: pytest.MonkeyPatch, ca
 
 
 def test_json_fields(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    keys = {"command", "authority_reference", "verdict", "reason", "main_before", "main_after", "reviewed", "source_before", "candidate_sha", "first_parent", "second_parent", "message", "verification", "verification_seconds", "evidence", "evidence_reason", "candidate_ref", "integration_record", "warnings"}
+    keys = {"command", "authority_reference", "verdict", "reason", "main_before", "main_after", "reviewed", "source_before", "candidate_sha", "first_parent", "second_parent", "message", "verification", "verification_seconds", "evidence", "evidence_reason", "candidate_ref", "integration_record", "warnings", "push"}
     before = main_tip(repo)
     tip = topic(repo, {"a.txt": "a2\n"}, branch="first")
     assert integrate(repo, "first", tip, "--json") == 0
@@ -782,6 +800,7 @@ def test_json_fields(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     assert data.pop("verification_seconds") >= 0
     assert Path(data.pop("integration_record")) == repo / ".git" / "atc" / "integrations.jsonl"
     assert [w for w in data.pop("warnings") if "atc tool checkout" not in w] == []
+    assert data.pop("push") == {"main": "main", "main_tip": tip, "origin_main_tip": None, "commits": []}
     assert data == {
         "command": "integrate", "authority_reference": f"test-owner-authorization @ {tip}", "verdict": "FF", "reason": "FAST_FORWARD", "main_before": before,
         "main_after": tip, "reviewed": tip, "source_before": tip, "candidate_sha": tip,
@@ -790,6 +809,7 @@ def test_json_fields(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     }
 
     second = topic(repo, {"b.txt": "b2\n"}, branch="topic/next")
+    publish(repo, "topic/next")
     base = commit(repo, "c.txt", "c\n")
     assert integrate(repo, "topic/next", second, "--json") == 0
     data = json.loads(capsys.readouterr().out)
@@ -881,6 +901,7 @@ def test_valid_report_writes_evidence_record(repo: Path, capsys: pytest.CaptureF
 
 def test_no_ff_record_names_the_merge_commit_only(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     tip = topic(repo, {"a.txt": "a2\n"})
+    publish(repo, "topic")
     base = commit(repo, "c.txt", "c\n")
     assert integrate_with(repo, "topic", tip, report_command(json.dumps(REPORT)), "--json") == 0
     data = json.loads(capsys.readouterr().out)
@@ -1080,6 +1101,7 @@ def test_an_authority_record_the_reviewed_commit_lacks_is_a_warning(
 @pytest.mark.integration
 def test_the_one_branch_at_the_reviewed_sha_is_inferred(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     tip = topic(repo, {"a.txt": "a2\n"}, branch="worktree-claude+demo")
+    publish(repo, "worktree-claude+demo")
     commit(repo, "c.txt", "c\n")
     assert run(repo, "--repo", str(repo), "--reviewed", tip, "--authority-reference", "x") == 0
     assert "branch=worktree-claude+demo (inferred)" in stderr_lines(capsys)[0]
@@ -1145,11 +1167,13 @@ def test_every_integration_appends_its_record(repo: Path) -> None:
     first = topic(repo, {"a.txt": "a2\n"}, branch="first")
     assert integrate(repo, "first", first) == 0
     second = topic(repo, {"b.txt": "b2\n"}, branch="second")
+    publish(repo, "second")
     commit(repo, "c.txt", "c\n")
     assert integrate(repo, "second", second) == 0
     lines = (repo / ".git" / "atc" / "integrations.jsonl").read_text(encoding="utf-8").splitlines()
     records = [json.loads(line) for line in lines]
-    assert [set(record) for record in records] == [{"candidate_sha", "reviewed", "authority_reference", "integrated_at"}] * 2
+    assert [set(record) for record in records] == [{"candidate_sha", "reviewed", "main_before", "authority_reference", "integrated_at"}] * 2
+    assert records[1]["main_before"] == run_git(repo, "rev-parse", "main^1")
     assert (records[0]["candidate_sha"], records[0]["reviewed"]) == (first, first)
     assert (records[1]["candidate_sha"], records[1]["reviewed"]) == (main_tip(repo), second)
     assert records[1]["authority_reference"] == f"test-owner-authorization @ {second}"
@@ -1215,6 +1239,7 @@ def test_a_stopped_update_is_recorded_when_another_request_drops_its_ref(
 ) -> None:
     first_tip = topic(repo, {"a.txt": "first\n"}, branch="topic-one")
     second_tip = topic(repo, {"b.txt": "second\n"}, branch="topic-two")
+    publish(repo, "topic-two")
     real_git = gi.git
 
     def head_moves_after_ff(repo_arg, *args, **kwargs):
@@ -1238,6 +1263,7 @@ def test_main_moved_since_its_declaration_was_read_is_ref_drift(
     repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:
     tip = topic(repo, {"a.txt": "a2\n"})
+    publish(repo, "topic")
     real = gi.resolve
     moved = []
 
