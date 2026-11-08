@@ -233,5 +233,5 @@ the verifier.
 | Verification evidence records, integration slot lock | the repository's git common directory | bound to one repository |
 | The latest pre-push gate logs | the checkout's ignored `.tmp/` directory | read next to the checkout after a refused push |
 | Built testkit wheels | `.tooling/testkit-dist/` | release output of `build_testkit_release.py` |
-| Installed `atc` command and its source snapshot | `~/.local/bin`, `~/.local/atc-src` | installer convention |
+| Installed `atc` command | `~/.local/bin`, an editable install of the checkout's `adapters/python` | installer convention; it runs the checkout's code (root `AGENTS.md` `## Integration verification`) |
 | A product's runtime files | the product's own locations (`PROJECT_RUNTIME.md`) | product state, not ATC's |

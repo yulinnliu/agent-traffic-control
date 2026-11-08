@@ -18,11 +18,9 @@ PASS block written before a step runs after it.
 1 governance change ──> 2 integrate reads its declarations ──> 3 integrate infers its target ──> 4 command surface ──> 5 skill text
 ```
 
-Steps 2 and 3 can run after `ATC_HOME_TESTKIT_PLAN.md` step 3 and beside its
-steps 4 and 5; they touch `adapters/python/scripts/` and none of the testkit's
-adoption. Step 4 changes `atc-testkit` and waits for the first vendoring
-decision of that plan. Step 5 waits for step 3 to be on `main`, because a
-shorter PASS block runs only on a checkout that has it.
+Steps 2 and 3 touch `adapters/python/scripts/` and none of the testkit's
+adoption. Step 4 changes `atc-testkit`. Step 5 waits for step 3 to be on
+`main`, because a shorter PASS block runs only on a checkout that has it.
 
 ## Rulings
 
@@ -142,4 +140,4 @@ copies the timeout from `AGENTS.md`.
 | --- | --- | --- |
 | Scripts in the workspace that branch on `atc integrate`'s exit code 1 | step 2 | search every project's scripts and skills before the exit codes split |
 | The `main` revision's `AGENTS.md` of every registered project parses with the shared module | step 2 | `atc validate --projects` after the module moves |
-| Which `atc` a cloud writer host runs the new forms with | step 5 | the same item of `ATC_HOME_TESTKIT_PLAN.md` § Unverified items |
+| Which `atc` a cloud writer host runs the new forms with | step 5 | the cloud writer host item of `TESTKIT.md` § Commands |

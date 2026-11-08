@@ -72,6 +72,9 @@ order. Each is one pytest invocation over the selected paths.
   `interactive_desktop`; it therefore runs on the desktop the CI job starts
   it from, with no private desktop. It passes when it collects no test. The
   project decides which CI job holds it.
+- No project has a test that is both `slow` and `interactive_desktop`, so no
+  run has shown that a hosted Windows CI runner's job desktop serves one. The
+  first such test's first CI run of this invocation shows it.
 
 ## Isolated environment
 
@@ -266,6 +269,11 @@ The test tools a review or a developer runs are subcommands of `atc`, one
 implementation on every platform. A machine that runs them has `atc`
 installed (`uv tool install -e adapters/python`), as integration already
 requires. Every variable ATC itself defines starts with `ATC_`.
+
+No run has confirmed this on a cloud writer host, a clone with no
+`workspace.yaml`: installing `atc` from a clone there and running
+`atc test run` against a project clone is untried, and what such a host runs
+when it has no `atc` is not decided.
 
 `atc test` and `atc tmp` are implemented in `atc-testkit`. The adapter
 depends on the package by its path in the tree, and `atc` dispatches to it;
