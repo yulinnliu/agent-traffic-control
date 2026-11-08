@@ -156,9 +156,10 @@ No adapter directory named `hami-review-relay`, `hami-worktree` or
      `--reviewed <reviewed SHA> --rebased <rebased tip>`, which carries the
      review over when its check passes and otherwise stops as
      `CARRY_OVER_REFUSED`, needing a fresh review. A published topic
-     integrates as `NO_FF` when it is compatible; on `CONFLICT` or
-     `OVERLAP` it stops for a reconcile commit on the topic and a review of
-     that commit. Either way the word is asked for again on the SHA being
+     integrates as `NO_FF` when it is compatible; on `CONFLICT` it stops
+     for a reconcile commit on the topic and a review of that commit; on
+     `OVERLAP` a reviewer first judges the overlap (`GIT_WORKFLOW.md`
+     § Integrate). Either way the word is asked for again on the SHA being
      integrated: the rebased tip, or for `NO_FF` the reviewed SHA. The rest
      of the section stays: the
      `--check` rule, the `STOP CHECKOUT_NOT_ON_MAIN` case, the `--repo` form
@@ -312,7 +313,8 @@ and confirms no tool name in the body and no project-specific value in
    `git mv shared/skills/hami-shared-skill shared/skills/atc-shared-skill`;
    in each `SKILL.md` only `name:` and the skill citations change. In
    `atc-worktree` those are the description's "through the shared
-   hami-worktree CLI" and "lacks the `hami-worktree` capability"; its
+   hami-worktree CLI" and the body's "lacks the `hami-worktree`
+   capability"; its
    heading "Hami Managed Worktree" stays as the concept name.
 2. Citations inside the workspace root, each renamed with its meaning kept:
    - the canonical skills that cite them (`atc-review` cites
