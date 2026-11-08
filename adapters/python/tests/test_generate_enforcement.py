@@ -170,3 +170,18 @@ def test_rerun_rewrites_a_file_whose_content_differs_as_lf(tmp_path):
     target.write_bytes(expected.replace(b"Read(**/.env)", b"Read(**/.stale)").replace(b"\n", b"\r\n"))
     _enforce(tmp_path)
     assert target.read_bytes() == expected
+
+
+@pytest.mark.unit
+def test_validate_reads_a_settings_file_saved_with_a_bom(tmp_path, capsys):
+    import validate_workspace
+    workspace = _workspace(tmp_path, WORKSPACE)
+    project = tmp_path / "project"
+    (project / ".claude").mkdir(parents=True)
+    settings = _settings(project / ".claude/settings.local.json", ["Bash(ls:*)", *LOCAL_DENY])
+    settings.write_text("﻿" + settings.read_text(encoding="utf-8"), encoding="utf-8")
+    failures = list(validate_workspace.FAILURES)
+    validate_workspace.report_machine_local(project, "projects.a.machine-local", workspace)
+    assert capsys.readouterr().out == ""
+    assert validate_workspace.FAILURES == failures
+    assert generate_enforcement.deny_entries(settings) == ["Bash(ls:*)", *LOCAL_DENY]

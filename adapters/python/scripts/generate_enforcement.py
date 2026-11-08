@@ -188,9 +188,10 @@ def _codex_block(text: str) -> list[str]:
 
 
 def deny_entries(path: Path) -> list | None:
+    """The deny list of a settings file, which an editor may have saved with a UTF-8 BOM."""
     text = _read(path)
     try:
-        return json.loads(text)["permissions"]["deny"] if text is not None else None
+        return json.loads(text.removeprefix("﻿"))["permissions"]["deny"] if text is not None else None
     except (ValueError, KeyError, TypeError):
         return None
 

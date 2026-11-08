@@ -210,6 +210,21 @@ def test_a_link_whose_target_is_gone_is_refused(atc_tmp: Path, tmp_path: Path) -
     os.rmdir(link) if os.name == "nt" else link.unlink()
 
 
+@pytest.mark.integration
+@pytest.mark.parametrize("kind", KINDS)
+def test_a_root_below_a_link_whose_target_is_gone_is_refused_before_anything_is_created(
+        atc_tmp: Path, tmp_path: Path, kind: str) -> None:
+    gone = tmp_path / "gone"
+    gone.mkdir()
+    link = atc_tmp / "d"
+    make_link(link, gone, kind)
+    gone.rmdir()
+    with pytest.raises(Refusal, match="is a link to a missing target") as refused:
+        locations.locate(environment(ATC_TMP=str(link / "x" / "y")))
+    assert refused.value.detail.endswith(str(link)) and not gone.exists()
+    os.rmdir(link) if os.name == "nt" else link.unlink()
+
+
 @pytest.mark.parametrize("place", ["systmp", "candidates"])
 def test_a_file_at_a_place_is_refused(atc_tmp: Path, place: str) -> None:
     (atc_tmp / place).write_text("x", encoding="utf-8")

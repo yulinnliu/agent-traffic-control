@@ -25,7 +25,10 @@ whole directory loses nothing. Persistent state lives elsewhere
 - `<tmp>`, `<tmp>/systmp` and `<tmp>/candidates` are real directories. One
   that is a link or anything else that is not a directory is refused with
   `ATC_TMP_UNSUITABLE` and the property it breaks (exit 9), before anything
-  is created. One that does not exist yet is created on first use.
+  is created. One that does not exist yet is created on first use. A `<tmp>`
+  whose nearest existing ancestor is a link to a missing target is refused in
+  the same way: creating it would recreate that target wherever the link
+  points.
 - CI (`CI` set) keeps the platform's own temporary locations. `<tmp>` is the
   platform's temporary directory, or `ATC_TMP` when that is set and absolute,
   and the properties above are not checked on it. `<tmp>/systmp` and

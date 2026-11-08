@@ -99,7 +99,7 @@ def test_ci_keeps_the_platform_directory_and_sets_no_location(check: Check, atc_
     assert "UV_CACHE_DIR" in env and not (atc_tmp / "systmp").exists()
 
 
-def test_the_default_root_lies_in_the_home_directory(check: Check, fake_home: Path) -> None:
+def test_the_default_root_lies_in_the_home_directory(fake_home: Path, check: Check) -> None:
     default = fake_home / ".atc" / "tmp"
     del check.env["ATC_TMP"]
     run = check.run(USERPROFILE=str(fake_home), HOME=str(fake_home))
@@ -139,6 +139,10 @@ def unsuitable_root(kind: str, base: Path) -> str:
         (base / "s").mkdir()
         (base / "s" / "systmp").write_text("x", encoding="utf-8")
         return str(base / "s")
+    if kind == "dangling ancestor":
+        make_junction(base / "d", base / "gone")
+        (base / "gone").rmdir()
+        return str(base / "d" / "t")
     if kind == "candidates link":
         (base / "c").mkdir()
         make_junction(base / "c" / "candidates", base / "elsewhere")
@@ -149,7 +153,8 @@ def unsuitable_root(kind: str, base: Path) -> str:
 @pytest.mark.parametrize(("kind", "reason"), [
     ("relative", "is not absolute"), ("file", "is not a directory"), ("link", "is a link"),
     ("app data", "lies inside AppData"), ("git", "holds .git"), ("too long", "limit 40"),
-    ("systmp file", "is not a directory"), ("candidates link", "is a link")])
+    ("systmp file", "is not a directory"), ("candidates link", "is a link"),
+    ("dangling ancestor", "is a link to a missing target")])
 def test_an_unsuitable_root_exits_nine_as_the_package_refuses_it(check: Check, atc_tmp: Path, kind: str, reason: str) -> None:
     root = unsuitable_root(kind, atc_tmp)
     before = sorted(path.name for path in atc_tmp.iterdir())
@@ -157,8 +162,10 @@ def test_an_unsuitable_root_exits_nine_as_the_package_refuses_it(check: Check, a
     assert run.returncode == 9, run.stdout + run.stderr
     assert run.stderr.startswith(locations.UNSUITABLE + " ") and reason in run.stderr
     assert check.calls() == [] and sorted(path.name for path in atc_tmp.iterdir()) == before
-    with pytest.raises(locations.Refusal):
+    with pytest.raises(locations.Refusal) as refused:
         locations.locate({**os.environ, "ATC_TMP": root})
+    assert reason in refused.value.detail
+    assert sorted(path.name for path in atc_tmp.iterdir()) == before
 
 
 @pytest.mark.skipif(os.name != "nt", reason="8.3 names")

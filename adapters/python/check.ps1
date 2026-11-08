@@ -26,8 +26,7 @@ function Get-NotARealDirectory([string]$Path) {
     return $null
 }
 
-function Get-FinalPath([string]$Path) {
-    if (-not $onWindows) { return (& realpath -- $Path) }
+function Use-FinalPathType {
     if (-not ("AtcFinalPath" -as [type])) {
         Add-Type -TypeDefinition @'
 using System;
@@ -40,6 +39,12 @@ public static class AtcFinalPath {
     static extern uint GetFinalPathNameByHandleW(IntPtr handle, StringBuilder path, uint size, uint flags);
     [DllImport("kernel32.dll")]
     static extern bool CloseHandle(IntPtr handle);
+    public static bool Opens(string path) {
+        IntPtr handle = CreateFileW(path, 0, 7, IntPtr.Zero, 3, 0x02000000, IntPtr.Zero);
+        if (handle == new IntPtr(-1)) return false;
+        CloseHandle(handle);
+        return true;
+    }
     public static string Of(string path) {
         IntPtr handle = CreateFileW(path, 0, 7, IntPtr.Zero, 3, 0x02000000, IntPtr.Zero);
         if (handle == new IntPtr(-1)) return path;
@@ -53,6 +58,21 @@ public static class AtcFinalPath {
 }
 '@
     }
+}
+
+# Whether the path opens with every link on it followed.
+function Test-Opens([string]$Path) {
+    if (-not $onWindows) {
+        & realpath -e -- $Path *> $null
+        return $LASTEXITCODE -eq 0
+    }
+    Use-FinalPathType
+    return [AtcFinalPath]::Opens($Path)
+}
+
+function Get-FinalPath([string]$Path) {
+    if (-not $onWindows) { return (& realpath -- $Path) }
+    Use-FinalPathType
     $final = [AtcFinalPath]::Of($Path)
     if ($final.StartsWith("\\?\UNC\")) { return "\\" + $final.Substring(8) }
     if ($final.StartsWith("\\?\")) { return $final.Substring(4) }
@@ -81,9 +101,27 @@ function Test-Below([string]$Path, [string]$Root) {
     return ($path_ -ceq $root_) -or $path_.StartsWith("$root_$separator", [StringComparison]::Ordinal)
 }
 
+# The nearest existing ancestor of the path when it is a link whose target is missing.
+function Get-DanglingAncestor([string]$Path) {
+    $current = [System.IO.Path]::GetFullPath($Path).TrimEnd([System.IO.Path]::DirectorySeparatorChar)
+    while (-not [string]::IsNullOrEmpty($current)) {
+        $item = Get-Item -LiteralPath $current -Force -ErrorAction SilentlyContinue
+        if ($null -ne $item) {
+            if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -and -not (Test-Opens $current)) {
+                return $current
+            }
+            return $null
+        }
+        $current = [System.IO.Path]::GetDirectoryName($current)
+    }
+    return $null
+}
+
 function Get-BrokenProperty([string]$Root) {
     $notReal = Get-NotARealDirectory $Root
     if ($notReal) { return $notReal }
+    $dangling = Get-DanglingAncestor $Root
+    if ($dangling) { return "has an ancestor that is a link to a missing target: $dangling" }
     $long = Get-LongName $Root
     $parts = $long -split '[\\/]'
     $insideAppData = $parts | Where-Object { $_ -ieq "appdata" }

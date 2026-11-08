@@ -78,11 +78,31 @@ def not_a_real_directory(path: str | os.PathLike[str]) -> str | None:
     return None
 
 
+def _dangling_ancestor(path: str | os.PathLike[str]) -> str | None:
+    """The nearest existing ancestor of ``path`` when it is a link whose target is missing, else ``None``."""
+    current = os.path.abspath(path)
+    while True:
+        try:
+            status = os.lstat(current)
+        except FileNotFoundError:
+            parent = os.path.dirname(current)
+            if parent == current:
+                return None
+            current = parent
+            continue
+        except OSError:
+            return None
+        return current if is_link(status) and not os.path.exists(current) else None
+
+
 def _broken_property(root: str, environ: MutableMapping[str, str]) -> str | None:
     """The property of docs/ATC_HOME.md § Location that ``root`` breaks, or ``None``."""
     not_real = not_a_real_directory(os.path.normpath(root))
     if not_real:
         return not_real
+    dangling = _dangling_ancestor(root)
+    if dangling:
+        return f"has an ancestor that is a link to a missing target: {dangling}"
     long = long_name(root)
     parts = [part.lower() for part in Path(long).parts]
     app_data = [environ.get(name) for name in ("APPDATA", "LOCALAPPDATA")]
