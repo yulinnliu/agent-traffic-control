@@ -65,6 +65,10 @@ without confirmation.
    - `find . -name '*.md' -not -path './.venv/*' -not -path './node_modules/*' -size +25k`
    - For each: living contract, or a finished migration/refactor log that should
      move to an archive/history directory with the durable parts summarized?
+   - Before a doc is retired or moved, `git grep` its file name in every
+     repository that may cite it (in a workspace, each registered project), not
+     only this one: a cross-repo citation is usually a backtick path, not a
+     link, so no link check catches it.
    - Section-numbered docs cited from source code by number: if the citation
      targets one bounded section (e.g. a field allowlist or a fixed table) and
      several docs pin that same section number, extract it into a small new
