@@ -479,7 +479,6 @@ def test_a_wrong_command_exits_two(arguments: tuple[str, ...], atc_tmp: Path, ca
     (["tmp", "prune"], "prune", scratch, ()),
     (["tmp", "clean", "a", "b"], "clean", scratch, (["a", "b"],)),
     (["tmp", "clean", "--tree-name", "p"], "clean", scratch, ((), "p")),
-    (["tmp", "clean", "--project", "p"], "clean", scratch, ((), "p")),
 ])
 def test_atc_reaches_the_package_with_its_arguments_and_returns_its_exit_code(
         monkeypatch: pytest.MonkeyPatch, arguments: list[str], attribute: str, module, expected: tuple) -> None:
@@ -490,10 +489,10 @@ def test_atc_reaches_the_package_with_its_arguments_and_returns_its_exit_code(
 
 
 @pytest.mark.integration
-def test_the_earlier_tree_name_option_prints_its_replacement(monkeypatch: pytest.MonkeyPatch,
-                                                             capsys: pytest.CaptureFixture[str]) -> None:
+def test_tmp_clean_takes_only_the_tree_name_option(monkeypatch: pytest.MonkeyPatch,
+                                                   capsys: pytest.CaptureFixture[str]) -> None:
     monkeypatch.setattr(scratch, "clean", lambda *args: 0)
-    assert commands.main(["tmp", "clean", "--project", "p"]) == 0
-    assert capsys.readouterr().err == "NOTE --project is accepted through atc-testkit 0.7.x; use --tree-name\n"
     assert commands.main(["tmp", "clean", "--tree-name", "p"]) == 0
     assert capsys.readouterr().err == ""
+    assert commands.main(["tmp", "clean", "--project", "p"]) == 2
+    assert capsys.readouterr().err.startswith("usage: atc tmp clean")

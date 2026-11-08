@@ -1184,11 +1184,10 @@ def assert_kept(ws, path, facts):
     assert ws.lock_reason(path) == "codex:sq:s1"
 
 
-@pytest.mark.parametrize("reviewed_option", ["--reviewed", "--reviewed-sha"])
-def test_squash_cleanup_removes_the_worktree_and_keeps_the_retained_ref(ws, capsys, reviewed_option):
+def test_squash_cleanup_removes_the_worktree_and_keeps_the_retained_ref(ws, capsys):
     path, facts = squashed_topic(ws, capsys)
     ws.run(capsys, "create", "claude", "other", "--session", "other-session")
-    status, results = squash_cleanup(ws, capsys, facts, reviewed_option=reviewed_option)
+    status, results = squash_cleanup(ws, capsys, facts)
     result = single(results)
     evidence = result["evidence"]
     assert (status, result["reason"], evidence["branch_kept"]) == (0, "OK", False), evidence.get("git")
@@ -1351,7 +1350,6 @@ def test_cleanup_complete_is_omitted_when_the_branch_state_cannot_be_observed(ws
 @pytest.mark.parametrize("extra", [
     ("--squash-integrated",),
     ("--reviewed", "a" * 40),
-    ("--reviewed-sha", "a" * 40),
     ("--retained-ref", "refs/tags/x"),
     ("--abandon", "--archive-tag", "archive/x"),
 ])

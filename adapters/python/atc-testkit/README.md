@@ -1,6 +1,6 @@
 # atc-testkit
 
-This document describes `atc-testkit` 0.7.0; update it with every version bump.
+This document describes `atc-testkit` 0.8.0; update it with every version bump.
 
 Development-only Python package shared by the projects of a workspace. It holds
 the pytest plugin and marker contract, policy-driven test selection, Git gate
@@ -104,8 +104,7 @@ diagnostics. A project supplies data.
   tree under a scratch directory, kill mutants of a committed tree and manage the
   scratch registry; `python -m atc_testkit.commands` is the same entry point.
   `-h` after a subcommand prints its help and exits 0. `atc tmp clean
-  --tree-name <name>` takes the registry rows of one tree, and `--project` is
-  accepted in its place through 0.7.x. A refusal token goes to stderr; the per-directory lines `DELETED`, `SKIPPED`,
+  --tree-name <name>` takes the registry rows of one tree. A refusal token goes to stderr; the per-directory lines `DELETED`, `SKIPPED`,
   `REFUSED`, `ANOMALY` and `LEFT` are the normal output of `atc tmp` on stdout.
 - `atc test mutants` counts `KILLED` only for pytest exit 1 with a `FAILED` line.
   Every other ending of a mutated run (a setup `ERROR` alone, exits 2 to 5, a
@@ -126,7 +125,7 @@ against that snapshot. It refuses to replace changed release content. Use a fres
 `src/atc_testkit/__init__.py` is the one place that sets the version.
 
 Each consumer commits the exact wheel under `vendor/`, pins
-`atc-testkit==0.7.0` in its development dependencies and records the local
+`atc-testkit==0.8.0` in its development dependencies and records the local
 artifact in `uv.lock`. Standalone clones and CI install their committed artifact
 without a workspace checkout or credentials. Released versions are immutable;
 source changes require a new version and explicit consumer upgrades.

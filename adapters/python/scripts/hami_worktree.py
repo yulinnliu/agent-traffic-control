@@ -912,7 +912,6 @@ def build_parser() -> argparse.ArgumentParser:
                                     help="clean up a topic integrated by an authorized same-tree squash")
     commands["cleanup"].add_argument("--reviewed", dest="reviewed_sha", type=full_sha_arg,
                                     help="full SHA the review named; equal to --expected-head")
-    commands["cleanup"].add_argument("--reviewed-sha", dest="reviewed_sha", type=full_sha_arg, help=argparse.SUPPRESS)
     commands["cleanup"].add_argument("--expected-main", type=full_sha_arg)
     commands["cleanup"].add_argument("--integrated-as", type=full_sha_arg)
     commands["cleanup"].add_argument("--retained-ref")

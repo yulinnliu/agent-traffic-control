@@ -14,7 +14,6 @@ from .locations import Refusal
 USAGE_EXIT = 2
 HELP_OPTIONS = ("-h", "--help")
 TREE_NAME_OPTION = "--tree-name"
-EARLIER_TREE_NAME_OPTION = "--project"
 
 USAGES = {
     ("test", "run"): "usage: atc test run <tree> <scratch> <python> <label> <pytest args...>",
@@ -41,7 +40,6 @@ Exit: pytest's code, 8 for a guard refusal, 9 for a location refusal.""",
   <dir>...                scratches under the ATC temporary root
   {TREE_NAME_OPTION} <name>       every scratch whose registry `project` column is <name>:
                           the tree's [project].name, else its directory name
-  {EARLIER_TREE_NAME_OPTION} <name>         accepted in place of {TREE_NAME_OPTION} through atc-testkit 0.7.x
 
 Exit: 0, 1 for a refused directory, 2 before anything is deleted.""",
     ("tmp", "prune"): """Delete entries of <tmp>/systmp and <tmp>/candidates older than seven days
@@ -70,12 +68,9 @@ def _usage(text: str) -> int:
 
 def _clean(arguments: Sequence[str]) -> int:
     usage = USAGES[("tmp", "clean")]
-    if arguments[:1] in ([TREE_NAME_OPTION], [EARLIER_TREE_NAME_OPTION]):
+    if arguments[:1] == [TREE_NAME_OPTION]:
         if len(arguments) != 2:
             return _usage(usage)
-        if arguments[0] == EARLIER_TREE_NAME_OPTION:
-            print(f"NOTE {EARLIER_TREE_NAME_OPTION} is accepted through atc-testkit 0.7.x; use {TREE_NAME_OPTION}",
-                  file=sys.stderr, flush=True)
         return scratch.clean((), arguments[1])
     if not arguments or any(argument.startswith("--") for argument in arguments):
         return _usage(usage)

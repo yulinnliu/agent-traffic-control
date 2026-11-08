@@ -33,11 +33,6 @@ location, in that order.
 `src/atc_cli/` is the dispatcher; the scripts stay runnable directly with
 `uv run python scripts/<name>.py`.
 
-`atc worktree cleanup` also accepts `--reviewed-sha FULL_SHA` in place of
-`--reviewed FULL_SHA`, unlisted in its help, through `atc-testkit` 0.7.x; from
-0.8.0 it accepts only `--reviewed`. `atc tmp clean --project` has the same end
-(`docs/ATC_HOME.md` § Deleting).
-
 `atc-testkit/` is the pytest adapter of the verification contract: marker
 classification, change-impact selection, temporary locations, the stages, the
 gate and verifier skeletons, and the installed-artifact check a consuming project
