@@ -34,7 +34,7 @@ After `verification=PASS`, with `main` updated and read back, the adapter
 writes `<git-common-dir>/atc/verification-evidence/<candidate_sha>.json`:
 
 ```text
-schema               "atc-verification-evidence/1"
+schema               "atc-verification-evidence/2"
 candidate_sha        full commit ID the verifier ran against
 tree                 tree ID of that commit
 clean                true: candidate HEAD unchanged and status empty after the verifier
@@ -42,7 +42,9 @@ expected_main        main before the integration
 reviewed             reviewed source SHA; the rebased tip of a carried-over approval
 carried_over_from    present only for a carried-over approval: the reviewed SHA it came from
 verdict              "FF" | "NO_FF"
-authority_reference  as supplied to the adapter
+task                 the task the integration names, as in its integrations.jsonl line
+authority            {"kind": "record", "task_id": str} | {"kind": "owner_words", "quote": str}
+                     | {"kind": "unclassified"} for the deprecated --authority-reference
 verify_argv          the verifier argv that ran
 platform             {"system": str, "machine": str}
 verified_at          UTC timestamp, ISO 8601
@@ -57,6 +59,10 @@ writes none (`RECOVERED`). The result names the record path, or `NONE` with
 one of these reasons. After each write the adapter deletes records older than
 14 days. Readers never write or delete.
 
+A reader accepts `atc-verification-evidence/1` as well: its records carry
+`authority_reference`, the string supplied to the adapter, in place of `task`
+and `authority`. No reuse check reads these keys.
+
 ## Reuse
 
 A gate about to run tests for a pushed commit reuses the record in place of
@@ -68,7 +74,7 @@ row that fails gives the verdict `RUN: <reason>`; all rows holding gives
 | --- | --- |
 | The record for the pushed commit exists | `NO_RECORD` |
 | It is readable JSON holding an object | `UNREADABLE` |
-| `schema` is the record schema and every field above has its type | `SCHEMA_MISMATCH` |
+| `schema` is `atc-verification-evidence/2` or `/1` and every field the reuse checks read has its type | `SCHEMA_MISMATCH` |
 | `candidate_sha` equals the pushed commit | `COMMIT_MISMATCH` |
 | `tree` equals the pushed commit's tree | `TREE_MISMATCH` |
 | `clean` is `true` | `NOT_CLEAN` |

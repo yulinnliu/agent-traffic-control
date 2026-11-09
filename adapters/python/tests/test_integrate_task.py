@@ -350,3 +350,108 @@ def test_the_alias_takes_no_other_authority_flag(tasks_repo: Path, capsys: pytes
     tip = on_branch(tasks_repo, "work", {"a.txt": "w\n"})
     status, data, _ = run_json(tasks_repo, capsys, tip, "--authority-reference", "x", *extra)
     assert (status, data["refusal"]["reason"]) == (2, "USAGE")
+
+
+# A recovered candidate resolves its authority as any other run
+
+
+def stop_after_update(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Dirty the checkout right after the fast-forward, so the run stops for recovery with main at the candidate."""
+    real_git = gi.git
+
+    def dirty_after_ff(repo_arg, *args, **kwargs):
+        result = real_git(repo_arg, *args, **kwargs)
+        if args[:2] == ("merge", "--ff-only"):
+            (repo / "a.txt").write_text("unexpected checkout mutation\n", encoding="utf-8")
+        return result
+
+    monkeypatch.setattr(gi, "git", dirty_after_ff)
+
+
+def recover(repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tip: str, *flags: str) -> None:
+    stop_after_update(repo, monkeypatch)
+    assert run_json(repo, capsys, tip, *flags)[0] == 3
+    monkeypatch.undo()
+    run_git(repo, "checkout", "--", "a.txt")
+    assert main_tip(repo) == tip
+
+
+def test_a_recovery_without_a_grant_on_main_takes_owner_words(
+    tasks_repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    tip = on_branch(tasks_repo, "work", {".atc/tasks/DEMO-0001.yaml": record("DEMO-0001", "work"), "a.txt": "w\n"})
+    recover(tasks_repo, monkeypatch, capsys, tip, "--task", "DEMO-0001", "--owner-words", WORDS)
+    status, data, _ = run_json(tasks_repo, capsys, tip, "--task", "DEMO-0001")
+    assert (status, data["refusal"]["reason"]) == (1, "AUTHORITY_MISSING")
+    status, data, err = run_json(tasks_repo, capsys, tip, "--task", "DEMO-0001", "--owner-words", WORDS)
+    assert (status, data["verdict"], data["authority"]["kind"]) == (0, "RECOVERED", "owner_words"), err
+    assert len(lines(tasks_repo)) == 1
+
+
+def test_a_recovery_under_a_record_checks_its_provenance(
+    tasks_repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    bind(tasks_repo, capsys)
+    work = on_branch(tasks_repo, "work", {"a.txt": "work\n"})
+    recover(tasks_repo, monkeypatch, capsys, work, "--task", "DEMO-0001")
+    status, data, err = run_json(tasks_repo, capsys, work, "--task", "DEMO-0001")
+    assert (status, data["verdict"], data["authority"]) == (0, "RECOVERED", {"kind": "record", "task_id": "DEMO-0001"}), err
+
+
+def test_a_recovery_under_an_unintegrated_grant_is_refused(
+    tasks_repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    put(tasks_repo, {".atc/tasks/DEMO-0001.yaml": record("DEMO-0001", "work", GRANT)})
+    work = on_branch(tasks_repo, "work", {"a.txt": "work\n"})
+    recover(tasks_repo, monkeypatch, capsys, work, "--task", "DEMO-0001", "--owner-words", WORDS)
+    status, data, _ = run_json(tasks_repo, capsys, work, "--task", "DEMO-0001")
+    assert (status, data["refusal"]["reason"]) == (1, "AUTHORITY_NOT_INTEGRATED")
+
+
+# The push listing
+
+
+def test_the_push_listing_names_every_task_of_a_binding(tasks_repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    publish(tasks_repo, "main")
+    tip = on_branch(tasks_repo, "bind", {
+        ".atc/tasks/DEMO-0001.yaml": record("DEMO-0001", "one", GRANT),
+        ".atc/tasks/DEMO-0002.yaml": record("DEMO-0002", "two", GRANT),
+    })
+    assert run_json(tasks_repo, capsys, tip, "--owner-words", WORDS)[0] == 0
+    listing = gp.push_listing(tasks_repo)
+    assert [(c["task"], c["tasks"], c["authority"]["kind"]) for c in listing["commits"]] == [
+        (None, ["DEMO-0001", "DEMO-0002"], "owner_words"),
+    ]
+    assert gp.render_push(listing)[1] == f'  integration {tip[:12]} task="DEMO-0001,DEMO-0002" authority=owner_words'
+
+
+def test_the_push_listing_reads_lines_written_before_task_and_authority(
+    tasks_repo: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    publish(tasks_repo, "main")
+    base = main_tip(tasks_repo)
+    reviewed = put(tasks_repo, {"a.txt": "old\n"})
+    synced = put(tasks_repo, {"b.txt": "sync\n"})
+    revision = "b" * 40
+    path = tasks_repo / ".git" / "atc" / "integrations.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps({"candidate_sha": reviewed, "reviewed": reviewed, "main_before": base,
+                    "authority_reference": f"docs/PLAN.md §2 step 1 @ {reviewed}", "integrated_at": "2026-11-01T00:00:00+00:00"}) + "\n"
+        + json.dumps({"candidate_sha": synced, "main_before": reviewed, "kind": "sync", "source": "example/governance",
+                      "source_revision": revision, "authority_reference": f"governance sync from example/governance at {revision}",
+                      "integrated_at": "2026-11-01T00:00:00+00:00"}) + "\n",
+        encoding="utf-8")
+    listing = gp.push_listing(tasks_repo)
+    assert [(c["sha"], c["task"], c["authority"], c["authority_reference"] is not None) for c in listing["commits"]] == [
+        (reviewed, "docs/PLAN.md §2 step 1", {"kind": "unclassified"}, True),
+        (synced, revision, {"kind": "sync"}, True),
+    ]
+    assert gp.render_push(listing)[1:] == [
+        f'  integration {reviewed[:12]} task="docs/PLAN.md §2 step 1" authority=unclassified',
+        f"    {reviewed[:12]} edit",
+        f'  integration {synced[:12]} task="{revision[:12]}" authority=sync',
+        f"    {synced[:12]} edit",
+    ]
+    assert gp.main(["push", "--repo", str(tasks_repo)]) == 0
+    assert 'task="docs/PLAN.md §2 step 1" authority=unclassified' in capsys.readouterr().out

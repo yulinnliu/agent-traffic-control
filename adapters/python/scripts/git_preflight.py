@@ -432,9 +432,14 @@ def push_listing(repo: Path, main: str = "main", own: set[str] | str | None = No
         commits = [tuple(line.split(" ", 1)) if " " in line else (line, "") for line in out.splitlines() if line]
     position = {sha: index for index, (sha, _) in enumerate(commits)}
     records: dict[str, dict] = {}
+    tasks: dict[str, list[str | None]] = {}
     for record in read_integrations(repo):
         if record["candidate_sha"] in position:
             records.setdefault(record["candidate_sha"], record)
+            # A records-only binding of several tasks writes one line per task with one candidate.
+            task = integration_view(record)[0]
+            if task not in tasks.setdefault(record["candidate_sha"], []):
+                tasks[record["candidate_sha"]].append(task)
     owner: dict[str, dict] = {}
     excluded = [remote] if remote else []
     for candidate in sorted(records, key=position.__getitem__):
@@ -448,7 +453,8 @@ def push_listing(repo: Path, main: str = "main", own: set[str] | str | None = No
     entries = []
     for sha, subject in commits:
         record = owner.get(sha, {})
-        task, authority = integration_view(record) if record else (None, None)
+        authority = integration_view(record)[1] if record else None
+        named = tasks.get(record.get("candidate_sha"), [])
         entries.append({
             "sha": sha,
             "subject": subject,
@@ -457,7 +463,8 @@ def push_listing(repo: Path, main: str = "main", own: set[str] | str | None = No
             "kind": record.get("kind"),
             "source_revision": record.get("source_revision"),
             "authority_reference": record.get("authority_reference"),
-            "task": task,
+            "task": named[0] if len(named) == 1 else None,
+            "tasks": named,
             "authority": authority,
             "push_approval": None if own is None else sha in own,
         })
@@ -483,7 +490,7 @@ def render_push(listing: dict) -> list[str]:
             group = key
             if entry["integration"]:
                 authority = entry.get("authority") or {}
-                source = (f"integration {short(entry['integration'])} task={json.dumps(entry.get('task'), ensure_ascii=False)} "
+                source = (f"integration {short(entry['integration'])} task={json.dumps(','.join(str(t) for t in entry.get('tasks') or [entry.get('task')]), ensure_ascii=False)} "
                           f"authority={authority.get('kind', '-')}")
             else:
                 source = "no integration record"

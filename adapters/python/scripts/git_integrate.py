@@ -1101,16 +1101,18 @@ def resolve_binding(
 ) -> Binding:
     """The tasks and authority of the run (`docs/TASK_CONTRACT_PLAN.md` § B), or the stop that refuses them."""
     words = {"kind": "owner_words", "quote": args.owner_words} if args.owner_words is not None else None
-    record_task = args.task if args.task and ta.RECORD_ID.fullmatch(args.task)         and declared_prefix(repo, main) == ta.RECORD_ID.fullmatch(args.task)["prefix"] else None
+    match = ta.RECORD_ID.fullmatch(args.task or "")
+    record_task = args.task if match and declared_prefix(repo, main) == match["prefix"] else None
     if branch is None or branch_source == "recovery":
-        # A recovered candidate is already on main; its range was checked by the run that made it.
+        # A recovered candidate is already on main; its range was checked by the run that made it,
+        # and its authority is resolved here as for any other run.
         if alias is not None:
             return Binding([alias], {"kind": "unclassified"})
         if args.task is None:
             raise Refused("USAGE", "the reviewed SHA is already on main; name the integration's task with --task")
-        if words is None and record_task is None:
-            raise ta.Stop("AUTHORITY_MISSING", f"--task {args.task} is no record; integrate with --owner-words")
-        return Binding([args.task], words or {"kind": "record", "task_id": record_task})
+        if record_task is not None and branch is not None:
+            ta.check_record(repo, record_task, reviewed, branch)
+        return Binding([args.task], resolve_authority_of(repo, main, main_tip, args.task, record_task, [args.task], words))
     rng = ta.scan(repo, git(repo, "merge-base", main_tip, reviewed).stdout.strip(), reviewed)
     if alias is not None:
         if rng.touches_tasks:
@@ -1128,16 +1130,23 @@ def resolve_binding(
     else:
         tasks = [args.task]
     ta.check_range(repo, rng, main_tip, reviewed, may_change=rng.records_only and words is not None)
+    return Binding(tasks, resolve_authority_of(repo, main, main_tip, args.task, record_task, tasks, words),
+                   rng.records_only)
+
+
+def resolve_authority_of(
+    repo: Path, main: str, main_tip: str, task: str | None, record_task: str | None, tasks: list[str],
+    words: dict | None,
+) -> dict:
+    """Exactly one authority: the Owner's quoted words, or the record on main granting `integrate_main`."""
     if words is not None:
-        authority = words
-    elif record_task is None:
-        raise ta.Stop("AUTHORITY_MISSING", f"--task {args.task} is no task record; integrate with --owner-words")
-    elif tasks != [record_task]:
+        return words
+    if record_task is None:
+        raise ta.Stop("AUTHORITY_MISSING", f"--task {task} is no task record; integrate with --owner-words")
+    if tasks != [record_task]:
         raise ta.Stop("AUTHORITY_MISSING", f"the range binds {', '.join(tasks)}; the record of {record_task} "
                                            "covers that task alone; integrate with --owner-words")
-    else:
-        authority = ta.record_authority(repo, record_task, main, main_tip, gp.read_integrations(repo))
-    return Binding(tasks, authority, rng.records_only)
+    return ta.record_authority(repo, record_task, main, main_tip, gp.read_integrations(repo))
 
 
 def resolve(args: argparse.Namespace, root: Path, root_given: bool, cwd: str) -> Target:
