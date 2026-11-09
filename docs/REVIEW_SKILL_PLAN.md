@@ -249,11 +249,13 @@ record, git (the topic branch tip and `main`), `atc worktree audit`,
 `<git common dir>/atc/integrations.jsonl`, the previous coordinator
 hand-over and the session list. A truncated notification, or a verdict whose
 full text is missing, is not enough to proceed; the coordinator obtains the
-full content from its sender first. The task record never receives the
-integration result, the final SHA or session names: a topic's commits never
-cite that topic's own integration SHA, and facts known only after
-integration go in the next topic (ria-project `AGENTS.md`); session names
-belong only in the hand-over.
+full content from its sender first. An Owner's word that
+`integrations.jsonl` does not record is asked for again after recovery. The
+task record receives only what the project's `AGENTS.md` lets a topic's own
+commits write; session names belong only in the hand-over. The reason, kept
+in this plan and out of the body: a project may forbid a topic's commits
+from naming facts known only after integration, as ria-project `AGENTS.md`
+does for the topic's own integration SHA.
 
 Its steps, each ending on its done condition:
 
@@ -307,10 +309,11 @@ Its steps, each ending on its done condition:
    another. The word is recorded without a separate registry:
    `--authority-reference` names where the Owner granted it, and
    `atc integrate` writes that reference with the reviewed SHA and any
-   `carried_over_from` to `<git common dir>/atc/integrations.jsonl`
-   (`_note_integration` and `_record_integration` in
-   `adapters/python/scripts/git_integrate.py`); the Owner's own words go in
-   the coordinator hand-over.
+   `carried_over_from` to `<git common dir>/atc/integrations.jsonl`; the
+   Owner's own words go in the coordinator hand-over. The body names only
+   `--authority-reference` and `integrations.jsonl`; the writing code, cited
+   here as the source, is `_note_integration` and `_record_integration` in
+   `adapters/python/scripts/git_integrate.py`.
    With the word, run the instruction, or forward it to the writer with the
    Owner's words quoted, and check the result as `atc-review` "Writer:
    after integration" says. Done when the Owner's word is recorded with its
@@ -319,7 +322,8 @@ Its steps, each ending on its done condition:
    branch or worktree cleaned up and the task record at its
    post-integration state; archive both sessions; delete the task's
    scratches only as a separate step on the Owner's word (until then
-   `atc tmp list` still lists them); write the coordinator hand-over the project's handoff rules call for
+   `atc tmp list` still lists them); write the coordinator hand-over the
+   project's handoff rules call for
    (`hami-handoff-reminder` `references/handoff-document.md` § The handoff
    document): one file, final state, what waits on the Owner. Done when
    each closure fact is confirmed and the hand-over written.
