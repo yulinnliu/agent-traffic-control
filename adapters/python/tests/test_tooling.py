@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import json
 import os
 import shutil
@@ -288,6 +289,31 @@ def test_validator_failure_records_evidence(tmp_path: Path) -> None:
     records = friction.load_records(events)
     assert records[0]["kind"] == "VALIDATOR_DRIFT"
     assert list((events.parent / "validator").glob("*.log"))
+
+
+@pytest.mark.integration
+def test_validator_output_reaches_the_caller_whatever_encoding_the_caller_carries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("PYTHONIOENCODING", "latin-1")
+    root = tmp_path / "workspace"
+    root.mkdir()
+    validator_script = root / "pass.py"
+    write(validator_script, "print('caf\\u00e9 \\u9a57\\u8b49')\n")
+    result = check_workspace.run_check(
+        root=root, validator_script=validator_script, events_file=root / "events.jsonl",
+        python_executable=sys.executable,
+    )
+    assert result == 0
+    assert capsys.readouterr().out == "caf\u00e9 \u9a57\u8b49\n"
+
+
+@pytest.mark.unit
+def test_forwarded_output_escapes_what_the_stream_cannot_encode() -> None:
+    stream = io.TextIOWrapper(io.BytesIO(), encoding="cp950", newline="\n")
+    check_workspace.forward(stream, "\u9a57 \u2713\n")
+    stream.flush()
+    assert stream.buffer.getvalue().decode("cp950") == "\u9a57 \\u2713\n"
 
 
 def test_validator_success_creates_no_incident(tmp_path: Path) -> None:

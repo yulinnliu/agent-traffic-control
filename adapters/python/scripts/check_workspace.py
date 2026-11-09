@@ -18,6 +18,7 @@ machine-local runtime state.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -26,6 +27,14 @@ from pathlib import Path
 import friction
 
 ROOT = Path(__file__).resolve().parents[3]
+
+
+def forward(stream, text: str) -> None:
+    """Write ``text`` to ``stream``; characters its encoding cannot hold become backslash escapes."""
+    encoding = stream.encoding or "utf-8"
+    stream.write(text.encode(encoding, "backslashreplace").decode(encoding))
+
+
 def run_check(
     *,
     root: Path = ROOT,
@@ -38,9 +47,10 @@ def run_check(
     validator_script = validator_script or root / "scripts" / "validate_workspace.py"
     cmd = [python_executable, str(validator_script), *forwarded_args]
 
-    result = subprocess.run(cmd, cwd=root, capture_output=True, text=True)
-    sys.stdout.write(result.stdout)
-    sys.stderr.write(result.stderr)
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
+    result = subprocess.run(cmd, cwd=root, env=env, capture_output=True, text=True, encoding="utf-8")
+    forward(sys.stdout, result.stdout)
+    forward(sys.stderr, result.stderr)
 
     if result.returncode == 0:
         return 0
