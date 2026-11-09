@@ -251,3 +251,34 @@ def test_list_infers_the_project_from_a_worktree(ws: Workspace, capsys: pytest.C
     status, out, _ = ws.cli(capsys, "list", cwd=topic)
     assert status == 0
     assert out.startswith("DEMO-0001  open  topic-widget")
+
+
+def test_new_takes_base_sha_from_the_merge_base_not_the_main_tip(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    fork = run_git(ws.repo, "rev-parse", "main")
+    topic = ws.worktree(ws.repo, "claude+widget", "topic-widget")
+    moved = commit(ws.repo, {"later.txt": "later\n"})
+    assert ws.cli(capsys, "new", "--scope", "s", cwd=topic)[0] == 0
+    data = yaml.safe_load((topic / ".atc" / "tasks" / "DEMO-0001.yaml").read_text(encoding="utf-8"))
+    assert (data["base_sha"], moved != fork) == (fork, True)
+
+
+def test_list_reads_unknown_for_an_integration_whose_candidate_is_off_main(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    commit(ws.repo, {".atc/tasks/DEMO-0001.yaml": record("DEMO-0001", "t-lost")})
+    lost = ws.worktree(ws.repo, "claude+lost", "t-lost")
+    candidate = commit(lost, {"work.txt": "never on main\n"})
+    run_git(ws.repo, "worktree", "remove", "--force", str(lost))
+    run_git(ws.repo, "branch", "-D", "t-lost")
+    ws.integrate(ws.repo, candidate_sha=candidate, task="DEMO-0001")
+    assert ws.listing(capsys)["DEMO-0001"]["status"] == "unknown"
+
+
+def test_a_broken_schema_fails_the_check(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from jsonschema.exceptions import SchemaError
+    broken = tmp_path / "task.schema.json"
+    broken.write_text(json.dumps({"$schema": "https://json-schema.org/draft/2020-12/schema", "type": 5}), encoding="utf-8")
+    monkeypatch.setattr(task_records, "SCHEMA", broken)
+    (tmp_path / "AGENTS.md").write_text(agents("DEMO"), encoding="utf-8")
+    (tmp_path / ".atc" / "tasks").mkdir(parents=True)
+    (tmp_path / ".atc" / "tasks" / "DEMO-0001.yaml").write_text(record("DEMO-0001", "b"), encoding="utf-8")
+    with pytest.raises(SchemaError):
+        task_records.problems(tmp_path)

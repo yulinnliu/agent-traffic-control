@@ -105,7 +105,7 @@ no store or writer of its own exists; authority enters `main` only through
 | `closed`, `abandoned` | the record's `closure.state` |
 | `open` | its branch exists with commits not on `main` |
 | `integrated` | `integrations.jsonl` names the task in a record that is not records-only, whose candidate SHA is reachable from `main`, and its branch is gone or has no commit beyond `main`: everything on the branch so far is on `main` |
-| `bound` | the record is on `main`, its only integrations are records-only, and its branch is gone or has no commit beyond `main` |
+| `bound` | the record is on `main`, it has at least one integration and every one is records-only, and its branch is gone or has no commit beyond `main` |
 | `unknown` | none of the above, such as a task integrated on another machine |
 
 Rows are tried in order; a multi-step task reads `open` while a later step

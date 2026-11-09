@@ -17,7 +17,7 @@ pytestmark = pytest.mark.integration
 SUBCOMMANDS = [
     ("worktree",), ("worktree", "create"), ("worktree", "resume"), ("worktree", "audit"), ("worktree", "cleanup"),
     ("preflight",), ("preflight", "merge"), ("preflight", "cleanup"),
-    ("integrate",), ("validate",), ("onboard",),
+    ("integrate",), ("task",), ("task", "new"), ("task", "list"), ("task", "check"), ("validate",), ("onboard",),
     ("bootstrap",), ("bootstrap", "init"), ("bootstrap", "add"), ("bootstrap", "sync"), ("bootstrap", "status"),
     ("doctor",), ("policies",), ("policies", "check"), ("enforce",), ("classify",),
     ("friction",), ("friction", "add"), ("friction", "list"), ("friction", "summary"), ("friction", "resolve"),
@@ -142,6 +142,19 @@ def test_onboard_dispatch_picks_the_root_by_target(
     assert seen["root"] == {"worktree": worktree, "workspace": workspace}[expected].resolve()
 
 
+def test_task_dispatch_passes_the_resolved_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import task_records
+    seen: dict[str, object] = {}
+
+    def record(rest: list[str], root: Path) -> int:
+        seen.update(rest=rest, root=root)
+        return 0
+
+    monkeypatch.setattr(task_records, "main", record)
+    assert atc_cli.main(["--root", str(tmp_path), "task", "list", "--all"]) == 0
+    assert seen == {"rest": ["list", "--all"], "root": tmp_path.resolve()}
+
+
 def git(repo: Path, *args: str) -> None:
     subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
 
@@ -172,7 +185,7 @@ def test_a_canonical_checkout_off_main_refuses_every_command_but_doctor_and_help
     git(canonical, "switch", "-q", "-c", "topic")
     assert atc_cli.main(["validate"], checkout=canonical) == 2
     assert capsys.readouterr().err.startswith(f"ERROR CHECKOUT_NOT_MAIN {canonical} is on topic;")
-    for command in ("worktree", "integrate", "onboard", "test", "tmp"):
+    for command in ("worktree", "integrate", "task", "onboard", "test", "tmp"):
         assert atc_cli._guard(command, [], canonical) == 2
     assert atc_cli._guard("doctor", [], canonical) is None
     assert atc_cli._guard("integrate", ["--help"], canonical) is None

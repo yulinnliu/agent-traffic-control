@@ -1,0 +1,6 @@
+{
+  "exit_code": 1,
+  "output_contains": [
+    "no-prefix-line: AGENTS.md '## Task records' has no 'Task prefix: <PREFIX>' line"
+  ]
+}

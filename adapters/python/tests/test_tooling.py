@@ -365,6 +365,21 @@ def test_projects_check_task_records_and_one_prefix_per_repository(tmp_path: Pat
     assert any(f.startswith("projects.demo: task records: schema-violation: ATC-0002.yaml") for f in validator.FAILURES)
     assert "task prefix ATC is declared by workspace root, projects.demo; a prefix names one repository" in validator.FAILURES
 
+
+@pytest.mark.integration
+def test_validate_reports_a_bad_record_of_the_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                   capsys: pytest.CaptureFixture[str]) -> None:
+    root, _ = make_workspace(tmp_path)
+    write(root / "AGENTS.md", "# AGENTS.md\n\n## Task records\n\n- Task prefix: ATC\n")
+    write(root / ".atc" / "tasks" / "ATC-0002.yaml", "task_id: ATC-0001\n")
+    monkeypatch.setattr(validator, "ROOT", root)
+    validator.FAILURES.clear()
+    assert validator.main(["--root", str(root)]) == 1
+    validator.FAILURES.clear()
+    out = capsys.readouterr().out
+    assert "workspace root: task records: id-mismatch: ATC-0002.yaml" in out
+    assert "workspace root: task records: schema-violation: ATC-0002.yaml" in out
+
 def test_new_project_bootstrap_requires_vendored_index_and_revision(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root, project = make_workspace(tmp_path)
     write(project / "AGENTS.md", f"# AGENTS.md\n\n{validator.POLICY_BEGIN}\nread governance\n{validator.POLICY_END}\n")

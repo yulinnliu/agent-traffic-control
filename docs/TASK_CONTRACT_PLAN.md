@@ -30,7 +30,9 @@ the final sync after the `.atc/` layout work.
 ## A. Task contract (task ATC-0001)
 
 1. `shared/policies/schemas/task.schema.json`, Draft 2020-12, as
-   `docs/TASKS.md` § Record states; `atc policies check` covers it.
+   `docs/TASKS.md` § Record states; the record check validates the schema
+   against the Draft 2020-12 meta-schema before each use, so a broken schema
+   fails `atc task check` and `validate`.
 2. `adapters/python/scripts/task_records.py`: `new`, `list`, `check`;
    `atc_cli` maps `task` to it, behind the canonical checkout guard.
    - The declaration parser sits beside `verification_section.py`.

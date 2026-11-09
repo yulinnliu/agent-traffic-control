@@ -1,0 +1,6 @@
+{
+  "exit_code": 1,
+  "output_contains": [
+    "invalid-prefix: AGENTS.md declares task prefix 'demo'"
+  ]
+}
