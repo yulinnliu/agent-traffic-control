@@ -61,6 +61,8 @@ rewrites the files in place without a commit.
   repository never tracks their content.
 - `worktrees/<name>/<owner>+<topic>/` — disposable per-topic worktrees whose
   identity is in git metadata.
+- `worktrees/root/<owner>+<topic>/` — the same for this repository's own
+  topics; `root` is therefore reserved and names no registered project.
 - `state/<name>-data/` — a project's persistent, hard-to-regenerate data.
   Protected by the mutation policy in `AGENTS.md`, not by `.gitignore`.
 - `shared/memory/INDEX.md` — cross-repository memory router naming real

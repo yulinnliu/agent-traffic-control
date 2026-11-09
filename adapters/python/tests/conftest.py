@@ -21,6 +21,13 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 
+@pytest.fixture(autouse=True)
+def _guard_checks_no_live_checkout(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`atc_cli.main` guards a checkout holding no workspace.yaml unless a test names one, whatever branch runs the suite."""
+    import atc_cli
+    monkeypatch.setattr(atc_cli, "GUARDED_CHECKOUT", SCRIPTS)
+
+
 def _writable_retry(function, target, _error) -> None:
     os.chmod(target, stat.S_IWRITE)
     function(target)

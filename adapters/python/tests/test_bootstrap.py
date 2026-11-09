@@ -73,6 +73,19 @@ def test_add_rejects_non_repository_and_bad_names(tmp_path: Path) -> None:
     assert bootstrap.add(root, "plain", str(root / "elsewhere"), []) == 1
 
 
+@pytest.mark.integration
+def test_add_refuses_the_reserved_root_name_before_writing(tmp_path: Path) -> None:
+    root, _ = make_workspace(tmp_path, create_project=False)
+    shutil.copyfile(bootstrap.ROOT / "workspace.yaml.example", root / "workspace.yaml.example")
+    bootstrap.init(root, "owner/repo", force=True, environ={})
+    project = root / "projects" / "root"
+    project.mkdir(parents=True)
+    run_git(project, "init", "-q", "-b", "main")
+    before = (root / "workspace.yaml").read_text(encoding="utf-8")
+    assert bootstrap.add(root, "root", None, []) == 1
+    assert (root / "workspace.yaml").read_text(encoding="utf-8") == before
+
+
 def test_add_installs_requested_opt_in_adapter(tmp_path: Path) -> None:
     root, _ = make_workspace(tmp_path, create_project=False)
     shutil.copyfile(bootstrap.ROOT / "workspace.yaml.example", root / "workspace.yaml.example")

@@ -38,6 +38,7 @@ from pathlib import Path
 import yaml
 
 import doctor
+import validate_workspace
 import onboard_project
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -140,6 +141,10 @@ def validate(root: Path) -> int:
 def add(root: Path, name: str, repo: str | None, skills: list[str]) -> int:
     if not NAME.match(name):
         print(f"{name}: use a lowercase hyphenated name")
+        return 1
+    reserved = validate_workspace.reserved_root_problem(name, f"worktrees/{name}")
+    if reserved:
+        print(f"{name}: {reserved}")
         return 1
     project = root / "projects" / name
     if repo and URL.match(repo):

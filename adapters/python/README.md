@@ -23,7 +23,7 @@ location, in that order.
 | `classify` | `classify_change.py` | `--policy escalation.yaml --changed FILE [--severity]`: `LOW` or `HIGH` |
 | `preflight` | `git_preflight.py` | `merge` verdict `FF` / `NO_FF` / `STOP`; `cleanup` verdict `REMOVABLE`; reads only |
 | `integrate` | `git_integrate.py` | `--project NAME \| --repo DIR --reviewed SHA --authority-reference REF`: the caller types the reviewed SHA and the record part of the reference, never inferred; the branch is found from the reviewed SHA, so `--branch` names it only when several local branches sit there; `--check` resolves, preflights and warns without a slot or candidate |
-| `worktree` | `hami_worktree.py` | `create`, `resume`, `audit`, `cleanup` per-topic worktrees with identity in git |
+| `worktree` | `hami_worktree.py` | `create`, `resume`, `audit`, `cleanup` per-topic worktrees with identity in git; `--repo` for this checkout's own topics under `worktrees/root/` |
 | `friction` | `friction.py` | append incident and resolution events; summaries |
 | `test` | `atc-testkit` | `run TREE SCRATCH PYTHON LABEL [pytest args]`: a test tree under a scratch of `~/.atc/tmp`; `mutants`: one guard mutant at a time on an exported commit |
 | `tmp` | `atc-testkit` | `list`, `clean DIR... \| --tree-name NAME`, `prune`: the scratch registry and what is older than seven days |
@@ -43,7 +43,7 @@ runs in CI. This adapter depends on it by in-tree path.
 uv run --locked pytest                                  # suite, including shared/conformance
 uv run --locked pytest tests/test_tooling.py -k name    # one test
 uv run atc validate                                     # this checkout's contract
-uv run atc onboard --sync --root-only                   # re-render .claude/ .agents/ .dsh/ after a canonical skill change
+uv run atc onboard --sync --root-only                   # re-render .claude/ .agents/ .dsh/ after a canonical skill change (topic worktree only)
 pwsh -File check.ps1 -Projects -Tests                   # one-shot with temporary files and caches under ~/.atc
 ```
 

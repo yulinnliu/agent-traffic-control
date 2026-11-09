@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import io
+import subprocess
 import sys
 from pathlib import Path
 
@@ -139,3 +140,81 @@ def test_onboard_dispatch_picks_the_root_by_target(
     monkeypatch.chdir(worktree / "adapters" / "python")
     assert atc_cli.main(["onboard", *args]) == 0
     assert seen["root"] == {"worktree": worktree, "workspace": workspace}[expected].resolve()
+
+
+def git(repo: Path, *args: str) -> None:
+    subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
+
+
+@pytest.fixture()
+def canonical(tmp_path: Path) -> Path:
+    """A canonical checkout: holds workspace.yaml, its git dir is the common dir, on main with one tracked file."""
+    checkout = tmp_path / "workspace"
+    checkout.mkdir()
+    git(checkout, "init", "-q", "-b", "main")
+    git(checkout, "config", "user.email", "t@example.invalid")
+    git(checkout, "config", "user.name", "t")
+    (checkout / "AGENTS.md").write_text("# root\n", encoding="utf-8")
+    git(checkout, "add", "AGENTS.md")
+    git(checkout, "commit", "-q", "-m", "root")
+    (checkout / "workspace.yaml").write_text("version: 1\n", encoding="utf-8")
+    return checkout
+
+
+def test_the_canonical_checkout_on_main_and_clean_passes_silently(canonical: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    assert atc_cli._guard("validate", [], canonical) is None
+    assert capsys.readouterr().err == ""
+
+
+def test_a_canonical_checkout_off_main_refuses_every_command_but_doctor_and_help(
+    canonical: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    git(canonical, "switch", "-q", "-c", "topic")
+    assert atc_cli.main(["validate"], checkout=canonical) == 2
+    assert capsys.readouterr().err.startswith(f"ERROR CHECKOUT_NOT_MAIN {canonical} is on topic;")
+    for command in ("worktree", "integrate", "onboard", "test", "tmp"):
+        assert atc_cli._guard(command, [], canonical) == 2
+    assert atc_cli._guard("doctor", [], canonical) is None
+    assert atc_cli._guard("integrate", ["--help"], canonical) is None
+    git(canonical, "switch", "-q", "--detach")
+    assert atc_cli._guard("validate", [], canonical) == 2
+    assert "is on a detached HEAD" in capsys.readouterr().err
+
+
+def test_a_dirty_canonical_checkout_warns_and_runs(canonical: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    (canonical / "AGENTS.md").write_text("# edited\n", encoding="utf-8")
+    assert atc_cli._guard("validate", [], canonical) is None
+    assert capsys.readouterr().err.startswith(f"WARNING CHECKOUT_DIRTY {canonical} ")
+
+
+def test_a_linked_worktree_and_a_checkout_without_the_map_are_not_canonical(canonical: Path, tmp_path: Path) -> None:
+    linked = canonical / "worktrees" / "root" / "claude+topic"
+    git(canonical, "worktree", "add", "-q", "-b", "worktree-claude+topic", str(linked))
+    (linked / "workspace.yaml").write_text("version: 1\n", encoding="utf-8")
+    assert atc_cli._guard("validate", [], linked) is None
+    (canonical / "workspace.yaml").unlink()
+    git(canonical, "switch", "-q", "-c", "topic")
+    assert atc_cli._guard("validate", [], canonical) is None
+
+
+def test_root_only_onboard_refuses_the_canonical_checkout(
+    canonical: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    (canonical / "shared" / "governance").mkdir(parents=True)
+    (canonical / "adapters" / "python" / "scripts").mkdir(parents=True)
+    (canonical / "adapters" / "python" / "scripts" / "onboard_project.py").write_text("", encoding="utf-8")
+    monkeypatch.delenv("ATC_ROOT", raising=False)
+    monkeypatch.chdir(canonical)
+    assert atc_cli.main(["onboard", "--sync", "--root-only"]) == 2
+    assert capsys.readouterr().err.startswith(f"ERROR CHECKOUT_CANONICAL {canonical.resolve()} ")
+
+
+def test_doctor_lists_the_guard_conditions(canonical: Path) -> None:
+    import doctor
+    assert doctor.checkout_check(canonical).status == "READY"
+    (canonical / "AGENTS.md").write_text("# edited\n", encoding="utf-8")
+    assert doctor.checkout_check(canonical).status == "ERROR"
+    git(canonical, "stash", "-q")
+    git(canonical, "switch", "-q", "-c", "topic")
+    check = doctor.checkout_check(canonical)
+    assert (check.status, check.detail.endswith("every other atc command refuses")) == ("ERROR", True)

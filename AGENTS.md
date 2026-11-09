@@ -21,10 +21,11 @@ Then read `shared/governance/INDEX.md` and `CORE.md` from that exact same revisi
 ## Changing this repo
 
 - Read by default; editing this repo requires explicit task authority.
-- Authorized changes use a topic branch in this canonical checkout; the managed worktree tooling is for registered project repos, not this root.
+- The installed `atc` runs this canonical checkout's code, so the checkout stays on `main` with no tracked modification: off `main` every `atc` command but `doctor` refuses, and `onboard --root-only` refuses to render here.
+- Authorized changes use a managed worktree under `worktrees/root/` from `atc worktree create --repo <this checkout>`; `atc integrate --repo <this checkout>` fast-forwards `main` here.
 - Integration, publication and deployment are separately governed actions.
-- Never aim destructive project/worktree tooling at this root. Do not run `git clean -fdx` here or recursively delete `projects/`, `worktrees/`, or `state/` from above.
-- Read back changes, then validate from `adapters/python/` with `uv run atc onboard --sync --root-only` followed by `uv run atc validate` after touching a shared skill or overlay, `uv run atc policies check ../../shared/policies/examples` after touching a schema or example, and `uv run --locked pytest` (reads `shared/conformance/`) after touching a tool or fixture.
+- Never aim destructive project/worktree tooling at this checkout itself. Do not run `git clean -fdx` here or recursively delete `projects/`, `worktrees/`, or `state/` from above.
+- Read back changes, then validate from the topic worktree's `adapters/python/`, entered in a subshell `( cd <worktree>/adapters/python && ... )` and through `uv run --locked atc` (bare `atc` runs this checkout's code): `onboard --sync --root-only` followed by `validate` after touching a shared skill or overlay, `policies check ../../shared/policies/examples` after touching a schema or example, and `uv run --locked pytest` (reads `shared/conformance/`) after touching a tool or fixture.
 
 ## Integration verification
 

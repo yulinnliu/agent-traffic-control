@@ -193,6 +193,55 @@ def test_uninferable_project_lists_the_registered_names(ws: Workspace, capsys: p
     assert f"registered: {PROJECT}, other-project" in single(results)["detail"]
 
 
+def root_repo(ws: Workspace) -> Path:
+    """Make the workspace root a Git repository whose topics live under worktrees/root."""
+    run_git(ws.root, "init", "-q", "-b", "main")
+    (ws.root / ".gitignore").write_text("/projects/\n/worktrees/\n/state/\n/workspace.yaml\n", encoding="utf-8")
+    commit(ws.root, "AGENTS.md", "# root\n")
+    return ws.root / "worktrees" / "root"
+
+
+@pytest.mark.integration
+def test_repo_runs_the_whole_lifecycle_for_the_workspace_root(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    topics = root_repo(ws)
+    target = topics / "claude+topic"
+    identity = ["--repo", str(ws.root), "--owner", "claude", "--topic", "topic", "--contract", "1"]
+    status, results = ws.cli(capsys, "create", *identity)
+    assert (status, single(results)["reason"]) == (0, "OK")
+    assert os.path.normcase(single(results)["target"]) == os.path.normcase(str(target))
+    assert run_git(target, "branch", "--show-current") == "worktree-claude+topic"
+    status, results = ws.cli(capsys, "resume", *identity)
+    assert (status, single(results)["reason"]) == (0, "OK")
+    status, results = ws.cli(capsys, "audit", "--repo", str(ws.root), "--contract", "1")
+    assert (status, [os.path.normcase(r["target"]) for r in results]) == (0, [os.path.normcase(str(target))])
+    status, results = ws.cli(capsys, "cleanup", *identity)
+    assert (status, single(results)["reason"]) == (0, "OK")
+    assert not target.exists()
+    assert run_git(ws.root, "branch", "--list", "worktree-claude+topic") == ""
+
+
+@pytest.mark.integration
+def test_root_is_inferred_only_under_its_worktrees_root(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    topics = root_repo(ws)
+    status, _ = ws.cli(capsys, "create", "--repo", str(ws.root), "--owner", "claude", "--topic", "topic", "--contract", "1")
+    assert status == 0
+    status, results = ws.cli(capsys, "audit", "--contract", "1", cwd=topics / "claude+topic")
+    assert (status, [os.path.normcase(r["target"]) for r in results]) == (0, [os.path.normcase(str(topics / "claude+topic"))])
+    status, results = ws.cli(capsys, "audit", "--contract", "1", cwd=ws.root)
+    assert (status, single(results)["reason"]) == (2, "UNKNOWN_PROJECT")
+
+
+@pytest.mark.integration
+def test_repo_takes_only_the_workspace_root(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    root_repo(ws)
+    status, results = ws.cli(capsys, "audit", "--repo", str(ws.repo), "--contract", "1")
+    assert (status, single(results)["reason"]) == (2, "UNKNOWN_PROJECT")
+    assert "--repo takes the workspace root" in single(results)["detail"]
+    with pytest.raises(SystemExit) as exc:
+        hw.main(["audit", "--repo", str(ws.root), "--project", PROJECT, "--contract", "1"], root=ws.root, environ=ws.environ, home=str(ws.home))
+    assert exc.value.code == 2
+
+
 @pytest.mark.parametrize("topic", ["Upper", "-lead", "a+b", "a_b", "a" * 49, ""])
 def test_invalid_topic_is_a_usage_error(ws: Workspace, topic: str, capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit) as exc:
@@ -280,7 +329,9 @@ def test_claude_native_root_overlapping_the_map_root_is_refused(ws: Workspace, c
 def test_external_roots_record_their_evidence_level(ws: Workspace) -> None:
     workspace = hw.load_workspace(ws.root, {})
     roots = hw.external_roots(workspace, ws.environ, str(ws.home))
-    assert [(r.tool, r.evidence) for r in roots] == [("codex-app", "DOCUMENTED"), ("claude-code", "DOCUMENTED")]
+    assert [(r.tool, r.evidence) for r in roots] == [("codex-app", "DOCUMENTED"), ("claude-code", "DOCUMENTED"), ("claude-code", "DOCUMENTED")]
+    assert [os.path.normcase(r.path) for r in roots[1:]] == [
+        os.path.normcase(str(ws.root / ".claude" / "worktrees")), os.path.normcase(str(ws.repo / ".claude" / "worktrees"))]
     codex = Path(ws.environ["CODEX_HOME"])
     codex.mkdir()
     (codex / "config.toml").write_text("[desktop\n", encoding="utf-8")

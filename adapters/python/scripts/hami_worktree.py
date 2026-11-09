@@ -10,8 +10,11 @@ code and next step.
 
 `--project` may be omitted when the working directory lies under a registered
 project's repository or worktrees root; an explicit value always wins.
+`--repo <workspace root>` targets the workspace root itself, whose worktrees
+live under `worktrees/root`; a working directory there infers it, while the
+rest of the canonical checkout infers nothing.
 
-Usage:
+Usage (`--repo ROOT` may replace `--project P`):
   hami_worktree.py create  --project P --owner O --topic T --contract 1 [--session S] [--base-sha FULL_SHA] [--json]
   hami_worktree.py resume  --project P --owner O --topic T --contract 1 [--session S] [--rebind-session] [--json]
   hami_worktree.py audit   --project P --contract 1 [--owner O] [--topic T] [--json]
@@ -110,7 +113,7 @@ class Project:
     name: str
     repo: str
     worktrees: str
-    state: str
+    state: str | None
 
 
 @dataclass(frozen=True)
@@ -184,8 +187,8 @@ def external_roots(ws: Workspace, environ: dict[str, str], home: str) -> list[Ex
         roots = [ExternalRoot("codex-app", os.path.normpath(os.path.expanduser(configured)), "CONFIG-ONLY")]
     else:
         roots = [ExternalRoot("codex-app", os.path.normpath(os.path.join(codex_home, "worktrees")), "DOCUMENTED")]
-    for project in ws.projects.values():
-        roots.append(ExternalRoot("claude-code", os.path.join(project.repo, ".claude", "worktrees"), "DOCUMENTED"))
+    for repo in (ws.root, *(project.repo for project in ws.projects.values())):
+        roots.append(ExternalRoot("claude-code", os.path.join(repo, ".claude", "worktrees"), "DOCUMENTED"))
     return roots
 
 
@@ -1004,7 +1007,9 @@ def build_parser() -> argparse.ArgumentParser:
     commands = {name: sub.add_parser(name, allow_abbrev=False) for name in ("create", "resume", "audit", "cleanup")}
     for name, p in commands.items():
         identity_required = name != "audit"
-        p.add_argument("--project")
+        target = p.add_mutually_exclusive_group()
+        target.add_argument("--project")
+        target.add_argument("--repo", help="the workspace root itself, whose worktrees live under worktrees/root")
         p.add_argument("--owner", choices=OWNERS, required=identity_required)
         p.add_argument("--topic", type=topic_arg, required=identity_required)
         p.add_argument("--contract", type=int, required=True)
@@ -1044,8 +1049,19 @@ def cleanup_mode(parser: argparse.ArgumentParser, args: argparse.Namespace) -> N
         parser.error("abandoned cleanup requires --abandon, --archive-tag and --expected-head together")
 
 
+def root_project(ws: Workspace) -> Project:
+    """The workspace root as a worktree target: never an entry of ``ws.projects``, and without state."""
+    return Project(validator.ROOT_TOPICS_NAME, ws.root, os.path.join(ws.root, *validator.ROOT_WORKTREES.split("/")), None)
+
+
 def infer_project(ws: Workspace, cwd: str) -> Project | None:
-    """The project whose repository or worktrees root holds ``cwd``; the deepest root wins."""
+    """The project whose repository or worktrees root holds ``cwd``; the deepest root wins.
+
+    Under the root's worktrees root it is the root; elsewhere in the canonical checkout it is nothing.
+    """
+    root = root_project(ws)
+    if within(cwd, root.worktrees):
+        return root
     matches = [(len(key(root)), project) for project in ws.projects.values()
                for root in (project.repo, project.worktrees) if within(cwd, root)]
     return max(matches, key=lambda m: m[0])[1] if matches else None
@@ -1057,7 +1073,11 @@ def run(args: argparse.Namespace, root: Path, environ: dict[str, str], home: str
     try:
         ws = load_workspace(root, environ)
         registered = f"registered: {', '.join(sorted(ws.projects)) or 'none'}"
-        if args.project is None:
+        if args.repo is not None:
+            if key(os.path.abspath(args.repo)) != key(ws.root):
+                return [Result("UNKNOWN_PROJECT", args.repo, f"--repo takes the workspace root {ws.root} only; a registered project takes --project; {registered}")]
+            project = root_project(ws)
+        elif args.project is None:
             project = infer_project(ws, cwd)
             if project is None:
                 return [Result("UNKNOWN_PROJECT", cwd, f"no --project and the working directory is in no registered project; {registered}")]

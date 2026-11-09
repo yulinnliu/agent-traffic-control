@@ -27,6 +27,13 @@ holding the working directory, which in a linked worktree has no
 explicit `--root` beside `--repo`. Skills call `atc` by name, so a repository that
 uses them needs nothing but this command on PATH.
 
+When this package runs from the canonical checkout (it holds `workspace.yaml`
+and is no linked worktree), every command but `doctor` and `--help` stops with
+`ERROR CHECKOUT_NOT_MAIN` while that checkout is off `main`, and warns with
+`WARNING CHECKOUT_DIRTY` while it has tracked modifications;
+`onboard --root-only` stops with `ERROR CHECKOUT_CANONICAL` when the checkout
+it would render is the canonical one (root `AGENTS.md` § Changing this repo).
+
 `atc <command> --help` describes one command. A module the installed `atc`
 lacks stops the command with `ERROR MISSING_DEPENDENCY` and the reinstall
 command of the root's AGENTS.md.
@@ -54,6 +61,8 @@ COMMANDS = {
     "friction": "friction",
 }
 TESTKIT_COMMANDS = ("test", "tmp")
+GUARD_EXEMPT = ("doctor",)
+GUARDED_CHECKOUT = CHECKOUT
 
 
 def resolve_root(explicit: str | None, environ: dict[str, str], cwd: Path) -> Path:
@@ -91,7 +100,30 @@ def _escape_unencodable_output() -> None:
             stream.reconfigure(errors="backslashreplace")
 
 
-def main(argv: list[str] | None = None) -> int:
+def _scripts_on_path() -> None:
+    if str(SCRIPTS) not in sys.path:
+        sys.path.insert(0, str(SCRIPTS))
+
+
+def _guard(command: str, rest: list[str], checkout: Path) -> int | None:
+    """Exit 2 when the canonical checkout serving this `atc` is off `main`; warn when it is dirty."""
+    if command in GUARD_EXEMPT or any(arg in ("-h", "--help") for arg in rest):
+        return None
+    _scripts_on_path()
+    import checkout_guard
+    current = checkout_guard.state(checkout)
+    if current.off_main:
+        print(f"ERROR CHECKOUT_NOT_MAIN {checkout_guard.describe(checkout, current)}; every atc command would run "
+              f"that branch's code. Switch it back to main and keep topics in worktrees/root "
+              f"(root AGENTS.md § Changing this repo)", file=sys.stderr)
+        return 2
+    if current.dirty:
+        print(f"WARNING CHECKOUT_DIRTY {checkout} has tracked modifications; atc runs them", file=sys.stderr)
+    return None
+
+
+def main(argv: list[str] | None = None, checkout: Path | None = None) -> int:
+    """``checkout`` is the checkout serving this `atc` for the guard; tests name one."""
     _escape_unencodable_output()
     args = list(sys.argv[1:] if argv is None else argv)
     explicit_root = None
@@ -109,6 +141,9 @@ def main(argv: list[str] | None = None) -> int:
     if command not in COMMANDS and command not in TESTKIT_COMMANDS:
         print(f"unknown command: {command}\n\n{usage()}", file=sys.stderr)
         return 2
+    refused = _guard(command, rest, GUARDED_CHECKOUT if checkout is None else checkout)
+    if refused is not None:
+        return refused
     program = sys.argv[0]
     sys.argv[0] = f"atc {command}"
     try:
@@ -126,12 +161,17 @@ def _dispatch(command: str, rest: list[str], explicit_root: str | None) -> int:
     if command in TESTKIT_COMMANDS:
         from atc_testkit import commands
         return commands.main([command, *rest])
+    _scripts_on_path()
     if command == "onboard" and "--root-only" in rest:
         root = resolve_checkout(explicit_root, dict(os.environ), Path.cwd())
+        import checkout_guard
+        if checkout_guard.state(root).canonical:
+            print(f"ERROR CHECKOUT_CANONICAL {root} is the canonical checkout; render managed copies in the topic's "
+                  f"worktree under worktrees/root and commit them there (root AGENTS.md § Changing this repo)",
+                  file=sys.stderr)
+            return 2
     else:
         root = resolve_root(explicit_root, dict(os.environ), Path.cwd())
-    if str(SCRIPTS) not in sys.path:
-        sys.path.insert(0, str(SCRIPTS))
     module = __import__(COMMANDS[command])
     if command in ("worktree", "onboard", "bootstrap"):
         return module.main(rest, root=root)

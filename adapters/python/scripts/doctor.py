@@ -11,6 +11,7 @@ from pathlib import Path
 
 import yaml
 
+import checkout_guard
 import friction
 import onboard_project
 import validate_workspace as validator
@@ -34,9 +35,21 @@ class Check:
     detail: str
 
 
-def diagnose(root: Path = ROOT, environ: dict[str, str] | None = None) -> list[Check]:
+def checkout_check(checkout: Path) -> Check:
+    """The canonical checkout guard's conditions (`checkout_guard`), as a problem doctor lists."""
+    current = checkout_guard.state(checkout)
+    if not current.canonical:
+        return Check("canonical checkout", "READY", f"{checkout} is not the canonical checkout")
+    if current.off_main:
+        return Check("canonical checkout", "ERROR", f"{checkout_guard.describe(checkout, current)}; every other atc command refuses")
+    if current.dirty:
+        return Check("canonical checkout", "ERROR", f"{checkout} has tracked modifications; atc runs them")
+    return Check("canonical checkout", "READY", f"{checkout} is on main and clean")
+
+
+def diagnose(root: Path = ROOT, environ: dict[str, str] | None = None, checkout: Path = ROOT) -> list[Check]:
     environ = environ if environ is not None else dict(os.environ)
-    checks = [Check("workspace root", "READY", str(root.resolve()))]
+    checks = [Check("workspace root", "READY", str(root.resolve())), checkout_check(checkout)]
 
     env_problems = validator.workspace_env_problems(root, environ)
     if "ATC_ROOT" not in env_problems:

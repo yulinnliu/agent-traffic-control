@@ -1359,6 +1359,16 @@ def test_project_resolves_through_the_workspace_map(repo: Path, workspace: Path,
     assert main_tip(repo) == tip
 
 
+@pytest.mark.unit
+def test_a_root_worktree_names_the_workspace_root(workspace: Path) -> None:
+    args = gi.build_parser().parse_args(["--reviewed", "a" * 40, "--authority-reference", "x"])
+    inside = workspace / "worktrees" / "root" / "claude+topic" / "adapters"
+    assert gi.resolve_repo(args, workspace, False, str(inside)) == workspace
+    with pytest.raises(gi.Refused) as refused:
+        gi.resolve_repo(args, workspace, False, str(workspace / "shared"))
+    assert refused.value.token == "UNKNOWN_PROJECT"
+
+
 @pytest.mark.integration
 def test_the_working_directory_names_the_project(repo: Path, workspace: Path, capsys: pytest.CaptureFixture[str]) -> None:
     tip = topic(repo, {"a.txt": "a2\n"})

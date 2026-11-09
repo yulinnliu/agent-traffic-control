@@ -1,6 +1,6 @@
 ---
 name: atc-worktree
-description: Create, resume, audit or clean up a per-topic git worktree for a project registered in the workspace map, through the shared `atc worktree` CLI. Not for the workspace root repo itself, nor for worktrees another tool manages.
+description: Create, resume, audit or clean up a per-topic git worktree for a project registered in the workspace map, or for the workspace root repo itself, through the shared `atc worktree` CLI. Not for worktrees another tool manages.
 contract: 1
 ---
 
@@ -57,7 +57,10 @@ branch, tip SHA and base SHA instead of a worktree path. Never substitute raw
 
 Every call passes `--project <name> --contract 1`. With `--project` absent,
 the CLI infers the project whose repository or worktrees root holds the
-working directory; an explicit `--project` always wins. Add `--json` for a
+working directory; an explicit `--project` always wins. The workspace root
+repo takes `--repo <workspace root>` in place of `--project`; its worktrees
+live under `worktrees/root/`, a working directory there infers it, and the
+rest of its canonical checkout infers nothing. Add `--json` for a
 machine-readable result: `contract`, `command`, and per target `verdict`
 (`OK`, `STOP` for a refusal or finding, `ERROR` for an environment problem),
 `reason` (the code below), `target`, `detail`, `next` and `evidence`.
@@ -180,8 +183,9 @@ missing lock and `PATH_UNSAFE` are findings.
   `IDENTITY_MISMATCH`, which `--rebind-session` does not resolve.
 - Only a top-level session that can run commands drives the CLI. A subagent
   without a shell edits files but takes no part in worktree identity.
-- The workspace root repo itself has no worktrees; it is edited on a topic
-  branch in its own checkout.
+- The workspace root repo's canonical checkout stays on `main`, since the
+  installed `atc` runs its code; each root topic gets a worktree from
+  `atc worktree create --repo <workspace root>`.
 
 ## Never
 

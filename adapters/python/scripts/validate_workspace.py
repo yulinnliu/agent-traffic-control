@@ -31,6 +31,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import posixpath
 import re
 import subprocess
 import sys
@@ -44,6 +45,8 @@ import verification_section
 ROOT = Path(__file__).resolve().parents[3]
 FAILURES: list[str] = []
 MANAGED_BY = "agent-traffic-control"
+ROOT_TOPICS_NAME = "root"
+ROOT_WORKTREES = f"worktrees/{ROOT_TOPICS_NAME}"
 FORBIDDEN_FALLBACK = re.compile(r"~[\\/]hami(?:[\\/]|\b)", re.IGNORECASE)
 # A canonical skill or a shipped file must not locate this checkout through
 # the environment; that is what makes the managed copies self-contained.
@@ -185,8 +188,21 @@ def load_and_check_workspace_yaml(path: Path) -> tuple[str | None, dict[str, dic
                 fail(f"{path}: projects.{name}.{field} must be a string path")
                 entry_ok = False
         if entry_ok:
+            reserved = reserved_root_problem(name, entry["worktrees"])
+            if reserved:
+                fail(f"{path}: projects.{name}: {reserved}")
+                continue
             safe_projects[name] = entry
     return root_val, safe_projects
+
+
+def reserved_root_problem(name: str, worktrees: str) -> str | None:
+    """The workspace root's own worktrees live under `worktrees/root`, so a project may claim neither."""
+    if name.lower() == ROOT_TOPICS_NAME:
+        return f"the name '{ROOT_TOPICS_NAME}' is reserved for the workspace root's worktrees"
+    if posixpath.normpath(worktrees.replace("\\", "/")).lower() == ROOT_WORKTREES:
+        return f"worktrees '{worktrees}' is reserved for the workspace root's worktrees"
+    return None
 
 
 def description_line(fm_text: str) -> str | None:

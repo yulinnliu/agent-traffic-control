@@ -117,6 +117,19 @@ def test_malformed_workspace_yaml_is_rejected(tmp_path: Path) -> None:
         onboard_project.load_projects(root)
 
 
+@pytest.mark.unit
+@pytest.mark.parametrize("name, worktrees", [("root", "worktrees/root-repo"), ("other", "worktrees/root"), ("other", "worktrees\\root\\")])
+def test_project_claiming_the_root_worktrees_is_rejected(tmp_path: Path, name: str, worktrees: str) -> None:
+    write(tmp_path / "workspace.yaml",
+          f"version: 1\nworkspace_root: {tmp_path.as_posix()}\nprojects:\n"
+          f"  {name}:\n    repo: projects/x\n    worktrees: '{worktrees}'\n    state: state/x-data\n")
+    validator.FAILURES.clear()
+    _, projects = validator.load_and_check_workspace_yaml(tmp_path / "workspace.yaml")
+    failures, validator.FAILURES[:] = list(validator.FAILURES), []
+    assert projects == {}
+    assert any("reserved for the workspace root's worktrees" in f for f in failures)
+
+
 def test_workspace_root_mismatch_is_contract_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root, _ = make_workspace(tmp_path)
     text = (root / "workspace.yaml").read_text(encoding="utf-8")
