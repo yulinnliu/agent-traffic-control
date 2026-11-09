@@ -110,7 +110,7 @@ uv run atc bootstrap sync --prune                                       # 所有
 
 - **atc-worktree** 建立、恢復、稽核、清理身分存在 git 裡的 per-topic worktree。
 - **hami-handoff-reminder** 判斷該交接、壓縮還是寫交接筆記。
-- **hami-review-relay** 由使用者在兩個 session 之間轉貼的 writer／reviewer 工作：步驟回報、審核、判定區塊。
+- **atc-review** 兩個彼此看不到的 session 之間的 writer／reviewer 工作，不論訊息靠什麼傳遞（轉貼、session 訊息、筆記檔）：步驟回報、審核、判定區塊、整合檢查。
 - **hami-retro** 回顧 session 紀錄並提出改進。
 - **hami-writing-for-agents** 撰寫 skill、`AGENTS.md` 與 pointer 的參考。
 - **atc-shared-skill** 建立共用 skill 與它 render 出來的各工具副本。

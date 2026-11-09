@@ -28,13 +28,13 @@ def make_repo(tmp_path: Path) -> Path:
 
 def test_directory_without_skill_md_is_a_collision(tmp_path: Path) -> None:
     repo = make_repo(tmp_path)
-    mine = repo / ".claude/skills/hami-review-relay/notes/mine.md"
+    mine = repo / ".claude/skills/atc-review/notes/mine.md"
     write(mine, "mine\n")
-    run = sh("link-skills.sh", repo.as_posix(), "hami-review-relay")
+    run = sh("link-skills.sh", repo.as_posix(), "atc-review")
     assert run.returncode == 1
-    assert "collision  .claude/skills/hami-review-relay (files but no SKILL.md, left alone)" in run.stdout
+    assert "collision  .claude/skills/atc-review (files but no SKILL.md, left alone)" in run.stdout
     assert mine.read_text(encoding="utf-8") == "mine\n" and not (mine.parents[1] / "SKILL.md").exists()
-    assert sh("link-skills.sh", repo.as_posix(), "hami-review-relay").returncode == 1
+    assert sh("link-skills.sh", repo.as_posix(), "atc-review").returncode == 1
     assert mine.is_file()
 
 
@@ -66,16 +66,16 @@ def test_managed_directory_is_repaired_whatever_its_file_names(tmp_path: Path) -
 
 def test_dangling_skill_md_link_is_relinked_only_when_alone(tmp_path: Path) -> None:
     repo = make_repo(tmp_path)
-    adapter = repo / ".claude/skills/hami-review-relay"
+    adapter = repo / ".claude/skills/atc-review"
     adapter.mkdir(parents=True)
     try:
         os.symlink(tmp_path / "moved/SKILL.md", adapter / "SKILL.md")
     except OSError:
         pytest.skip("this host cannot create symlinks")
     write(adapter / "mine.md", "mine\n")
-    run = sh("link-skills.sh", repo.as_posix(), "hami-review-relay")
-    assert "collision  .claude/skills/hami-review-relay (files but no SKILL.md, left alone)" in run.stdout
+    run = sh("link-skills.sh", repo.as_posix(), "atc-review")
+    assert "collision  .claude/skills/atc-review (files but no SKILL.md, left alone)" in run.stdout
     assert (adapter / "mine.md").is_file() and (adapter / "SKILL.md").is_symlink()
     (adapter / "mine.md").unlink()
-    assert sh("link-skills.sh", repo.as_posix(), "hami-review-relay").returncode == 0
+    assert sh("link-skills.sh", repo.as_posix(), "atc-review").returncode == 0
     assert (adapter / "SKILL.md").is_file() and sh("check-skills.sh", repo.as_posix()).returncode == 0

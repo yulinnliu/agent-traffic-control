@@ -1,23 +1,30 @@
 ---
-name: hami-review-relay
-description: Writer/reviewer work relayed by the user between two sessions that cannot see each other - writing a step report for review, reviewing a relayed commit, writing the verdict block, checking an integration. Not for reviewing your own uncommitted work.
+name: atc-review
+description: Writer/reviewer protocol for work split across sessions that cannot see each other, whatever carries the messages (the user's paste, a session message, a notes file) - the step report, the review on a scratch copy, the verdict block, the integration check. Not for reviewing your own uncommitted work, nor a diff inside the session that wrote it.
 managed-by: agent-traffic-control
-canonical: hami-review-relay
+canonical: atc-review
 ---
 
-# Review relay
+# Review
 
 Two sessions share one task and never see each other: the **writer** commits
-on its topic branch, the **reviewer** reviews and never edits that branch, and
-the user carries every message between them by pasting. "Writer" is a
-permission boundary, not a component name. Everything you send is a **cold
-read**: the receiving session has this skill and the pasted block, nothing
-else.
+on its topic branch, the **reviewer** reviews and never edits that branch,
+and the **holder** carries every message between them. The holder is the
+user, or a coordinator session following the `atc-coordinator` skill
+installed beside this one. A message travels by whatever carrier the setting
+provides: the user's paste, a message from one session to another, or a file
+in a notes folder. "Writer" is a permission boundary, not a component name.
+Everything you send is a **cold read**: the receiving session has this skill
+and the message, nothing else.
+
+The **Owner** is the person who holds the task's authority. Only the Owner
+gives the word that approves an integration.
 
 Integration runs through `atc integrate` in every project. Project specifics
-(stricter integration gates, required gates, frozen snapshot files, build
-steps) live in that project's `AGENTS.md`, its runbooks and its current
-session handoff; read them before the first report or review.
+(the checkout a session works in, stricter integration gates, required
+gates, frozen snapshot files, build steps) live in that project's
+`AGENTS.md`, its runbooks and its current session handoff; read them before
+the first report or review.
 
 ## Every block you write
 
@@ -26,11 +33,15 @@ session handoff; read them before the first report or review.
   are already known to both sessions and stay out of the block, and so does
   what the receiver can read: a reviewer reads the code at the named SHA, so a
   report gives results rather than narrating the implementation.
-- Inline in the reply as one code block the user pastes whole. Use a file only
-  for a prompt that is long and revised repeatedly, or a lasting template.
-- Relay blocks must not contain nested code fences: internal triple backticks
-  prematurely close the outer block. Put commands, scripts and quoted output
-  on plain text lines or use indentation instead.
+- A report or verdict travels whole in one message to its receiver. A
+  notification that truncates (a short note, a preview) is a pointer, never
+  the report.
+- On the paste carrier, the block is inline in the reply as one code block
+  the user pastes whole. Use a file only for a prompt that is long and
+  revised repeatedly, or a lasting template.
+- A block the user pastes must not contain nested code fences: internal
+  triple backticks prematurely close the outer block. Put commands, scripts
+  and quoted output on plain text lines or use indentation instead.
 - Commands the user runs are pasted as-is, so they carry zero placeholders:
   capture a value in a variable on an earlier line, show the fields the user
   must check, then reference the variable.
@@ -45,8 +56,10 @@ session handoff; read them before the first report or review.
 
 End every completed step with a review request carrying:
 
-- the checkout (a managed worktree path, or `independent clone` plus
-  its host kind, such as `cloud VM`), branch, tip SHA and its base SHA;
+- the checkout, of the kind the repository's `AGENTS.md` prescribes for the
+  session (a managed worktree path, a topic branch in the main checkout, or
+  `independent clone` plus its host kind, such as `cloud VM`), branch, tip
+  SHA and its base SHA;
 - spec/plan sections in scope and the contract sections the step rewrote;
 - changed-file map;
 - targeted test commands with their exact summary lines;
@@ -60,15 +73,17 @@ only on the fetched tip; never continue from a stale base.
 
 After a PASS the reviewed SHA is frozen; fixes go in new commits.
 
-Run targeted tests against the worktree with
-`atc test run <worktree> <scratch> <python> <label> <pytest args...>`.
-`<scratch>` is a name; the run creates it as `<tmp>/<scratch>`, where `<tmp>`
-is `~/.atc/tmp`, or `ATC_TMP` when that is set. The run removes every `HAMI_*`
-variable so the host's project settings stay out of it, points each data-root
-variable the tree's `[tool.atc-testkit]` names, or `QUANT_DATA_ROOT` when it
-names none, at `<scratch>/qdr`, makes the scratch the temporary directory,
-and proves with its import-location guard that the imports come from the
-tree (`COPY_IMPORT_MISMATCH`, exit 8).
+Where the project runs its tests through `atc-testkit`, run targeted tests
+against the worktree with
+`atc test run <worktree> <scratch> <python> <label> <pytest args...>`;
+elsewhere the targeted test commands are the ones the project's `AGENTS.md`
+names. `<scratch>` is a name; the run creates it as `<tmp>/<scratch>`, where
+`<tmp>` is `~/.atc/tmp`, or `ATC_TMP` when that is set. The run removes every
+`HAMI_*` variable so the host's project settings stay out of it, points each
+data-root variable the tree's `[tool.atc-testkit]` names, or
+`QUANT_DATA_ROOT` when it names none, at `<scratch>/qdr`, makes the scratch
+the temporary directory, and proves with its import-location guard that the
+imports come from the tree (`COPY_IMPORT_MISMATCH`, exit 8).
 
 A tree that runs source child processes needs a `.venv`:
 
@@ -100,7 +115,7 @@ one `atc test mutants` call.
    SHA the request names, against its stated base. If a check shows its
    premise is stale (for example, `main` moved, a referenced file or section
    was renamed, or a count changed), re-check against current state and
-   continue; do not stop to ask the user to verify a premise you can check
+   continue; do not stop to ask the holder to verify a premise you can check
    yourself. Done when the branch tip equals that SHA.
 2. **Build a scratch copy.** Export that exact tree to `<tmp>/<scratch>/tree`
    (`git archive <sha>`) and run it through `atc test run` as "Writer: the
@@ -108,28 +123,25 @@ one `atc test mutants` call.
    roots; strip ambient credentials from the shell that runs it. Tests and
    mutants never run in a live worktree. Prepare and delete a `.venv` in the
    copy as "Writer: the step report" says. An exported tree can differ only
-   in line endings, so compare files with carriage returns ignored. Done when an import-location guard proves
-   the copy, not an installed checkout, is what runs.
+   in line endings, so compare files with carriage returns ignored. Done when
+   an import-location guard proves the copy, not an installed checkout, is
+   what runs.
 3. **Walk the real path.** Trace from the user-facing entry to the external
    effect (the order request, the published event, the written record) and
    list every gate and required input on the way. Done when each one is shown
    delivered by the real product assembly, not only by test fakes. Wording
    such as "pending wiring" or "awaiting acceptance" in a delivery is a
-   blocker to tell the user now.
+   blocker to tell the holder now.
 4. **Run tests and mutants.** Tests only: that file plus mutants. Behaviour:
    the targeted set plus every project gate the change touches. One
-   single-string mutant per guard, one at a time, restored after each run. Done when every file in the copy is
-   proven equal to its Git object again and every surviving mutant is listed
-   as a test gap or argued equivalent.
+   single-string mutant per guard, one at a time, restored after each run.
+   Done when every file in the copy is proven equal to its Git object again
+   and every surviving mutant is listed as a test gap or argued equivalent.
+   Where the project runs its tests through `atc-testkit`,
    `atc test mutants <scratch> <sha> <worktree> <mutants.json> --python <py> --tests <path>...`
-   performs this step on the copy at `<tmp>/<scratch>/tree`. `<mutants.json>`
-   is a JSON array of `{"label": ..., "edits": [{"path", "old", "new"}]}`,
-   every `old` occurring exactly once in its file. A red unmutated run prints
-   `BASELINE-RED` and applies no mutant. Each mutant prints `KILLED` or
-   `SURVIVED`; an `INCONCLUSIVE` mutant stops the run and leaves the rest
-   unrun. Each touched file then prints `restored-ok` or `RESTORE-MISMATCH`,
-   and the last line reads `done: M mutants, S survived <labels>`, or
-   `done: N of M mutants, S survived <labels>` after a stop.
+   performs this step on the copy at `<tmp>/<scratch>/tree`; elsewhere the
+   project's `AGENTS.md` names how a mutant run is done. Its input file and
+   result lines are in [`references/mutants.md`](references/mutants.md).
 5. **Search by behaviour.** Look for a guard by its refusal token or the
    behaviour it produces; a single keyword search misses guards. Also search
    the repo for the same mechanism already solved elsewhere (a sibling script,
@@ -146,25 +158,40 @@ one `atc test mutants` call.
 - First line: `<step> review: PASS.`, conditional PASS or FAIL.
 - A "verified" paragraph: test counts, mutant results, read-only host
   evidence.
-- On a PASS, when the project's adopted process lets a relayed PASS authorize
-  integration, the integration instruction. The user pasting it approves
-  integration and then default cleanup of the topic. Before writing it, run
+- On a PASS, when the project's adopted process lets a PASS carry an
+  integration instruction, the integration instruction. The Owner's word on
+  the exact reviewed SHA approves integration and then default cleanup of
+  the topic. The holder of that word (the user pasting the instruction into
+  the writer, or a coordinator that has the Owner's word for that SHA) runs
+  or forwards the instruction. Before writing it, run
   `atc integrate --check` with the same arguments as the integrate command
   below; it runs `git fetch origin` and otherwise only reads. The PASS
   carries the instruction only when the check prints `CHECK FF` or
   `CHECK NO_FF`; quote that line and every `WARNING` line in the "verified"
   paragraph. A `STOP` line, such as a missing `## Integration verification`
-  section, leaves the PASS without an instruction: give the user the stop and
-  its `next:` line. A stop whose `next:` names a rebase (`REBASE_REQUIRED`,
-  or `OVERLAP` or `CONFLICT` of an unpublished topic) still carries the
-  instruction, with that stop quoted: the writer rebases and integrates the
-  rebased tip as "Writer: after integration" says. In a repository
+  section, leaves the PASS without an instruction: give the holder the stop
+  and its `next:` line. A stop whose `next:` names a rebase
+  (`REBASE_REQUIRED`, or `OVERLAP` or `CONFLICT` of an unpublished topic)
+  still carries the instruction, with that stop quoted. In a repository
   without managed worktrees, `STOP CHECKOUT_NOT_ON_MAIN` naming the topic
   branch is the expected check result: the PASS still carries the
   instruction, the "verified" paragraph quotes that `STOP` line and every
   `WARNING` line, and the writer's run after `switch main` assesses a dirty
-  checkout and `FF` or `NO_FF`. The instruction carries, with every value
-  filled in:
+  checkout and `FF` or `NO_FF`.
+
+  When `main` has moved, the topic follows `GIT_WORKFLOW.md` § Integrate.
+  An unpublished topic stops on a stop whose `next:` names a rebase
+  (`REBASE_REQUIRED`, or `OVERLAP` or `CONFLICT`), is rebased onto `main`
+  and integrates with `--reviewed <reviewed SHA> --rebased <rebased tip>`,
+  which carries the review over when its check passes and otherwise stops
+  as `CARRY_OVER_REFUSED`, needing a fresh review. A published topic
+  integrates as `NO_FF` when it is compatible; on `CONFLICT` it stops for a
+  reconcile commit on the topic and a review of that commit; on `OVERLAP` a
+  reviewer first judges the overlap. Either way the word is asked for again
+  on the SHA being integrated: the rebased tip, or for `NO_FF` the reviewed
+  SHA.
+
+  The instruction carries, with every value filled in:
   - `atc integrate --project <name> --reviewed <full SHA> --authority-reference "<record>"`,
     with the project's `workspace.yaml` name and the exact 40-character
     reviewed SHA. The workspace root takes `--repo <root checkout>` in place
@@ -188,8 +215,8 @@ one `atc test mutants` call.
   Squash-integrated and abandon cleanups never ride on a PASS; atc-worktree
   states their authority. A conditional PASS or FAIL carries no integration
   instruction.
-- Anything needing the user's decision (version numbers, spec semantics, risk
-  limits, remote deletes) stops for the user.
+- Anything needing the Owner's decision (version numbers, spec semantics,
+  risk limits, remote deletes) stops for the Owner.
 - Then the next step's scope and the conditions this step carries into it.
 
 ## Writer: after integration
@@ -203,28 +230,30 @@ other action need their own instruction.
    reviewed SHA and the first parent equals the `main` the line reports as
    before.
    - When it stops with a `next:` that names a rebase, rebase the topic
-     branch onto `main`, give the user the rebased tip for approval, and run
-     the same command with `--rebased <rebased tip>` added. `FF` then matches
-     when the new `main` equals the rebased tip and the `carried over:` line
-     names the reviewed SHA. `CARRY_OVER_REFUSED` sends the rebased tip to the
-     reviewer for a fresh review.
+     branch onto `main`, give the holder the rebased tip so the Owner's word
+     is asked for on it, and on that word run the same command with
+     `--rebased <rebased tip>` added. `FF` then matches when the new `main`
+     equals the rebased tip and the `carried over:` line names the reviewed
+     SHA. `CARRY_OVER_REFUSED` sends the rebased tip to the reviewer for a
+     fresh review.
    - The `push:` lines list every commit a push of `main` would carry; give
-     the user each `NO PUSH APPROVAL` line with any push request.
+     the holder each `NO PUSH APPROVAL` line with any push request.
      `atc preflight push --repo <main checkout>` prints the same list
      before a later push.
 2. On a match, run the cleanup command: the worktree cleanup under
    atc-worktree's run rules, or the `branch -d`.
 3. Run the hami-handoff-reminder check and report the result lines to the
-   user only; the reviewer gets no relay.
+   holder only; the reviewer gets no relay.
 
 Stop on a `switch` failure, a result mismatch, a cleanup verdict other than
 `OK`, `cleanup_complete` other than `true`, or a `branch -d` refusal: leave
 `main`, the worktree and the branch as they are, take only the read-only next
 step atc-worktree names for a cleanup refusal (such as `audit` after
-`PERMISSION_DENIED`), and hand the result lines to the user for the reviewer.
+`PERMISSION_DENIED`), and hand the result lines to the holder for the
+reviewer.
 
 Done when the cleanup reported `cleanup_complete: true` or deleted the
-branch, and the handoff check ran, or the stop is with the user.
+branch, and the handoff check ran, or the stop is with the holder.
 
 ## Reviewer: after integration
 
@@ -238,3 +267,10 @@ their project, tree and size. Each `<dir>` ends on `DELETED`, `SKIPPED` or
 A failing verifier or gate run leaves its working directory under
 `<tmp>/systmp` for inspection; it stays until `atc tmp prune` deletes it,
 seven days after its last change.
+
+## Codex constants
+
+- There is no session messaging: the carrier is the user's paste or a notes
+  file. The nested-fence rule applies to every block in a reply that the
+  user is to paste; a notes file's content is written as it is.
+- The full report is written inline in the reply.

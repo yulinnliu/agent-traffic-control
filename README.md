@@ -120,7 +120,7 @@ user-invoked.
 
 - **atc-worktree** creates, resumes, audits and cleans up per-topic worktrees whose identity lives in git.
 - **hami-handoff-reminder** decides whether to hand off, compact or write a handoff note.
-- **hami-review-relay** runs writer/reviewer work the user relays between two sessions: step reports, reviews, verdict blocks.
+- **atc-review** runs writer/reviewer work across two sessions that cannot see each other, whatever carries the messages (a paste, a session message, a notes file): step reports, reviews, verdict blocks, the integration check.
 - **hami-retro** reviews a session record and proposes improvements.
 - **hami-writing-for-agents** is the reference for writing skills, `AGENTS.md` and pointers.
 - **atc-shared-skill** creates a shared skill and its rendered per-tool copies.
