@@ -120,6 +120,7 @@ user-invoked.
 
 - **atc-worktree** creates, resumes, audits and cleans up per-topic worktrees whose identity lives in git.
 - **hami-handoff-reminder** decides whether to hand off, compact or write a handoff note.
+- **atc-coordinator** (user-invoked) coordinates one task across a writer session and a reviewer session: opens the task, briefs both sessions, carries the Owner's integration word for an exact SHA, closes the task.
 - **atc-review** runs writer/reviewer work across two sessions that cannot see each other, whatever carries the messages (a paste, a session message, a notes file): step reports, reviews, verdict blocks, the integration check.
 - **hami-retro** reviews a session record and proposes improvements.
 - **hami-writing-for-agents** is the reference for writing skills, `AGENTS.md` and pointers.
