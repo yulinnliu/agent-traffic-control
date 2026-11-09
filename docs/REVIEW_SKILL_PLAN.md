@@ -270,14 +270,13 @@ Its steps, each ending on its done condition:
    records, the branches, the worktrees (`atc worktree audit` where they are
    managed) and the titles of running sessions; another coordinator may be
    opening tasks in the same project. The task ID comes from the issuing
-   source: by
-   default the Owner names it in the instruction that opens the task, and
-   where the project's `AGENTS.md` declares a ticketing system, the ID is
-   that system's. The coordinator never makes up an ID; an instruction
-   without one is answered by asking the Owner. The reads above confirm that
-   neither the given ID nor the branch name is taken; a collision stops the
-   step and is reported to the Owner. Done when the given task ID and the
-   branch name are shown free.
+   source: by default the Owner names it in the instruction that opens the
+   task, and where the project's `AGENTS.md` declares a ticketing system,
+   the ID is that system's. The coordinator never makes up an ID; an
+   instruction without one is answered by asking the Owner. The reads above
+   confirm that neither the given ID nor the branch name is taken; a
+   collision stops the step and is reported to the Owner. Done when the
+   given task ID and the branch name are shown free.
 2. **Open the task record** in the project's form; its scope and authority
    basis are the writer's contract. Done when the record is written.
 3. **Start the writer session** with a brief that is a cold read: project
@@ -359,6 +358,7 @@ automated test:
 - the writer and the reviewer are different sessions, and the reviewer has
   not seen the writer's conversation;
 - the coordinator never gives the word in the Owner's place;
+- the coordinator never makes up a task ID;
 - a PASS does not by itself trigger an integration;
 - a SHA mismatch stops the task;
 - an incomplete verdict stops the task, and a truncated notification is
