@@ -36,5 +36,6 @@ run. Edits follow the file's line endings.
   carriage returns ignored, and prints `restored-ok` or `RESTORE-MISMATCH`;
   any mismatch exits 1.
 - The last line reads `done: M mutants, S survived <labels>`, or
-  `done: N of M mutants, S survived <labels>` after a stop, where `N` counts
-  the mutants that printed `KILLED`, `SURVIVED` or `INCONCLUSIVE`.
+  `done: N of M mutants, S survived <labels>` after a stop, also one on the
+  last mutant, where `N` counts the mutants that printed `KILLED`,
+  `SURVIVED` or `INCONCLUSIVE`.

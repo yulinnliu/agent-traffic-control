@@ -27,8 +27,10 @@ Each of these stops the task until it is resolved, and is reported to the
 Owner with what was observed:
 
 - **SHA mismatch.** The tip the writer reported, the SHA the verdict names
-  and the SHA the Owner's word names must be one SHA, and a check or result
-  line must show that SHA. Any difference stops the task.
+  and the SHA the Owner's word names must be one SHA, or, after a rebase,
+  the Owner's word names the rebased tip whose `carried over:` line names
+  the reviewed SHA; a check or result line must show the SHA the word
+  names. Any other difference stops the task.
 - **Incomplete verdict.** A verdict without its first line, its "verified"
   paragraph or the integration instruction it says it carries stops the
   task. A truncated notification (a short note, a preview) is a pointer:

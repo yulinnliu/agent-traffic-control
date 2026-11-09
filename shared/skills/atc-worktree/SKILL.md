@@ -1,6 +1,6 @@
 ---
 name: atc-worktree
-description: Create, resume, audit or clean up a per-topic git worktree for a project registered in the workspace map, through the shared atc-worktree CLI. Not for the workspace root repo itself, nor for worktrees another tool manages.
+description: Create, resume, audit or clean up a per-topic git worktree for a project registered in the workspace map, through the shared `atc worktree` CLI. Not for the workspace root repo itself, nor for worktrees another tool manages.
 contract: 1
 ---
 
