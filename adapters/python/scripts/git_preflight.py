@@ -434,6 +434,8 @@ def push_listing(repo: Path, main: str = "main", own: set[str] | str | None = No
             "subject": subject,
             "integration": record.get("candidate_sha"),
             "reviewed": record.get("reviewed"),
+            "kind": record.get("kind"),
+            "source_revision": record.get("source_revision"),
             "authority_reference": record.get("authority_reference"),
             "push_approval": None if own is None else sha in own,
         })
@@ -451,8 +453,12 @@ def render_push(listing: dict) -> list[str]:
         return []
     lines = [f"push: {len(entries)} commits origin/{listing['main']} {remote} -> {listing['main']} {listing['main_tip']}"]
     for entry in entries:
+        basis = (
+            f"sync from {entry['source_revision']}" if entry.get("kind") == "sync"
+            else f"reviewed {entry['reviewed']}"
+        )
         source = (
-            f"integration {entry['integration']} reviewed {entry['reviewed']} "
+            f"integration {entry['integration']} {basis} "
             f"authority {json.dumps(entry['authority_reference'], ensure_ascii=False)}"
             if entry["integration"] else "no integration record"
         )

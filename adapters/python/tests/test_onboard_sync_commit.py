@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+import git_preflight
 import onboard_project
 from integration_slot import IntegrationSlot
 from test_tooling import commit_workspace, make_workspace, run_git, write
@@ -133,3 +134,78 @@ def test_root_only_sync_renders_the_topic_checkout_and_commits_nothing(tmp_path:
     assert onboard_project.main(["--sync", "--root-only"], root=root) == 0
     assert adapter.exists()
     assert git_out(root, "rev-parse", "HEAD") == head
+
+
+def test_the_integration_slot_is_held_while_sync_writes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root, project = committed_workspace(tmp_path)
+    apply_plan = onboard_project.apply_plan
+    held: list[bool] = []
+
+    def apply_while_probing(plan, mode, prune=False):
+        probe = IntegrationSlot(project)
+        got = probe.acquire(blocking=False)
+        if got:
+            probe.release()
+        held.append(not got)
+        apply_plan(plan, mode, prune)
+
+    monkeypatch.setattr(onboard_project, "apply_plan", apply_while_probing)
+    assert onboard_project.main(["--sync", "demo"], root=root) == 0
+    assert held == [True]
+
+
+def test_checkout_dirtied_before_the_slot_is_taken_stops_inside_it(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root, project = committed_workspace(tmp_path)
+
+    class DirtyingSlot(IntegrationSlot):
+        def acquire(self, blocking: bool = True) -> bool:
+            write(project / "notes.txt", "written between the checks\n")
+            return super().acquire(blocking)
+
+    monkeypatch.setattr(onboard_project, "IntegrationSlot", DirtyingSlot)
+    head = git_out(project, "rev-parse", "HEAD")
+    assert onboard_project.main(["--sync", "demo"], root=root) == 2
+    assert "  stop: CHECKOUT_DIRTY " in capsys.readouterr().out
+    assert git_out(project, "rev-parse", "HEAD") == head
+    assert not (project / ".atc/governance.yaml").exists()
+
+
+def test_project_that_is_not_its_own_repository_stops(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root, project = make_workspace(tmp_path)
+    write(root / ".gitignore", "projects/\n")
+    run_git(root, "add", "-A")
+    run_git(root, *COMMIT, "release")
+    head = git_out(root, "rev-parse", "HEAD")
+    assert onboard_project.main(["--sync", "demo"], root=root) == 2
+    assert "  stop: NOT_A_REPOSITORY " in capsys.readouterr().out
+    assert git_out(root, "rev-parse", "HEAD") == head
+    assert not (project / ".atc/governance.yaml").exists()
+
+
+def test_root_adapter_collision_stops_every_project(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root, project = committed_workspace(tmp_path)
+    write(root / ".agents/skills/demo-skill/SKILL.md", "---\nname: demo-skill\ndescription: local\n---\n\n# Local\n")
+    run_git(root, "add", "-A")
+    run_git(root, *COMMIT, "unowned adapter")
+    assert onboard_project.main(["--sync", "demo"], root=root) == 2
+    assert "  stop: ROOT_ADAPTER_DRIFT " in capsys.readouterr().out
+    assert not (project / ".atc/governance.yaml").exists()
+
+
+def test_ownership_stops_at_the_directory_boundary(tmp_path: Path) -> None:
+    owner = tmp_path / "skills" / "old-skill"
+    assert onboard_project._within(owner, owner)
+    assert onboard_project._within(owner / "SKILL.md", owner)
+    assert not onboard_project._within(tmp_path / "skills" / "old-skill-2" / "SKILL.md", owner)
+
+
+def test_push_listing_names_the_sync_source(tmp_path: Path) -> None:
+    root, project = committed_workspace(tmp_path)
+    run_git(project, "update-ref", "refs/remotes/origin/main", "HEAD")
+    assert onboard_project.main(["--sync", "demo"], root=root) == 0
+    head = git_out(project, "rev-parse", "HEAD")
+    revision = git_out(root, "rev-parse", "HEAD")
+    lines = git_preflight.render_push(git_preflight.push_listing(project))
+    assert lines[1].endswith(f'[integration {head} sync from {revision} authority "governance sync from unknown at {revision}"]')

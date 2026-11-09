@@ -503,8 +503,11 @@ renders nothing until that checkout's own adapters are current. Per project
 it takes the Integration Slot and writes nothing when the checkout is not on
 `main`, has uncommitted or untracked changes, or does not contain
 `origin/main`. A changed path outside the files sync owns stops the project
-with the change left uncommitted. Files a project keeps out of Git (ignored
-or excluded) are written and not committed.
+with the change left uncommitted; a failed `git commit`, such as a hook
+refusal, stops it with the rendered files written and staged. Either way the
+next sync stops as dirty until the Owner resolves the checkout. Files a
+project keeps out of Git (ignored or excluded) are written and not committed.
+`atc preflight push` shows a sync commit as `sync from <ATC revision>`.
 
 A change sync does not render, such as a project file that cites a renamed
 skill, goes through a topic and `## Integrate`. `atc onboard --sync
