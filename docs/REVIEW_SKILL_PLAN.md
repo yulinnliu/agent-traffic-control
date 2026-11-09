@@ -109,7 +109,11 @@ No adapter directory named `hami-review-relay`, `hami-worktree` or
   no `adoption` key, `contract: 1`. `atc-shared-skill` keeps
   `adoption: baseline`.
 - A session a coordinator starts runs on Opus 5.5 or Sonnet 5.5, chosen per
-  task; Fable only after the Owner agreed for that session.
+  task; Fable only after the Owner agreed for that session. Model names and
+  versions appear only in the Claude Code overlays; a canonical body that
+  speaks of the choice describes it by capability (mechanical or
+  well-briefed work, against design-heavy writing or a review of a
+  behaviour change).
 
 ## 1. `shared/skills/atc-review/` replaces `shared/skills/hami-review-relay/`
 
@@ -205,13 +209,15 @@ No adapter directory named `hami-review-relay`, `hami-worktree` or
    - A large hand-over (a brief revised repeatedly, a template) may go as a
      file in the side-session notes folder, the message naming its absolute
      path.
-   - A session is archived once its topic is integrated and its scratches
-     deleted; scratch deletion (`atc tmp clean`) runs only on the Owner's
-     word.
+   - A session is archived once its topic is integrated and the task record
+     is at its post-integration state. Scratch deletion (`atc tmp clean`)
+     is a separate step that runs only on the Owner's word; until then
+     `atc tmp list` still lists the scratches.
 5. `adapters/codex.md`, under the heading `## Codex constants`: no session
    messaging; the carrier is the user's paste or a notes file, so the
-   nested-fence rule applies to every block, and the full report is written
-   inline in the reply.
+   nested-fence rule applies to every block in a reply that the user is to
+   paste, while a notes file's content is written as it is, and the full
+   report is written inline in the reply.
 
 Verification: a rule-preservation check of the old `SKILL.md` at `main`
 against the new body and `references/mutants.md`: every sentence has a
@@ -235,8 +241,21 @@ or the review yourself, not for a single-session task. `invocation: user`,
 so the skill starts only when the Owner names it. No `adoption` key.
 
 `SKILL.md` body, tool-agnostic: it says "start a session" and "send a
-message" and names no tool; Claude Code specifics live in the overlay. Its
-steps, each ending on its done condition:
+message" and names no tool; Claude Code specifics live in the overlay.
+
+**Recovery.** A coordinator that restarts or has lost its conversation
+rebuilds its state from durable sources, never from memory: the task
+record, git (the topic branch tip and `main`), `atc worktree audit`,
+`<git common dir>/atc/integrations.jsonl`, the previous coordinator
+hand-over and the session list. A truncated notification, or a verdict whose
+full text is missing, is not enough to proceed; the coordinator obtains the
+full content from its sender first. The task record never receives the
+integration result, the final SHA or session names: a topic's commits never
+cite that topic's own integration SHA, and facts known only after
+integration go in the next topic (ria-project `AGENTS.md`); session names
+belong only in the hand-over.
+
+Its steps, each ending on its done condition:
 
 1. **Before opening.** Read the project's `AGENTS.md`, the task identity
    form it declares (governance `CORE.md` § Task identity), the task
@@ -244,7 +263,9 @@ steps, each ending on its done condition:
    managed) and the titles of running sessions, so the new task's number
    and branch collide with nothing; another coordinator may be opening tasks
    in the same project. Done when the task's identity and branch name are
-   chosen and shown free.
+   chosen and shown free. How a task ID stays unique when several
+   coordinators open tasks in one project is an open decision for the
+   Owner; this step is rewritten to that decision.
 2. **Open the task record** in the project's form; its scope and authority
    basis are the writer's contract. Done when the record is written.
 3. **Start the writer session** with a brief that is a cold read: project
@@ -280,14 +301,25 @@ steps, each ending on its done condition:
    - On any other `STOP`, follow its `next:` line (`GIT_WORKFLOW.md`
      § Command results); a `next:` that names a re-review goes back to the
      reviewer before any word is asked for.
+   The Owner's word is an explicit integration instruction given against
+   the exact SHA. A vague reply ("looks fine", "go on") is not the word, and
+   the coordinator asks again; the word for one SHA never extends to
+   another. The word is recorded without a separate registry:
+   `--authority-reference` names where the Owner granted it, and
+   `atc integrate` writes that reference with the reviewed SHA and any
+   `carried_over_from` to `<git common dir>/atc/integrations.jsonl`
+   (`_note_integration` and `_record_integration` in
+   `adapters/python/scripts/git_integrate.py`); the Owner's own words go in
+   the coordinator hand-over.
    With the word, run the instruction, or forward it to the writer with the
    Owner's words quoted, and check the result as `atc-review` "Writer:
    after integration" says. Done when the Owner's word is recorded with its
    SHA and the result line matches.
-6. **Close.** Confirm `main` at the integrated SHA, the branch or worktree
-   cleaned up and the task record at its post-integration state; archive
-   both sessions; delete the task's scratches only on the Owner's word;
-   write the coordinator hand-over the project's handoff rules call for
+6. **Close.** In this order: confirm `main` at the integrated SHA, the
+   branch or worktree cleaned up and the task record at its
+   post-integration state; archive both sessions; delete the task's
+   scratches only as a separate step on the Owner's word (until then
+   `atc tmp list` still lists them); write the coordinator hand-over the project's handoff rules call for
    (`hami-handoff-reminder` `references/handoff-document.md` § The handoff
    document): one file, final state, what waits on the Owner. Done when
    each closure fact is confirmed and the hand-over written.
@@ -305,7 +337,20 @@ through the session management tools once the task is closed.
 
 Verification: the review reads `SKILL.md` against this section step by step
 and confirms no tool name in the body and no project-specific value in
-`references/briefs.md`.
+`references/briefs.md`. It then reads the body line by line and confirms
+each of these is stated in so many words, as a document check with no
+automated test:
+
+- the coordinator does not run the review steps;
+- the writer and the reviewer are different sessions, and the reviewer has
+  not seen the writer's conversation;
+- the coordinator never gives the word in the Owner's place;
+- a PASS does not by itself trigger an integration;
+- a SHA mismatch stops the task;
+- an incomplete verdict stops the task, and a truncated notification is
+  followed by obtaining the full content;
+- recovery follows the Recovery paragraph;
+- scratches are not deleted without the Owner's word.
 
 ## 3. `atc-worktree` and `atc-shared-skill`
 
@@ -408,3 +453,12 @@ After the topic of §§ 1 to 4 integrates:
 
 - Which projects opt in to `atc-coordinator` first; ria-project runs
   coordinator sessions.
+- How a task ID stays unique when one project has several coordinators.
+  No command creates a task atomically; a ria-project task record is
+  committed on its topic branch, and a branch name carries an owner token
+  and a slug, so distinct branches do not make distinct IDs, and the
+  read-then-confirm of § 2 step 1 races. Options: (1) the Owner names the
+  task ID in the instruction that opens the task, the reviewer's
+  recommendation and the simplest; (2) one coordinator per project opens
+  tasks at a time. ria-project runs two coordinators, so this is decided
+  before its round; § 2 step 1 is then rewritten to the decision.
