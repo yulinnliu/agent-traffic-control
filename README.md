@@ -106,7 +106,7 @@ this repository changes they are re-rendered, never edited:
 ```sh
 atc/scripts/check-skills.sh path/to/your-repo                           # current / drifted / orphaned / stale
 atc/scripts/link-skills.sh --prune path/to/your-repo                    # repair
-uv run atc bootstrap sync --prune                                       # every registered project, then validate
+uv run atc bootstrap sync --prune                                       # every registered project, committed on its main, then validate
 ```
 
 Every rendered file carries `managed-by: agent-traffic-control`; a file

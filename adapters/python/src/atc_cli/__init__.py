@@ -20,8 +20,10 @@ Commands map onto the scripts under `adapters/python/scripts/`:
 
 The checkout root is, in order: `--root`, `$ATC_ROOT`, the nearest parent of
 the working directory holding `workspace.yaml`, else the checkout this
-package was installed from. `integrate` resolves `--project` and the
-working directory's project in that root's workspace.yaml and refuses an
+package was installed from. `onboard --root-only` renders the ATC checkout
+holding the working directory, which in a linked worktree has no
+`workspace.yaml`; `--root` and `$ATC_ROOT` still win. `integrate` resolves
+`--project` and the working directory's project in that root's workspace.yaml and refuses an
 explicit `--root` beside `--repo`. Skills call `atc` by name, so a repository that
 uses them needs nothing but this command on PATH.
 
@@ -63,6 +65,16 @@ def resolve_root(explicit: str | None, environ: dict[str, str], cwd: Path) -> Pa
         if (candidate / "workspace.yaml").is_file() and (candidate / "shared" / "governance").is_dir():
             return candidate
     return CHECKOUT
+
+
+def resolve_checkout(explicit: str | None, environ: dict[str, str], cwd: Path) -> Path:
+    """The ATC checkout holding ``cwd``, with or without ``workspace.yaml``: what `onboard --root-only` renders."""
+    if explicit or environ.get("ATC_ROOT"):
+        return resolve_root(explicit, environ, cwd)
+    for candidate in (cwd.resolve(), *cwd.resolve().parents):
+        if (candidate / "adapters" / "python" / "scripts" / "onboard_project.py").is_file():
+            return candidate
+    return resolve_root(explicit, environ, cwd)
 
 
 def usage() -> str:
@@ -114,7 +126,10 @@ def _dispatch(command: str, rest: list[str], explicit_root: str | None) -> int:
     if command in TESTKIT_COMMANDS:
         from atc_testkit import commands
         return commands.main([command, *rest])
-    root = resolve_root(explicit_root, dict(os.environ), Path.cwd())
+    if command == "onboard" and "--root-only" in rest:
+        root = resolve_checkout(explicit_root, dict(os.environ), Path.cwd())
+    else:
+        root = resolve_root(explicit_root, dict(os.environ), Path.cwd())
     if str(SCRIPTS) not in sys.path:
         sys.path.insert(0, str(SCRIPTS))
     module = __import__(COMMANDS[command])

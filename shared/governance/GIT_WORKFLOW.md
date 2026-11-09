@@ -487,6 +487,31 @@ carrying this section only when the project's `AGENTS.md` already has its
 `## Integration verification` section and the named argv file exists. Add
 the section and the file in the project first, then sync.
 
+## Governance sync commits
+
+`atc onboard --sync <project>`, `--sync --all` and `atc bootstrap sync`
+commit what they render on each project's `main` and append the commit to
+`<git common dir>/atc/integrations.jsonl` with `kind: sync`. Such a commit
+bypasses `## Integrate`: it needs no review and no `integrate_main` authority
+of its own, because the ATC revision it names determines its content and
+that revision already carries the Owner's integration approval in the ATC
+repository. Pushing it still needs `push_main` authority under
+`## Publication boundary`.
+
+Sync renders from the ATC checkout on `main` with no tracked change, and
+renders nothing until that checkout's own adapters are current. Per project
+it takes the Integration Slot and writes nothing when the checkout is not on
+`main`, has uncommitted or untracked changes, or does not contain
+`origin/main`. A changed path outside the files sync owns stops the project
+with the change left uncommitted. Files a project keeps out of Git (ignored
+or excluded) are written and not committed.
+
+A change sync does not render, such as a project file that cites a renamed
+skill, goes through a topic and `## Integrate`. `atc onboard --sync
+--root-only` renders the adapters of the ATC checkout it runs in, linked
+worktree included, and commits nothing; run it in the topic that changes a
+canonical skill.
+
 ## Cleanup trigger
 
 Cleanup requires its own applicable authority (which may be granted by the

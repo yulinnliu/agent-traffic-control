@@ -97,7 +97,7 @@ PATH）；預期的目錄配置見 `docs/LAYOUT.md`。`atc` 會從工作目錄�
 ```sh
 atc/scripts/check-skills.sh path/to/your-repo                           # current / drifted / orphaned / stale
 atc/scripts/link-skills.sh --prune path/to/your-repo                    # 修復
-uv run atc bootstrap sync --prune                                       # 所有登記的專案，接著驗證
+uv run atc bootstrap sync --prune                                       # 所有登記的專案，在各自的 main 上 commit，接著驗證
 ```
 
 每個 render 出來的檔案都帶 `managed-by: agent-traffic-control`；沒有這個

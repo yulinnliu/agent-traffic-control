@@ -100,3 +100,42 @@ def test_a_missing_dependency_names_the_reinstall_command(monkeypatch: pytest.Mo
 def test_without_a_named_root_outside_any_workspace_the_root_is_this_checkout(tmp_path: Path) -> None:
     root = atc_cli.resolve_root(None, {}, tmp_path)
     assert (root / "adapters" / "python" / "src" / "atc_cli").is_dir() and (root / "shared" / "governance").is_dir()
+
+
+def nested_checkouts(tmp_path: Path) -> tuple[Path, Path]:
+    """A workspace checkout holding workspace.yaml and a linked worktree inside it without one."""
+    workspace = tmp_path / "workspace"
+    worktree = workspace / ".claude" / "worktrees" / "topic"
+    for checkout in (workspace, worktree):
+        (checkout / "shared" / "governance").mkdir(parents=True)
+        (checkout / "adapters" / "python" / "scripts").mkdir(parents=True)
+        (checkout / "adapters" / "python" / "scripts" / "onboard_project.py").write_text("", encoding="utf-8")
+    (workspace / "workspace.yaml").write_text("version: 1\n", encoding="utf-8")
+    return workspace, worktree
+
+
+def test_root_only_onboard_renders_the_linked_worktree_not_the_workspace_above(tmp_path: Path) -> None:
+    workspace, worktree = nested_checkouts(tmp_path)
+    cwd = worktree / "adapters" / "python"
+    assert atc_cli.resolve_root(None, {}, cwd) == workspace.resolve()
+    assert atc_cli.resolve_checkout(None, {}, cwd) == worktree.resolve()
+    assert atc_cli.resolve_checkout(None, {"ATC_ROOT": str(workspace)}, cwd) == workspace.resolve()
+
+
+@pytest.mark.parametrize(("args", "expected"), [(["--sync", "--root-only"], "worktree"), (["--check", "demo"], "workspace")])
+def test_onboard_dispatch_picks_the_root_by_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, args: list[str], expected: str,
+) -> None:
+    workspace, worktree = nested_checkouts(tmp_path)
+    import onboard_project
+    seen: dict[str, Path] = {}
+
+    def record(rest: list[str], root: Path) -> int:
+        seen["root"] = root
+        return 0
+
+    monkeypatch.setattr(onboard_project, "main", record)
+    monkeypatch.delenv("ATC_ROOT", raising=False)
+    monkeypatch.chdir(worktree / "adapters" / "python")
+    assert atc_cli.main(["onboard", *args]) == 0
+    assert seen["root"] == {"worktree": worktree, "workspace": workspace}[expected].resolve()

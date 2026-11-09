@@ -9,19 +9,21 @@ import pytest
 
 import bootstrap
 import onboard_project
-from test_tooling import make_workspace, managed_adapter, write
+from test_tooling import commit_workspace, make_workspace, managed_adapter, write
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 
 
 def _orphaned_project(tmp_path: Path) -> tuple[Path, Path]:
     """A project carrying a managed adapter whose canonical skill no longer exists,
-    plus a project-owned skill directory without any ownership marker."""
+    plus a project-owned skill directory without any ownership marker, committed
+    as sync commits need."""
     root, project = make_workspace(tmp_path)
     shutil.copyfile(bootstrap.ROOT / "workspace.yaml.example", root / "workspace.yaml.example")
     for tool in (".agents", ".claude"):
         write(project / tool / "skills/old-skill/SKILL.md", managed_adapter("old-skill"))
     write(project / ".claude/skills/local-skill/SKILL.md", "---\nname: local-skill\ndescription: mine\n---\n\n# Local\n")
+    commit_workspace(root, project)
     return root, project
 
 

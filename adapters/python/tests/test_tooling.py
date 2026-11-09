@@ -79,6 +79,19 @@ def make_workspace(tmp_path: Path, *, create_project: bool = True) -> tuple[Path
     return root, project
 
 
+def commit_workspace(root: Path, project: Path) -> None:
+    """Commit the ATC checkout on main and make the project its own repository on main, as sync commits need."""
+    write(root / ".gitignore", "projects/\n")
+    commit = ("-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q", "-m")
+    run_git(root, "add", "-A")
+    run_git(root, *commit, "release")
+    run_git(project, "init", "-q", "-b", "main")
+    run_git(project, "config", "user.name", "t")
+    run_git(project, "config", "user.email", "t@example.invalid")
+    run_git(project, "add", "-A")
+    run_git(project, *commit, "init")
+
+
 def changed(plan: list[onboard_project.PlanItem]) -> list[onboard_project.PlanItem]:
     return [item for item in plan if item.action in ("create", "update", "collision")]
 

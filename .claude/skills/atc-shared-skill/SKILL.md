@@ -70,9 +70,9 @@ stay in the canonical body so they exist once.
 Adapters are generated. From the checkout:
 
 ```
-atc onboard --sync --root-only          # this checkout's own .claude/ .agents/ .dsh/
-atc onboard --sync <project>            # one registered project
-atc bootstrap sync --prune              # every registered project, then validate
+atc onboard --sync --root-only          # this checkout's own .claude/ .agents/ .dsh/, no commit
+atc onboard --sync <project>            # one registered project, committed on its main
+atc bootstrap sync --prune              # every registered project, committed, then validate
 scripts/link-skills.sh <repo> <name>    # a repository outside the workspace map, no Python
 ```
 
