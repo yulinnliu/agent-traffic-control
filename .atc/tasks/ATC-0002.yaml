@@ -1,0 +1,14 @@
+task_id: ATC-0002
+repository: yulinnliu/agent-traffic-control
+base_sha: a14631293f354932b5cf92ad8c14a695428fcad1
+scope: 'docs/TASK_CONTRACT_PLAN.md § B: integration task and authority'
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: a14631293f354932b5cf92ad8c14a695428fcad1
+branch: worktree-claude+task-integration-authority
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
