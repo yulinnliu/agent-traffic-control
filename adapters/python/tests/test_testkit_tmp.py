@@ -78,6 +78,54 @@ def test_expected_links_are_unlinked_and_their_targets_survive(tmp_path: Path, a
     assert registered_names(atc_tmp) == ["other"]
 
 
+@pytest.mark.integration
+def test_a_venv_beside_a_pyproject_below_tree_is_unlinked_even_when_its_target_is_gone(tmp_path: Path,
+                                                                                        atc_tmp: Path) -> None:
+    whole = scratch_dir(atc_tmp, "whole")
+    write(whole / "tree/adapters/python/pyproject.toml")
+    link_directory(whole / "tree/adapters/python/.venv", target(tmp_path, "venv"))
+    gone = scratch_dir(atc_tmp, "gone")
+    write(gone / "tree/adapters/python/pyproject.toml")
+    link_directory(gone / "tree/adapters/python/.venv", target(tmp_path, "removed"))
+    for path in (tmp_path / "outer/removed/keep.txt", tmp_path / "outer/removed"):
+        os.remove(path) if path.is_file() else os.rmdir(path)
+    code, lines = clean(whole, gone)
+    assert (code, lines) == (0, [f"DELETED {whole}", f"DELETED {gone}"])
+    assert not whole.exists() and not gone.exists()
+    assert (tmp_path / "outer/venv/keep.txt").read_text(encoding="utf-8") == "venv"
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("case", ["no_pyproject", "pyproject_is_a_directory", "other_name", "outside_tree"])
+def test_a_nested_venv_without_its_pyproject_is_an_anomaly(tmp_path: Path, atc_tmp: Path, case: str) -> None:
+    odd = scratch_dir(atc_tmp, "odd")
+    place = {"outside_tree": odd / "qdr/sub"}.get(case, odd / "tree/adapters/python")
+    if case == "pyproject_is_a_directory":
+        (place / "pyproject.toml").mkdir(parents=True)
+    elif case != "no_pyproject":
+        write(place / "pyproject.toml")
+    link = place / ("venv" if case == "other_name" else ".venv")
+    link_directory(link, target(tmp_path, "venv"))
+    assert clean(odd) == (1, [f"ANOMALY {link}", f"REFUSED {odd} (1 unexpected links)"])
+    assert (link / "keep.txt").is_file() and (odd / "qdr/data.txt").is_file()
+    unlink_directory(link)
+
+
+@pytest.mark.integration
+def test_a_nested_venv_beside_a_link_elsewhere_is_refused_with_both_untouched(tmp_path: Path, atc_tmp: Path) -> None:
+    mixed = scratch_dir(atc_tmp, "mixed")
+    write(mixed / "tree/adapters/python/pyproject.toml")
+    link_directory(mixed / "tree/adapters/python/.venv", target(tmp_path, "venv"))
+    link_directory(mixed / "tree/src/hidden", target(tmp_path, "hidden"))
+    assert clean(mixed) == (1, [f"ANOMALY {mixed / 'tree/src/hidden'}", f"REFUSED {mixed} (1 unexpected links)"])
+    for name, link in (("venv", "tree/adapters/python/.venv"), ("hidden", "tree/src/hidden")):
+        assert (mixed / link / "keep.txt").read_text(encoding="utf-8") == name
+        assert (tmp_path / "outer" / name / "keep.txt").is_file()
+    assert (mixed / "qdr/data.txt").is_file()
+    for link in ("tree/adapters/python/.venv", "tree/src/hidden"):
+        unlink_directory(mixed / link)
+
+
 def test_a_link_elsewhere_refuses_that_tree_untouched_and_the_rest_continue(tmp_path: Path, atc_tmp: Path) -> None:
     odd = scratch_dir(atc_tmp, "odd")
     link_directory(odd / ".venv", target(tmp_path, "venv"))

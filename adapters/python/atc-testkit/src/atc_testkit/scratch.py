@@ -209,15 +209,27 @@ def remove_tree(directory: str | os.PathLike[str], expected: Callable[[str], boo
 
 
 def scratch_links(directory: str) -> Callable[[str], bool]:
-    """The links a scratch may hold: ``.venv``, ``tree/.venv`` and any inside ``bt``."""
+    """The links a scratch may hold: ``.venv``, ``tree/.venv``, a ``.venv`` beside a ``pyproject.toml`` below
+    ``tree`` and any inside ``bt``."""
     venv = os.path.normcase(os.path.join(directory, ".venv"))
-    tree_venv = os.path.normcase(os.path.join(directory, "tree", ".venv"))
+    tree = os.path.normcase(os.path.join(directory, "tree"))
+    tree_venv = os.path.join(tree, ".venv")
     bt = os.path.normcase(os.path.join(directory, "bt")) + os.sep
 
     def expected(link: str) -> bool:
         name = os.path.normcase(link)
-        return name in (venv, tree_venv) or name.startswith(bt)
+        return (name in (venv, tree_venv) or name.startswith(bt)
+                or (name.startswith(tree + os.sep) and os.path.basename(name) == ".venv"
+                    and _project_file(os.path.join(os.path.dirname(link), "pyproject.toml"))))
     return expected
+
+
+def _project_file(path: str) -> bool:
+    """``path`` is a regular file, not a link."""
+    try:
+        return stat.S_ISREG(os.lstat(_extended(path)).st_mode)
+    except OSError:
+        return False
 
 
 def working_directory_links(work: str | os.PathLike[str]) -> Callable[[str], bool]:
