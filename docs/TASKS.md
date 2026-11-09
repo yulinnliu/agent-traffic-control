@@ -67,6 +67,22 @@ where they enter Git.
   word on, the coordinator integrates nothing under the grant, and it then
   integrates the narrowed `authority` the same way. The record on `main` may
   still read `true` in between; the word governs.
+- A grant counts only when it entered `main` through this machine's
+  `atc integrate`. The grant's commit is the most recent commit on `main`'s
+  first-parent history of the record whose parsed `authority` or
+  `authority_basis` differs from its first parent's copy, the commit that
+  creates the record counting as a change; a later edit that
+  changes neither, such as `closure`, leaves it in place. That commit must be
+  one of the new commits of a records-only integration with `--owner-words`
+  in this clone's `integrations.jsonl`: reachable from the line's candidate
+  and not from its `main_before`, so a binding of several commits and a
+  `NO_FF` merge both qualify. A record changed on `main` any other way, such
+  as a push by someone who does not use Agent Traffic Control or a binding
+  made on another machine, grants nothing here: every integration of that
+  task on this machine takes `--owner-words`, and the refusal says why. A
+  repository shared with other
+  developers protects `.atc/tasks/` on its host (code owners, branch
+  protection) when it needs a real boundary.
 - Only the coordinator runs `atc integrate`, and only it passes
   `--owner-words`. The tool cannot tell whose words a quote holds; it records
   the quote, and the integration record is the evidence the Owner audits.

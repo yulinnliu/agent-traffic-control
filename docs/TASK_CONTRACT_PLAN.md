@@ -71,6 +71,15 @@ the final sync after the `.atc/` layout work.
    - A range that changes `authority` or `authority_basis` of a record on
      `main` stops with `TASK_AUTHORITY_CHANGED` unless every changed path is
      under `.atc/tasks/` and the authority is `--owner-words`.
+   - A record's grant counts only as `docs/TASKS.md` § Authority on `main`
+     states: walk `git log --first-parent --format=%H main -- <record>`,
+     parse `authority` and `authority_basis` in each version and its first
+     parent's, and take the newest commit where they differ; it must satisfy
+     `git merge-base --is-ancestor <commit> <candidate>` and not
+     `<commit> <main_before>` for some records-only `--owner-words` line
+     naming the task; otherwise the run stops with
+     `AUTHORITY_NOT_INTEGRATED` and needs `--owner-words`. A records-only
+     line always carries `main_before`.
    - Removing or renaming a record that exists on `main` counts as changing
      its `authority`.
    - A range that adds a record granting more than `edit` and `commit` stops
@@ -92,7 +101,9 @@ the final sync after the `.atc/` layout work.
      `atc worktree` and `atc task`.
 2. Records: `integrations.jsonl` lines gain `task`, `records_only` and `authority`
    (`{"kind": "record", "task_id": ...}` or `{"kind": "owner_words",
-   "quote": ...}`); governance sync records from `onboard_project.py` carry
+   "quote": ...}`); a records-only integration that binds several tasks
+   writes one line per task, all with the same candidate, and every
+   records-only line carries `main_before` unconditionally; governance sync records from `onboard_project.py` carry
    `task` as the sync's source revision and authority `{"kind": "sync"}`.
    Verification evidence moves to `atc-verification-evidence/2` with the same
    keys; the adapter and `atc_testkit.evidence` read `/1` and `/2`, and
