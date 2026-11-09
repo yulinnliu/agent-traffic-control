@@ -866,12 +866,13 @@ def test_doctor_reports_hami_worktree_readiness(tmp_path: Path) -> None:
 
 
 def run_doctor(scripts: Path, workspace_root: Path) -> subprocess.CompletedProcess:
-    environ = {**os.environ, "PYTHONPATH": str(scripts)}
+    environ = {**os.environ, "PYTHONPATH": str(scripts), "PYTHONIOENCODING": "utf-8"}
     return subprocess.run(
         [sys.executable, str(scripts / "doctor.py")],
         cwd=scripts.parent,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         env=environ,
     )
 

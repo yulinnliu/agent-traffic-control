@@ -49,10 +49,10 @@ def project(tmp_path: Path) -> Path:
 
 def runner(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
     env = {key: value for key, value in os.environ.items() if not key.startswith("PYTEST_")}
-    env["CI"] = "1"
+    env.update(CI="1", PYTHONIOENCODING="utf-8")
     return subprocess.run([sys.executable, "-m", "atc_testkit.ci", "-p", "no:cacheprovider", *args] if not args or not args[0].startswith("--s")
                           else [sys.executable, "-m", "atc_testkit.ci", *args],
-                          cwd=root, env=env, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+                          cwd=root, env=env, capture_output=True, text=True, encoding="utf-8", stdin=subprocess.DEVNULL)
 
 
 def test_a_failing_test_prints_context_causes_and_the_report(project: Path) -> None:
@@ -104,8 +104,8 @@ def test_a_project_adds_context_hints_and_its_own_initialization(project: Path) 
     (project / "tests/test_a.py").write_text(FAILING, encoding="utf-8")
     (project / "own_runner.py").write_text(PROJECT_RUNNER, encoding="utf-8")
     env = {key: value for key, value in os.environ.items() if not key.startswith("PYTEST_")}
-    run = subprocess.run([sys.executable, "own_runner.py", "-n", "0"], cwd=project, env={**env, "CI": "1"},
-                         capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    run = subprocess.run([sys.executable, "own_runner.py", "-n", "0"], cwd=project, env={**env, "CI": "1", "PYTHONIOENCODING": "utf-8"},
+                         capture_output=True, text=True, encoding="utf-8", stdin=subprocess.DEVNULL)
     assert run.returncode == 1 and '"field": "test_fails"' in run.stderr
     assert "CI_HINT project hint" in run.stdout and "OWN_INIT" in run.stdout and "PROJECT_INIT" not in run.stdout
 
@@ -115,8 +115,8 @@ def test_a_failing_context_function_keeps_the_result(project: Path) -> None:
     text = PROJECT_RUNNER.replace('return {"field": item.name}', 'raise RuntimeError("x")')
     (project / "own_runner.py").write_text(text, encoding="utf-8")
     env = {key: value for key, value in os.environ.items() if not key.startswith("PYTEST_")}
-    run = subprocess.run([sys.executable, "own_runner.py", "-n", "0"], cwd=project, env={**env, "CI": "1"},
-                         capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    run = subprocess.run([sys.executable, "own_runner.py", "-n", "0"], cwd=project, env={**env, "CI": "1", "PYTHONIOENCODING": "utf-8"},
+                         capture_output=True, text=True, encoding="utf-8", stdin=subprocess.DEVNULL)
     assert run.returncode == 1 and '"diagnostic_error": "RuntimeError"' in run.stderr
 
 

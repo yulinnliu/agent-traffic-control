@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path, PureWindowsPath
@@ -175,7 +176,8 @@ def test_other_tools_are_ignored():
 def run_hook(payload: dict) -> subprocess.CompletedProcess:
     script = Path(guard.__file__)
     return subprocess.run([sys.executable, str(script)], input=json.dumps(payload),
-                          capture_output=True, text=True, encoding="utf-8", timeout=60)
+                          env={**os.environ, "PYTHONIOENCODING": "utf-8"}, capture_output=True, text=True,
+                          encoding="utf-8", timeout=60)
 
 
 def test_hook_prints_a_deny_naming_the_alternatives():

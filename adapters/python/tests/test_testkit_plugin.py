@@ -43,9 +43,9 @@ def project(tmp_path: Path) -> Path:
 
 def pytest_in(root: Path, *args: str, **env: str) -> subprocess.CompletedProcess[str]:
     environment = {key: value for key, value in os.environ.items() if not key.startswith("PYTEST_")}
-    environment.update(env)
+    environment.update(env, PYTHONIOENCODING="utf-8")
     return subprocess.run([sys.executable, "-m", "pytest", "-p", "no:cacheprovider", "-s", "-n", "0", *args], cwd=root,
-                          env=environment, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+                          env=environment, capture_output=True, text=True, encoding="utf-8", stdin=subprocess.DEVNULL)
 
 
 def reported(output: str, name: str) -> str:

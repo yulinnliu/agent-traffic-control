@@ -31,9 +31,9 @@ def test_value(tmp_path):
 
 def run_command(*args: str, cwd: Path | None = None, **env: str) -> subprocess.CompletedProcess[str]:
     environment = {key: value for key, value in os.environ.items() if not key.startswith("PYTEST_")}
-    environment.update(env)
+    environment.update(env, PYTHONIOENCODING="utf-8")
     return subprocess.run([sys.executable, "-m", "atc_testkit.commands", *args], cwd=cwd, env=environment,
-                          capture_output=True, text=True, stdin=subprocess.DEVNULL)
+                          capture_output=True, text=True, encoding="utf-8", stdin=subprocess.DEVNULL)
 
 
 @pytest.fixture()

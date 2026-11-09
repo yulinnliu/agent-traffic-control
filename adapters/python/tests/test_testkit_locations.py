@@ -80,7 +80,8 @@ def test_enter_moves_this_process_and_every_child(atc_tmp: Path) -> None:
     assert tempfile.gettempdir() == str(atc_tmp / "systmp")
     assert os.environ["ATC_TMP"] == str(atc_tmp)
     child = subprocess.run([sys.executable, "-c", "import tempfile;print(tempfile.gettempdir())"],
-                           capture_output=True, text=True, check=True)
+                           env={**os.environ, "PYTHONIOENCODING": "utf-8"}, capture_output=True, text=True,
+                           encoding="utf-8", check=True)
     assert child.stdout.strip() == str(atc_tmp / "systmp")
     for name in ("TEMP", "TMP", "TMPDIR"):
         assert os.environ[name] == str(atc_tmp / "systmp")
@@ -156,8 +157,9 @@ def assert_refused(run: subprocess.CompletedProcess[str], victim: Path) -> None:
 
 def outside_a_pytest(*args: str, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
     environ = {key: value for key, value in os.environ.items() if not key.startswith("PYTEST_")}
+    environ["PYTHONIOENCODING"] = "utf-8"
     return subprocess.run([sys.executable, *args], cwd=cwd, env=environ, capture_output=True, text=True,
-                          stdin=subprocess.DEVNULL)
+                          encoding="utf-8", stdin=subprocess.DEVNULL)
 
 
 @pytest.mark.parametrize("command", ["list", "prune"])

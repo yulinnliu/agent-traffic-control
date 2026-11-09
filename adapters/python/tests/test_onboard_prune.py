@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -59,7 +60,7 @@ def test_sync_prune_removes_orphans_and_validator_passes(tmp_path: Path, capsys:
     assert (project / ".claude/skills/local-skill/SKILL.md").is_file()
     run = subprocess.run(
         [sys.executable, str(SCRIPTS / "validate_workspace.py"), "--projects", "--root", str(root)],
-        capture_output=True, text=True, encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"}, capture_output=True, text=True, encoding="utf-8",
     )
     assert run.returncode == 0, run.stdout + run.stderr
 
