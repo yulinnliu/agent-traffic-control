@@ -31,6 +31,7 @@ location, in that order.
 | | `check_workspace.py` | runs the validator and records a failure as friction evidence |
 | | `integration_verify.py` | the verifier `atc integrate` runs in a candidate of this checkout (root `AGENTS.md` § Integration verification) |
 | | `build_testkit_release.py` | builds the `atc-testkit` wheel and digest record for consuming projects |
+| | `select_tests.py` | the test files a change can affect, each with its cause (§ Selected tests) |
 
 `src/atc_cli/` is the dispatcher; the scripts stay runnable directly with
 `uv run python scripts/<name>.py`.
@@ -57,3 +58,23 @@ under its marker contract: a new test carries a category, and
 The `Verifier timeout` in the root `AGENTS.md` is three times the measured
 wall clock of a full run, rounded up to a whole minute and never below 300
 seconds; re-measure it when the suite's duration changes.
+
+## Selected tests
+
+Writers and reviewers run the tests their change can affect; the integration
+verifier alone runs the full suite, because the installed `atc` runs the
+canonical checkout's `main`.
+
+```powershell
+uv run --locked python scripts/select_tests.py --run               # select against main, then run pytest on it
+uv run --locked python scripts/select_tests.py                     # print the selection only
+uv run --locked python scripts/select_tests.py --paths A B         # explain workspace-relative paths
+uv run --locked python scripts/select_tests.py --base REF --run -- -x   # another base; pytest arguments after --
+```
+
+The changed paths run from the merge base of `main` and `HEAD` to the working
+tree, untracked files included. The output lists each selected test file with
+the paths that select it, then every path with its rule; the rules are in the
+script's docstring. `conftest.py`, the pytest plugin and what they load,
+`pyproject.toml`, `uv.lock`, the unmarked baseline and every path no rule
+maps select the full suite.
