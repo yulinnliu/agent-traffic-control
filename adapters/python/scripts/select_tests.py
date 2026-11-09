@@ -6,15 +6,19 @@ root. Selection is by test file and reads the static structure of the code:
 
 - A Python module of `scripts/`, `src/atc_cli/` or `atc-testkit/src/` selects
   every test file that reaches it, through imports or by naming it in a string
-  (a script's module name or file name), transitively.
+  (a script's module name or file name), transitively. A test file is such a
+  module too: it selects itself and the test files that import it.
+- A test file that reads every file of a directory is declared in
+  `DIRECTORY_READERS` and runs for any change there; the graph cannot see a glob.
 - `conftest.py`, the pytest plugin and everything they import at load time,
   `pyproject.toml`, `uv.lock` and the unmarked baseline select the full suite.
 - A path under `shared/<area>/` selects the test files whose reach names
   `<area>` or `shared/<area>`; another path selects the test files whose reach
   names its file name.
 - A path no rule maps selects the full suite: a module no test reaches, a
-  removed module, a `shared/` area no test reads, and a non-Markdown file no
-  test names. Markdown no test names selects nothing.
+  removed module, a removed test file another module still names, a `shared/`
+  area no test reads, and a non-Markdown file no test names. Markdown no test
+  names selects nothing.
 
 Usage, from `adapters/python`::
 
@@ -59,6 +63,17 @@ SOURCE_ROOTS = {
     f"{ADAPTER}/atc-testkit/src/atc_testkit": "atc_testkit",
 }
 SHARED = "shared"
+SCRIPTS = f"{ADAPTER}/scripts"
+CLI_SRC = f"{ADAPTER}/src/atc_cli"
+TESTKIT_SRC = f"{ADAPTER}/atc-testkit/src/atc_testkit"
+# Test files that read every file of a directory (a glob, a copy, a digest). The
+# graph sees imports and names, not globs, so each is declared here and runs
+# for any change under its directories.
+DIRECTORY_READERS = {
+    f"{TESTS}/test_testkit_tmp.py": (TESTKIT_SRC,),
+    f"{TESTS}/test_testkit_release.py": (TESTKIT_SRC,),
+    f"{TESTS}/test_select_tests.py": (SCRIPTS, CLI_SRC, TESTKIT_SRC, TESTS),
+}
 
 
 @dataclass
@@ -143,6 +158,9 @@ class Graph:
         self.edges = {name: self._edges(module) for name, module in self.modules.items()}
         self.load_set = self._load_set()
         self.reach = {test: self._closure(self.by_path[test].name) for test in self.tests}
+        undeclared = set(DIRECTORY_READERS) - set(self.tests)
+        if undeclared:
+            raise ValueError(f"declared directory readers are not test files: {sorted(undeclared)}")
 
     def _edges(self, module: Module) -> set[str]:
         found = {name for name in module.imports if name in self.modules}
@@ -183,6 +201,13 @@ class Graph:
             stack.extend(n for n in self.modules[name].load_imports if n in self.modules)
         return seen
 
+    def importers(self, name: str) -> set[str]:
+        """Modules that import ``name`` or name its file in a string, whether or not it still exists."""
+        return {other.name for other in self.modules.values()
+                if PurePosixPath(other.path).name not in IMPORTS_ONLY
+                and (any(i == name or i.startswith(f"{name}.") for i in other.imports)
+                     or f"{name}.py" in "\n".join(other.literals))}
+
     def literals_of(self, test: str) -> tuple[set[str], str]:
         lits = [lit for name in self.reach[test] for lit in self.modules[name].literals
                 if PurePosixPath(self.modules[name].path).name not in IMPORTS_ONLY]
@@ -219,9 +244,15 @@ def classify(path: str, selection: TestSelection, graph: Graph) -> None:
     if path in FULL_FILES:
         selection.widen(path, "collection, dependency or marker input of every test")
         return
+    readers = {test for test, dirs in DIRECTORY_READERS.items() if path.startswith(tuple(f"{d}/" for d in dirs))}
+    if readers:
+        selection.add(path, readers, "declared reader of its whole directory")
     if str(pure.parent) == TESTS and pure.name.startswith("test_") and pure.suffix == ".py":
         if path in graph.tests:
-            selection.add(path, {path}, "the test file itself")
+            reached = {test for test in graph.tests if pure.stem in graph.reach[test]}
+            selection.add(path, reached, "the test file and the test files that reach it")
+        elif graph.importers(pure.stem):
+            selection.widen(path, "removed test file that another module still names")
         else:
             selection.add(path, (), "removed test file")
         return

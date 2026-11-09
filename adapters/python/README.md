@@ -78,3 +78,8 @@ the paths that select it, then every path with its rule; the rules are in the
 script's docstring. `conftest.py`, the pytest plugin and what they load,
 `pyproject.toml`, `uv.lock`, the unmarked baseline and every path no rule
 maps select the full suite.
+
+The selection sees imports and names written in strings, not globs: a test
+that reads every file of a directory (a package-wide scan, a copy, a digest)
+selects nothing through the graph, so it is declared in `DIRECTORY_READERS`
+in the script, and a new such test is added there.
