@@ -37,19 +37,19 @@ jobs:
           repo=$(mktemp -d)
           git -C "$repo" init -q -b main
           printf '# AGENTS.md\n\nIntro.\n\n## Build\n\nmake.\n' > "$repo/AGENTS.md"
-          sh scripts/link-skills.sh "$repo" hami-worktree
+          sh scripts/link-skills.sh "$repo" atc-worktree
           sh scripts/check-skills.sh "$repo"
           grep -qF '<!-- atc:project-policy-reference begin -->' "$repo/AGENTS.md"
           test -f "$repo/.atc/governance/INDEX.md"
           grep -q '^managed-by: agent-traffic-control$' "$repo/.atc/governance.yaml"
-          grep -q '^managed-by: agent-traffic-control$' "$repo/.claude/skills/hami-worktree/SKILL.md"
-          if grep -q '\$ATC_ROOT\|\$env:ATC_ROOT' "$repo/.claude/skills/hami-worktree/SKILL.md" "$repo"/.atc/governance/*.md; then echo "installed files point back at the checkout" >&2; exit 1; fi
-          echo '# edited' >> "$repo/.claude/skills/hami-worktree/SKILL.md"
+          grep -q '^managed-by: agent-traffic-control$' "$repo/.claude/skills/atc-worktree/SKILL.md"
+          if grep -q '\$ATC_ROOT\|\$env:ATC_ROOT' "$repo/.claude/skills/atc-worktree/SKILL.md" "$repo"/.atc/governance/*.md; then echo "installed files point back at the checkout" >&2; exit 1; fi
+          echo '# edited' >> "$repo/.claude/skills/atc-worktree/SKILL.md"
           echo '# edited' >> "$repo/.atc/governance/CORE.md"
           mkdir -p "$repo/.agents/skills/gone"
           printf -- '---\nname: gone\ndescription: x\nmanaged-by: agent-traffic-control\ncanonical: gone\n---\n' > "$repo/.agents/skills/gone/SKILL.md"
           if sh scripts/check-skills.sh "$repo"; then echo "check-skills missed drift" >&2; exit 1; fi
-          sh scripts/link-skills.sh --prune "$repo" hami-worktree
+          sh scripts/link-skills.sh --prune "$repo" atc-worktree
           sh scripts/check-skills.sh "$repo"
       - name: a pinned governance revision outside this checkout's history is stale, and link-skills re-pins it
         shell: bash
@@ -57,12 +57,12 @@ jobs:
           set -eu
           repo=$(mktemp -d)
           git -C "$repo" init -q -b main
-          sh scripts/link-skills.sh "$repo" hami-worktree
+          sh scripts/link-skills.sh "$repo" atc-worktree
           pin="$repo/.atc/governance.yaml"
           sed 's/^revision: .*/revision: 0000000000000000000000000000000000000000/' "$pin" > "$pin.tmp" && mv "$pin.tmp" "$pin"
           if out=$(sh scripts/check-skills.sh "$repo"); then echo "check-skills missed a stale pin" >&2; exit 1; fi
           echo "$out" | grep -q '^stale      .atc/governance.yaml (revision 0\{40\} not in history)$'
-          sh scripts/link-skills.sh "$repo" hami-worktree
+          sh scripts/link-skills.sh "$repo" atc-worktree
           sh scripts/check-skills.sh "$repo"
           grep -q "^revision: $(git rev-parse HEAD)\$" "$pin"
 

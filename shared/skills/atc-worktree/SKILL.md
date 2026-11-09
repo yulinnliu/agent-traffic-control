@@ -1,9 +1,7 @@
 ---
-name: hami-worktree
-description: Create, resume, audit or clean up a per-topic git worktree for a project registered in the workspace map, through the shared hami-worktree CLI. Not for the workspace root repo itself, nor for worktrees another tool manages.
-requires-contract: 1
-managed-by: agent-traffic-control
-canonical: hami-worktree
+name: atc-worktree
+description: Create, resume, audit or clean up a per-topic git worktree for a project registered in the workspace map, through the shared atc-worktree CLI. Not for the workspace root repo itself, nor for worktrees another tool manages.
+contract: 1
 ---
 
 # Hami Managed Worktree
@@ -50,7 +48,7 @@ working directory, or the checkout it was installed from). If
 from their Agent Traffic Control checkout with
 `uv tool install -e <checkout>/adapters/python`. If no such
 Agent Traffic Control checkout is available, report that this environment
-lacks the `hami-worktree` capability and stop. If no `workspace.yaml`
+lacks the `atc-worktree` capability and stop. If no `workspace.yaml`
 exists in the current directory or any parent and `atc` is not on PATH, this
 is an independent clone: the managed-worktree lifecycle does not apply. Use
 the `GIT_WORKFLOW.md` topic-branch procedure in this clone, and report the
@@ -192,18 +190,3 @@ missing lock and `PATH_UNSAFE` are findings.
 - Touch a legacy worktree, another owner's worktree, or a worktree another
   tool manages under its own root.
 - Remove with `--force`.
-
-## Codex constants
-
-This tool's values for the two inputs you never choose yourself:
-
-- **owner:** `codex`
-- **session:** `--session "$CODEX_THREAD_ID"`; if it is unset, `$CODEX_SESSION_ID`.
-  If both are set and differ, stop and ask the user. Pass it to `create` and `resume` only; `audit` and `cleanup` reject it.
-- **contract:** pass `--contract 1` on every call.
-- Set each command's `workdir` to the worktree path the CLI prints.
-- Git metadata writes and ordinary file writes are separate sandbox
-  permissions. On `PERMISSION_DENIED`, request escalation for that one
-  command and retry it once.
-- Do not use the app's own managed worktrees for a topic; they follow a
-  different lifecycle and are never touched by this CLI.

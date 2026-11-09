@@ -1,8 +1,8 @@
 ---
-name: hami-shared-skill
+name: atc-shared-skill
 description: Create a new skill shared across workspace projects or agent tools from one canonical source that sync renders into each tool's skills directory. Use for "make a shared skill" or a skill drafted for one project that would help another. Exclude skills scoped to one repo and one tool; place those in that repo's .claude/skills/ or .agents/skills/.
 managed-by: agent-traffic-control
-canonical: hami-shared-skill
+canonical: atc-shared-skill
 ---
 
 # Creating a shared skill

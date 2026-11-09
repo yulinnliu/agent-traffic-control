@@ -817,16 +817,16 @@ def test_doctor_reports_hami_worktree_readiness(tmp_path: Path) -> None:
     write_cli_stub(root)
     environ = {"CODEX_HOME": str(tmp_path / "codex")}
     by_name = {check.name: check for check in doctor.diagnose(root, environ)}
-    assert by_name["hami-worktree"].status == "READY"
-    assert "contract 1" in by_name["hami-worktree"].detail
+    assert by_name["atc-worktree"].status == "READY"
+    assert "contract 1" in by_name["atc-worktree"].detail
     write(tmp_path / "codex/config.toml", f"[desktop]\ngit-worktree-root = '{(root / 'worktrees').as_posix()}'\n")
-    check = {c.name: c for c in doctor.diagnose(root, environ)}["hami-worktree"]
+    check = {c.name: c for c in doctor.diagnose(root, environ)}["atc-worktree"]
     assert check.status == "ERROR"
     assert "codex-app" in check.detail and "CONFIG-ONLY" in check.detail
     canonical_cli(root).unlink()
-    assert {c.name: c for c in doctor.diagnose(root, environ)}["hami-worktree"].status == "ERROR"
+    assert {c.name: c for c in doctor.diagnose(root, environ)}["atc-worktree"].status == "ERROR"
     canonical_cli(root).write_text("this is not python\n", encoding="utf-8")
-    assert {c.name: c for c in doctor.diagnose(root, environ)}["hami-worktree"].status == "ERROR"
+    assert {c.name: c for c in doctor.diagnose(root, environ)}["atc-worktree"].status == "ERROR"
 
 
 def run_doctor(scripts: Path, workspace_root: Path) -> subprocess.CompletedProcess:
@@ -841,7 +841,7 @@ def run_doctor(scripts: Path, workspace_root: Path) -> subprocess.CompletedProce
 
 
 def hami_worktree_line(stdout: str) -> str:
-    return next(line for line in stdout.splitlines() if "hami-worktree" in line)
+    return next(line for line in stdout.splitlines() if "atc-worktree" in line)
 
 
 def write_minimal_workspace(root: Path) -> None:
@@ -964,10 +964,10 @@ def test_adapter_line_endings_only_skip_but_content_drift_updates(tmp_path: Path
 def test_opt_in_dsh_sync_carries_the_contract_and_the_dsh_constants(tmp_path: Path) -> None:
     root, project = make_workspace(tmp_path)
     workspace = Path(__file__).resolve().parents[3]
-    relative = ".dsh/skills/hami-worktree/SKILL.md"
+    relative = ".dsh/skills/atc-worktree/SKILL.md"
     expected = (workspace / relative).read_text(encoding="utf-8")
     write(root / relative, expected)
-    shutil.copytree(workspace / "shared/skills/hami-worktree", root / "shared/skills/hami-worktree")
+    shutil.copytree(workspace / "shared/skills/atc-worktree", root / "shared/skills/atc-worktree")
     target = project / relative
     write(target, expected.replace("DSH_SESSION_ID", "STALE_SESSION_ID"))
     assert onboard_project.run("sync", [("demo", project)], root) == 0
@@ -977,7 +977,7 @@ def test_opt_in_dsh_sync_carries_the_contract_and_the_dsh_constants(tmp_path: Pa
         assert constant in actual
     assert "$ATC_ROOT" not in actual
     for tool in (".agents", ".claude"):
-        assert not (project / tool / "skills/hami-worktree").exists()
+        assert not (project / tool / "skills/atc-worktree").exists()
 
 
 @pytest.mark.parametrize("original", ["# Local skill\n", "---\n[invalid\n---\n", "---\n- local\n---\n"])

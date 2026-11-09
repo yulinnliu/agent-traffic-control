@@ -59,7 +59,7 @@ Prerequisites: git. The full workspace path also needs [uv](https://docs.astral.
 ```sh
 git clone https://github.com/yulinnliu/agent-traffic-control.git atc
 atc/scripts/link-skills.sh path/to/your-repo     # every baseline skill
-atc/scripts/link-skills.sh path/to/your-repo hami-worktree hami-writing-for-agents
+atc/scripts/link-skills.sh path/to/your-repo atc-worktree hami-writing-for-agents
 ```
 
 `link-skills.sh` copies each skill into `.claude/skills/`, `.agents/skills/`
@@ -72,7 +72,7 @@ no path back to this checkout. Files the repository owns are reported and
 left alone. `--link` symlinks instead of copying; `--prune` removes adapters
 whose canonical skill no longer exists. On Windows run it from Git Bash.
 
-Skills that run a tool (`hami-worktree`, the merge preflight) call the `atc`
+Skills that run a tool (`atc-worktree`, the merge preflight) call the `atc`
 command, so put it on PATH once per machine:
 
 ```sh
@@ -89,7 +89,7 @@ uv run --locked python scripts/bootstrap.py add my-project --repo <url> # clone,
 uv run --locked python scripts/bootstrap.py status                      # doctor plus a dry onboarding check
 ```
 
-`add` also takes `--skills hami-worktree,hami-writing-for-agents` to install
+`add` also takes `--skills atc-worktree,hami-writing-for-agents` to install
 opt-in adapters beside the baseline ones, and accepts a checkout you already
 placed at `projects/<name>` when `--repo` is omitted. This path adds the
 worktree, preflight, policy and friction tools behind one command, `atc`
@@ -114,14 +114,16 @@ without it is project-owned and never touched.
 
 ## Skills
 
-Model-invoked unless marked user-invoked.
+A skill that teaches an `atc` command is named `atc-<name>`; a skill about
+agent working practice is named `hami-<name>`. Model-invoked unless marked
+user-invoked.
 
-- **hami-worktree** creates, resumes, audits and cleans up per-topic worktrees whose identity lives in git.
+- **atc-worktree** creates, resumes, audits and cleans up per-topic worktrees whose identity lives in git.
 - **hami-handoff-reminder** decides whether to hand off, compact or write a handoff note.
 - **hami-review-relay** runs writer/reviewer work the user relays between two sessions: step reports, reviews, verdict blocks.
 - **hami-retro** reviews a session record and proposes improvements.
 - **hami-writing-for-agents** is the reference for writing skills, `AGENTS.md` and pointers.
-- **hami-shared-skill** creates a shared skill and its rendered per-tool copies.
+- **atc-shared-skill** creates a shared skill and its rendered per-tool copies.
 - **hami-token-audit** audits a repository for recurring context cost.
 - **hami-token-hygiene** keeps a session cheap when delegating noisy work.
 - **hami-offload-to-chatgpt** (user-invoked) prepares a self-contained research prompt for a web model.

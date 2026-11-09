@@ -354,7 +354,7 @@ a new integration.
 
 The source branch stays as review evidence; deleting it is a separate
 decision. Matching trees or patches never establish authorization or
-completeness by themselves. Plain `hami-worktree` cleanup checks ancestry only
+completeness by themselves. Plain `atc-worktree` cleanup checks ancestry only
 and reports a squashed topic as `UNMERGED`. With valid cleanup authority, a
 squashed Hami Managed Worktree is cleaned up with `cleanup --squash-integrated`
 (see its skill), which verifies the recorded SHAs, tree and retained ref; the
@@ -508,7 +508,7 @@ Local worktree cleanup, remote ref deletion, and evidence retention are
 separate operations with separate capability and authority boundaries.
 Integrating a different topic never by itself makes an older WIP branch
 cleanup-ready. For Hami Managed Worktree contract 1, use its existing
-`hami-worktree` capability for local cleanup; do not bypass its identity,
+`atc-worktree` capability for local cleanup; do not bypass its identity,
 lock, clean-tree or merged-state checks. Nothing here automatically
 authorizes force push, remote deletion, or cleanup of another writer's work.
 

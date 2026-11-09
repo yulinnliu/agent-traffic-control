@@ -53,7 +53,7 @@
 ```sh
 git clone https://github.com/yulinnliu/agent-traffic-control.git atc
 atc/scripts/link-skills.sh path/to/your-repo     # 所有 baseline skill
-atc/scripts/link-skills.sh path/to/your-repo hami-worktree hami-writing-for-agents
+atc/scripts/link-skills.sh path/to/your-repo atc-worktree hami-writing-for-agents
 ```
 
 `link-skills.sh` 把每個 skill 以完整受管副本複製進 `.claude/skills/`、
@@ -64,7 +64,7 @@ repository 沒有 `CLAUDE.md` 時補上指標檔，並把 governance 區塊插�
 也沒有指回本 checkout 的路徑。repository 自己的檔案只回報、不動。`--link`
 改用 symlink；`--prune` 移除正本已不存在的 adapter。Windows 請在 Git Bash 執行。
 
-會執行工具的 skill（`hami-worktree`、merge preflight）呼叫的是 `atc`
+會執行工具的 skill（`atc-worktree`、merge preflight）呼叫的是 `atc`
 指令，每台機器裝一次放上 PATH：
 
 ```sh
@@ -81,7 +81,7 @@ uv run --locked python scripts/bootstrap.py add my-project --repo <url> # clone�
 uv run --locked python scripts/bootstrap.py status                      # doctor 加上 onboarding 乾跑檢查
 ```
 
-`add` 可加 `--skills hami-worktree,hami-writing-for-agents` 在 baseline 之外
+`add` 可加 `--skills atc-worktree,hami-writing-for-agents` 在 baseline 之外
 安裝 opt-in adapter；省略 `--repo` 時會使用你已放在 `projects/<name>` 的
 checkout。這條路徑多了 worktree、preflight、policy 與 friction 工具，全部收在
 `atc` 一個指令底下（`uv run atc --help`，或 `uv tool install -e .` 放上
@@ -105,14 +105,15 @@ uv run atc bootstrap sync --prune                                       # 所有
 
 ## Skills
 
-未標註者為 model-invoked。
+教 `atc` 指令的 skill 命名為 `atc-<name>`；關於 agent 工作方式的 skill
+命名為 `hami-<name>`。未標註者為 model-invoked。
 
-- **hami-worktree** 建立、恢復、稽核、清理身分存在 git 裡的 per-topic worktree。
+- **atc-worktree** 建立、恢復、稽核、清理身分存在 git 裡的 per-topic worktree。
 - **hami-handoff-reminder** 判斷該交接、壓縮還是寫交接筆記。
 - **hami-review-relay** 由使用者在兩個 session 之間轉貼的 writer／reviewer 工作：步驟回報、審核、判定區塊。
 - **hami-retro** 回顧 session 紀錄並提出改進。
 - **hami-writing-for-agents** 撰寫 skill、`AGENTS.md` 與 pointer 的參考。
-- **hami-shared-skill** 建立共用 skill 與它 render 出來的各工具副本。
+- **atc-shared-skill** 建立共用 skill 與它 render 出來的各工具副本。
 - **hami-token-audit** 稽核 repository 反覆發生的 context 成本。
 - **hami-token-hygiene** 委派吵雜工作時讓 session 維持便宜。
 - **hami-offload-to-chatgpt**（user-invoked）準備可自足的研究 prompt 給網頁模型。

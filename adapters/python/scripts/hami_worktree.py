@@ -5,7 +5,7 @@ Contract 1. Every path derives from workspace.yaml and the durable key
 `<owner>+<topic>`: directory `<project.worktrees>/<owner>+<topic>`, branch
 `worktree-<owner>+<topic>`, lock reason `<owner>:<topic>:<session>`. The Git
 worktree registration plus that lock reason is the whole durable record; the
-canonical skill `shared/skills/hami-worktree/SKILL.md` documents each command,
+canonical skill `shared/skills/atc-worktree/SKILL.md` documents each command,
 code and next step.
 
 `--project` may be omitted when the working directory lies under a registered

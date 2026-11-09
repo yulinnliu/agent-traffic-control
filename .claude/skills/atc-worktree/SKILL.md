@@ -1,9 +1,9 @@
 ---
-name: hami-worktree
-description: Create, resume, audit or clean up a per-topic git worktree for a project registered in the workspace map, through the shared hami-worktree CLI. Not for the workspace root repo itself, nor for worktrees another tool manages.
+name: atc-worktree
+description: Create, resume, audit or clean up a per-topic git worktree for a project registered in the workspace map, through the shared atc-worktree CLI. Not for the workspace root repo itself, nor for worktrees another tool manages.
 requires-contract: 1
 managed-by: agent-traffic-control
-canonical: hami-worktree
+canonical: atc-worktree
 ---
 
 # Hami Managed Worktree
@@ -50,7 +50,7 @@ working directory, or the checkout it was installed from). If
 from their Agent Traffic Control checkout with
 `uv tool install -e <checkout>/adapters/python`. If no such
 Agent Traffic Control checkout is available, report that this environment
-lacks the `hami-worktree` capability and stop. If no `workspace.yaml`
+lacks the `atc-worktree` capability and stop. If no `workspace.yaml`
 exists in the current directory or any parent and `atc` is not on PATH, this
 is an independent clone: the managed-worktree lifecycle does not apply. Use
 the `GIT_WORKFLOW.md` topic-branch procedure in this clone, and report the
@@ -193,16 +193,19 @@ missing lock and `PATH_UNSAFE` are findings.
   tool manages under its own root.
 - Remove with `--force`.
 
-## DSH constants
+## Claude Code constants
 
 This tool's values for the two inputs you never choose yourself:
 
-- **owner:** `dsh`
-- **session:** `--session $env:DSH_SESSION_ID` on `create` and `resume` only; `audit` and `cleanup` reject it.
+- **owner:** `claude`
+- **session:** `--session "$CLAUDE_CODE_SESSION_ID"` on `create` and `resume` only; `audit` and `cleanup` reject it.
 - **contract:** pass `--contract 1` on every call.
-- The shell is Windows PowerShell 5.1: for example
-  `atc worktree audit --project <name> --contract 1`. There is no `&&`;
-  chain with `; if ($?) { ... }`.
-- If `atc` is missing and the user points you at a checkout, the fallback is
-  `uv run --locked --project "<checkout>\adapters\python" atc worktree ...`
-  with `--no-cache`; the default uv cache is outside the writable workspace.
+- Reach the worktree through the absolute path the CLI prints: `git -C <path>`,
+  absolute file paths, or a subshell `( cd <path> && ... )`. A top-level `cd`
+  into the worktree becomes the session's working directory for every later
+  call, which keeps the directory busy and makes `cleanup` stop halfway.
+- Create a topic's worktree with the CLI only; the native worktree tool's root
+  inside the repo is a legacy location for this contract. To work inside a
+  worktree the CLI created, enter it with the native tool by its `path`, and
+  leave it with the keep action before `cleanup`; the native remove action is
+  not the teardown.

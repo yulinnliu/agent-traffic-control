@@ -92,10 +92,10 @@ def diagnose(root: Path = ROOT, environ: dict[str, str] | None = None) -> list[C
         checks.append(Check("workspace-managed adapters", "READY", f"{adapters} adapters current"))
 
     if hami_worktree is None:
-        checks.append(Check("hami-worktree", "ERROR", f"the shared capability could not be loaded: {HAMI_WORKTREE_IMPORT_ERROR}"))
+        checks.append(Check("atc-worktree", "ERROR", f"the shared capability could not be loaded: {HAMI_WORKTREE_IMPORT_ERROR}"))
     else:
         status, detail = hami_worktree.readiness(root, environ, os.path.expanduser("~"))
-        checks.append(Check("hami-worktree", status, detail))
+        checks.append(Check("atc-worktree", status, detail))
 
     for name, entry in projects.items():
         for field in ("repo", "worktrees", "state"):

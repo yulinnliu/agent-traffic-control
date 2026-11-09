@@ -176,14 +176,14 @@ one `atc test mutants` call.
     `<owner>/<repo> <branch> per <file> § <section>`; the tool appends
     ` @ <reviewed SHA>`;
   - for a topic with a managed worktree, the default cleanup command in the
-    hami-worktree skill's command form; load that skill before writing any
+    atc-worktree skill's command form; load that skill before writing any
     worktree command;
   - for a repository without managed worktrees, where the topic branch lives
     in the main checkout, `git -C <main checkout> switch main` before the
     integrate command and `git -C <main checkout> branch -d <topic branch>`
     after it. `-d` deletes only a branch `main` already contains.
 
-  Squash-integrated and abandon cleanups never ride on a PASS; hami-worktree
+  Squash-integrated and abandon cleanups never ride on a PASS; atc-worktree
   states their authority. A conditional PASS or FAIL carries no integration
   instruction.
 - Anything needing the user's decision (version numbers, spec semantics, risk
@@ -211,14 +211,14 @@ other action need their own instruction.
      `atc preflight push --repo <main checkout>` prints the same list
      before a later push.
 2. On a match, run the cleanup command: the worktree cleanup under
-   hami-worktree's run rules, or the `branch -d`.
+   atc-worktree's run rules, or the `branch -d`.
 3. Run the hami-handoff-reminder check and report the result lines to the
    user only; the reviewer gets no relay.
 
 Stop on a `switch` failure, a result mismatch, a cleanup verdict other than
 `OK`, `cleanup_complete` other than `true`, or a `branch -d` refusal: leave
 `main`, the worktree and the branch as they are, take only the read-only next
-step hami-worktree names for a cleanup refusal (such as `audit` after
+step atc-worktree names for a cleanup refusal (such as `audit` after
 `PERMISSION_DENIED`), and hand the result lines to the user for the reviewer.
 
 Done when the cleanup reported `cleanup_complete: true` or deleted the
