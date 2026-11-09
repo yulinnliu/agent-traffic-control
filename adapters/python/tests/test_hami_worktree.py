@@ -407,7 +407,7 @@ def test_human_output_is_one_ascii_line_per_target(ws: Workspace, capsys: pytest
     status = hw.main(["audit", "--project", PROJECT, "--contract", "1"], root=ws.root, environ=ws.environ, home=str(ws.home))
     out = capsys.readouterr().out
     assert status == 0
-    assert out.strip().splitlines() == [f"OK {ws.worktrees} (no worktrees) - continue"]
+    assert out.strip().splitlines() == [f"OK {PROJECT}/ (no worktrees) - continue"]
 
 
 # Create and resume

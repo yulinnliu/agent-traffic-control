@@ -260,7 +260,7 @@ def test_damaged_record_does_not_reuse(repo: Path, verified: str, damage, reason
 
 
 @pytest.mark.parametrize("change", [
-    lambda record: record.update(schema="atc-verification-evidence/2"),
+    lambda record: record.update(schema="atc-verification-evidence/3"),
     lambda record: record.pop("schema"),
     lambda record: record.pop("candidate_sha"),
     lambda record: record.pop("tree"),

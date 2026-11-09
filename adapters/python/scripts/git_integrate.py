@@ -26,6 +26,8 @@ from pathlib import Path
 from atc_testkit import locations
 import git_preflight as gp
 import hami_worktree as hw
+import task_authority as ta
+import task_section
 import verification_section
 from git_preflight import GitError, git, is_ancestor, merge_preflight, render, rev, same_path
 from integration_slot import IntegrationSlot
@@ -35,13 +37,20 @@ CANDIDATE_ID_BYTES = 6
 WORKTREE_BRANCH = re.compile(r"worktree-[^+]+\+(?P<topic>.+)")
 # Formats: shared/conformance/verification-evidence/README.md
 REPORT_SCHEMA = "atc-verification-report/1"
-EVIDENCE_SCHEMA = "atc-verification-evidence/1"
+EVIDENCE_SCHEMA = "atc-verification-evidence/2"
 EVIDENCE_DIR = ("atc", "verification-evidence")
 EVIDENCE_RETENTION_SECONDS = 14 * 24 * 3600
 INTEGRATIONS = ("atc", "integrations.jsonl")
 CANDIDATE_REFS = "refs/atc/integration-candidates"
 AUTHORITY_ENDING = re.compile(r"\s@\s+(\S+)$")
 TAIL_LINES = 20
+SHORT_SHA = 12
+FULL_SHA_WORD = re.compile(r"\b([0-9a-f]{12})[0-9a-f]{28}\b")
+RECORD_CHECK = "record check"
+ALIAS_NOTICE = (
+    "--authority-reference is deprecated; name the task with --task and the authority with --owner-words "
+    "or the record's integrate_main on main"
+)
 
 STOP_BEFORE_CANDIDATE = 1
 ERROR = 2
@@ -68,6 +77,20 @@ NEXT = {
         "before any other integration of this repository"
     ),
     "CARRY_OVER_REFUSED": "the rebased tip needs a fresh review; integrate the SHA that review names",
+    "TASK_NOT_FOUND": "commit the task's record on the topic branch and re-review, or name the task the record holds",
+    "TASK_BRANCH_MISMATCH": "integrate the branch the record binds, or correct the record on the topic and re-review",
+    "AUTHORITY_MISSING": "obtain the Owner's word and run again with --owner-words quoting it",
+    "AUTHORITY_NOT_FF": (
+        "a record's integrate_main covers FF only; obtain the Owner's word for this NO_FF and run again "
+        "with --owner-words quoting it"
+    ),
+    "AUTHORITY_NOT_INTEGRATED": "obtain the Owner's word and run again with --owner-words quoting it",
+    "TASK_AUTHORITY_CHANGED": (
+        "move the authority change into a range that changes only .atc/tasks/ and integrate it with "
+        "--owner-words; keep authority and authority_basis of records on main unchanged elsewhere"
+    ),
+    "TASK_ID_TAKEN": "take the next number with atc task new on the topic, re-review, then run again",
+    "AUTHORITY_REFERENCE_REFUSED": "integrate a range that touches .atc/tasks/ with --task and --owner-words",
 }
 
 
@@ -407,8 +430,8 @@ def _verify_candidate(
     return warning
 
 
-def _record_integration(repo: Path, record: dict) -> Path:
-    """Append one integration to `<git common dir>/atc/integrations.jsonl`."""
+def _record_integration(repo: Path, records: list[dict]) -> Path:
+    """Append one integration, a line per task, to `<git common dir>/atc/integrations.jsonl`."""
     common = Path(_git_ok(repo, "rev-parse", "--path-format=absolute", "--git-common-dir"))
     path = common.joinpath(*INTEGRATIONS)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -418,28 +441,50 @@ def _record_integration(repo: Path, record: dict) -> Path:
         lines = []
     for line in lines:
         try:
-            if json.loads(line).get("candidate_sha") == record["candidate_sha"]:
+            if json.loads(line).get("candidate_sha") == records[0]["candidate_sha"]:
                 return path  # a run that stopped for recovery already recorded it
         except (json.JSONDecodeError, AttributeError):
             continue
     with path.open("a", encoding="utf-8", newline="\n") as handle:
-        handle.write(json.dumps(record, sort_keys=True) + "\n")
+        handle.write("".join(json.dumps(record, sort_keys=True) + "\n" for record in records))
     return path
 
 
+@dataclass
+class Binding:
+    """The tasks an integration names, its authority, and whether its range changes only task records."""
+
+    tasks: list[str]
+    authority: dict
+    records_only: bool = False
+
+
+def _binding_keys(binding: Binding) -> dict:
+    return {
+        "task": binding.tasks[0] if len(binding.tasks) == 1 else None,
+        "tasks": binding.tasks,
+        "authority": binding.authority,
+        "records_only": binding.records_only,
+    }
+
+
 def _note_integration(
-    repo: Path, result: dict, candidate_sha: str, reviewed: str, authority_reference: str,
+    repo: Path, result: dict, candidate_sha: str, reviewed: str, binding: Binding,
     carried_from: str | None = None, main_before: str | None = None,
 ) -> None:
+    """One line per task; `main_before` is present on every line, `None` only after a recovery."""
+    at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     try:
-        result["integration_record"] = str(_record_integration(repo, {
+        result["integration_record"] = str(_record_integration(repo, [{
             "candidate_sha": candidate_sha,
             "reviewed": reviewed,
-            **({"main_before": main_before} if main_before else {}),
+            "main_before": main_before,
             **({"carried_over_from": carried_from} if carried_from else {}),
-            "authority_reference": authority_reference,
-            "integrated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        }))
+            "task": task,
+            "authority": binding.authority,
+            "records_only": binding.records_only,
+            "integrated_at": at,
+        } for task in binding.tasks]))
     except (OSError, GitError) as exc:
         result["integration_record"] = None
         result["integration_record_warning"] = f"could not append the integration record: {exc}"
@@ -458,7 +503,7 @@ def _recovery_ref_at(repo: Path, sha: str) -> bool:
 
 
 def _recover_interrupted_update(
-    repo: Path, main: str, branch: str | None, reviewed: str, authority_reference: str,
+    repo: Path, main: str, branch: str | None, reviewed: str, binding: Binding,
     recovered_candidates: list[dict], *, check: bool = False,
 ) -> tuple[int, dict] | None:
     """Reconcile a verified candidate already installed on main after a crash.
@@ -515,7 +560,7 @@ def _recover_interrupted_update(
 
     result = {
         "command": "integrate",
-        "authority_reference": authority_reference,
+        **_binding_keys(binding),
         "verdict": "RECOVERED",
         "reason": "CANDIDATE_ALREADY_ON_MAIN",
         "main_before": main_tip,
@@ -549,7 +594,7 @@ def _recover_interrupted_update(
     for ref_name in matching:
         git(repo, "update-ref", "-d", ref_name, main_tip)
     result["candidate_ref"] = None
-    _note_integration(repo, result, main_tip, reviewed, authority_reference)
+    _note_integration(repo, result, main_tip, reviewed, binding)
     return 0, result
 
 
@@ -625,6 +670,34 @@ def render_carry_over(carried: dict) -> list[str]:
     ]
 
 
+def render_binding(binding: Binding) -> str:
+    """The tasks and the authority by kind; the quote stays in `--json` and the records."""
+    tasks = ",".join(binding.tasks)
+    records_only = " records-only" if binding.records_only else ""
+    return f"task={json.dumps(tasks, ensure_ascii=False)} authority={binding.authority['kind']}{records_only}"
+
+
+def authority_verdict_stop(binding: Binding, verdict: str) -> Refused | None:
+    """A record's `integrate_main` covers `FF` only."""
+    if binding.authority.get("kind") == "record" and verdict == "NO_FF":
+        return stop("AUTHORITY_NOT_FF", f"the record of {binding.authority['task_id']} on main grants integrate_main, "
+                                        "which covers FF only; this integration is NO_FF")
+    return None
+
+
+def _check_records(candidate_dir: Path, candidate_sha: str) -> None:
+    """The record check in place of the verifier, for a range that changes only `.atc/tasks/`."""
+    import task_records
+    problems = task_records.problems(candidate_dir)
+    if problems:
+        raise stop(
+            "VERIFICATION_FAILED", f"the record check failed for {candidate_sha}: {problems[0]}",
+            after_candidate=True, extra=[f"  {problem}" for problem in problems],
+        )
+    if git(candidate_dir, "status", "--porcelain").stdout.strip():
+        raise stop("CANDIDATE_CHANGED", "the record check dirtied the candidate checkout; refusing integration", after_candidate=True)
+
+
 @dataclass
 class Target:
     """Every value an integration runs with, resolved before anything runs.
@@ -639,7 +712,7 @@ class Target:
     branch: str | None
     branch_source: str
     reviewed: str
-    authority_reference: str
+    binding: Binding
     verify_argv: list[str]
     argv_source: str
     timeout: float
@@ -647,15 +720,19 @@ class Target:
     warnings: list[str] = field(default_factory=list)
     carried_from: str | None = None
     fetched: str = "none"
+    project: str = ""
 
     def line(self) -> str:
         carried = f" carried_from={self.carried_from}" if self.carried_from else ""
+        verifier = (
+            RECORD_CHECK if self.binding.records_only
+            else f"{json.dumps(self.verify_argv, ensure_ascii=False)} ({self.argv_source}) "
+                 f"timeout={self.timeout:g}s ({self.timeout_source})"
+        )
         return (
-            f"resolved: repo={self.repo} main={self.main}@{self.main_tip} fetched={self.fetched} "
+            f"resolved: {self.project} main={self.main}@{self.main_tip} fetched={self.fetched} "
             f"branch={self.branch or '-'} ({self.branch_source}) reviewed={self.reviewed}{carried} "
-            f"authority={json.dumps(self.authority_reference, ensure_ascii=False)} "
-            f"verifier={json.dumps(self.verify_argv, ensure_ascii=False)} ({self.argv_source}) "
-            f"timeout={self.timeout:g}s ({self.timeout_source})"
+            f"{render_binding(self.binding)} verifier={verifier}"
         )
 
 
@@ -670,7 +747,7 @@ def integrate(t: Target) -> tuple[int, dict]:
                 stale_candidate_refs.append({"ref": name, "sha": sha})
         recovered_candidates: list[dict] = []
         recovered = _recover_interrupted_update(
-            repo, main, branch, reviewed, t.authority_reference, recovered_candidates
+            repo, main, branch, reviewed, t.binding, recovered_candidates
         )
         if recovered is not None:
             code, recovered_result = recovered
@@ -684,7 +761,7 @@ def integrate(t: Target) -> tuple[int, dict]:
         source_before = report.evidence["topic_tip"]
         result = {
             "command": "integrate",
-            "authority_reference": t.authority_reference,
+            **_binding_keys(t.binding),
             "verdict": report.verdict,
             "reason": report.reason,
             "main_before": main_before,
@@ -707,6 +784,8 @@ def integrate(t: Target) -> tuple[int, dict]:
             result["stale_candidate_refs"] = stale_candidate_refs
         if report.verdict == "STOP":
             return STOP_BEFORE_CANDIDATE, {**result, "report": report}
+        if refusal := authority_verdict_stop(t.binding, report.verdict):
+            return STOP_BEFORE_CANDIDATE, {**result, "refusal": refusal}
         if t.carried_from:
             try:
                 result["carried_over"] = carry_over(repo, main, t.carried_from, reviewed, main_before)
@@ -762,15 +841,21 @@ def integrate(t: Target) -> tuple[int, dict]:
             elif candidate_sha != reviewed:
                 raise stop("CANDIDATE_CHANGED", f"FF candidate is {candidate_sha}, expected reviewed SHA {reviewed}", after_candidate=True)
 
-            print(f"verify: candidate {candidate_sha} timeout {t.timeout:g}s ({t.timeout_source})", file=sys.stderr)
             verification_started = time.monotonic()
-            verification_warning = _verify_candidate(
-                t.verify_argv, candidate_dir, candidate_sha, main_before, reviewed, t.timeout, places.systmp,
-                report_path,
-            )
+            if t.binding.records_only:
+                print(f"verify: candidate {candidate_sha} {RECORD_CHECK}", file=sys.stderr)
+                _check_records(candidate_dir, candidate_sha)
+                verification_warning, verifier_report, evidence_reason = None, None, "RECORDS_ONLY"
+            else:
+                print(f"verify: candidate {candidate_sha} timeout {t.timeout:g}s ({t.timeout_source})", file=sys.stderr)
+                verification_warning = _verify_candidate(
+                    t.verify_argv, candidate_dir, candidate_sha, main_before, reviewed, t.timeout, places.systmp,
+                    report_path,
+                )
+                verifier_report, evidence_reason = _read_report(report_path)
             result["verification"] = "PASS"
             result["verification_seconds"] = round(time.monotonic() - verification_started, 1)
-            verifier_report, result["evidence_reason"] = _read_report(report_path)
+            result["evidence_reason"] = evidence_reason
             if verification_warning:
                 result["verification_warning"] = verification_warning
 
@@ -801,9 +886,7 @@ def integrate(t: Target) -> tuple[int, dict]:
             if main_after == candidate_sha:
                 # main holds the candidate, so the integration happened even
                 # when its checkout needs recovery below.
-                _note_integration(
-                    repo, result, candidate_sha, reviewed, t.authority_reference, t.carried_from, main_before,
-                )
+                _note_integration(repo, result, candidate_sha, reviewed, t.binding, t.carried_from, main_before)
             if main_after != candidate_sha or rev(repo, "HEAD") != candidate_sha:
                 raise stop(
                     "RECOVERY_REQUIRED",
@@ -828,7 +911,8 @@ def integrate(t: Target) -> tuple[int, dict]:
                         "reviewed": reviewed,
                         "verdict": result["verdict"],
                         **({"carried_over_from": t.carried_from} if t.carried_from else {}),
-                        "authority_reference": t.authority_reference,
+                        "task": t.binding.tasks[0],
+                        "authority": t.binding.authority,
                         "verify_argv": t.verify_argv,
                         "platform": {"system": sys.platform, "machine": platform.machine()},
                         "verified_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -865,8 +949,19 @@ def integrate(t: Target) -> tuple[int, dict]:
                 result["candidate_ref"] = None
 
 
-def resolve_repo(args: argparse.Namespace, root: Path, root_given: bool, cwd: str) -> Path:
-    """`--repo`, else `--project` through workspace.yaml, else the project holding ``cwd``."""
+def _project_name(repo: Path, root: Path) -> str:
+    return hw.validator.ROOT_TOPICS_NAME if same_path(repo, root) else repo.name
+
+
+def declared_prefix(repo: Path, main: str = "main") -> str | None:
+    """The task prefix `AGENTS.md` on ``main`` declares, if any."""
+    shown = git(repo, "show", f"refs/heads/{main}:AGENTS.md", check=False)
+    return task_section.prefix(shown.stdout) or None if shown.returncode == 0 else None
+
+
+def resolve_repo(args: argparse.Namespace, root: Path, root_given: bool, cwd: str) -> tuple[str, Path]:
+    """The project name and main checkout: `--repo`, `--project` through workspace.yaml (`root` names the
+    workspace root), the repository whose declared prefix a record `--task` carries, or the project holding ``cwd``."""
     if args.repo is not None:
         if root_given:
             raise Refused(
@@ -874,25 +969,38 @@ def resolve_repo(args: argparse.Namespace, root: Path, root_given: bool, cwd: st
                 "--root names the workspace that --project or the working directory resolves in; "
                 "--repo names the checkout itself, so give --root or --repo, not both",
             )
-        return args.repo
+        return _project_name(args.repo, root), args.repo
     try:
         ws = hw.load_workspace(root, dict(os.environ))
     except hw.Stop as exc:
         raise Refused(exc.result.code, f"{exc.result.target}: {exc.result.detail}") from exc
     registered = f"registered: {', '.join(sorted(ws.projects)) or 'none'}"
+    root_project = hw.root_project(ws)
     if args.project is not None:
-        project = ws.projects.get(args.project)
+        project = root_project if args.project == root_project.name else ws.projects.get(args.project)
         if project is None:
             raise Refused("UNKNOWN_PROJECT", f"{args.project} is not in {root / 'workspace.yaml'}; {registered}")
-    else:
-        project = hw.infer_project(ws, cwd)
-        if project is None:
-            raise Refused(
-                "UNKNOWN_PROJECT",
-                f"no --repo or --project and the working directory {cwd} is in no registered project; "
-                f"{registered}; the workspace root takes --repo",
-            )
-    return Path(project.repo)
+        return project.name, Path(project.repo)
+    record = ta.RECORD_ID.fullmatch(args.task or "")
+    if record:
+        declaring = [p for p in [root_project, *ws.projects.values()]
+                     if Path(p.repo).is_dir() and declared_prefix(Path(p.repo)) == record["prefix"]]
+        if len(declaring) == 1:
+            return declaring[0].name, Path(declaring[0].repo)
+    if args.task is not None:
+        raise Refused(
+            "USAGE",
+            f"--task {args.task} names no record of a declared task prefix; a task identity string needs "
+            "--project or --repo",
+        )
+    project = hw.infer_project(ws, cwd)
+    if project is None:
+        raise Refused(
+            "UNKNOWN_PROJECT",
+            f"no --repo or --project and the working directory {cwd} is in no registered project; "
+            f"{registered}; the workspace root takes --repo or --project root",
+        )
+    return project.name, Path(project.repo)
 
 
 def infer_branch(repo: Path, reviewed: str, main: str, main_tip: str) -> tuple[str | None, str]:
@@ -987,11 +1095,64 @@ def tool_checkout_warning(checkout: Path = hw.ROOT) -> str | None:
     )
 
 
+def resolve_binding(
+    args: argparse.Namespace, repo: Path, main: str, main_tip: str, branch: str | None, branch_source: str,
+    reviewed: str, alias: str | None,
+) -> Binding:
+    """The tasks and authority of the run (`docs/TASK_CONTRACT_PLAN.md` § B), or the stop that refuses them."""
+    words = {"kind": "owner_words", "quote": args.owner_words} if args.owner_words is not None else None
+    record_task = args.task if args.task and ta.RECORD_ID.fullmatch(args.task)         and declared_prefix(repo, main) == ta.RECORD_ID.fullmatch(args.task)["prefix"] else None
+    if branch is None or branch_source == "recovery":
+        # A recovered candidate is already on main; its range was checked by the run that made it.
+        if alias is not None:
+            return Binding([alias], {"kind": "unclassified"})
+        if args.task is None:
+            raise Refused("USAGE", "the reviewed SHA is already on main; name the integration's task with --task")
+        if words is None and record_task is None:
+            raise ta.Stop("AUTHORITY_MISSING", f"--task {args.task} is no record; integrate with --owner-words")
+        return Binding([args.task], words or {"kind": "record", "task_id": record_task})
+    rng = ta.scan(repo, git(repo, "merge-base", main_tip, reviewed).stdout.strip(), reviewed)
+    if alias is not None:
+        if rng.touches_tasks:
+            raise ta.Stop("AUTHORITY_REFERENCE_REFUSED", "--authority-reference never integrates a range that touches "
+                                                          f"{ta.TASKS_DIR}/; use --task with --owner-words")
+        return Binding([alias], {"kind": "unclassified"})
+    if record_task is not None:
+        ta.check_record(repo, record_task, reviewed, branch)
+    if rng.records_only:
+        tasks = rng.task_ids
+        if args.task is not None and args.task not in tasks:
+            raise Refused("USAGE", f"--task {args.task} names no record this records-only range changes: {', '.join(tasks)}")
+    elif args.task is None:
+        raise Refused("USAGE", "a range that changes more than .atc/tasks/ needs --task")
+    else:
+        tasks = [args.task]
+    ta.check_range(repo, rng, main_tip, reviewed, may_change=rng.records_only and words is not None)
+    if words is not None:
+        authority = words
+    elif record_task is None:
+        raise ta.Stop("AUTHORITY_MISSING", f"--task {args.task} is no task record; integrate with --owner-words")
+    elif tasks != [record_task]:
+        raise ta.Stop("AUTHORITY_MISSING", f"the range binds {', '.join(tasks)}; the record of {record_task} "
+                                           "covers that task alone; integrate with --owner-words")
+    else:
+        authority = ta.record_authority(repo, record_task, main, main_tip, gp.read_integrations(repo))
+    return Binding(tasks, authority, rng.records_only)
+
+
 def resolve(args: argparse.Namespace, root: Path, root_given: bool, cwd: str) -> Target:
     reviewed = args.reviewed.strip().lower()
     if not FULL_SHA.fullmatch(reviewed):
         raise stop("REVIEWED_SHA_INVALID", f"--reviewed must be the full 40-character SHA: {args.reviewed}")
-    repo = resolve_repo(args, root, root_given, cwd)
+    if args.authority_reference is not None and (args.task is not None or args.owner_words is not None):
+        raise Refused("USAGE", "--authority-reference is the deprecated form of --task with an authority; "
+                               "give --task and --owner-words, or --authority-reference alone")
+    if args.authority_reference is None and args.task is None and args.owner_words is None:
+        raise Refused("USAGE", "name the task with --task and the authority with --owner-words or the record's "
+                               "integrate_main on main")
+    if args.owner_words is not None and not args.owner_words.strip():
+        raise Refused("USAGE", "--owner-words needs the Owner's words, quoted")
+    project, repo = resolve_repo(args, root, root_given, cwd)
     check_checkout(repo)
     fetched = "none"
     if gp.has_remote(repo):
@@ -1005,9 +1166,12 @@ def resolve(args: argparse.Namespace, root: Path, root_given: bool, cwd: str) ->
     if rev(repo, reviewed) != reviewed:
         raise stop("REVIEWED_SHA_UNKNOWN", f"{gp.REASONS['REVIEWED_SHA_UNKNOWN']}: {reviewed}")
     warnings: list[str] = []
-    authority, record = resolve_authority(args.authority_reference, reviewed)
-    if warning := authority_record_warning(repo, record, reviewed):
-        warnings.append(warning)
+    alias = None
+    if args.authority_reference is not None:
+        _, alias = resolve_authority(args.authority_reference, reviewed)
+        warnings.append(ALIAS_NOTICE)
+        if warning := authority_record_warning(repo, alias, reviewed):
+            warnings.append(warning)
     carried_from = None
     if args.rebased is not None:
         rebased = args.rebased.strip().lower()
@@ -1022,6 +1186,15 @@ def resolve(args: argparse.Namespace, root: Path, root_given: bool, cwd: str) ->
         branch, branch_source = args.branch, "--branch"
     else:
         branch, branch_source = infer_branch(repo, reviewed, main, main_tip)
+    try:
+        binding = resolve_binding(args, repo, main, main_tip, branch, branch_source, reviewed, alias)
+    except ta.Stop as exc:
+        raise stop(exc.token, exc.detail) from None
+    if binding.records_only:
+        return Target(
+            repo, main, main_tip, branch, branch_source, reviewed, binding, [], RECORD_CHECK, 0, RECORD_CHECK,
+            warnings, carried_from, fetched, project,
+        )
 
     declared, declared_argv, problem = declared_verifier(repo, main, main_tip)
     explicit = None
@@ -1069,20 +1242,40 @@ def resolve(args: argparse.Namespace, root: Path, root_given: bool, cwd: str) ->
     if warning := tool_checkout_warning():
         warnings.append(warning)
     return Target(
-        repo, main, main_tip, branch, branch_source, reviewed, authority,
-        argv, argv_source, timeout, timeout_source, warnings, carried_from, fetched,
+        repo, main, main_tip, branch, branch_source, reviewed, binding,
+        argv, argv_source, timeout, timeout_source, warnings, carried_from, fetched, project,
     )
 
 
-def render_result(result: dict) -> str:
-    line = f"{result['verdict']} main {result['main_before']} -> {result['main_after']}"
+def render_result(result: dict, binding: Binding, project: str) -> str:
+    line = f"{result['verdict']} {project} main {result['main_before']} -> {result['main_after']}"
     if result.get("candidate_sha"):
         line += f" candidate {result['candidate_sha']} verification={result['verification']}"
     if result["verdict"] == "NO_FF":
         line += f" (parents {result['first_parent']} {result['second_parent']})"
     if result.get("verification") == "PASS":
-        line += f" evidence={result.get('evidence') or 'NONE(' + str(result.get('evidence_reason')) + ')'}"
-    return line
+        line += f" evidence={'recorded' if result.get('evidence') else 'NONE(' + str(result.get('evidence_reason')) + ')'}"
+    return f"{line} {render_binding(binding)}"
+
+
+class _Human:
+    """A text stream for human output: 12-character SHAs and project names in place of checkout paths."""
+
+    def __init__(self, stream) -> None:
+        self.stream = stream
+        self.paths: dict[str, str] = {}
+
+    def write(self, text: str) -> int:
+        for path, name in sorted(self.paths.items(), key=lambda item: -len(item[0])):
+            text = text.replace(path, name)
+        self.stream.write(FULL_SHA_WORD.sub(r"\1", text))
+        return len(text)
+
+    def flush(self) -> None:
+        self.stream.flush()
+
+    def __getattr__(self, name: str):
+        return getattr(self.stream, name)
 
 
 class _Parser(argparse.ArgumentParser):
@@ -1096,7 +1289,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = _Parser(allow_abbrev=False, description=__doc__.splitlines()[0])
     target = parser.add_mutually_exclusive_group()
     target.add_argument("--repo", type=Path, help="main checkout of the repository; the workspace root takes this form")
-    target.add_argument("--project", help="registered project name from workspace.yaml")
+    target.add_argument("--project", help="registered project name from workspace.yaml; root names the workspace root")
     parser.add_argument("--branch", help="reviewed topic branch (default: the one local branch at --reviewed)")
     parser.add_argument("--reviewed", required=True, help="full 40-character SHA named by the review")
     parser.add_argument(
@@ -1106,8 +1299,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--main", default="main", help="integration branch (default: main)")
     parser.add_argument(
-        "--authority-reference", required=True,
-        help="record granting integrate_main authority; ' @ <reviewed>' is appended when absent",
+        "--task",
+        help="the task: a record ID with a declared prefix (it names the repository), or a task identity string",
+    )
+    parser.add_argument(
+        "--owner-words", metavar="QUOTE",
+        help="the Owner's words granting this integration, quoted; without it the record on main must grant "
+        "integrate_main, which covers FF only",
+    )
+    parser.add_argument(
+        "--authority-reference",
+        help="deprecated: a task identity string recorded with authority unclassified; refused for a range "
+        "that touches .atc/tasks/",
     )
     verifier = parser.add_mutually_exclusive_group()
     verifier.add_argument("--verify-command", help="verification argv as a JSON string array, in place of the declared one")
@@ -1145,7 +1348,7 @@ def _print_refusal(refusal: Refused, payload: dict, as_json: bool) -> None:
 
 def check(t: Target, as_json: bool) -> int:
     payload = {"command": "integrate", "check": True, "resolved": {**asdict(t), "repo": str(t.repo)}}
-    recovered = _recover_interrupted_update(t.repo, t.main, t.branch, t.reviewed, t.authority_reference, [], check=True)
+    recovered = _recover_interrupted_update(t.repo, t.main, t.branch, t.reviewed, t.binding, [], check=True)
     if recovered is not None:
         code, result = recovered
         refusal = result.pop("refusal", None)
@@ -1166,6 +1369,9 @@ def check(t: Target, as_json: bool) -> int:
     if report.verdict == "STOP":
         _print_stop_report(report, payload, as_json)
         return STOP_BEFORE_CANDIDATE
+    if refusal := authority_verdict_stop(t.binding, report.verdict):
+        _print_refusal(refusal, {**payload, "preflight": asdict(report)}, as_json)
+        return refusal.code
     carried = None
     if t.carried_from:
         try:
@@ -1191,10 +1397,25 @@ def main(argv: list[str] | None = None, root: Path = hw.ROOT, root_given: bool =
     except Refused as refusal:
         print("\n".join(refusal.lines()), file=sys.stderr)
         return refusal.code
+    if args.json:
+        return _main(args, root, root_given, cwd)
+    streams = sys.stdout, sys.stderr
+    sys.stdout, sys.stderr = _Human(streams[0]), _Human(streams[1])
+    try:
+        return _main(args, root, root_given, cwd)
+    finally:
+        sys.stdout, sys.stderr = streams
+
+
+def _main(args: argparse.Namespace, root: Path, root_given: bool, cwd: str | None) -> int:
     payload = {"command": "integrate"}
     try:
         locations.enter()
         target = resolve(args, root, root_given, cwd or os.getcwd())
+        for stream in (sys.stdout, sys.stderr):
+            if isinstance(stream, _Human):
+                stream.paths.update({str(target.repo): target.project,
+                                     str(target.repo.resolve()): target.project})
         print(target.line(), file=sys.stderr)
         for warning in target.warnings:
             print(f"WARNING {warning}", file=sys.stderr)
@@ -1214,6 +1435,7 @@ def main(argv: list[str] | None = None, root: Path = hw.ROOT, root_given: bool =
     except (GitError, RuntimeError) as exc:
         _print_refusal(Refused("GIT" if isinstance(exc, GitError) else "RUNTIME", str(exc)), payload, args.json)
         return ERROR
+    result["project"] = target.project
     result["warnings"] = target.warnings
     report = result.pop("report", None)
     refusal = result.pop("refusal", None)
@@ -1241,7 +1463,7 @@ def main(argv: list[str] | None = None, root: Path = hw.ROOT, root_given: bool =
     elif args.json:
         print(json.dumps(result, indent=2))
     else:
-        lines = [render_result(result)]
+        lines = [render_result(result, target.binding, target.project)]
         if result.get("carried_over"):
             lines += render_carry_over(result["carried_over"])
         if result.get("push"):

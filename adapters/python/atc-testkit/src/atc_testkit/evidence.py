@@ -16,7 +16,9 @@ from pathlib import Path
 from . import __version__
 
 REPORT_SCHEMA = "atc-verification-report/1"
-RECORD_SCHEMA = "atc-verification-evidence/1"
+RECORD_SCHEMA = "atc-verification-evidence/2"
+# Every record schema a gate reads: /2 names the task and authority where /1 held an authority reference.
+RECORD_SCHEMAS = ("atc-verification-evidence/1", RECORD_SCHEMA)
 REPORT_ENV = "ATC_VERIFICATION_REPORT"
 SELECTOR_NAME = "atc-testkit"
 DEPENDENCY_FILES = ("uv.lock", ".python-version")
@@ -116,7 +118,7 @@ def _strings(value: object) -> bool:
 
 def _well_formed(record: Mapping) -> bool:
     report = record.get("report")
-    if record.get("schema") != RECORD_SCHEMA or not isinstance(report, dict):
+    if record.get("schema") not in RECORD_SCHEMAS or not isinstance(report, dict):
         return False
     selection, selector = report.get("selection"), report.get("selector")
     return (

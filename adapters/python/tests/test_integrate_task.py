@@ -1,0 +1,352 @@
+"""`atc integrate` with a task and its authority (`docs/TASKS.md` § Authority on `main`).
+
+Each test runs real Git in a sandbox repository that declares task records.
+"""
+from __future__ import annotations
+
+import json
+import re
+from pathlib import Path
+
+import pytest
+import yaml
+
+import git_integrate as gi
+import git_preflight as gp
+import task_records
+from test_git_integrate import (  # noqa: F401  (repo is a fixture)
+    commit, main_tip, publish, refusal, repo, run_git, verify_command,
+)
+
+pytestmark = pytest.mark.integration
+
+SHA = "0" * 40
+WORDS = "Owner: integrate DEMO-0001 as reviewed"
+GRANT = {"integrate_main": True}
+
+
+def agents() -> str:
+    return (
+        "# AGENTS.md\n\n## Task records\n\n- Task prefix: DEMO\n\n"
+        "## Integration verification\n\n- Verifier argv file: verify.json\n\n## Other\n"
+    )
+
+
+def record(task_id: str, branch: str, grants: dict | None = None, **extra: object) -> str:
+    authority = {"edit": True, "commit": True, "push_topic": False, "integrate_main": False,
+                 "push_main": False, "deploy": False, **(grants or {})}
+    basis = {"authority_basis": f'"{WORDS}"'} if any(authority[k] for k in ta_grants()) else {}
+    data = {"task_id": task_id, "repository": "example/demo", "base_sha": SHA, "scope": "plan § 1",
+            "governance_source": "example/governance", "governance_revision": SHA, "branch": branch,
+            "authority": authority, **basis, **extra}
+    return yaml.safe_dump(data, sort_keys=False, allow_unicode=True)
+
+
+def ta_grants() -> tuple[str, ...]:
+    return ("push_topic", "integrate_main", "push_main", "deploy")
+
+
+def put(repo: Path, files: dict[str, str | None], message: str = "edit") -> str:
+    """Write, or with ``None`` remove, ``files`` and commit them on the current branch."""
+    for path, content in files.items():
+        target = repo / path
+        if content is None:
+            run_git(repo, "rm", "-q", "--", path)
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+        run_git(repo, "add", "--", path)
+    run_git(repo, "commit", "-q", "-m", message)
+    return run_git(repo, "rev-parse", "HEAD")
+
+
+def on_branch(repo: Path, branch: str, files: dict[str, str | None], start: str = "main") -> str:
+    """Commit ``files`` on ``branch`` (created from ``start`` when missing), then return to main."""
+    exists = run_git(repo, "branch", "--list", branch)
+    run_git(repo, "switch", "-q", *([branch] if exists else ["-c", branch, start]))
+    tip = put(repo, files, f"edit on {branch}")
+    run_git(repo, "switch", "-q", "main")
+    return tip
+
+
+@pytest.fixture
+def tasks_repo(repo: Path) -> Path:
+    """The integrate fixture repository, declaring the task prefix `DEMO`."""
+    put(repo, {"AGENTS.md": agents()}, "declare task records")
+    return repo
+
+
+def run(repo: Path, reviewed: str, *extra: str) -> int:
+    return gi.main(["--repo", str(repo), "--reviewed", reviewed, "--verify-command", verify_command(), *extra])
+
+
+def run_json(repo: Path, capsys: pytest.CaptureFixture[str], reviewed: str, *extra: str) -> tuple[int, dict, str]:
+    status = run(repo, reviewed, "--json", *extra)
+    captured = capsys.readouterr()
+    return status, json.loads(captured.out), captured.err
+
+
+def lines(repo: Path) -> list[dict]:
+    return gp.read_integrations(repo)
+
+
+def statuses(repo: Path) -> dict[str, str]:
+    return {row["task_id"]: row["status"] for row in task_records.tasks("demo", repo)}
+
+
+def bind(repo: Path, capsys: pytest.CaptureFixture[str], branch: str = "work") -> str:
+    """Bind DEMO-0001 on main with integrate_main through a records-only `--owner-words` integration."""
+    tip = on_branch(repo, branch, {".atc/tasks/DEMO-0001.yaml": record("DEMO-0001", branch, GRANT)})
+    status, data, err = run_json(repo, capsys, tip, "--owner-words", WORDS)
+    assert status == 0, err
+    return tip
+
+
+# The real path: bind on main, then integrate the work under the record
+
+
+def test_a_records_only_binding_then_an_ff_under_the_record(tasks_repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    repo = tasks_repo
+    before = main_tip(repo)
+    binding = on_branch(repo, "work", {".atc/tasks/DEMO-0001.yaml": record("DEMO-0001", "work", GRANT)})
+    status, data, err = run_json(repo, capsys, binding, "--owner-words", WORDS)
+    assert status == 0, err
+    assert (data["verdict"], data["records_only"], data["tasks"]) == ("FF", True, ["DEMO-0001"])
+    assert data["authority"] == {"kind": "owner_words", "quote": WORDS}
+    assert (data["evidence"], data["evidence_reason"]) == (None, "RECORDS_ONLY")
+    assert [(line["task"], line["records_only"], line["main_before"], line["authority"]) for line in lines(repo)] == [
+        ("DEMO-0001", True, before, {"kind": "owner_words", "quote": WORDS}),
+    ]
+    assert statuses(repo) == {"DEMO-0001": "bound"}
+
+    work = on_branch(repo, "work", {"a.txt": "work\n"})
+    assert statuses(repo) == {"DEMO-0001": "open"}
+    status, data, err = run_json(repo, capsys, work, "--task", "DEMO-0001")
+    assert status == 0, err
+    assert (data["verdict"], data["main_after"], data["records_only"]) == ("FF", work, False)
+    assert data["authority"] == {"kind": "record", "task_id": "DEMO-0001"}
+    assert (lines(repo)[-1]["task"], lines(repo)[-1]["main_before"]) == ("DEMO-0001", binding)
+    assert statuses(repo) == {"DEMO-0001": "integrated"}
+
+
+def test_the_human_result_names_the_task_and_the_authority_kind(tasks_repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    bind(tasks_repo, capsys)
+    work = on_branch(tasks_repo, "work", {"a.txt": "work\n"})
+    assert run(tasks_repo, work, "--task", "DEMO-0001") == 0
+    captured = capsys.readouterr()
+    assert captured.out.splitlines()[0].endswith('task="DEMO-0001" authority=record')
+    assert not re.search(r"\b[0-9a-f]{40}\b", captured.out + captured.err)
+    assert str(tasks_repo) not in captured.out + captured.err
+
+
+def test_a_records_only_binding_of_several_tasks_writes_a_line_per_task(
+    tasks_repo: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    before = main_tip(tasks_repo)
+    tip = on_branch(tasks_repo, "bind", {
+        ".atc/tasks/DEMO-0001.yaml": record("DEMO-0001", "one", GRANT),
+        ".atc/tasks/DEMO-0002.yaml": record("DEMO-0002", "two", GRANT),
+    })
+    status, data, err = run_json(tasks_repo, capsys, tip, "--owner-words", WORDS)
+    assert status == 0, err
+    assert [(line["task"], line["candidate_sha"], line["main_before"], line["records_only"]) for line in lines(tasks_repo)] == [
+        ("DEMO-0001", tip, before, True), ("DEMO-0002", tip, before, True),
+    ]
+
+
+def test_a_records_only_range_runs_the_record_check_not_the_verifier(
+    tasks_repo: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    broken = record("DEMO-0001", "work").replace("scope: plan § 1\n", "")
+    tip = on_branch(tasks_repo, "work", {".atc/tasks/DEMO-0001.yaml": broken})
+    before = main_tip(tasks_repo)
+    status, data, err = run_json(tasks_repo, capsys, tip, "--owner-words", WORDS, "--verify-command", '["no-such-verifier"]')
+    assert status == 3
+    assert data["refusal"]["reason"] == "VERIFICATION_FAILED"
+    assert "schema-violation: DEMO-0001.yaml" in data["refusal"]["detail"]
+    assert "verifier=record check" in err
+    assert main_tip(tasks_repo) == before
+
+
+def test_a_records_only_range_needs_no_verification_section(tasks_repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    put(tasks_repo, {"AGENTS.md": "# AGENTS.md\n\n## Task records\n\n- Task prefix: DEMO\n"})
+    tip = on_branch(tasks_repo, "work", {".atc/tasks/DEMO-0001.yaml": record("DEMO-0001", "work", GRANT)})
+    status, _, err = run_json(tasks_repo, capsys, tip, "--owner-words", WORDS)
+    assert status == 0, err
+
+
+# --task
+
+
+def test_a_task_the_reviewed_commit_lacks_is_not_found(tasks_repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    tip = on_branch(tasks_repo, "work", {"a.txt": "work\n"})
+    status, data, _ = run_json(tasks_repo, capsys, tip, "--task", "DEMO-0007", "--owner-words", WORDS)
+    assert (status, data["refusal"]["reason"]) == (1, "TASK_NOT_FOUND")
+
+
+def test_a_record_bound_to_another_branch_is_a_mismatch(tasks_repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    tip = on_branch(tasks_repo, "work", {".atc/tasks/DEMO-0001.yaml": record("DEMO-0001", "elsewhere"), "a.txt": "w\n"})
+    status, data, _ = run_json(tasks_repo, capsys, tip, "--task", "DEMO-0001", "--owner-words", WORDS)
+    assert (status, data["refusal"]["reason"]) == (1, "TASK_BRANCH_MISMATCH")
+
+
+def test_a_task_identity_string_is_recorded_with_owner_words(tasks_repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    tip = on_branch(tasks_repo, "work", {"a.txt": "work\n"})
+    status, data, err = run_json(tasks_repo, capsys, tip, "--task", "docs/PLAN.md §2 step 1", "--owner-words", WORDS)
+    assert status == 0, err
+    assert (lines(tasks_repo)[-1]["task"], lines(tasks_repo)[-1]["authority"]["kind"]) == ("docs/PLAN.md §2 step 1", "owner_words")
+
+
+def test_a_task_identity_string_needs_owner_words(tasks_repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    tip = on_branch(tasks_repo, "work", {"a.txt": "work\n"})
+    status, data, _ = run_json(tasks_repo, capsys, tip, "--task", "docs/PLAN.md §2 step 1")
+    assert (status, data["refusal"]["reason"]) == (1, "AUTHORITY_MISSING")
+
+
+def test_a_range_beyond_the_records_needs_a_task(tasks_repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    tip = on_branch(tasks_repo, "work", {"a.txt": "work\n"})
+    status, data, _ = run_json(tasks_repo, capsys, tip, "--owner-words", WORDS)
+    assert (status, data["refusal"]["reason"]) == (2, "USAGE")
+
+
+# Authority on main
+
+
+def test_a_record_without_integrate_main_is_no_authority(tasks_repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    tip = on_branch(tasks_repo, "work", {".atc/tasks/DEMO-0001.yaml": record("DEMO-0001", "work")})
+    assert run_json(tasks_repo, capsys, tip, "--owner-words", WORDS)[0] == 0
+    work = on_branch(tasks_repo, "work", {"a.txt": "work\n"})
+    status, data, _ = run_json(tasks_repo, capsys, work, "--task", "DEMO-0001")
+    assert (status, data["refusal"]["reason"]) == (1, "AUTHORITY_MISSING")
+
+
+def test_a_record_grant_covers_ff_only(tasks_repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    bind(tasks_repo, capsys)
+    work = on_branch(tasks_repo, "work", {"a.txt": "work\n"})
+    publish(tasks_repo, "work")
+    put(tasks_repo, {"c.txt": "c\n"})
+    before = main_tip(tasks_repo)
+    status, data, _ = run_json(tasks_repo, capsys, work, "--task", "DEMO-0001")
+    assert (status, data["refusal"]["reason"]) == (1, "AUTHORITY_NOT_FF")
+    assert run(tasks_repo, work, "--task", "DEMO-0001", "--check") == 1
+    assert refusal(capsys.readouterr().err)[0].startswith("STOP AUTHORITY_NOT_FF: ")
+    assert main_tip(tasks_repo) == before
+    status, data, err = run_json(tasks_repo, capsys, work, "--task", "DEMO-0001", "--owner-words", WORDS)
+    assert (status, data["verdict"]) == (0, "NO_FF"), err
+
+
+def test_a_grant_committed_to_main_directly_is_not_integrated(tasks_repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    put(tasks_repo, {".atc/tasks/DEMO-0001.yaml": record("DEMO-0001", "work", GRANT)})
+    work = on_branch(tasks_repo, "work", {"a.txt": "work\n"})
+    status, data, _ = run_json(tasks_repo, capsys, work, "--task", "DEMO-0001")
+    assert (status, data["refusal"]["reason"]) == (1, "AUTHORITY_NOT_INTEGRATED")
+    assert "--owner-words" in data["refusal"]["detail"]
+
+
+def catch_up(repo: Path, branch: str) -> None:
+    run_git(repo, "switch", "-q", branch)
+    run_git(repo, "merge", "-q", "--ff-only", "main")
+    run_git(repo, "switch", "-q", "main")
+
+
+def test_a_later_direct_change_of_the_grant_voids_it(tasks_repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    bind(tasks_repo, capsys)
+    put(tasks_repo, {".atc/tasks/DEMO-0001.yaml": record("DEMO-0001", "work", {**GRANT, "deploy": True})})
+    catch_up(tasks_repo, "work")
+    work = on_branch(tasks_repo, "work", {"b.txt": "more\n"})
+    status, data, _ = run_json(tasks_repo, capsys, work, "--task", "DEMO-0001")
+    assert (status, data["refusal"]["reason"]) == (1, "AUTHORITY_NOT_INTEGRATED")
+
+
+def test_a_later_edit_that_keeps_the_grant_leaves_it_in_place(tasks_repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    bind(tasks_repo, capsys)
+    put(tasks_repo, {".atc/tasks/DEMO-0001.yaml": record("DEMO-0001", "work", GRANT, writer="claude")})
+    catch_up(tasks_repo, "work")
+    work = on_branch(tasks_repo, "work", {"a.txt": "work\n"})
+    status, data, err = run_json(tasks_repo, capsys, work, "--task", "DEMO-0001")
+    assert (status, data["authority"]["kind"]) == (0, "record"), err
+
+
+# The record's authority in a range
+
+
+@pytest.mark.parametrize("change", [
+    {".atc/tasks/DEMO-0001.yaml": record("DEMO-0001", "work", {**GRANT, "push_main": True}), "a.txt": "w\n"},
+    {".atc/tasks/DEMO-0001.yaml": None, "a.txt": "w\n"},
+    {".atc/tasks/DEMO-0001.yaml": None, ".atc/tasks/DEMO-0003.yaml": record("DEMO-0003", "work", GRANT), "a.txt": "w\n"},
+], ids=["changed", "removed", "renamed"])
+def test_a_mixed_range_never_changes_a_grant_on_main(
+    tasks_repo: Path, capsys: pytest.CaptureFixture[str], change: dict,
+) -> None:
+    bind(tasks_repo, capsys)
+    work = on_branch(tasks_repo, "work", change)
+    status, data, _ = run_json(tasks_repo, capsys, work, "--task", "plan § 1 step 2", "--owner-words", WORDS)
+    assert (status, data["refusal"]["reason"]) == (1, "TASK_AUTHORITY_CHANGED")
+
+
+def test_a_records_only_change_of_a_grant_needs_owner_words(tasks_repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    bind(tasks_repo, capsys)
+    narrowed = on_branch(tasks_repo, "work", {".atc/tasks/DEMO-0001.yaml": record("DEMO-0001", "work")})
+    status, data, _ = run_json(tasks_repo, capsys, narrowed, "--task", "DEMO-0001")
+    assert (status, data["refusal"]["reason"]) == (1, "TASK_AUTHORITY_CHANGED")
+    status, data, err = run_json(tasks_repo, capsys, narrowed, "--task", "DEMO-0001", "--owner-words", WORDS)
+    assert (status, data["records_only"]) == (0, True), err
+
+
+@pytest.mark.parametrize(("grants", "expected"), [({"push_topic": True}, 1), ({}, 0)])
+def test_a_new_record_in_a_mixed_range_grants_edit_and_commit_at_most(
+    tasks_repo: Path, capsys: pytest.CaptureFixture[str], grants: dict, expected: int,
+) -> None:
+    tip = on_branch(tasks_repo, "work", {".atc/tasks/DEMO-0001.yaml": record("DEMO-0001", "work", grants), "a.txt": "w\n"})
+    status, data, err = run_json(tasks_repo, capsys, tip, "--task", "DEMO-0001", "--owner-words", WORDS)
+    assert status == expected, err
+    if expected:
+        assert data["refusal"]["reason"] == "TASK_AUTHORITY_CHANGED"
+
+
+def test_a_number_main_binds_to_another_branch_is_taken(tasks_repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    clash = on_branch(tasks_repo, "mine", {".atc/tasks/DEMO-0002.yaml": record("DEMO-0002", "mine"), "a.txt": "w\n"})
+    theirs = on_branch(tasks_repo, "theirs", {".atc/tasks/DEMO-0002.yaml": record("DEMO-0002", "theirs")})
+    assert run_json(tasks_repo, capsys, theirs, "--owner-words", WORDS)[0] == 0
+    status, data, _ = run_json(tasks_repo, capsys, clash, "--task", "DEMO-0002", "--owner-words", WORDS)
+    assert (status, data["refusal"]["reason"]) == (1, "TASK_ID_TAKEN")
+    multi = on_branch(tasks_repo, "multi", {".atc/tasks/DEMO-0002.yaml": record("DEMO-0002", "multi")}, start="main")
+    status, data, _ = run_json(tasks_repo, capsys, multi, "--owner-words", WORDS)
+    assert (status, data["refusal"]["reason"]) == (1, "TASK_ID_TAKEN")
+
+
+# The deprecated --authority-reference
+
+
+def test_the_alias_names_its_replacement_and_records_unclassified(tasks_repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    tip = on_branch(tasks_repo, "work", {"a.txt": "w\n"})
+    status, data, err = run_json(tasks_repo, capsys, tip, "--authority-reference", "DEMO-0001")
+    assert status == 0, err
+    assert f"WARNING {gi.ALIAS_NOTICE}" in err.splitlines()
+    assert (lines(tasks_repo)[-1]["task"], lines(tasks_repo)[-1]["authority"]) == ("DEMO-0001", {"kind": "unclassified"})
+
+
+def test_the_alias_never_satisfies_a_record(tasks_repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    tip = on_branch(tasks_repo, "work", {"a.txt": "w\n"})
+    assert run_json(tasks_repo, capsys, tip, "--authority-reference", "DEMO-0001")[0] == 0
+    record_line = lines(tasks_repo)[-1]
+    assert gi.ta.integrated_binding(tasks_repo, tip, "DEMO-0001", [record_line]) is None
+
+
+@pytest.mark.parametrize("files", [
+    {".atc/tasks/DEMO-0001.yaml": record("DEMO-0001", "work")},
+    {".atc/tasks/DEMO-0001.yaml": record("DEMO-0001", "work"), "a.txt": "w\n"},
+], ids=["records-only", "mixed"])
+def test_the_alias_is_refused_for_a_range_touching_task_records(
+    tasks_repo: Path, capsys: pytest.CaptureFixture[str], files: dict,
+) -> None:
+    tip = on_branch(tasks_repo, "work", files)
+    status, data, _ = run_json(tasks_repo, capsys, tip, "--authority-reference", "DEMO-0001")
+    assert (status, data["refusal"]["reason"]) == (1, "AUTHORITY_REFERENCE_REFUSED")
+
+
+@pytest.mark.parametrize("extra", [["--task", "DEMO-0001"], ["--owner-words", WORDS]])
+def test_the_alias_takes_no_other_authority_flag(tasks_repo: Path, capsys: pytest.CaptureFixture[str], extra: list[str]) -> None:
+    tip = on_branch(tasks_repo, "work", {"a.txt": "w\n"})
+    status, data, _ = run_json(tasks_repo, capsys, tip, "--authority-reference", "x", *extra)
+    assert (status, data["refusal"]["reason"]) == (2, "USAGE")

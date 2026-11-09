@@ -55,13 +55,13 @@ the `GIT_WORKFLOW.md` topic-branch procedure in this clone, and report the
 branch, tip SHA and base SHA instead of a worktree path. Never substitute raw
 `git worktree` commands.
 
-Every call passes `--project <name> --contract 1`. With `--project` absent,
+Every call passes `--project <name> --contract 1 --json`. With `--project` absent,
 the CLI infers the project whose repository or worktrees root holds the
 working directory; an explicit `--project` always wins. The workspace root
 repo takes `--repo <workspace root>` in place of `--project`; its worktrees
 live under `worktrees/root/`, a working directory there infers it, and the
-rest of its canonical checkout infers nothing. Add `--json` for a
-machine-readable result: `contract`, `command`, and per target `verdict`
+rest of its canonical checkout infers nothing. Read the result from
+`--json`: `contract`, `command`, and per target `verdict`
 (`OK`, `STOP` for a refusal or finding, `ERROR` for an environment problem),
 `reason` (the code below), `target`, `detail`, `next` and `evidence`.
 
@@ -91,7 +91,9 @@ worktree's base.
 
 ## Results
 
-Human output is one line per target: `<CODE> <target> [(<detail>)] - <next step>`.
+Human output is one line per target for a person to read:
+`<CODE> <project>[/<worktree>] [(<detail>)] - <next step>`, with 12-character
+SHAs; paths and full SHAs are in `--json`.
 Exit status is `0` for OK, `1` for a refusal or an audit finding, `2` for a
 usage, environment, permission or contract problem.
 
@@ -122,7 +124,7 @@ missing lock and `PATH_UNSAFE` are findings.
 
 ## Working in the worktree
 
-- Use the absolute path the CLI printed, and run Git as `git -C <path> ...`.
+- Use the absolute path in the `--json` result's `target`, and run Git as `git -C <path> ...`.
 - Integrate the reviewed topic with `atc integrate` against the main
   checkout; it takes the branch and reviewed SHA, not the worktree. Run
   `cleanup` after it.

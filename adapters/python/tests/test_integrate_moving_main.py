@@ -5,6 +5,7 @@ Each test runs a sandbox repository with a bare `origin` beside it.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -47,6 +48,11 @@ def records(repo: Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
 
 
+def short(sha: str) -> str:
+    """A SHA as human output prints it."""
+    return sha[:12]
+
+
 def run(repo: Path, reviewed: str, *extra: str) -> int:
     return gi.main(["--repo", str(repo), "--reviewed", reviewed, "--authority-reference", "owner-approval", *extra])
 
@@ -73,7 +79,7 @@ def test_main_behind_origin_stops_before_the_verifier(repo: Path, tmp_path: Path
     assert run(repo, tip, "--verify-command", marker_verifier(marker)) == 1
     err = capsys.readouterr().err
     first, after = refusal(err)
-    assert first == f"STOP MAIN_BEHIND_ORIGIN: local main {before} is 1 commits behind origin/main {remote}"
+    assert first == f"STOP MAIN_BEHIND_ORIGIN: local main {short(before)} is 1 commits behind origin/main {short(remote)}"
     assert after.startswith("next: fast-forward local main to origin/main")
     assert "fetched=origin" in err
     assert not marker.exists()
@@ -88,8 +94,8 @@ def test_main_diverged_from_origin_stops_with_both_counts(repo: Path, capsys: py
     assert run(repo, tip) == 1
     first, after = refusal(capsys.readouterr().err)
     assert first == (
-        f"STOP MAIN_DIVERGED_FROM_ORIGIN: local main {local} has 1 commits origin/main lacks, "
-        f"and origin/main {remote} has 1 commits local main lacks"
+        f"STOP MAIN_DIVERGED_FROM_ORIGIN: local main {short(local)} has 1 commits origin/main lacks, "
+        f"and origin/main {short(remote)} has 1 commits local main lacks"
     )
     assert after.startswith("next: the owner decides how the local-only main commits reach origin")
     assert main_tip(repo) == local
@@ -125,7 +131,7 @@ def test_an_unpublished_compatible_topic_requires_a_rebase(repo: Path, tmp_path:
     assert run(repo, tip, "--verify-command", marker_verifier(marker)) == 1
     first, after = refusal(capsys.readouterr().err)
     assert first.startswith("STOP REBASE_REQUIRED: main advanced by 1 commits since the topic's base ")
-    assert f"rebase the topic onto main {base}" in first
+    assert f"rebase the topic onto main {short(base)}" in first
     assert after.startswith("next: rebase the unpublished topic onto main, then run again with --rebased")
     assert not marker.exists()
     assert main_tip(repo) == base
@@ -162,20 +168,21 @@ def test_a_clean_rebase_carries_the_approval_over(repo: Path, capsys: pytest.Cap
     reviewed, between = stale_two_commit_topic(repo)
     rebased = rebase(repo, "topic")
     assert run(repo, reviewed, "--rebased", rebased, "--check") == 0
-    assert f"carried over: the approval for reviewed {reviewed} applies to rebased {rebased}" in capsys.readouterr().out
+    assert (f"carried over: the approval for reviewed {short(reviewed)} applies to rebased {short(rebased)}"
+            in capsys.readouterr().out)
     assert run(repo, reviewed, "--rebased", rebased, "--verify-command", report_command(json.dumps(REPORT))) == 0
     captured = capsys.readouterr()
     lines = captured.out.splitlines()
-    assert lines[0].startswith(f"FF main {between} -> {rebased} candidate {rebased} verification=PASS")
+    assert lines[0].startswith(f"FF repo main {short(between)} -> {short(rebased)} candidate {short(rebased)} verification=PASS")
     assert lines[1] == (
-        f"carried over: the approval for reviewed {reviewed} applies to rebased {rebased} "
+        f"carried over: the approval for reviewed {short(reviewed)} applies to rebased {short(rebased)} "
         "(2 commits, every patch-id equal, clean replay)"
     )
-    assert lines[2:4] == ["main commits between: 1", f"  {between} edit c.txt"]
-    assert f"reviewed={rebased} carried_from={reviewed}" in captured.err
+    assert lines[2:4] == ["main commits between: 1", f"  {short(between)} edit c.txt"]
+    assert f"reviewed={short(rebased)} carried_from={short(reviewed)}" in captured.err
     assert main_tip(repo) == rebased
     assert (records(repo)[-1]["reviewed"], records(repo)[-1]["carried_over_from"]) == (rebased, reviewed)
-    assert records(repo)[-1]["authority_reference"] == f"owner-approval @ {reviewed}"
+    assert (records(repo)[-1]["task"], records(repo)[-1]["authority"]) == ("owner-approval", {"kind": "unclassified"})
     evidence = json.loads((evidence_dir(repo) / f"{rebased}.json").read_text(encoding="utf-8"))
     assert (evidence["reviewed"], evidence["carried_over_from"], evidence["verdict"]) == (rebased, reviewed, "FF")
 
@@ -185,7 +192,7 @@ def test_a_carried_over_rebase_still_runs_the_verifier(repo: Path, capsys: pytes
     rebased = rebase(repo, "topic")
     failing = json.dumps([sys.executable, "-c", "import sys; sys.exit(5)"])
     assert run(repo, reviewed, "--rebased", rebased, "--verify-command", failing) == 3
-    assert refusal(capsys.readouterr().err)[0].startswith(f"STOP VERIFICATION_FAILED: candidate verification failed for {rebased}")
+    assert refusal(capsys.readouterr().err)[0].startswith(f"STOP VERIFICATION_FAILED: candidate verification failed for {short(rebased)}")
     assert main_tip(repo) == between
 
 
@@ -249,7 +256,7 @@ def test_a_rebase_that_is_not_equivalent_is_refused(
     first, after = refusal(capsys.readouterr().err)
     assert first.startswith("STOP CARRY_OVER_REFUSED: ")
     assert detail in first
-    assert first.endswith(f"the approval for {reviewed} does not carry over to {rebased}")
+    assert first.endswith(f"the approval for {short(reviewed)} does not carry over to {short(rebased)}")
     assert after == "next: the rebased tip needs a fresh review; integrate the SHA that review names"
     assert not marker.exists()
     assert main_tip(repo) == before
@@ -266,7 +273,7 @@ def test_a_conflicting_replay_is_refused_even_when_the_patch_ids_match(
     monkeypatch.setattr(gi, "_patch_ids", lambda _repo, commits: ["same"] * len(commits))
     assert run(repo, reviewed, "--rebased", rebased) == 1
     first, _ = refusal(capsys.readouterr().err)
-    assert first.startswith(f"STOP CARRY_OVER_REFUSED: replaying {reviewed} onto main conflicts in a.txt")
+    assert first.startswith(f"STOP CARRY_OVER_REFUSED: replaying {short(reviewed)} onto main conflicts in a.txt")
 
 
 # A published topic
@@ -282,7 +289,7 @@ def test_a_published_topic_merges_and_keeps_the_reviewed_sha(repo: Path, capsys:
     assert run(repo, reviewed) == 0
     assert run_git(repo, "rev-parse", "main^1", "main^2").split() == [remote, reviewed]
     assert run_git(repo, "rev-parse", "topic", "origin/topic").split() == [reviewed, reviewed]
-    assert capsys.readouterr().out.startswith(f"NO_FF main {remote} -> ")
+    assert capsys.readouterr().out.startswith(f"NO_FF repo main {short(remote)} -> ")
 
 
 def test_a_published_overlap_keeps_the_reconcile_step(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -308,10 +315,15 @@ def test_the_integration_lists_and_flags_what_a_push_carries(repo: Path, capsys:
     assert run(repo, mine) == 0
     captured = capsys.readouterr()
     lines = captured.out.splitlines()
-    assert lines[1] == f"push: 3 commits origin/main {origin} -> main {mine}"
-    assert lines[2].startswith(f"  {other} edit a.txt  [NO PUSH APPROVAL: integration {other} reviewed {other} authority ")
-    assert lines[3] == f"  {manual} edit m.txt  [NO PUSH APPROVAL: no integration record]"
-    assert lines[4] == f"  {mine} edit b.txt  [this integration]"
+    assert lines[1:8] == [
+        f"push: 3 commits origin/main {short(origin)} -> main {short(mine)}",
+        f'  integration {short(other)} task="owner-approval" authority=unclassified [NO PUSH APPROVAL]',
+        f"    {short(other)} edit a.txt",
+        "  no integration record [NO PUSH APPROVAL]",
+        f"    {short(manual)} edit m.txt",
+        f'  integration {short(mine)} task="owner-approval" authority=unclassified [this integration]',
+        f"    {short(mine)} edit b.txt",
+    ]
     assert "WARNING 2 commits in origin/main..main come from other integrations or none" in captured.err
 
 
@@ -325,13 +337,19 @@ def test_preflight_push_fetches_and_groups_by_integration(repo: Path, capsys: py
     assert gp.main(["push", "--repo", str(repo), "--integration", second]) == 0
     lines = capsys.readouterr().out.splitlines()
     assert lines[0] == "PUSH PUSH_LISTED: 2 commits in origin/main..main; 1 lack this integration's push approval"
-    listed = [line for line in lines if line.startswith("  ") and "edit" in line]
-    assert listed[0].startswith(f"  {first} edit a.txt  [NO PUSH APPROVAL: integration {first}")
-    assert listed[1] == f"  {second} edit b.txt  [this integration]"
+    assert lines[-4:] == [
+        f'  integration {short(first)} task="owner-approval" authority=unclassified [NO PUSH APPROVAL]',
+        f"    {short(first)} edit a.txt",
+        f'  integration {short(second)} task="owner-approval" authority=unclassified [this integration]',
+        f"    {short(second)} edit b.txt",
+    ]
+    assert not re.search(r"\b[0-9a-f]{40}\b", "\n".join(lines))
     assert gp.main(["push", "--repo", str(repo), "--json"]) == 0
     data = json.loads(capsys.readouterr().out)
-    assert [(c["sha"], c["integration"], c["push_approval"]) for c in data["push"]["commits"]] == [
-        (first, first, None), (second, second, None),
+    assert [(c["sha"], c["integration"], c["push_approval"], c["task"], c["authority"])
+            for c in data["push"]["commits"]] == [
+        (first, first, None, "owner-approval", {"kind": "unclassified"}),
+        (second, second, None, "owner-approval", {"kind": "unclassified"}),
     ]
     push_from_other(repo, "c.txt", "c\n")
     assert gp.main(["push", "--repo", str(repo)]) == 1

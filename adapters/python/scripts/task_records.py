@@ -151,6 +151,8 @@ def resolve(root: Path, environ: dict[str, str], cwd: str, project: str | None, 
             raise Refused("UNKNOWN_PROJECT", f"--repo takes the workspace root {ws.root} only; a registered project "
                                              f"takes --project; {registered}")
         return [(root_target.name, Path(ws.root))]
+    if project == root_target.name:
+        return [(root_target.name, Path(ws.root))]
     if project is not None:
         found = ws.projects.get(project)
         if found is None:

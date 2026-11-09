@@ -14,7 +14,7 @@ project's repository or worktrees root; an explicit value always wins.
 live under `worktrees/root`; a working directory there infers it, while the
 rest of the canonical checkout infers nothing.
 
-Usage (`--repo ROOT` may replace `--project P`):
+Usage (`--repo ROOT` or `--project root` may replace `--project P`):
   hami_worktree.py create  --project P --owner O --topic T --contract 1 [--session S] [--base-sha FULL_SHA] [--json]
   hami_worktree.py resume  --project P --owner O --topic T --contract 1 [--session S] [--rebind-session] [--json]
   hami_worktree.py audit   --project P --contract 1 [--owner O] [--topic T] [--json]
@@ -1083,6 +1083,8 @@ def run(args: argparse.Namespace, root: Path, environ: dict[str, str], home: str
             project = infer_project(ws, cwd)
             if project is None:
                 return [Result("UNKNOWN_PROJECT", cwd, f"no --project and the working directory is in no registered project; {registered}")]
+        elif args.project == validator.ROOT_TOPICS_NAME:
+            project = root_project(ws)
         else:
             project = ws.projects.get(args.project)
             if project is None:
@@ -1114,8 +1116,30 @@ def exit_status(command: str, results: list[Result]) -> int:
     return 2 if "ERROR" in verdicts else 1 if "STOP" in verdicts else 0
 
 
-def render(results: list[Result]) -> str:
-    return "\n".join(f"{r.code} {r.target}{f' ({r.detail})' if r.detail else ''} - {r.next}" for r in results)
+FULL_SHA_WORD = re.compile(r"\b([0-9a-f]{12})[0-9a-f]{28}\b")
+
+
+def display_target(target: str, ws: Workspace | None) -> str:
+    """A checkout or worktree path as `<project>` or `<project>/<worktree>`; anything else as given."""
+    if ws is None:
+        return target
+    for project in [root_project(ws), *ws.projects.values()]:
+        if key(target) == key(project.repo):
+            return project.name
+        if within(target, project.worktrees) and key(target) != key(project.worktrees):
+            return f"{project.name}/{os.path.relpath(target, project.worktrees).replace(os.sep, '/')}"
+        if key(target) == key(project.worktrees):
+            return f"{project.name}/"
+    return target
+
+
+def render(results: list[Result], ws: Workspace | None = None) -> str:
+    """Human output: project names in place of paths and 12-character SHAs; full values stay in `--json`."""
+    lines = []
+    for r in results:
+        detail = " (" + FULL_SHA_WORD.sub(r"\1", r.detail) + ")" if r.detail else ""
+        lines.append(f"{r.code} {display_target(r.target, ws)}{detail} - {r.next}")
+    return "\n".join(lines)
 
 
 def main(argv: list[str] | None = None, root: Path = ROOT, environ: dict[str, str] | None = None, home: str | None = None,
@@ -1139,7 +1163,11 @@ def main(argv: list[str] | None = None, root: Path = ROOT, environ: dict[str, st
         }
         print(json.dumps(payload, indent=2))
     else:
-        print(render(results))
+        try:
+            ws = load_workspace(root, environ)
+        except (Stop, OSError):
+            ws = None
+        print(render(results, ws))
     return exit_status(args.command, results)
 
 

@@ -1,6 +1,6 @@
 # atc-testkit
 
-This document describes `atc-testkit` 0.8.1; update it with every version bump.
+This document describes `atc-testkit` 0.8.2; update it with every version bump.
 
 Development-only Python package shared by the projects of a workspace. It holds
 the pytest plugin and marker contract, policy-driven test selection, Git gate
@@ -64,7 +64,7 @@ and pushed-commit identity when a consumer's gate requires it.
 `evidence` lets a pre-push gate reuse a passed `atc integrate` candidate
 verification in place of its test stage; the formats and the reuse table are
 `shared/conformance/verification-evidence/README.md` at the bound governance
-revision.
+revision. It reads records of `atc-verification-evidence/1` and `/2`.
 
 - The project's integration verifier calls `write_report(os.environ, root,
   selection.pytest_paths(), stages)` once its checks pass. It writes the report
@@ -125,7 +125,7 @@ against that snapshot. It refuses to replace changed release content. Use a fres
 `src/atc_testkit/__init__.py` is the one place that sets the version.
 
 Each consumer commits the exact wheel under `vendor/`, pins
-`atc-testkit==0.8.1` in its development dependencies and records the local
+`atc-testkit==0.8.2` in its development dependencies and records the local
 artifact in `uv.lock`. Standalone clones and CI install their committed artifact
 without a workspace checkout or credentials. Released versions are immutable;
 source changes require a new version and explicit consumer upgrades.

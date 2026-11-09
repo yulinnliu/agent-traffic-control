@@ -282,3 +282,33 @@ def test_a_broken_schema_fails_the_check(tmp_path: Path, monkeypatch: pytest.Mon
     (tmp_path / ".atc" / "tasks" / "DEMO-0001.yaml").write_text(record("DEMO-0001", "b"), encoding="utf-8")
     with pytest.raises(SchemaError):
         task_records.problems(tmp_path)
+
+
+# --project root and the prefix of a record --task
+
+
+def test_project_root_names_the_workspace_root(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    commit(ws.root, {".atc/tasks/ATC-0001.yaml": record("ATC-0001", "gone")})
+    status, out, err = ws.cli(capsys, "list", "--project", "root", "--json", cwd=ws.root)
+    assert status == 0, err
+    assert [(row["project"], row["task_id"]) for row in json.loads(out)["tasks"]] == [("root", "ATC-0001")]
+    import hami_worktree
+    assert hami_worktree.main(["audit", "--project", "root", "--contract", "1"], root=ws.root, environ={},
+                              home=str(ws.root)) == 0
+    assert capsys.readouterr().out.strip() == "OK root/ (no worktrees) - continue"
+
+
+def test_a_record_task_names_its_repository_by_prefix(ws: Workspace, monkeypatch: pytest.MonkeyPatch) -> None:
+    import git_integrate
+    monkeypatch.delenv("ATC_ROOT", raising=False)
+
+    def resolved(task: str) -> tuple[str, Path]:
+        args = git_integrate.build_parser().parse_args(["--reviewed", "a" * 40, "--task", task, "--owner-words", "w"])
+        return git_integrate.resolve_repo(args, ws.root, False, str(ws.root))
+
+    assert resolved("DEMO-0001") == (PROJECT, ws.repo)
+    assert resolved("ATC-0001") == ("root", ws.root)
+    for other in ("ZZZ-0001", "plan § 1 step 2"):
+        with pytest.raises(git_integrate.Refused) as refused:
+            resolved(other)
+        assert refused.value.token == "USAGE"

@@ -208,4 +208,7 @@ def test_push_listing_names_the_sync_source(tmp_path: Path) -> None:
     head = git_out(project, "rev-parse", "HEAD")
     revision = git_out(root, "rev-parse", "HEAD")
     lines = git_preflight.render_push(git_preflight.push_listing(project))
-    assert lines[1].endswith(f'[integration {head} sync from {revision} authority "governance sync from unknown at {revision}"]')
+    assert lines[1] == f'  integration {head[:12]} task="{revision[:12]}" authority=sync'
+    record = git_preflight.read_integrations(project)[-1]
+    assert (record["task"], record["authority"], record["records_only"]) == (revision, {"kind": "sync"}, False)
+    assert "authority_reference" not in record

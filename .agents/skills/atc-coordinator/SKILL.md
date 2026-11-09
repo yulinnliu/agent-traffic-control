@@ -28,8 +28,8 @@ Owner with what was observed:
 
 - **SHA mismatch.** The tip the writer reported, the SHA the verdict names
   and the SHA the Owner's word names must be one SHA, or, after a rebase,
-  the Owner's word names the rebased tip whose `carried over:` line names
-  the reviewed SHA; a check or result line must show the SHA the word
+  the Owner's word names the rebased tip whose `carried_over` names the
+  reviewed SHA; the `--json` check or result must show the full SHA the word
   names. Any other difference stops the task.
 - **Incomplete verdict.** A verdict without its first line, its "verified"
   paragraph or the integration instruction it says it carries stops the
@@ -86,20 +86,20 @@ own commits write; session names belong only in the hand-over.
    act on it. Done when the verdict is received whole.
 5. **Carry the Owner's word.** A PASS does not by itself trigger an
    integration. On a PASS that carries an integration instruction, run
-   `atc integrate --check` with the instruction's arguments.
-   - On `CHECK FF` or `CHECK NO_FF`, or `STOP CHECKOUT_NOT_ON_MAIN` for a
-     root checkout, give the Owner the reviewed SHA, the check line and the
-     instruction, and ask for the word on that exact SHA; only the Owner
-     gives it.
-   - On a `STOP` whose `next:` names a rebase (`REBASE_REQUIRED`, or
+   `atc integrate --check --json` with the instruction's arguments.
+   - On `preflight.verdict` `FF` or `NO_FF` with no `refusal`, or a
+     `CHECKOUT_NOT_ON_MAIN` refusal for a root checkout, give the Owner the
+     reviewed SHA, that verdict and the instruction, and ask for the word on
+     that exact SHA; only the Owner gives it.
+   - On a `refusal` whose `next` names a rebase (`REBASE_REQUIRED`, or
      `OVERLAP` or `CONFLICT` of an unpublished topic), have the writer
      rebase onto `main` and run
-     `atc integrate --check --reviewed <reviewed SHA> --rebased <rebased tip>`.
+     `atc integrate --check --json --reviewed <reviewed SHA> --rebased <rebased tip>`.
      When the carry-over holds, ask the Owner for the word on the rebased
      tip, naming the carried-from SHA and the `main` commits in between; on
      `CARRY_OVER_REFUSED`, the reviewer re-reviews the rebased tip first.
-   - On any other `STOP`, follow its `next:` line (`GIT_WORKFLOW.md`
-     § Command results); a `next:` that names a re-review goes back to the
+   - On any other `refusal`, follow its `next` (`GIT_WORKFLOW.md`
+     § Command results); a `next` that names a re-review goes back to the
      reviewer before any word is asked for.
 
    The Owner's word is an explicit integration instruction given against
@@ -114,7 +114,7 @@ own commits write; session names belong only in the hand-over.
    With the word, run the instruction, or forward it to the writer with the
    Owner's words quoted, and check the result as `atc-review` "Writer: after
    integration" says. Done when the Owner's word is recorded with its SHA
-   and the result line matches.
+   and the result matches.
 6. **Close.** In this order: confirm `main` at the integrated SHA, the
    branch or worktree cleaned up and the task record at its
    post-integration state; archive both sessions; delete the task's

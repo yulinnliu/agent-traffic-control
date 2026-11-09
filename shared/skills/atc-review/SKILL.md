@@ -163,20 +163,21 @@ one `atc test mutants` call.
   the topic. The holder of that word (the user pasting the instruction into
   the writer, or a coordinator that has the Owner's word for that SHA) runs
   or forwards the instruction. Before writing it, run
-  `atc integrate --check` with the same arguments as the integrate command
-  below; it runs `git fetch origin` and otherwise only reads. The PASS
-  carries the instruction only when the check prints `CHECK FF` or
-  `CHECK NO_FF`; quote that line and every `WARNING` line in the "verified"
-  paragraph. A `STOP` line, such as a missing `## Integration verification`
-  section, leaves the PASS without an instruction: give the holder the stop
-  and its `next:` line. A stop whose `next:` names a rebase
+  `atc integrate --check --json` with the same arguments as the integrate
+  command below; it runs `git fetch origin` and otherwise only reads. The
+  PASS carries the instruction only when the result has no `refusal` and its
+  `preflight.verdict` is `FF` or `NO_FF`; quote that verdict with
+  `preflight.reason` and every entry of `resolved.warnings` in the "verified"
+  paragraph. A `refusal`, such as a missing `## Integration verification`
+  section, leaves the PASS without an instruction: give the holder its
+  `reason`, `detail` and `next`. A `refusal` whose `next` names a rebase
   (`REBASE_REQUIRED`, or `OVERLAP` or `CONFLICT` of an unpublished topic)
-  still carries the instruction, with that stop quoted. In a repository
-  without managed worktrees, `STOP CHECKOUT_NOT_ON_MAIN` naming the topic
-  branch is the expected check result: the PASS still carries the
-  instruction, the "verified" paragraph quotes that `STOP` line and every
-  `WARNING` line, and the writer's run after `switch main` assesses a dirty
-  checkout and `FF` or `NO_FF`.
+  still carries the instruction, with that refusal quoted. In a repository
+  without managed worktrees, a `CHECKOUT_NOT_ON_MAIN` refusal naming the
+  topic branch is the expected check result: the PASS still carries the
+  instruction, the "verified" paragraph quotes that refusal and every entry
+  of `resolved.warnings`, and the writer's run after `switch main` assesses a
+  dirty checkout and `FF` or `NO_FF`.
 
   When `main` has moved, the topic follows `GIT_WORKFLOW.md` § Integrate.
   An unpublished topic stops on a stop whose `next:` names a rebase
@@ -223,21 +224,22 @@ one `atc test mutants` call.
 A PASS authorizes only the commands it carries; build, install, push and any
 other action need their own instruction.
 
-1. Run the `atc integrate` command (after `switch main`, when the block
-   carries it) and check its result line. `FF` matches when the new `main`
-   equals the reviewed SHA; `NO_FF` matches when the second parent equals the
-   reviewed SHA and the first parent equals the `main` the line reports as
-   before.
-   - When it stops with a `next:` that names a rebase, rebase the topic
+1. Run the `atc integrate` command with `--json` added (after
+   `switch main`, when the block carries it) and check its result. `FF`
+   matches when `main_after` equals the reviewed SHA; `NO_FF` matches when
+   `second_parent` equals the reviewed SHA and `first_parent` equals
+   `main_before`.
+   - When it stops with a `next` that names a rebase, rebase the topic
      branch onto `main`, give the holder the rebased tip so the Owner's word
      is asked for on it, and on that word run the same command with
-     `--rebased <rebased tip>` added. `FF` then matches when the new `main`
-     equals the rebased tip and the `carried over:` line names the reviewed
-     SHA. `CARRY_OVER_REFUSED` sends the rebased tip to the reviewer for a
+     `--rebased <rebased tip>` added. `FF` then matches when `main_after`
+     equals the rebased tip and `carried_over.carried_over_from` is the
+     reviewed SHA. `CARRY_OVER_REFUSED` sends the rebased tip to the reviewer for a
      fresh review.
-   - The `push:` lines list every commit a push of `main` would carry; give
-     the holder each `NO PUSH APPROVAL` line with any push request.
-     `atc preflight push --repo <main checkout>` prints the same list
+   - `push.commits` lists every commit a push of `main` would carry; give
+     the holder each entry whose `push_approval` is `false`, with its `sha`,
+     `task` and `authority`, with any push request.
+     `atc preflight push --repo <main checkout> --json` gives the same list
      before a later push.
 2. On a match, run the cleanup command: the worktree cleanup under
    atc-worktree's run rules, or the `branch -d`.

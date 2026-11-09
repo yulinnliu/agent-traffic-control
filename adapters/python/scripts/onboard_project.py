@@ -445,13 +445,15 @@ def commit_sync(project_path: Path, plan: list[PlanItem], source: str, revision:
     record_file.parent.mkdir(parents=True, exist_ok=True)
     with record_file.open("a", encoding="utf-8", newline="\n") as handle:
         handle.write(json.dumps({
-            "authority_reference": f"governance sync from {source} at {revision}",
+            "authority": {"kind": "sync"},
             "candidate_sha": sha,
             "integrated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "kind": "sync",
             "main_before": before,
+            "records_only": False,
             "source": source,
             "source_revision": revision,
+            "task": revision,
         }, sort_keys=True) + "\n")
     return sha
 

@@ -43,6 +43,9 @@ INTEGRATIONS = ("atc", "integrations.jsonl")
 # A review binds to an object ID, never to a ref or revision expression that
 # can move after the review.
 REVIEWED_SHA = re.compile(r"[0-9a-fA-F]{7,40}")
+SHORT_SHA = 12
+AUTHORITY_ENDING = re.compile(r"\s@\s+\S+$")
+FULL_SHA_WORD = re.compile(r"\b([0-9a-f]{12})[0-9a-f]{28}\b")
 
 REASONS = {
     "NO_REVIEWED_SHA": "no reviewed SHA given; integration requires a formal review bound to a commit",
@@ -393,6 +396,22 @@ def read_integrations(repo: Path) -> list[dict]:
     return records
 
 
+def integration_view(record: dict) -> tuple[str | None, dict]:
+    """The task and authority of an integration line; a line written before both existed is read as
+    its authority reference without the ` @ <sha>` ending, authority unclassified, or a sync."""
+    if isinstance(record.get("authority"), dict):
+        return record.get("task"), record["authority"]
+    if record.get("kind") == "sync":
+        return record.get("source_revision"), {"kind": "sync"}
+    reference = record.get("authority_reference")
+    task = AUTHORITY_ENDING.sub("", reference).strip() if isinstance(reference, str) else None
+    return task, {"kind": "unclassified"}
+
+
+def short(sha: str | None) -> str:
+    return sha[:SHORT_SHA] if sha else "-"
+
+
 def push_listing(repo: Path, main: str = "main", own: set[str] | str | None = None) -> dict:
     """Every commit in origin/main..main, oldest first, with the integration that brought it in.
 
@@ -429,6 +448,7 @@ def push_listing(repo: Path, main: str = "main", own: set[str] | str | None = No
     entries = []
     for sha, subject in commits:
         record = owner.get(sha, {})
+        task, authority = integration_view(record) if record else (None, None)
         entries.append({
             "sha": sha,
             "subject": subject,
@@ -437,13 +457,16 @@ def push_listing(repo: Path, main: str = "main", own: set[str] | str | None = No
             "kind": record.get("kind"),
             "source_revision": record.get("source_revision"),
             "authority_reference": record.get("authority_reference"),
+            "task": task,
+            "authority": authority,
             "push_approval": None if own is None else sha in own,
         })
     return {"main": main, "main_tip": main_tip, "origin_main_tip": remote, "commits": entries}
 
 
 def render_push(listing: dict) -> list[str]:
-    """The listing as text: one line per commit, flagged when it lacks this run's push approval.
+    """The listing as text: each integration's task and authority once, then one line per commit it brought in,
+    flagged when it lacks this run's push approval. Full values stay in `--json`.
 
     A repository without origin/main has nothing to push to and lists nothing.
     """
@@ -451,25 +474,26 @@ def render_push(listing: dict) -> list[str]:
     remote = listing["origin_main_tip"]
     if remote is None:
         return []
-    lines = [f"push: {len(entries)} commits origin/{listing['main']} {remote} -> {listing['main']} {listing['main_tip']}"]
+    lines = [f"push: {len(entries)} commits origin/{listing['main']} {short(remote)} -> {listing['main']} "
+             f"{short(listing['main_tip'])}"]
+    group = object()
     for entry in entries:
-        basis = (
-            f"sync from {entry['source_revision']}" if entry.get("kind") == "sync"
-            else f"reviewed {entry['reviewed']}"
-        )
-        source = (
-            f"integration {entry['integration']} {basis} "
-            f"authority {json.dumps(entry['authority_reference'], ensure_ascii=False)}"
-            if entry["integration"] else "no integration record"
-        )
-        if entry["push_approval"] is True:
-            mark = "this integration"
-        elif entry["push_approval"] is False:
-            mark = f"NO PUSH APPROVAL: {source}"
-        else:
-            mark = source
-        lines.append(f"  {entry['sha']} {entry['subject']}  [{mark}]")
-    return lines
+        key = (entry["integration"], entry["push_approval"])
+        if key != group:
+            group = key
+            if entry["integration"]:
+                authority = entry.get("authority") or {}
+                source = (f"integration {short(entry['integration'])} task={json.dumps(entry.get('task'), ensure_ascii=False)} "
+                          f"authority={authority.get('kind', '-')}")
+            else:
+                source = "no integration record"
+            if entry["push_approval"] is True:
+                source += " [this integration]"
+            elif entry["push_approval"] is False:
+                source += " [NO PUSH APPROVAL]"
+            lines.append(f"  {source}")
+        lines.append(f"    {short(entry['sha'])} {entry['subject']}")
+    return [FULL_SHA_WORD.sub(r"\1", line) for line in lines]
 
 
 def push_preflight(repo: Path, main: str = "main", own: set[str] | str | None = None) -> tuple[Report, dict | None]:
@@ -542,10 +566,12 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if args.json:
         print(json.dumps({**asdict(report), **({"push": listing} if listing else {})}, indent=2))
-    else:
-        print(render(report))
+    elif args.command == "push":
+        print(FULL_SHA_WORD.sub(r"\1", render(report)))
         if listing:
             print("\n".join(render_push(listing)))
+    else:
+        print(render(report))
     return 0 if report.verdict in ("FF", "NO_FF", "REMOVABLE", "PUSH") else 1
 
 
