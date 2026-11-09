@@ -108,6 +108,12 @@ No adapter directory named `hami-review-relay`, `hami-worktree` or
 - `atc-worktree` keeps the frontmatter of `hami-worktree` apart from `name`:
   no `adoption` key, `contract: 1`. `atc-shared-skill` keeps
   `adoption: baseline`.
+- The Owner names the task ID in the instruction that opens a task; a
+  project may declare a ticketing system in its `AGENTS.md` as the issuing
+  source instead (governance `CORE.md` § Task identity leaves the ID form to
+  the project's `AGENTS.md`). The issuing source keeps IDs unique, so
+  coordinators never race to pick one. A ticketing system itself is out of
+  this plan's scope; the plan keeps only this interface.
 - A session a coordinator starts runs on Opus 5.5 or Sonnet 5.5, chosen per
   task; Fable only after the Owner agreed for that session. Model names and
   versions appear only in the Claude Code overlays; a canonical body that
@@ -262,12 +268,16 @@ Its steps, each ending on its done condition:
 1. **Before opening.** Read the project's `AGENTS.md`, the task identity
    form it declares (governance `CORE.md` § Task identity), the task
    records, the branches, the worktrees (`atc worktree audit` where they are
-   managed) and the titles of running sessions, so the new task's number
-   and branch collide with nothing; another coordinator may be opening tasks
-   in the same project. Done when the task's identity and branch name are
-   chosen and shown free. How a task ID stays unique when several
-   coordinators open tasks in one project is an open decision for the
-   Owner; this step is rewritten to that decision.
+   managed) and the titles of running sessions; another coordinator may be
+   opening tasks in the same project. The task ID comes from the issuing
+   source: by
+   default the Owner names it in the instruction that opens the task, and
+   where the project's `AGENTS.md` declares a ticketing system, the ID is
+   that system's. The coordinator never makes up an ID; an instruction
+   without one is answered by asking the Owner. The reads above confirm that
+   neither the given ID nor the branch name is taken; a collision stops the
+   step and is reported to the Owner. Done when the given task ID and the
+   branch name are shown free.
 2. **Open the task record** in the project's form; its scope and authority
    basis are the writer's contract. Done when the record is written.
 3. **Start the writer session** with a brief that is a cold read: project
@@ -457,12 +467,3 @@ After the topic of §§ 1 to 4 integrates:
 
 - Which projects opt in to `atc-coordinator` first; ria-project runs
   coordinator sessions.
-- How a task ID stays unique when one project has several coordinators.
-  No command creates a task atomically; a ria-project task record is
-  committed on its topic branch, and a branch name carries an owner token
-  and a slug, so distinct branches do not make distinct IDs, and the
-  read-then-confirm of § 2 step 1 races. Options: (1) the Owner names the
-  task ID in the instruction that opens the task, the reviewer's
-  recommendation and the simplest; (2) one coordinator per project opens
-  tasks at a time. ria-project runs two coordinators, so this is decided
-  before its round; § 2 step 1 is then rewritten to the decision.
