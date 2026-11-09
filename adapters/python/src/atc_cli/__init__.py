@@ -112,6 +112,10 @@ def _guard(command: str, rest: list[str], checkout: Path) -> int | None:
     _scripts_on_path()
     import checkout_guard
     current = checkout_guard.state(checkout)
+    if current.unreadable:
+        print(f"ERROR CHECKOUT_UNREADABLE {checkout} holds workspace.yaml but its Git state cannot be read "
+              f"({current.unreadable}); atc cannot confirm it is on main", file=sys.stderr)
+        return 2
     if current.off_main:
         print(f"ERROR CHECKOUT_NOT_MAIN {checkout_guard.describe(checkout, current)}; every atc command would run "
               f"that branch's code. Switch it back to main and keep topics in worktrees/root "

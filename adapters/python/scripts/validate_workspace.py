@@ -188,7 +188,7 @@ def load_and_check_workspace_yaml(path: Path) -> tuple[str | None, dict[str, dic
                 fail(f"{path}: projects.{name}.{field} must be a string path")
                 entry_ok = False
         if entry_ok:
-            reserved = reserved_root_problem(name, entry["worktrees"])
+            reserved = reserved_root_problem(name, entry["worktrees"], root_val)
             if reserved:
                 fail(f"{path}: projects.{name}: {reserved}")
                 continue
@@ -196,12 +196,27 @@ def load_and_check_workspace_yaml(path: Path) -> tuple[str | None, dict[str, dic
     return root_val, safe_projects
 
 
-def reserved_root_problem(name: str, worktrees: str) -> str | None:
-    """The workspace root's own worktrees live under `worktrees/root`, so a project may claim neither."""
+def reserved_root_problem(name: str, worktrees: str, workspace_root: str | None = None) -> str | None:
+    """The workspace root's own worktrees live under `worktrees/root`, so a project may neither take
+    the name nor a worktrees root that contains it or lies inside it."""
     if name.lower() == ROOT_TOPICS_NAME:
         return f"the name '{ROOT_TOPICS_NAME}' is reserved for the workspace root's worktrees"
-    if posixpath.normpath(worktrees.replace("\\", "/")).lower() == ROOT_WORKTREES:
-        return f"worktrees '{worktrees}' is reserved for the workspace root's worktrees"
+    spelled = worktrees.replace("\\", "/")
+    if looks_absolute(spelled):
+        if workspace_root is None:
+            return None
+        base = workspace_root.replace("\\", "/").rstrip("/")
+        if spelled.lower() == base.lower():
+            spelled = "."
+        elif spelled.lower().startswith(base.lower() + "/"):
+            spelled = spelled[len(base) + 1:]
+        else:
+            return None
+    parts = [p for p in posixpath.normpath(spelled).lower().split("/") if p != "."]
+    reserved = ROOT_WORKTREES.split("/")
+    shared = min(len(parts), len(reserved))
+    if parts[:shared] == reserved[:shared]:
+        return f"worktrees '{worktrees}' overlaps '{ROOT_WORKTREES}', reserved for the workspace root's worktrees"
     return None
 
 

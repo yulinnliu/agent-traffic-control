@@ -1074,8 +1074,10 @@ def run(args: argparse.Namespace, root: Path, environ: dict[str, str], home: str
         ws = load_workspace(root, environ)
         registered = f"registered: {', '.join(sorted(ws.projects)) or 'none'}"
         if args.repo is not None:
-            if key(os.path.abspath(args.repo)) != key(ws.root):
-                return [Result("UNKNOWN_PROJECT", args.repo, f"--repo takes the workspace root {ws.root} only; a registered project takes --project; {registered}")]
+            if key(os.path.realpath(args.repo)) != key(os.path.realpath(ws.root)):
+                return [Result("UNKNOWN_PROJECT", args.repo,
+                               f"--repo takes the workspace root this atc serves, {ws.root}, only (run the installed atc, "
+                               f"not uv run inside a topic worktree); a registered project takes --project; {registered}")]
             project = root_project(ws)
         elif args.project is None:
             project = infer_project(ws, cwd)

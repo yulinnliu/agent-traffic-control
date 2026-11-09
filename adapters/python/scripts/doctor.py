@@ -40,6 +40,8 @@ def checkout_check(checkout: Path) -> Check:
     current = checkout_guard.state(checkout)
     if not current.canonical:
         return Check("canonical checkout", "READY", f"{checkout} is not the canonical checkout")
+    if current.unreadable:
+        return Check("canonical checkout", "ERROR", f"{checkout} Git state cannot be read ({current.unreadable}); every other atc command refuses")
     if current.off_main:
         return Check("canonical checkout", "ERROR", f"{checkout_guard.describe(checkout, current)}; every other atc command refuses")
     if current.dirty:

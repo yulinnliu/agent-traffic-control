@@ -51,6 +51,10 @@ the code every session runs.
   every command, the testkit commands included, except `doctor` and `--help`,
   prints `ERROR CHECKOUT_NOT_MAIN <checkout> <branch>` and exits 2, because
   every command would run that branch's code.
+- Unreadable: a checkout holding `workspace.yaml` and `.git` whose Git state
+  cannot be read (for example a `safe.directory` refusal) refuses the same way
+  with `ERROR CHECKOUT_UNREADABLE`; the guard's Git calls drop inherited
+  repository variables such as `GIT_DIR`.
 - Dirty: a tracked modification (`git --no-optional-locks status --porcelain
   --untracked-files=no`) prints one `WARNING CHECKOUT_DIRTY <checkout>` line on
   stderr and the command runs. `atc integrate`'s own `merge --ff-only` touches

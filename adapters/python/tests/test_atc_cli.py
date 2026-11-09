@@ -218,3 +218,21 @@ def test_doctor_lists_the_guard_conditions(canonical: Path) -> None:
     git(canonical, "switch", "-q", "-c", "topic")
     check = doctor.checkout_check(canonical)
     assert (check.status, check.detail.endswith("every other atc command refuses")) == ("ERROR", True)
+
+
+def test_an_unreadable_canonical_checkout_refuses(canonical: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    (canonical / ".git" / "HEAD").write_text("garbage\n", encoding="utf-8")
+    assert atc_cli._guard("validate", [], canonical) == 2
+    assert capsys.readouterr().err.startswith(f"ERROR CHECKOUT_UNREADABLE {canonical} ")
+    import doctor
+    assert doctor.checkout_check(canonical).status == "ERROR"
+
+
+def test_an_inherited_git_dir_does_not_redirect_the_guard(
+    canonical: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    other = tmp_path / "other"
+    other.mkdir()
+    git(other, "init", "-q", "-b", "topic")
+    monkeypatch.setenv("GIT_DIR", str(other / ".git"))
+    assert atc_cli._guard("validate", [], canonical) is None

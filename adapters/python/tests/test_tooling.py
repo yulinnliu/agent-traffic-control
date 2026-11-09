@@ -118,8 +118,12 @@ def test_malformed_workspace_yaml_is_rejected(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("name, worktrees", [("root", "worktrees/root-repo"), ("other", "worktrees/root"), ("other", "worktrees\\root\\")])
+@pytest.mark.parametrize("name, worktrees", [
+    ("root", "worktrees/root-repo"), ("other", "worktrees/root"), ("other", "worktrees\\root\\"),
+    ("other", "worktrees"), ("other", "worktrees/root/sub"), ("other", "."), ("other", "{root}/worktrees/root"),
+])
 def test_project_claiming_the_root_worktrees_is_rejected(tmp_path: Path, name: str, worktrees: str) -> None:
+    worktrees = worktrees.replace("{root}", tmp_path.as_posix())
     write(tmp_path / "workspace.yaml",
           f"version: 1\nworkspace_root: {tmp_path.as_posix()}\nprojects:\n"
           f"  {name}:\n    repo: projects/x\n    worktrees: '{worktrees}'\n    state: state/x-data\n")
@@ -128,6 +132,12 @@ def test_project_claiming_the_root_worktrees_is_rejected(tmp_path: Path, name: s
     failures, validator.FAILURES[:] = list(validator.FAILURES), []
     assert projects == {}
     assert any("reserved for the workspace root's worktrees" in f for f in failures)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("worktrees", ["worktrees/rooted", "worktrees/other", "../elsewhere/worktrees/root"])
+def test_worktrees_beside_the_root_worktrees_are_accepted(worktrees: str) -> None:
+    assert validator.reserved_root_problem("other", worktrees, "C:/ws") is None
 
 
 def test_workspace_root_mismatch_is_contract_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
