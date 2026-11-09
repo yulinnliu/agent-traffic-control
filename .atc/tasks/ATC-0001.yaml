@@ -1,0 +1,14 @@
+task_id: ATC-0001
+repository: yulinnliu/agent-traffic-control
+base_sha: 490e683bb9ff6bf10c8ce346062c89a065b0c218
+scope: 'docs/TASK_CONTRACT_PLAN.md § A: task record schema, atc task new/list/check, the record and prefix checks in validate, conformance cases, the root''s Task records declaration'
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: 490e683bb9ff6bf10c8ce346062c89a065b0c218
+branch: worktree-claude+task-contract
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false

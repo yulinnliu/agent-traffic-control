@@ -32,6 +32,8 @@ Operational description of the tree; governance semantics live under
   `atc-testkit/`, the pytest adapter of the verification contract. Other
   languages add a sibling directory and run the same fixtures.
 - `workspace.yaml.example` — the shape of the machine-local map.
+- `.atc/tasks/<task_id>.yaml` — this repository's task records, under the
+  `ATC` prefix its `AGENTS.md` declares (`docs/TASKS.md`).
 - `docs/` — operational documentation. `.out-of-scope/` — recorded rejections.
 
 ## Inside a consuming repository
@@ -41,6 +43,8 @@ Operational description of the tree; governance semantics live under
 - `.atc/governance/*.md` — the vendored governance modules, byte-equal to
   `shared/governance/` at the pinned revision.
 - `.atc/governance.yaml` — `managed-by`, `source` and `revision` of that copy.
+- `.atc/tasks/<task_id>.yaml` — the repository's own task records, declared by
+  `## Task records` in its `AGENTS.md` (`docs/TASKS.md`); sync never writes them.
 - The policy block in `AGENTS.md` and, when the repository had none, `CLAUDE.md`.
 
 All of them are ordinary tracked files; sync rewrites them, people review the

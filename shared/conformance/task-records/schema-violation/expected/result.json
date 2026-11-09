@@ -1,0 +1,7 @@
+{
+  "exit_code": 1,
+  "output_contains": [
+    "schema-violation: DEMO-0001.yaml: base_sha:",
+    "schema-violation: DEMO-0001.yaml: authority:"
+  ]
+}

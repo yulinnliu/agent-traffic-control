@@ -15,7 +15,7 @@ location, in that order.
 | `atc` command | Script | Does |
 | --- | --- | --- |
 | `bootstrap` | `bootstrap.py` | `init`, `add NAME [--repo URL] [--skills a,b]`, `sync [NAME] [--prune]`, `status`: the quickstart path over the tools below |
-| `validate` | `validate_workspace.py` | canonical skills versus rendered adapters, root contract, `--projects` for registered checkouts (adapters, policy block, vendored governance), `--root DIR --adapters-only` for a fixture |
+| `validate` | `validate_workspace.py` | canonical skills versus rendered adapters, root contract, task records and their declaration, `--projects` for registered checkouts (adapters, policy block, vendored governance, task records, one prefix per repository), `--root DIR --adapters-only` for a fixture |
 | `onboard` | `onboard_project.py` | `--check`, `--apply`, `--sync [--prune]` a project's managed files; `--root-only` re-renders this checkout's adapters; never touches project-owned files |
 | `doctor` | `doctor.py` | local readiness: `READY`, `NOT_INITIALIZED`, `ERROR` |
 | `policies` | `policies.py` | `check DIR`: schema-validate a policy directory and refuse contradictions |
@@ -23,6 +23,7 @@ location, in that order.
 | `classify` | `classify_change.py` | `--policy escalation.yaml --changed FILE [--severity]`: `LOW` or `HIGH` |
 | `preflight` | `git_preflight.py` | `merge` verdict `FF` / `NO_FF` / `STOP`; `cleanup` verdict `REMOVABLE`; reads only |
 | `integrate` | `git_integrate.py` | `--project NAME \| --repo DIR --reviewed SHA --authority-reference REF`: the caller types the reviewed SHA and the record part of the reference, never inferred; the branch is found from the reviewed SHA, so `--branch` names it only when several local branches sit there; `--check` resolves, preflights and warns without a slot or candidate |
+| `task` | `task_records.py` | `new --scope TEXT`, `list [--all] [--status S] [--json]`, `check [DIR]` task records under `.atc/tasks/` (`docs/TASKS.md`); `--project NAME \| --repo DIR` as `worktree` takes them |
 | `worktree` | `hami_worktree.py` | `create`, `resume`, `audit`, `cleanup` per-topic worktrees with identity in git; `--repo` for this checkout's own topics under `worktrees/root/` |
 | `friction` | `friction.py` | append incident and resolution events; summaries |
 | `test` | `atc-testkit` | `run TREE SCRATCH PYTHON LABEL [pytest args]`: a test tree under a scratch of `~/.atc/tmp`; `mutants`: one guard mutant at a time on an exported commit |

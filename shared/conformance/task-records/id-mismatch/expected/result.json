@@ -1,0 +1,7 @@
+{
+  "exit_code": 1,
+  "output_contains": [
+    "id-mismatch: DEMO-0002.yaml: task_id DEMO-0001 differs from the file name",
+    "id-mismatch: OTHER-0001.yaml: task_id OTHER-0001 lacks the declared prefix DEMO"
+  ]
+}

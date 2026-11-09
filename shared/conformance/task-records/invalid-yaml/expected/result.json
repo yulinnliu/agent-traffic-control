@@ -1,0 +1,6 @@
+{
+  "exit_code": 1,
+  "output_contains": [
+    "invalid-yaml: DEMO-0001.yaml"
+  ]
+}

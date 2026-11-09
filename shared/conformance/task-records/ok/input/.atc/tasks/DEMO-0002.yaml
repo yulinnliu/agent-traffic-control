@@ -1,0 +1,19 @@
+task_id: DEMO-0002
+repository: example/demo
+base_sha: '1111111111111111111111111111111111111111'
+scope: 'Plan § A: add the widget'
+governance_source: example/governance
+governance_revision: '2222222222222222222222222222222222222222'
+branch: worktree-alice+widget
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: true
+  push_main: false
+  deploy: false
+authority_basis: 'Owner: integrate DEMO-0002 when its review passes'
+closure:
+  state: closed
+  note: done
+writer: alice

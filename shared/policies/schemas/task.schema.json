@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-traffic-control/schemas/task.schema.json",
+  "title": "Task record",
+  "description": "One task of one repository, kept in .atc/tasks/<task_id>.yaml (docs/TASKS.md § Record).",
+  "type": "object",
+  "required": ["task_id", "repository", "base_sha", "scope", "governance_source", "governance_revision", "branch", "authority"],
+  "properties": {
+    "task_id": {"type": "string", "pattern": "^[A-Z][A-Z0-9]{1,7}-[0-9]{4}$"},
+    "repository": {"type": "string", "minLength": 1},
+    "repository_identity_status": {"type": "string"},
+    "base_sha": {"$ref": "#/$defs/sha"},
+    "scope": {"type": "string", "minLength": 1},
+    "governance_source": {"type": "string", "minLength": 1},
+    "governance_revision": {"$ref": "#/$defs/sha"},
+    "branch": {"type": "string", "minLength": 1},
+    "authority": {
+      "type": "object",
+      "required": ["edit", "commit", "push_topic", "integrate_main", "push_main", "deploy"],
+      "additionalProperties": false,
+      "properties": {
+        "edit": {"type": "boolean"},
+        "commit": {"type": "boolean"},
+        "push_topic": {"type": "boolean"},
+        "integrate_main": {"type": "boolean"},
+        "push_main": {"type": "boolean"},
+        "deploy": {"type": "boolean"}
+      }
+    },
+    "authority_basis": {"type": "string", "minLength": 1},
+    "closure": {
+      "type": "object",
+      "required": ["state", "note"],
+      "additionalProperties": false,
+      "properties": {
+        "state": {"enum": ["closed", "abandoned"]},
+        "note": {"type": "string", "minLength": 1}
+      }
+    }
+  },
+  "if": {
+    "required": ["authority"],
+    "properties": {
+      "authority": {
+        "anyOf": [
+          {"required": ["push_topic"], "properties": {"push_topic": {"const": true}}},
+          {"required": ["integrate_main"], "properties": {"integrate_main": {"const": true}}},
+          {"required": ["push_main"], "properties": {"push_main": {"const": true}}},
+          {"required": ["deploy"], "properties": {"deploy": {"const": true}}}
+        ]
+      }
+    }
+  },
+  "then": {"required": ["authority_basis"]},
+  "$defs": {
+    "sha": {"type": "string", "pattern": "^([0-9a-f]{40}|[0-9a-f]{64})$"}
+  }
+}

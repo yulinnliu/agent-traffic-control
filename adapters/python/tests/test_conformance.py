@@ -27,6 +27,7 @@ TOOLS = {
     "load-policies": "policies.py",
     "generate-enforcement": "generate_enforcement.py",
     "classify-change": "classify_change.py",
+    "task-records": "task_records.py",
 }
 
 

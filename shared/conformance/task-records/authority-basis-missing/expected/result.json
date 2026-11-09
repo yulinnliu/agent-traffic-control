@@ -1,0 +1,6 @@
+{
+  "exit_code": 1,
+  "output_contains": [
+    "schema-violation: DEMO-0001.yaml: <root>: 'authority_basis' is a required property"
+  ]
+}

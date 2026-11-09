@@ -27,6 +27,12 @@ Then read `shared/governance/INDEX.md` and `CORE.md` from that exact same revisi
 - Never aim destructive project/worktree tooling at this checkout itself. Do not run `git clean -fdx` here or recursively delete `projects/`, `worktrees/`, or `state/` from above.
 - Read back changes, then validate from the topic worktree's `adapters/python/`, entered in a subshell `( cd <worktree>/adapters/python && ... )` and through `uv run --locked atc` (bare `atc` runs this checkout's code): `onboard --sync --root-only` followed by `validate` after touching a shared skill or overlay, `policies check ../../shared/policies/examples` after touching a schema or example, and `uv run --locked pytest` (reads `shared/conformance/`) after touching a tool or fixture.
 
+## Task records
+
+- Task prefix: ATC
+
+Records live in `.atc/tasks/`; `docs/TASKS.md` specifies them and `atc task`.
+
 ## Integration verification
 
 `atc integrate` runs this verifier in its candidate checkout (governance

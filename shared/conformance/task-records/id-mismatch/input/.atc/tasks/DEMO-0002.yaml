@@ -1,0 +1,14 @@
+task_id: DEMO-0001
+repository: example/demo
+base_sha: '1111111111111111111111111111111111111111'
+scope: 'Plan § A: add the widget'
+governance_source: example/governance
+governance_revision: '2222222222222222222222222222222222222222'
+branch: worktree-alice+widget
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false

@@ -9,6 +9,9 @@ fields ``managed-by`` and ``canonical``. A canonical
 skill never depends on an environment variable naming this checkout, so the
 copies work in a repository that knows nothing about it. No orphaned adapter
 is left behind after a canonical skill is removed.
+The task records under `.atc/tasks/` and their `## Task records` declaration
+are checked here and, with --projects, in each project, along with one task
+prefix per repository (`docs/TASKS.md`).
 
 By default only checks this repo's own `.claude/skills/`, `.agents/skills/`
 and `.dsh/skills/` — the ones CI can see. Pass --projects to also check each
@@ -20,7 +23,7 @@ and to reject user-level duplicates of a canonical skill under
 ~/.claude/skills, ~/.agents/skills or ~/.dsh/skills. This only makes sense to
 run locally, not in CI, since projects/ isn't present in a fresh CI checkout.
 
-No third-party dependency beyond PyYAML (``pip install pyyaml``).
+Third-party dependencies: PyYAML, and jsonschema for the task record check.
 
 Exit code is 0 iff everything below passed; non-zero otherwise, with every
 failure printed (not just the first one).
@@ -569,6 +572,26 @@ def check_project_integration_verifier(project_path: Path, label: str) -> None:
         fail(f"{label}: AGENTS.md verifier timeout must be greater than zero")
 
 
+def check_task_records(path: Path, label: str) -> str | None:
+    """The task records and declaration of ``path`` (docs/TASKS.md § Commands); returns its valid prefix, if any."""
+    import task_records
+    for problem in task_records.problems(path):
+        fail(f"{label}: task records: {problem}")
+    declared = task_records.declared_prefix(path)
+    return declared if declared and task_records.prefix_problem(declared) is None else None
+
+
+def check_unique_prefixes(prefixes: Mapping[str, str | None]) -> None:
+    """One task prefix per repository across the workspace root and the registered projects."""
+    holders: dict[str, list[str]] = {}
+    for label, prefix in prefixes.items():
+        if prefix:
+            holders.setdefault(prefix, []).append(label)
+    for prefix, labels in sorted(holders.items()):
+        if len(labels) > 1:
+            fail(f"task prefix {prefix} is declared by {', '.join(labels)}; a prefix names one repository")
+
+
 def vendored_governance_modules() -> tuple[str, ...]:
     return ("INDEX.md", *GOVERNANCE_MODULES)
 
@@ -737,9 +760,11 @@ def check_user_level_duplicates(canonical: dict[str, dict], home: Path) -> None:
                 )
 
 
-def check_projects(canonical: dict[str, dict], project_checkouts: dict[str, Path] | None = None) -> None:
+def check_projects(canonical: dict[str, dict], project_checkouts: dict[str, Path] | None = None,
+                   root_prefix: str | None = None) -> None:
     """Local-only: check each configured project's adapters, if it exists."""
     project_checkouts = project_checkouts or {}
+    prefixes: dict[str, str | None] = {"workspace root": root_prefix}
     real_workspace_yaml = ROOT / "workspace.yaml"
     if not real_workspace_yaml.exists():
         if project_checkouts:
@@ -786,6 +811,8 @@ def check_projects(canonical: dict[str, dict], project_checkouts: dict[str, Path
         check_adapter_tree(
             project_path, canonical, label=f"projects.{name}", required=baseline_skills(canonical)
         )
+        prefixes[f"projects.{name}"] = check_task_records(project_path, label=f"projects.{name}")
+    check_unique_prefixes(prefixes)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -813,7 +840,9 @@ def main(argv: list[str] | None = None) -> int:
         load_and_check_workspace_yaml(ROOT / "workspace.yaml.example")
     canonical = load_canonical_skills()
     check_adapter_tree(ROOT, canonical, label="workspace root", required=set(canonical))
+    root_prefix = None
     if not args.adapters_only:
+        root_prefix = check_task_records(ROOT, label="workspace root")
         check_policy_template()
         check_no_hardcoded_governance_source()
         check_rules_referenced_in_agents_md()
@@ -821,7 +850,7 @@ def main(argv: list[str] | None = None) -> int:
         check_workspace_env()
 
     if args.projects or project_checkouts:
-        check_projects(canonical, project_checkouts)
+        check_projects(canonical, project_checkouts, root_prefix=root_prefix)
         check_user_level_duplicates(canonical, Path.home())
 
     if FAILURES:

@@ -350,6 +350,21 @@ def test_explicit_candidate_checkout_is_validated(tmp_path: Path, monkeypatch: p
     validator.check_projects(validator.load_canonical_skills(), {"demo": candidate})
     assert validator.FAILURES == []
 
+
+@pytest.mark.integration
+def test_projects_check_task_records_and_one_prefix_per_repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root, project = make_workspace(tmp_path)
+    onboard_project.apply_plan(onboard_project.build_plan(project, root), "sync")
+    agents = project / "AGENTS.md"
+    write(agents, agents.read_text(encoding="utf-8") + "\n## Task records\n\n- Task prefix: ATC\n")
+    write(project / ".atc" / "tasks" / "ATC-0002.yaml", "task_id: ATC-0001\n")
+    monkeypatch.setattr(validator, "ROOT", root)
+    validator.FAILURES.clear()
+    validator.check_projects(validator.load_canonical_skills(), root_prefix="ATC")
+    assert any(f.startswith("projects.demo: task records: id-mismatch: ATC-0002.yaml") for f in validator.FAILURES)
+    assert any(f.startswith("projects.demo: task records: schema-violation: ATC-0002.yaml") for f in validator.FAILURES)
+    assert "task prefix ATC is declared by workspace root, projects.demo; a prefix names one repository" in validator.FAILURES
+
 def test_new_project_bootstrap_requires_vendored_index_and_revision(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root, project = make_workspace(tmp_path)
     write(project / "AGENTS.md", f"# AGENTS.md\n\n{validator.POLICY_BEGIN}\nread governance\n{validator.POLICY_END}\n")

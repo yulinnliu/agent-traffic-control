@@ -32,12 +32,15 @@ access.
 | policy loading | `load-policies/` | `ok: <kinds>`, `schema-violation`, `preset-regrants-hard-deny`, `approval-overlaps-hard-deny`, `duplicate-glob` |
 | enforcement generation | `generate-enforcement/` | `generated:`, `ok: enforcement configs are current`, `drift:` (files and `live-claude`/`live-codex`/`live-hook`), `unresolved-token`, plus golden files per harness |
 | escalation gate | `classify-change/` | `LOW: <reason>`, `HIGH: <reason>` |
+| task record check | `task-records/` | `ok: <dir>`, `invalid-yaml`, `schema-violation`, `id-mismatch`, `no-declaration`, `no-prefix-line`, `invalid-prefix` |
 
 Merge preflight (`FF`, `NO_FF`, `STOP`), push preflight (`PUSH`, `STOP`) and
 worktree identity (`CREATED`, `RESUMED`, `IDENTITY_MISMATCH`,
-`IDENTITY_AMBIGUOUS`, `ALREADY_EXISTS`, `REMOVABLE`) need live git
+`IDENTITY_AMBIGUOUS`, `ALREADY_EXISTS`, `REMOVABLE`) and task records
+(`atc task new` and `list`) need live git
 repositories. Their cases are the Python suites `tests/test_git_preflight.py`,
-`tests/test_integrate_moving_main.py` and `tests/test_hami_worktree.py`, which build
+`tests/test_integrate_moving_main.py`, `tests/test_hami_worktree.py` and
+`tests/test_task_records.py`, which build
 each repository in code; a second implementation ports those suites until
 fixtures with an `init.json` repository description exist here.
 

@@ -7,6 +7,7 @@ Commands map onto the scripts under `adapters/python/scripts/`:
     worktree   hami_worktree.py   create / resume / audit / cleanup
     preflight  git_preflight.py   merge / cleanup / push verdicts
     integrate  git_integrate.py   advance local main to a reviewed topic
+    task       task_records.py    new / list / check task records
     validate   validate_workspace.py
     onboard    onboard_project.py
     bootstrap  bootstrap.py       init / add / sync / status
@@ -51,6 +52,7 @@ COMMANDS = {
     "worktree": "hami_worktree",
     "preflight": "git_preflight",
     "integrate": "git_integrate",
+    "task": "task_records",
     "validate": "validate_workspace",
     "onboard": "onboard_project",
     "bootstrap": "bootstrap",
@@ -177,7 +179,7 @@ def _dispatch(command: str, rest: list[str], explicit_root: str | None) -> int:
     else:
         root = resolve_root(explicit_root, dict(os.environ), Path.cwd())
     module = __import__(COMMANDS[command])
-    if command in ("worktree", "onboard", "bootstrap"):
+    if command in ("worktree", "task", "onboard", "bootstrap"):
         return module.main(rest, root=root)
     if command == "integrate":
         return module.main(rest, root=root, root_given=explicit_root is not None)
