@@ -455,3 +455,17 @@ def test_the_push_listing_reads_lines_written_before_task_and_authority(
     ]
     assert gp.main(["push", "--repo", str(tasks_repo)]) == 0
     assert 'task="docs/PLAN.md §2 step 1" authority=unclassified' in capsys.readouterr().out
+
+
+def test_a_legacy_line_without_a_task_shows_none_as_a_dash(tasks_repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    publish(tasks_repo, "main")
+    base = main_tip(tasks_repo)
+    tip = put(tasks_repo, {"a.txt": "old\n"})
+    path = tasks_repo / ".git" / "atc" / "integrations.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"candidate_sha": tip, "reviewed": tip, "main_before": base}) + "\n", encoding="utf-8")
+    listing = gp.push_listing(tasks_repo)
+    assert [(c["task"], c["tasks"]) for c in listing["commits"]] == [(None, [])]
+    rendered = gp.render_push(listing)
+    assert rendered[1] == f"  integration {tip[:12]} task=- authority=unclassified"
+    assert "None" not in "\n".join(rendered)

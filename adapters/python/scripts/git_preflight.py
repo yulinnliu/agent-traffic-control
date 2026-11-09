@@ -438,8 +438,9 @@ def push_listing(repo: Path, main: str = "main", own: set[str] | str | None = No
             records.setdefault(record["candidate_sha"], record)
             # A records-only binding of several tasks writes one line per task with one candidate.
             task = integration_view(record)[0]
-            if task not in tasks.setdefault(record["candidate_sha"], []):
-                tasks[record["candidate_sha"]].append(task)
+            named = tasks.setdefault(record["candidate_sha"], [])
+            if task is not None and task not in named:
+                named.append(task)
     owner: dict[str, dict] = {}
     excluded = [remote] if remote else []
     for candidate in sorted(records, key=position.__getitem__):
@@ -490,7 +491,9 @@ def render_push(listing: dict) -> list[str]:
             group = key
             if entry["integration"]:
                 authority = entry.get("authority") or {}
-                source = (f"integration {short(entry['integration'])} task={json.dumps(','.join(str(t) for t in entry.get('tasks') or [entry.get('task')]), ensure_ascii=False)} "
+                named = ",".join(entry.get("tasks") or [])
+                task = json.dumps(named, ensure_ascii=False) if named else "-"
+                source = (f"integration {short(entry['integration'])} task={task} "
                           f"authority={authority.get('kind', '-')}")
             else:
                 source = "no integration record"

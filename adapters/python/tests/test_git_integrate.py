@@ -892,7 +892,8 @@ def test_valid_report_writes_evidence_record(repo: Path, capsys: pytest.CaptureF
         "schema": "atc-verification-evidence/2", "candidate_sha": tip,
         "tree": run_git(repo, "rev-parse", f"{tip}^{{tree}}"), "clean": True,
         "expected_main": before, "reviewed": tip, "verdict": "FF",
-        "task": "test-owner-authorization", "authority": {"kind": "unclassified"}, "verify_argv": json.loads(command),
+        "task": "test-owner-authorization", "tasks": ["test-owner-authorization"],
+        "authority": {"kind": "unclassified"}, "verify_argv": json.loads(command),
         "platform": {"system": sys.platform, "machine": platform.machine()},
         "report": REPORT,
     }

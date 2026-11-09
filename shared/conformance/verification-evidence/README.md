@@ -42,7 +42,8 @@ expected_main        main before the integration
 reviewed             reviewed source SHA; the rebased tip of a carried-over approval
 carried_over_from    present only for a carried-over approval: the reviewed SHA it came from
 verdict              "FF" | "NO_FF"
-task                 the task the integration names, as in its integrations.jsonl line
+tasks                every task the integration names, as in its integrations.jsonl lines
+task                 the one entry of tasks, or null when tasks holds several
 authority            {"kind": "record", "task_id": str} | {"kind": "owner_words", "quote": str}
                      | {"kind": "unclassified"} for the deprecated --authority-reference
 verify_argv          the verifier argv that ran
@@ -60,8 +61,8 @@ one of these reasons. After each write the adapter deletes records older than
 14 days. Readers never write or delete.
 
 A reader accepts `atc-verification-evidence/1` as well: its records carry
-`authority_reference`, the string supplied to the adapter, in place of `task`
-and `authority`. No reuse check reads these keys.
+`authority_reference`, the string supplied to the adapter, in place of `tasks`,
+`task` and `authority`. No reuse check reads these keys.
 
 ## Reuse
 
