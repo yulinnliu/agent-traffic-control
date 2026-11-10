@@ -196,9 +196,9 @@ section above; this section covers the rest of the test workflow.
 - While iterating, run the touched test files.
 - Before a commit or push, run the project's impact-selected `not slow` tests
   (its pre-push gate, where it has one).
-- Writers and reviewers run the selection (`select_tests.py`, or the
-  project's own selection); only the integration verifier runs the full
-  suite.
+- Writers run the selection (`select_tests.py`, or the project's own
+  selection); reviewers run tests as § Independent review states; only the
+  integration verifier runs the full suite.
 
 A project's local pre-push gate, where it has one, runs the impact-selected
 `not slow` tests for the pushed paths. Unknown paths select the project's
@@ -284,6 +284,11 @@ that has not seen the writer's conversation. A re-review that only fixes the
 last round's findings continues the same reviewer with the findings and the
 fix diff; new design or new files get a fresh reviewer. No rule requires the
 final round to be fresh.
+
+A reviewer does not rerun the selection the writer ran at the reviewed SHA.
+It runs only the tests that settle its own doubts, such as a finding, a
+suspected gap or a test it adds in its scratch, and names those tests in its
+verdict. The integration verifier's full suite is the safety net.
 
 A verdict's first line is the verdict token, then one line per finding
 (severity, `file:line`, required fix), the verified items as one line, and no

@@ -145,10 +145,10 @@ diff against your last round's findings.
    delivered by the real product assembly, not only by test fakes. Wording
    such as "pending wiring" or "awaiting acceptance" in a delivery is a
    blocker to tell the holder now.
-4. **Run tests and mutants.** Tests only: that file plus mutants. Behaviour:
-   the selection (governance `VERIFICATION.md` § Testing) plus every project
-   gate the change touches. One single-string mutant per guard, one at a
-   time, restored after each run.
+4. **Run tests and mutants.** Run the tests governance `VERIFICATION.md`
+   § Independent review assigns a reviewer, and name them in the verified
+   line. One single-string mutant per guard, one at a time, restored after
+   each run.
    Done when every file in the copy is proven equal to its Git object again
    and every surviving mutant is listed as a test gap or argued equivalent.
    Where the project runs its tests through `atc-testkit`,
