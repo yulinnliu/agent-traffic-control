@@ -2,7 +2,8 @@ task_id: ATC-0004
 repository: yulinnliu/agent-traffic-control
 base_sha: ea716ab253fb55e10327efab8229f19def021e33
 scope: 'Topic C of docs/TASK_CONTRACT_PLAN.md: governance and skills (C.1-C.8, placement
-  table, Principle of § Tool output)'
+  table, Principle of § Tool output); select_tests.py selects the tests that name
+  .atc/tasks for a task record'
 governance_source: yulinnliu/agent-traffic-control
 governance_revision: ea716ab253fb55e10327efab8229f19def021e33
 branch: worktree-claude+task-contract-governance

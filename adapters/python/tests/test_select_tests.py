@@ -101,6 +101,11 @@ def test_shared_paths_select_the_tests_that_read_their_area(graph):
     assert "tests/test_worktree_cd_guard.py" not in selected
 
 
+def test_a_task_record_selects_the_tests_that_name_the_record_directory(graph):
+    assert chosen(graph, ".atc/tasks/ATC-0004.yaml") == [
+        "tests/test_integrate_task.py", "tests/test_task_records.py"]
+
+
 def test_markdown_no_test_names_selects_nothing(graph):
     assert chosen(graph, "docs/NO_TEST_NAMES_THIS.md") is None
 

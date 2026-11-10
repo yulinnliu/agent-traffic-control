@@ -13,11 +13,13 @@ root. Selection is by test file and reads the static structure of the code:
 - `conftest.py`, the pytest plugin and everything they import at load time,
   `pyproject.toml`, `uv.lock` and the unmarked baseline select the full suite.
 - A path under `shared/<area>/` selects the test files whose reach names
-  `<area>` or `shared/<area>`; another path selects the test files whose reach
-  names its file name.
+  `<area>` or `shared/<area>`; a task record under `.atc/tasks/` selects the
+  test files that themselves name `.atc/tasks`; another path selects the test
+  files whose reach names its file name.
 - A path no rule maps selects the full suite: a module no test reaches, a
   removed module, a removed test file another module still names, a `shared/`
-  area no test reads, and a non-Markdown file no test names. Markdown no test
+  area no test reads, task records when no test names `.atc/tasks`, and a
+  non-Markdown file no test names. Markdown no test
   names selects nothing.
 
 Usage, from `adapters/python`::
@@ -63,6 +65,7 @@ SOURCE_ROOTS = {
     f"{ADAPTER}/atc-testkit/src/atc_testkit": "atc_testkit",
 }
 SHARED = "shared"
+TASK_RECORDS = ".atc/tasks"
 SCRIPTS = f"{ADAPTER}/scripts"
 CLI_SRC = f"{ADAPTER}/src/atc_cli"
 TESTKIT_SRC = f"{ADAPTER}/atc-testkit/src/atc_testkit"
@@ -277,6 +280,14 @@ def classify(path: str, selection: TestSelection, graph: Graph) -> None:
             selection.add(path, readers, f"test files that read {SHARED}/{area}")
         else:
             selection.widen(path, f"no test file reads {SHARED}/{area}")
+        return
+    if path.startswith(f"{TASK_RECORDS}/"):
+        readers = {test for test in graph.tests if PurePosixPath(test).name not in IMPORTS_ONLY
+                   and any(TASK_RECORDS in lit for lit in graph.by_path[test].literals)}
+        if readers:
+            selection.add(path, readers, f"test files that name {TASK_RECORDS}")
+        else:
+            selection.widen(path, f"no test file names {TASK_RECORDS}")
         return
     readers = graph.naming((pure.name,))
     if readers:
