@@ -3,7 +3,7 @@
 
 `push` runs `git fetch origin` and lists every commit a push of main would
 carry, grouped by the integration that brought it in (PUSH / STOP). `merge`
-is retired: it runs `atc integrate --check` until the CLI trim (plan D.7).
+is retired: it refuses and names `atc integrate --check` (plan D.7).
 `merge_preflight()` evaluates that file's integration table for `atc
 integrate`, and `cleanup_preflight()` judges a worktree's removal for `atc
 worktree cleanup`. None of them writes a branch, the index or the working
@@ -11,14 +11,16 @@ tree: conflicts are detected with `git merge-tree --write-tree`, which creates
 only unreferenced objects, and the fetch updates only remote-tracking refs.
 
 Usage:
-  git_preflight.py push --repo <checkout> [--integration <sha>] [--json]
-  git_preflight.py merge --repo <checkout> --branch <topic> --reviewed <sha> [--json]   (retired)
+  git_preflight.py push [--project <name>] [--integration <sha>] [--json]
+  git_preflight.py merge ...   (retired: refuses and names atc integrate --check)
+
+`--project` names a project registered in workspace.yaml, `root` the workspace
+root; without it, the project holding the working directory.
 
 A STOP verdict carries a `next:` line naming the step that resolves it
 (governance `GIT_WORKFLOW.md` § Integrate and § Command results).
 
-Exit status: 0 for PUSH; 1 for STOP; 2 for a usage or git error; `merge`
-exits as `atc integrate --check` does.
+Exit status: 0 for PUSH; 1 for STOP; 2 for a usage or git error and for `merge`.
 """
 
 from __future__ import annotations
@@ -102,7 +104,7 @@ NEXT = {
     "CHECKOUT_DIRTY": "have the owner of the listed paths commit or remove them, then run again",
     "CONFLICT": _RECONCILE,
     "OVERLAP": "a reviewer judges semantic overlap, then prepare a merge candidate or " + _RECONCILE,
-    "BRANCH_AMBIGUOUS": "run again with `--branch` naming the reviewed topic branch among those listed",
+    "BRANCH_AMBIGUOUS": "delete or move the other local branches at the reviewed SHA, or integrate with the task's record ID",
     "NO_BRANCH_AT_REVIEWED": "restore the reviewed topic branch at the reviewed SHA, or " + _RUN_WITH_REVIEWED,
     "FETCH_FAILED": "restore access to origin (network, credentials), then run again",
     "MAIN_BEHIND_ORIGIN": (
@@ -541,44 +543,57 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(allow_abbrev=False, description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
     push = sub.add_parser("push", allow_abbrev=False, help="fetch origin and list what a push of main would carry")
-    push.add_argument("--repo", type=Path, required=True, help="integration checkout")
+    push.add_argument("--project", help="registered project name from workspace.yaml; root names the workspace root "
+                      "(default: the working directory's project)")
     push.add_argument(
         "--integration", help="candidate SHA whose commits carry push approval; every other commit is flagged",
     )
-    merge = sub.add_parser("merge", allow_abbrev=False, help="retired: runs atc integrate --check")
-    merge.add_argument("--repo", type=Path, required=True, help="integration checkout")
-    merge.add_argument("--branch", required=True, help="topic branch")
-    merge.add_argument("--reviewed", help="SHA named by the formal review, as atc integrate takes it")
-    merge.add_argument("--main", default="main", help="accepted only as main")
-    for p in (merge, push):
-        p.add_argument("--json", action="store_true", help="print the report as JSON")
+    sub.add_parser("merge", allow_abbrev=False, help="retired: names atc integrate --check")
+    push.add_argument("--json", action="store_true", help="print the report as JSON")
     return parser
 
 
-def retired_merge(args: argparse.Namespace) -> int:
-    """`preflight merge` as `atc integrate --check` (plan D.7); its exit code is integrate's."""
-    if args.main != "main" or args.reviewed is None:
-        given = f"--main {args.main}" if args.main != "main" else "no --reviewed"
-        print(f"ERROR USAGE atc preflight merge is retired and runs atc integrate --check, which takes "
-              f"--reviewed <sha> and integrates into main only; {given}", file=sys.stderr)
-        return 2
-    import git_integrate  # imports this module, so not at the top
-
-    print(f"NOTE atc preflight merge is retired; this ran atc integrate --check --repo {args.repo} "
-          f"--reviewed {args.reviewed}", file=sys.stderr)
-    forwarded = ["--check", "--repo", str(args.repo), "--branch", args.branch, "--reviewed", args.reviewed]
-    return git_integrate.main([*forwarded, *(["--json"] if args.json else [])])
+def retired_merge() -> int:
+    """`preflight merge` (plan D.7): it names the command that replaced it."""
+    print("ERROR USAGE atc preflight merge is retired; run atc integrate --check --project <project> "
+          "--task <task> --reviewed <sha>", file=sys.stderr)
+    return 2
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
-    if args.command == "merge":
-        return retired_merge(args)
+def checkout_of(project: str | None, root: Path | None, cwd: str) -> Path:
+    """The main checkout `--project` names (`root` the workspace root), else the working directory's project."""
+    import hami_worktree as hw  # imports this module, so not at the top
+
+    root = hw.ROOT if root is None else root
     try:
-        own = rev(args.repo, args.integration) if args.integration else None
+        ws = hw.load_workspace(root, dict(os.environ))
+    except hw.Stop as exc:
+        raise GitError(f"{exc.result.code} {exc.result.target}: {exc.result.detail}") from None
+    registered = f"registered: {', '.join(sorted(ws.projects)) or 'none'}"
+    root_project = hw.root_project(ws)
+    if project is not None:
+        found = root_project if project == root_project.name else ws.projects.get(project)
+        if found is None:
+            raise GitError(f"UNKNOWN_PROJECT {project} is not in {root / 'workspace.yaml'}; {registered}")
+        return Path(found.repo)
+    found = hw.infer_project(ws, cwd)
+    if found is None:
+        raise GitError(f"UNKNOWN_PROJECT no --project and the working directory {cwd} is in no registered project; "
+                       f"{registered}; the workspace root takes --project root")
+    return Path(found.repo)
+
+
+def main(argv: list[str] | None = None, root: Path | None = None, cwd: str | None = None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == ["merge"] and not {"-h", "--help"} & set(argv):
+        return retired_merge()
+    args = build_parser().parse_args(argv)
+    try:
+        repo = checkout_of(args.project, root, cwd or os.getcwd())
+        own = rev(repo, args.integration) if args.integration else None
         if args.integration and own is None:
             raise GitError(f"cannot resolve --integration {args.integration}")
-        report, listing = push_preflight(args.repo, "main", own)
+        report, listing = push_preflight(repo, "main", own)
     except GitError as exc:
         print(f"ERROR {exc}", file=sys.stderr)
         return 2

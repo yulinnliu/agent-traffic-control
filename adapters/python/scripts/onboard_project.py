@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check, apply, or sync the files Agent Traffic Control owns inside a project.
+"""Check or sync the files Agent Traffic Control owns inside a project.
 
 Owned files: `CLAUDE.md` (only when the project has none, or has the
 previous workspace entrypoint), the pointer line in `AGENTS.md`, sync's files
@@ -13,7 +13,8 @@ is project-owned; neither is ever rewritten. A project in the layout before
 `--sync` with a project or `--all` commits what it writes on each project's
 `main` and records the commit in `integrations.jsonl`; `--root-only` renders
 the adapters of the checkout it runs in and commits nothing. The rules:
-GIT_WORKFLOW.md "Governance sync commits".
+GIT_WORKFLOW.md "Governance sync commits". `apply()` creates a new project's
+missing files, updates nothing and commits nothing (`atc bootstrap add`).
 """
 
 from __future__ import annotations
@@ -618,7 +619,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(allow_abbrev=False, description=__doc__)
     modes = parser.add_mutually_exclusive_group(required=True)
     modes.add_argument("--check", action="store_const", const="check", dest="mode")
-    modes.add_argument("--apply", action="store_const", const="apply", dest="mode")
     modes.add_argument("--sync", action="store_const", const="sync", dest="mode")
     targets = parser.add_mutually_exclusive_group(required=True)
     targets.add_argument("project", nargs="?")
@@ -647,6 +647,19 @@ def main(argv: list[str] | None = None, root: Path = ROOT) -> int:
             selected = [(args.project, projects[args.project])]
         targets = [(name, (root / entry["repo"]).resolve()) for name, entry in selected]
         return run(args.mode, targets, root, args.prune, commit=args.mode == "sync", verbose=args.verbose)
+    except ValueError as exc:
+        print(f"onboard: {exc}", file=sys.stderr)
+        return 2
+
+
+def apply(name: str, root: Path = ROOT) -> int:
+    """Create the missing owned files of the registered project ``name``; update nothing, commit nothing."""
+    try:
+        projects = load_projects(root)
+        if name not in projects:
+            print(f"'{name}' is not registered in workspace.yaml.", file=sys.stderr)
+            return 2
+        return run("apply", [(name, (root / projects[name]["repo"]).resolve())], root, False)
     except ValueError as exc:
         print(f"onboard: {exc}", file=sys.stderr)
         return 2

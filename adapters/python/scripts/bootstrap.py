@@ -2,17 +2,17 @@
 """Set up this checkout as a workspace root and bring projects under it.
 
     atc bootstrap init   [--governance-source OWNER/REPO] [--force]
-    atc bootstrap add    NAME [--repo URL] [--skills a,b]
+    atc bootstrap add    NAME [--url URL] [--skills a,b]
     atc bootstrap status
 
 `init` writes `workspace.yaml` with this checkout as `workspace_root`,
 creates `projects/`, `worktrees/` and `state/`, and prints how to put the
 `atc` command on PATH. No environment variable is needed.
 
-`add` registers one project: clones `--repo` into `projects/NAME`, or expects
+`add` registers one project: clones `--url` into `projects/NAME`, or expects
 a checkout already there; appends the entry to `workspace.yaml`; creates its
 worktree and state directories; installs the requested opt-in skill
-adapters; then runs onboarding `--apply` so the project receives `CLAUDE.md`,
+adapters; then runs onboarding's apply step so the project receives `CLAUDE.md`,
 the pointer line in `AGENTS.md`, `.atc/` and every baseline adapter, and validates the
 result. Project-owned files are never rewritten.
 
@@ -138,7 +138,7 @@ def validate(root: Path) -> int:
     return subprocess.call(cmd, cwd=root, env=env)
 
 
-def add(root: Path, name: str, repo: str | None, skills: list[str]) -> int:
+def add(root: Path, name: str, url: str | None, skills: list[str]) -> int:
     if not NAME.match(name):
         print(f"{name}: use a lowercase hyphenated name")
         return 1
@@ -147,15 +147,15 @@ def add(root: Path, name: str, repo: str | None, skills: list[str]) -> int:
         print(f"{name}: {reserved}")
         return 1
     project = root / "projects" / name
-    if repo and URL.match(repo):
+    if url and URL.match(url):
         if project.exists():
-            print(f"{project} exists; drop --repo to register it as is")
+            print(f"{project} exists; drop --url to register it as is")
             return 1
-        print(f"$ git clone {repo} {project}")
-        if subprocess.call(["git", "clone", repo, str(project)]) != 0:
+        print(f"$ git clone {url} {project}")
+        if subprocess.call(["git", "clone", url, str(project)]) != 0:
             return 1
-    elif repo:
-        print(f"--repo must be a URL; place an existing checkout at {project} and rerun without --repo")
+    elif url:
+        print(f"--url must be a URL; place an existing checkout at {project} and rerun without --url")
         return 1
     if not (project / ".git").exists():
         print(f"{project} is not a git repository")
@@ -164,8 +164,8 @@ def add(root: Path, name: str, repo: str | None, skills: list[str]) -> int:
     for key in ("worktrees", "state"):
         (root / entry[key]).mkdir(parents=True, exist_ok=True)
     install_opt_in(root, project, skills)
-    print(f"$ onboard_project.py --apply {name}")
-    if onboard_project.main(["--apply", name], root=root) != 0:
+    print(f"$ onboard apply {name}")
+    if onboard_project.apply(name, root=root) != 0:
         return 1
     return validate(root)
 
@@ -196,7 +196,7 @@ def main(argv: list[str] | None = None, root: Path = ROOT) -> int:
     p_init.add_argument("--force", action="store_true")
     p_add = sub.add_parser("add", allow_abbrev=False)
     p_add.add_argument("name")
-    p_add.add_argument("--repo", help="git URL to clone into projects/NAME")
+    p_add.add_argument("--url", help="git URL to clone into projects/NAME")
     p_add.add_argument("--skills", default="", help="comma-separated opt-in skills to install")
     p_sync = sub.add_parser("sync", allow_abbrev=False)
     p_sync.add_argument("name", nargs="?")
@@ -206,7 +206,7 @@ def main(argv: list[str] | None = None, root: Path = ROOT) -> int:
     if args.command == "init":
         return init(root, args.governance_source, args.force)
     if args.command == "add":
-        return add(root, args.name, args.repo, [s for s in args.skills.split(",") if s])
+        return add(root, args.name, args.url, [s for s in args.skills.split(",") if s])
     if args.command == "sync":
         return sync(root, args.name, args.prune)
     return status(root)

@@ -15,7 +15,7 @@ import pytest
 import git_integrate as gi
 import git_preflight as gp
 from test_git_integrate import (  # noqa: F401  (repo is a fixture)
-    REPORT, add_origin, commit, declare_verifier, evidence_dir, integrate, main_tip, publish, refusal, repo,
+    OWNER, REPORT, add_origin, commit, declare_verifier, evidence_dir, integrate, main_tip, publish, refusal, repo,
     report_command, run_git, topic,
 )
 
@@ -54,7 +54,8 @@ def short(sha: str) -> str:
 
 
 def run(repo: Path, reviewed: str, *extra: str) -> int:
-    return gi.main(["--repo", str(repo), "--reviewed", reviewed, "--authority-reference", "owner-approval", *extra])
+    return gi.main(["--project", "repo", "--reviewed", reviewed, "--task", "owner-approval", "--owner-words", OWNER,
+                    *extra], root=repo.parent)
 
 
 def rebase(repo: Path, branch: str, onto: str = "main") -> str:
@@ -186,7 +187,7 @@ def test_a_clean_rebase_carries_the_approval_over(repo: Path, capsys: pytest.Cap
     assert f" carried_from={short(reviewed)} log " in lines[0]
     assert main_tip(repo) == rebased
     assert (records(repo)[-1]["reviewed"], records(repo)[-1]["carried_over_from"]) == (rebased, reviewed)
-    assert (records(repo)[-1]["task"], records(repo)[-1]["authority"]) == ("owner-approval", {"kind": "unclassified"})
+    assert (records(repo)[-1]["task"], records(repo)[-1]["authority"]) == ("owner-approval", {"kind": "owner_words", "quote": OWNER})
     evidence = json.loads((evidence_dir(repo) / f"{rebased}.json").read_text(encoding="utf-8"))
     assert (evidence["reviewed"], evidence["carried_over_from"], evidence["verdict"]) == (rebased, reviewed, "FF")
 
@@ -325,11 +326,11 @@ def test_the_integration_lists_and_flags_what_a_push_carries(repo: Path, capsys:
     lines = ["", *gp.render_push(gp.push_listing(repo, "main", {mine}))]
     assert lines[1:8] == [
         f"push: 3 commits origin/main {short(origin)} -> main {short(mine)}",
-        f'  integration {short(other)} task="owner-approval" authority=unclassified [NO PUSH APPROVAL]',
+        f'  integration {short(other)} task="owner-approval" authority=owner_words [NO PUSH APPROVAL]',
         f"    {short(other)} edit a.txt",
         "  no integration record [NO PUSH APPROVAL]",
         f"    {short(manual)} edit m.txt",
-        f'  integration {short(mine)} task="owner-approval" authority=unclassified [this integration]',
+        f'  integration {short(mine)} task="owner-approval" authority=owner_words [this integration]',
         f"    {short(mine)} edit b.txt",
     ]
     assert "WARNING 2 commits in origin/main..main come from other integrations or none" in captured.err
@@ -342,31 +343,31 @@ def test_preflight_push_fetches_and_groups_by_integration(repo: Path, capsys: py
     second = topic(repo, {"b.txt": "b2\n"}, branch="second")
     assert run(repo, second) == 0
     capsys.readouterr()
-    assert gp.main(["push", "--repo", str(repo), "--integration", second]) == 0
+    assert gp.main(["push", "--project", "repo", "--integration", second], root=repo.parent) == 0
     lines = capsys.readouterr().out.splitlines()
     assert lines[0] == "PUSH PUSH_LISTED: 2 commits in origin/main..main; 1 lack this integration's push approval"
     assert lines[-4:] == [
-        f'  integration {short(first)} task="owner-approval" authority=unclassified [NO PUSH APPROVAL]',
+        f'  integration {short(first)} task="owner-approval" authority=owner_words [NO PUSH APPROVAL]',
         f"    {short(first)} edit a.txt",
-        f'  integration {short(second)} task="owner-approval" authority=unclassified [this integration]',
+        f'  integration {short(second)} task="owner-approval" authority=owner_words [this integration]',
         f"    {short(second)} edit b.txt",
     ]
     assert not re.search(r"\b[0-9a-f]{40}\b", "\n".join(lines))
-    assert gp.main(["push", "--repo", str(repo), "--json"]) == 0
+    assert gp.main(["push", "--project", "repo", "--json"], root=repo.parent) == 0
     data = json.loads(capsys.readouterr().out)
     assert [(c["sha"], c["integration"], c["push_approval"], c["task"], c["authority"])
             for c in data["push"]["commits"]] == [
-        (first, first, None, "owner-approval", {"kind": "unclassified"}),
-        (second, second, None, "owner-approval", {"kind": "unclassified"}),
+        (first, first, None, "owner-approval", {"kind": "owner_words", "quote": OWNER}),
+        (second, second, None, "owner-approval", {"kind": "owner_words", "quote": OWNER}),
     ]
     push_from_other(repo, "c.txt", "c\n")
-    assert gp.main(["push", "--repo", str(repo)]) == 1
+    assert gp.main(["push", "--project", "repo"], root=repo.parent) == 1
     assert capsys.readouterr().out.startswith("STOP MAIN_DIVERGED_FROM_ORIGIN: ")
 
 
 def test_push_and_integrate_take_no_main_flag(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit) as exc:
-        gp.main(["push", "--repo", ".", "--main", "main"])
+        gp.main(["push", "--project", "repo", "--main", "main"])
     assert exc.value.code == 2
-    assert gi.main(["--repo", ".", "--reviewed", "0" * 40, "--main", "main"]) == 2
+    assert gi.main(["--project", "repo", "--reviewed", "0" * 40, "--task", "x", "--main", "main"]) == 2
     assert "--main" in capsys.readouterr().err

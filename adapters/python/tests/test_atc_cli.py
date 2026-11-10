@@ -97,7 +97,7 @@ def test_testkit_entry_points_take_no_abbreviation(main, parsers: list[argparse.
 
 
 def test_an_abbreviated_option_is_refused(capsys: pytest.CaptureFixture[str]) -> None:
-    code = call(["worktree", "cleanup", "--owner", "claude", "--topic", "t", "--contract", "1",
+    code = call(["worktree", "cleanup", "--owner", "claude", "--topic", "t",
                  "--squash-integrated", "--reviewe", "a" * 40])
     assert code == 2 and "unrecognized arguments: --reviewe" in capsys.readouterr().err
 

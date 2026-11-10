@@ -99,10 +99,21 @@ def topic(repo: Path, edits: dict[str, str], branch: str) -> str:
     return tip
 
 
+def workspace_beside(repo: Path) -> Path:
+    """A workspace.yaml beside ``repo`` registering it under its directory name; returns that workspace root."""
+    (repo.parent / "workspace.yaml").write_text(
+        f"version: 1\nworkspace_root: '{repo.parent}'\nprojects:\n  {repo.name}:\n    repo: {repo.name}\n"
+        f"    worktrees: worktrees/{repo.name}\n    state: state/{repo.name}-data\n",
+        encoding="utf-8",
+    )
+    return repo.parent
+
+
 def integrate(repo: Path, branch: str, reviewed: str) -> None:
+    """`atc integrate` of ``reviewed``, the tip of ``branch``, the one local branch there."""
     assert gi.main([
-        "--repo", str(repo), "--branch", branch, "--reviewed", reviewed, "--authority-reference", "test",
-    ]) == 0
+        "--project", repo.name, "--reviewed", reviewed, "--task", "test", "--owner-words", "Owner: integrate",
+    ], root=workspace_beside(repo)) == 0
 
 
 def decide(repo: Path, pushed: str, paths, stages=STAGES) -> ev.Decision:

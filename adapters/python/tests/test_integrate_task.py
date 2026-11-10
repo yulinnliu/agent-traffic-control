@@ -77,7 +77,7 @@ def tasks_repo(repo: Path) -> Path:
 
 
 def run(repo: Path, reviewed: str, *extra: str) -> int:
-    return gi.main(["--repo", str(repo), "--reviewed", reviewed, *extra])
+    return gi.main(["--project", "repo", "--reviewed", reviewed, *extra], root=repo.parent)
 
 
 def run_json(repo: Path, capsys: pytest.CaptureFixture[str], reviewed: str, *extra: str) -> tuple[int, dict, str]:
@@ -97,7 +97,7 @@ def statuses(repo: Path) -> dict[str, str]:
 def bind(repo: Path, capsys: pytest.CaptureFixture[str], branch: str = "work") -> str:
     """Bind DEMO-0001 on main with integrate_main through a records-only `--owner-words` integration."""
     tip = on_branch(repo, branch, {".atc/tasks/DEMO-0001.yaml": record("DEMO-0001", branch, GRANT)})
-    status, data, err = run_json(repo, capsys, tip, "--owner-words", WORDS)
+    status, data, err = run_json(repo, capsys, tip, "--task", "DEMO-0001", "--owner-words", WORDS)
     assert status == 0, err
     return tip
 
@@ -109,7 +109,7 @@ def test_a_records_only_binding_then_an_ff_under_the_record(tasks_repo: Path, ca
     repo = tasks_repo
     before = main_tip(repo)
     binding = on_branch(repo, "work", {".atc/tasks/DEMO-0001.yaml": record("DEMO-0001", "work", GRANT)})
-    status, data, err = run_json(repo, capsys, binding, "--owner-words", WORDS)
+    status, data, err = run_json(repo, capsys, binding, "--task", "DEMO-0001", "--owner-words", WORDS)
     assert status == 0, err
     assert (data["verdict"], data["records_only"], data["tasks"]) == ("FF", True, ["DEMO-0001"])
     assert data["authority"] == {"kind": "owner_words", "quote": WORDS}
@@ -147,7 +147,7 @@ def test_a_records_only_binding_of_several_tasks_writes_a_line_per_task(
         ".atc/tasks/DEMO-0001.yaml": record("DEMO-0001", "one", GRANT),
         ".atc/tasks/DEMO-0002.yaml": record("DEMO-0002", "two", GRANT),
     })
-    status, data, err = run_json(tasks_repo, capsys, tip, "--owner-words", WORDS)
+    status, data, err = run_json(tasks_repo, capsys, tip, "--task", "DEMO-0001", "--owner-words", WORDS)
     assert status == 0, err
     assert [(line["task"], line["candidate_sha"], line["main_before"], line["records_only"]) for line in lines(tasks_repo)] == [
         ("DEMO-0001", tip, before, True), ("DEMO-0002", tip, before, True),
@@ -161,7 +161,7 @@ def test_a_records_only_range_runs_the_record_check_not_the_verifier(
     broken = record("DEMO-0001", "work").replace("scope: plan § 1\n", "")
     tip = on_branch(tasks_repo, "work", {".atc/tasks/DEMO-0001.yaml": broken})
     before = main_tip(tasks_repo)
-    status, data, err = run_json(tasks_repo, capsys, tip, "--owner-words", WORDS)
+    status, data, err = run_json(tasks_repo, capsys, tip, "--task", "DEMO-0001", "--owner-words", WORDS)
     assert status == 3
     assert data["refusal"]["reason"] == "VERIFICATION_FAILED"
     assert "schema-violation: DEMO-0001.yaml" in data["refusal"]["detail"]
@@ -172,7 +172,7 @@ def test_a_records_only_range_runs_the_record_check_not_the_verifier(
 def test_a_records_only_range_needs_no_verification_section(tasks_repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     put(tasks_repo, {"AGENTS.md": "# AGENTS.md\n\n## Task records\n\n- Task prefix: DEMO\n"})
     tip = on_branch(tasks_repo, "work", {".atc/tasks/DEMO-0001.yaml": record("DEMO-0001", "work", GRANT)})
-    status, _, err = run_json(tasks_repo, capsys, tip, "--owner-words", WORDS)
+    status, _, err = run_json(tasks_repo, capsys, tip, "--task", "DEMO-0001", "--owner-words", WORDS)
     assert status == 0, err
 
 
@@ -185,10 +185,13 @@ def test_a_task_the_reviewed_commit_lacks_is_not_found(tasks_repo: Path, capsys:
     assert (status, data["refusal"]["reason"]) == (1, "TASK_NOT_FOUND")
 
 
-def test_a_record_bound_to_another_branch_is_a_mismatch(tasks_repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_a_record_bound_to_another_branch_integrates_that_branch(
+    tasks_repo: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    on_branch(tasks_repo, "elsewhere", {"c.txt": "c\n"})
     tip = on_branch(tasks_repo, "work", {".atc/tasks/DEMO-0001.yaml": record("DEMO-0001", "elsewhere"), "a.txt": "w\n"})
     status, data, _ = run_json(tasks_repo, capsys, tip, "--task", "DEMO-0001", "--owner-words", WORDS)
-    assert (status, data["refusal"]["reason"]) == (1, "TASK_BRANCH_MISMATCH")
+    assert (status, data["refusal"]["reason"]) == (1, "REVIEW_REWRITTEN")
 
 
 def test_a_task_identity_string_is_recorded_with_owner_words(tasks_repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -206,8 +209,8 @@ def test_a_task_identity_string_needs_owner_words(tasks_repo: Path, capsys: pyte
 
 def test_a_range_beyond_the_records_needs_a_task(tasks_repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     tip = on_branch(tasks_repo, "work", {"a.txt": "work\n"})
-    status, data, _ = run_json(tasks_repo, capsys, tip, "--owner-words", WORDS)
-    assert (status, data["refusal"]["reason"]) == (2, "USAGE")
+    assert run(tasks_repo, tip, "--owner-words", WORDS) == 2
+    assert capsys.readouterr().err == "ERROR USAGE the following arguments are required: --task\n"
 
 
 # Authority on main
@@ -215,7 +218,7 @@ def test_a_range_beyond_the_records_needs_a_task(tasks_repo: Path, capsys: pytes
 
 def test_a_record_without_integrate_main_is_no_authority(tasks_repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     tip = on_branch(tasks_repo, "work", {".atc/tasks/DEMO-0001.yaml": record("DEMO-0001", "work")})
-    assert run_json(tasks_repo, capsys, tip, "--owner-words", WORDS)[0] == 0
+    assert run_json(tasks_repo, capsys, tip, "--task", "DEMO-0001", "--owner-words", WORDS)[0] == 0
     work = on_branch(tasks_repo, "work", {"a.txt": "work\n"})
     status, data, _ = run_json(tasks_repo, capsys, work, "--task", "DEMO-0001")
     assert (status, data["refusal"]["reason"]) == (1, "AUTHORITY_MISSING")
@@ -308,49 +311,73 @@ def test_a_new_record_in_a_mixed_range_grants_edit_and_commit_at_most(
 def test_a_number_main_binds_to_another_branch_is_taken(tasks_repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     clash = on_branch(tasks_repo, "mine", {".atc/tasks/DEMO-0002.yaml": record("DEMO-0002", "mine"), "a.txt": "w\n"})
     theirs = on_branch(tasks_repo, "theirs", {".atc/tasks/DEMO-0002.yaml": record("DEMO-0002", "theirs")})
-    assert run_json(tasks_repo, capsys, theirs, "--owner-words", WORDS)[0] == 0
+    assert run_json(tasks_repo, capsys, theirs, "--task", "DEMO-0002", "--owner-words", WORDS)[0] == 0
     status, data, _ = run_json(tasks_repo, capsys, clash, "--task", "DEMO-0002", "--owner-words", WORDS)
     assert (status, data["refusal"]["reason"]) == (1, "TASK_ID_TAKEN")
     multi = on_branch(tasks_repo, "multi", {".atc/tasks/DEMO-0002.yaml": record("DEMO-0002", "multi")}, start="main")
-    status, data, _ = run_json(tasks_repo, capsys, multi, "--owner-words", WORDS)
+    status, data, _ = run_json(tasks_repo, capsys, multi, "--task", "DEMO-0002", "--owner-words", WORDS)
     assert (status, data["refusal"]["reason"]) == (1, "TASK_ID_TAKEN")
 
 
-# The deprecated --authority-reference
+# The record names the branch
 
 
-def test_the_alias_names_its_replacement_and_records_unclassified(tasks_repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    tip = on_branch(tasks_repo, "work", {"a.txt": "w\n"})
-    status, data, err = run_json(tasks_repo, capsys, tip, "--authority-reference", "DEMO-0001")
-    assert status == 0, err
-    assert f"WARNING {gi.ALIAS_NOTICE}" in err.splitlines()
-    assert (lines(tasks_repo)[-1]["task"], lines(tasks_repo)[-1]["authority"]) == ("DEMO-0001", {"kind": "unclassified"})
-
-
-def test_the_alias_never_satisfies_a_record(tasks_repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    tip = on_branch(tasks_repo, "work", {"a.txt": "w\n"})
-    assert run_json(tasks_repo, capsys, tip, "--authority-reference", "DEMO-0001")[0] == 0
-    record_line = lines(tasks_repo)[-1]
-    assert gi.ta.integrated_binding(tasks_repo, tip, "DEMO-0001", [record_line]) is None
-
-
-@pytest.mark.parametrize("files", [
-    {".atc/tasks/DEMO-0001.yaml": record("DEMO-0001", "work")},
-    {".atc/tasks/DEMO-0001.yaml": record("DEMO-0001", "work"), "a.txt": "w\n"},
-], ids=["records-only", "mixed"])
-def test_the_alias_is_refused_for_a_range_touching_task_records(
-    tasks_repo: Path, capsys: pytest.CaptureFixture[str], files: dict,
+def test_the_record_names_the_branch_among_several_at_the_reviewed_sha(
+    tasks_repo: Path, capsys: pytest.CaptureFixture[str],
 ) -> None:
-    tip = on_branch(tasks_repo, "work", files)
-    status, data, _ = run_json(tasks_repo, capsys, tip, "--authority-reference", "DEMO-0001")
-    assert (status, data["refusal"]["reason"]) == (1, "AUTHORITY_REFERENCE_REFUSED")
+    tip = on_branch(tasks_repo, "work", {".atc/tasks/DEMO-0001.yaml": record("DEMO-0001", "work"), "a.txt": "w\n"})
+    run_git(tasks_repo, "branch", "copy", tip)
+    status, data, err = run_json(tasks_repo, capsys, tip, "--task", "DEMO-0001", "--owner-words", WORDS)
+    assert status == 0, err
+    assert "branch=work (record)" in err.splitlines()[0]
+    assert main_tip(tasks_repo) == tip
 
 
-@pytest.mark.parametrize("extra", [["--task", "DEMO-0001"], ["--owner-words", WORDS]])
-def test_the_alias_takes_no_other_authority_flag(tasks_repo: Path, capsys: pytest.CaptureFixture[str], extra: list[str]) -> None:
+def test_a_task_identity_string_stops_on_several_branches(tasks_repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     tip = on_branch(tasks_repo, "work", {"a.txt": "w\n"})
-    status, data, _ = run_json(tasks_repo, capsys, tip, "--authority-reference", "x", *extra)
-    assert (status, data["refusal"]["reason"]) == (2, "USAGE")
+    run_git(tasks_repo, "branch", "copy", tip)
+    status, data, _ = run_json(tasks_repo, capsys, tip, "--task", "plan step 1", "--owner-words", WORDS)
+    assert (status, data["refusal"]["reason"]) == (1, "BRANCH_AMBIGUOUS")
+
+
+def test_a_record_naming_a_missing_branch_stops(tasks_repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    tip = on_branch(tasks_repo, "work", {".atc/tasks/DEMO-0001.yaml": record("DEMO-0001", "gone"), "a.txt": "w\n"})
+    before = main_tip(tasks_repo)
+    status, data, _ = run_json(tasks_repo, capsys, tip, "--task", "DEMO-0001", "--owner-words", WORDS)
+    assert (status, data["refusal"]["reason"]) == (1, "NO_BRANCH_AT_REVIEWED")
+    assert "names branch gone, which is no local branch" in data["refusal"]["detail"]
+    assert main_tip(tasks_repo) == before
+
+
+@pytest.mark.parametrize(("change", "reason"), [("amend", "REVIEW_REWRITTEN"), ("commit", "UNREVIEWED_COMMITS")])
+def test_the_record_branch_past_or_beside_the_reviewed_sha_stops(
+    tasks_repo: Path, capsys: pytest.CaptureFixture[str], change: str, reason: str,
+) -> None:
+    reviewed = on_branch(tasks_repo, "work", {".atc/tasks/DEMO-0001.yaml": record("DEMO-0001", "work"), "a.txt": "w\n"})
+    run_git(tasks_repo, "branch", "keep", reviewed)  # inference alone would take this branch
+    run_git(tasks_repo, "switch", "-q", "work")
+    if change == "amend":
+        run_git(tasks_repo, "commit", "-q", "--amend", "-m", "reworded")
+    else:
+        put(tasks_repo, {"b.txt": "more\n"})
+    run_git(tasks_repo, "switch", "-q", "main")
+    before = main_tip(tasks_repo)
+    status, data, _ = run_json(tasks_repo, capsys, reviewed, "--task", "DEMO-0001", "--owner-words", WORDS)
+    assert (status, data["refusal"]["reason"]) == (1, reason)
+    assert main_tip(tasks_repo) == before
+
+
+def test_a_records_only_binding_of_several_tasks_takes_the_branch_at_the_reviewed_sha(
+    tasks_repo: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    tip = on_branch(tasks_repo, "bind", {
+        ".atc/tasks/DEMO-0001.yaml": record("DEMO-0001", "one"),
+        ".atc/tasks/DEMO-0002.yaml": record("DEMO-0002", "two"),
+    })
+    status, data, err = run_json(tasks_repo, capsys, tip, "--task", "DEMO-0002", "--owner-words", WORDS)
+    assert status == 0, err
+    assert "branch=bind (inferred)" in err.splitlines()[0]
+    assert [line["task"] for line in lines(tasks_repo)] == ["DEMO-0001", "DEMO-0002"]
 
 
 # A recovered candidate resolves its authority as any other run
@@ -418,7 +445,7 @@ def test_the_push_listing_names_every_task_of_a_binding(tasks_repo: Path, capsys
         ".atc/tasks/DEMO-0001.yaml": record("DEMO-0001", "one", GRANT),
         ".atc/tasks/DEMO-0002.yaml": record("DEMO-0002", "two", GRANT),
     })
-    assert run_json(tasks_repo, capsys, tip, "--owner-words", WORDS)[0] == 0
+    assert run_json(tasks_repo, capsys, tip, "--task", "DEMO-0001", "--owner-words", WORDS)[0] == 0
     listing = gp.push_listing(tasks_repo)
     assert [(c["task"], c["tasks"], c["authority"]["kind"]) for c in listing["commits"]] == [
         (None, ["DEMO-0001", "DEMO-0002"], "owner_words"),
@@ -454,7 +481,7 @@ def test_the_push_listing_reads_lines_written_before_task_and_authority(
         f'  integration {synced[:12]} task="{revision[:12]}" authority=sync',
         f"    {synced[:12]} edit",
     ]
-    assert gp.main(["push", "--repo", str(tasks_repo)]) == 0
+    assert gp.main(["push", "--project", "repo"], root=tasks_repo.parent) == 0
     assert 'task="docs/PLAN.md §2 step 1" authority=unclassified' in capsys.readouterr().out
 
 
@@ -475,18 +502,19 @@ def test_a_legacy_line_without_a_task_shows_none_as_a_dash(tasks_repo: Path, cap
 def test_a_check_needs_no_authority(tasks_repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     work = on_branch(tasks_repo, "work", {"a.txt": "work\n"})
     before = main_tip(tasks_repo)
-    assert run(tasks_repo, work, "--check") == 0
+    assert run(tasks_repo, work, "--task", "x", "--check") == 0
     captured = capsys.readouterr()
     assert captured.out.startswith("CHECK FF ")
-    assert captured.out.rstrip().endswith('task="" authority=not_checked')
-    assert run(tasks_repo, work) == 2
+    assert captured.out.rstrip().endswith('task="x" authority=missing')
+    assert run(tasks_repo, work, "--check") == 2
+    assert run(tasks_repo, work, "--task", "x") == 1
     assert main_tip(tasks_repo) == before
 
 
 def test_a_check_reports_a_missing_grant_and_the_run_still_stops(tasks_repo: Path,
                                                                 capsys: pytest.CaptureFixture[str]) -> None:
     tip = on_branch(tasks_repo, "work", {".atc/tasks/DEMO-0001.yaml": record("DEMO-0001", "work")})
-    assert run_json(tasks_repo, capsys, tip, "--owner-words", WORDS)[0] == 0
+    assert run_json(tasks_repo, capsys, tip, "--task", "DEMO-0001", "--owner-words", WORDS)[0] == 0
     work = on_branch(tasks_repo, "work", {"a.txt": "work\n"})
     assert run(tasks_repo, work, "--task", "DEMO-0001", "--check") == 0
     captured = capsys.readouterr()
@@ -498,8 +526,8 @@ def test_a_check_reports_a_missing_grant_and_the_run_still_stops(tasks_repo: Pat
 
 def test_a_check_with_owner_words_still_needs_a_task(tasks_repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     work = on_branch(tasks_repo, "work", {"a.txt": "work\n"})
-    status, data, _ = run_json(tasks_repo, capsys, work, "--check", "--owner-words", WORDS)
-    assert (status, data["refusal"]["reason"]) == (2, "USAGE")
+    assert run(tasks_repo, work, "--check", "--owner-words", WORDS) == 2
+    assert capsys.readouterr().err == "ERROR USAGE the following arguments are required: --task\n"
 
 
 def test_atc_verify_runs_the_record_check_for_a_records_only_range(
@@ -509,10 +537,10 @@ def test_atc_verify_runs_the_record_check_for_a_records_only_range(
     broken = record("DEMO-0001", "work").replace("scope: plan § 1\n", "")
     tip = on_branch(tasks_repo, "work", {".atc/tasks/DEMO-0001.yaml": broken})
     before = main_tip(tasks_repo)
-    assert gi.verify_main(["--repo", str(tasks_repo), "--reviewed", tip]) == 3
+    assert gi.verify_main(["--project", "repo", "--reviewed", tip], root=tasks_repo.parent) == 3
     err = capsys.readouterr().err
     assert "STOP VERIFICATION_FAILED: the record check failed" in err and "schema-violation: DEMO-0001.yaml" in err
     good = on_branch(tasks_repo, "work2", {".atc/tasks/DEMO-0002.yaml": record("DEMO-0002", "work2")})
-    assert gi.verify_main(["--repo", str(tasks_repo), "--reviewed", good]) == 0
+    assert gi.verify_main(["--project", "repo", "--reviewed", good], root=tasks_repo.parent) == 0
     assert capsys.readouterr().out.splitlines()[-1].startswith("VERIFY PASS ")
     assert main_tip(tasks_repo) == before

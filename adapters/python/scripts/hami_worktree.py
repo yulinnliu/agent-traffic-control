@@ -10,15 +10,15 @@ code and next step.
 
 `--project` may be omitted when the working directory lies under a registered
 project's repository or worktrees root; an explicit value always wins.
-`--repo <workspace root>` targets the workspace root itself, whose worktrees
-live under `worktrees/root`; a working directory there infers it, while the
-rest of the canonical checkout infers nothing.
+`--project root` targets the workspace root itself, whose worktrees live
+under `worktrees/root`; a working directory there infers it, while the rest
+of the canonical checkout infers nothing.
 
-Usage (`--repo ROOT` or `--project root` may replace `--project P`):
-  hami_worktree.py create  --project P --owner O --topic T --contract 1 [--session S] [--base-sha FULL_SHA] [--json]
-  hami_worktree.py resume  --project P --owner O --topic T --contract 1 [--session S] [--rebind-session] [--json]
-  hami_worktree.py audit   --project P --contract 1 [--owner O] [--topic T] [--json]
-  hami_worktree.py cleanup --project P --owner O --topic T --contract 1 [--json]
+Usage:
+  hami_worktree.py create  --project P --owner O --topic T [--session S] [--base-sha FULL_SHA] [--json]
+  hami_worktree.py resume  --project P --owner O --topic T [--session S] [--rebind-session] [--json]
+  hami_worktree.py audit   --project P [--owner O] [--topic T] [--json]
+  hami_worktree.py cleanup --project P --owner O --topic T [--json]
     [--abandon --archive-tag archive/NAME --expected-head FULL_SHA]
     [--squash-integrated --expected-head FULL_SHA --reviewed FULL_SHA --expected-main FULL_SHA
      --integrated-as FULL_SHA --retained-ref refs/tags/NAME]
@@ -1023,12 +1023,10 @@ def build_parser() -> argparse.ArgumentParser:
     commands = {name: sub.add_parser(name, allow_abbrev=False) for name in ("create", "resume", "audit", "cleanup")}
     for name, p in commands.items():
         identity_required = name != "audit"
-        target = p.add_mutually_exclusive_group()
-        target.add_argument("--project")
-        target.add_argument("--repo", help="the workspace root itself, whose worktrees live under worktrees/root")
+        p.add_argument("--project", help="registered project name from workspace.yaml; root names the workspace root, "
+                       "whose worktrees live under worktrees/root")
         p.add_argument("--owner", choices=OWNERS, required=identity_required)
         p.add_argument("--topic", type=topic_arg, required=identity_required)
-        p.add_argument("--contract", type=int, default=CONTRACT)
         p.add_argument("--json", action="store_true")
     for name in ("create", "resume"):
         commands[name].add_argument("--session", type=session_arg, default=NO_SESSION)
@@ -1086,18 +1084,10 @@ def infer_project(ws: Workspace, cwd: str) -> Project | None:
 
 
 def run(args: argparse.Namespace, root: Path, environ: dict[str, str], home: str, cwd: str) -> list[Result]:
-    if args.contract != CONTRACT:
-        return [Result("CONTRACT_INCOMPATIBLE", args.project or "-", f"adapter requires {args.contract}, workspace provides {CONTRACT}")]
     try:
         ws = load_workspace(root, environ)
         registered = f"registered: {', '.join(sorted(ws.projects)) or 'none'}"
-        if args.repo is not None:
-            if key(os.path.realpath(args.repo)) != key(os.path.realpath(ws.root)):
-                return [Result("UNKNOWN_PROJECT", args.repo,
-                               f"--repo takes the workspace root this atc serves, {ws.root}, only (run the installed atc, "
-                               f"not uv run inside a topic worktree); a registered project takes --project; {registered}")]
-            project = root_project(ws)
-        elif args.project is None:
+        if args.project is None:
             project = infer_project(ws, cwd)
             if project is None:
                 return [Result("UNKNOWN_PROJECT", cwd, f"no --project and the working directory is in no registered project; {registered}")]

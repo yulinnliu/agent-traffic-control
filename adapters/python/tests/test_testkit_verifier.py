@@ -535,10 +535,20 @@ def integration_repo(tmp_path: Path, atc_tmp: Path, monkeypatch: pytest.MonkeyPa
     return root
 
 
+def workspace_beside(repo: Path) -> Path:
+    """A workspace.yaml beside ``repo`` registering it under its directory name; returns that workspace root."""
+    (repo.parent / "workspace.yaml").write_text(
+        f"version: 1\nworkspace_root: '{repo.parent}'\nprojects:\n  {repo.name}:\n    repo: {repo.name}\n"
+        f"    worktrees: worktrees/{repo.name}\n    state: state/{repo.name}-data\n",
+        encoding="utf-8",
+    )
+    return repo.parent
+
+
 def integrate(root: Path) -> int:
     tip = (root / ".git/atc-test-tip").read_text(encoding="utf-8")
-    return gi.main(["--repo", str(root), "--branch", "topic", "--reviewed", tip,
-                    "--authority-reference", "test-owner-authorization"])
+    return gi.main(["--project", root.name, "--reviewed", tip, "--task", "test-owner-authorization",
+                    "--owner-words", "Owner: integrate"], root=workspace_beside(root))
 
 
 def test_atc_integrate_runs_the_skeleton_to_a_pass(integration_repo: Path, atc_tmp: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -567,7 +577,7 @@ def test_atc_integrate_reports_the_skeletons_refusal_token(integration_repo: Pat
 
 def verify(root: Path, *extra: str) -> int:
     tip = (root / ".git/atc-test-tip").read_text(encoding="utf-8")
-    return gi.verify_main(["--repo", str(root), "--branch", "topic", "--reviewed", tip, *extra])
+    return gi.verify_main(["--project", root.name, "--reviewed", tip, *extra], root=workspace_beside(root))
 
 
 @pytest.mark.integration

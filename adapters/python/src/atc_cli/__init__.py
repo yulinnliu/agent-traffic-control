@@ -5,7 +5,7 @@
 Commands map onto the scripts under `adapters/python/scripts/`:
 
     worktree   hami_worktree.py   create / resume / audit / cleanup
-    preflight  git_preflight.py   push listing; merge (retired: integrate --check)
+    preflight  git_preflight.py   push listing; merge (retired: names integrate --check)
     integrate  git_integrate.py   advance local main to a reviewed topic
     verify     git_integrate.py   run the verifier on the candidate integrate would build
     task       task_records.py    new / list / check task records
@@ -25,9 +25,9 @@ The checkout root is, in order: `--root`, `$ATC_ROOT`, the nearest parent of
 the working directory holding `workspace.yaml`, else the checkout this
 package was installed from. `onboard --root-only` renders the ATC checkout
 holding the working directory, which in a linked worktree has no
-`workspace.yaml`; `--root` and `$ATC_ROOT` still win. `integrate` resolves
-`--project` and the working directory's project in that root's workspace.yaml and refuses an
-explicit `--root` beside `--repo`. Skills call `atc` by name, so a repository that
+`workspace.yaml`; `--root` and `$ATC_ROOT` still win. Every command names its
+repository with `--project` (`root` for the workspace root), resolved in that
+root's workspace.yaml. Skills call `atc` by name, so a repository that
 uses them needs nothing but this command on PATH.
 
 When this package runs from the canonical checkout (it holds `workspace.yaml`
@@ -206,10 +206,10 @@ def _dispatch(command: str, rest: list[str], explicit_root: str | None) -> int:
     module = __import__(COMMANDS[command])
     if command in ("worktree", "task", "onboard", "bootstrap", "close-out"):
         return module.main(rest, root=root)
-    if command == "integrate":
-        return module.main(rest, root=root, root_given=explicit_root is not None)
+    if command in ("integrate", "preflight"):
+        return module.main(rest, root=root)
     if command == "verify":
-        return module.verify_main(rest, root=root, root_given=explicit_root is not None)
+        return module.verify_main(rest, root=root)
     if command == "doctor":
         if rest[:1] in (["-h"], ["--help"]):
             print(f"usage: atc doctor\n\n{module.__doc__.strip()}")

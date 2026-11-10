@@ -194,24 +194,21 @@ def test_new_refuses_on_main(ws: Workspace, capsys: pytest.CaptureFixture[str]) 
 
 def test_new_refuses_in_the_canonical_checkout_on_any_branch(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
     run_git(ws.root, "switch", "-q", "-c", "topic-in-place")
-    status, _, err = ws.cli(capsys, "new", "--scope", "s", "--repo", str(ws.root), cwd=ws.root)
+    status, _, err = ws.cli(capsys, "new", "--scope", "s", "--project", "root", cwd=ws.root)
     assert status == 2
     assert err.startswith("ERROR CHECKOUT_CANONICAL ")
-    assert f'Run it inside the new worktree with an absolute --repo: atc task new --repo "{ws.root}"' in err
-    assert "--project <name>" not in err
+    assert "Run it inside the new worktree: atc task new --project <name> --scope <text>, root for the workspace root" in err
 
 
-def test_new_given_a_relative_repo_names_the_absolute_form(
+def test_new_takes_project_root_from_a_root_worktree(
         ws: Workspace, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
     topic = ws.worktree(ws.root, "claude+relative", "topic-relative")
     monkeypatch.chdir(topic)
-    status, _, err = ws.cli(capsys, "new", "--scope", "s", "--repo", ".", cwd=topic)
-    assert status == 2
-    assert err.startswith("ERROR UNKNOWN_PROJECT --repo takes the workspace root ")
-    assert f'Run it inside the new worktree with an absolute --repo: atc task new --repo "{ws.root}"' in err
-    assert "for a registered project: atc task new --project <name> --scope <text>" in err
+    with pytest.raises(SystemExit) as exc:
+        ws.cli(capsys, "new", "--scope", "s", "--repo", ".", cwd=topic)
+    assert exc.value.code == 2
     status, _, err = ws.cli(capsys, "new", "--scope", "s", "--project", "nope", cwd=topic)
-    assert status == 2 and "Run it inside" not in err
+    assert status == 2 and err.splitlines()[-1].startswith("ERROR UNKNOWN_PROJECT nope")
 
 
 def test_new_in_a_root_worktree_binds_the_root_main(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
@@ -357,7 +354,7 @@ def test_project_root_names_the_workspace_root(ws: Workspace, capsys: pytest.Cap
     assert status == 0, err
     assert [(row["project"], row["task_id"]) for row in json.loads(out)["tasks"]] == [("root", "ATC-0001")]
     import hami_worktree
-    assert hami_worktree.main(["audit", "--project", "root", "--contract", "1"], root=ws.root, environ={},
+    assert hami_worktree.main(["audit", "--project", "root"], root=ws.root, environ={},
                               home=str(ws.root)) == 0
     assert capsys.readouterr().out.strip() == "OK root/ (no worktrees) - continue"
 
@@ -368,7 +365,7 @@ def test_a_record_task_names_its_repository_by_prefix(ws: Workspace, monkeypatch
 
     def resolved(task: str) -> tuple[str, Path]:
         args = git_integrate.build_parser().parse_args(["--reviewed", "a" * 40, "--task", task, "--owner-words", "w"])
-        return git_integrate.resolve_repo(args, ws.root, False, str(ws.root))
+        return git_integrate.resolve_repo(args, ws.root, str(ws.root))
 
     assert resolved("DEMO-0001") == (PROJECT, ws.repo)
     assert resolved("ATC-0001") == ("root", ws.root)

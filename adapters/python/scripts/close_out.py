@@ -105,8 +105,7 @@ def remove_worktree(root: Path, name: str, worktree: Path, cwd: str, environ: di
     owner, plus, topic = worktree.name.partition("+")
     if not plus or owner not in hw.OWNERS:
         return f"REFUSED {worktree} (not a managed worktree <owner>+<topic>)"
-    target = ["--repo", str(root)] if name == hw.root_project(hw.load_workspace(root, environ)).name \
-        else ["--project", name]
+    target = ["--project", name]
     out = io.StringIO()
     with contextlib.redirect_stdout(out):
         code = hw.main(["cleanup", *target, "--owner", owner, "--topic", topic, "--json"], root=root,
@@ -128,10 +127,8 @@ def main(argv: list[str] | None = None, root: Path = task_records.ROOT, environ:
         epilog="Exit: 0 when every item ends DELETED or SKIPPED; 1 when one ends REFUSED; 2 before anything is "
                "removed.")
     parser.add_argument("--task", required=True, help="the integrated task, for example ATC-0008")
-    target = parser.add_mutually_exclusive_group()
-    target.add_argument("--project", help="the task's project (default: the repository declaring the task's prefix, else the "
-                                             "working directory's)")
-    target.add_argument("--repo", help="the workspace root, for one of its own tasks")
+    parser.add_argument("--project", help="the task's project, root for the workspace root (default: the repository "
+                                          "declaring the task's prefix, else the working directory's)")
     parser.add_argument("--skip", action="append", choices=ITEMS, default=[], metavar="ITEM",
                         help=f"leave this item for this run only, nothing written ({', '.join(ITEMS)}; repeatable; "
                              "an absent item is a no-op); the record's keep is permanent")
@@ -140,7 +137,7 @@ def main(argv: list[str] | None = None, root: Path = task_records.ROOT, environ:
     cwd = cwd or os.getcwd()
     lines: list[str] = []
     try:
-        [(name, checkout)] = task_records.resolve(root, environ, cwd, args.project, args.repo, task=args.task)
+        [(name, checkout)] = task_records.resolve(root, environ, cwd, args.project, task=args.task)
         integrated(checkout, args.task)
         data = record(checkout, args.task)
     except (Stop, task_records.Refused) as stop:

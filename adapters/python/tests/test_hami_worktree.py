@@ -88,7 +88,7 @@ class Workspace:
         return status, payload["results"]
 
     def run(self, capsys: pytest.CaptureFixture[str], command: str, owner: str | None = "claude", topic: str | None = "topic", *extra: str) -> tuple[int, list[dict]]:
-        argv = [command, "--project", PROJECT, "--contract", "1"]
+        argv = [command, "--project", PROJECT]
         if owner is not None:
             argv += ["--owner", owner]
         if topic is not None:
@@ -124,13 +124,6 @@ def single(results: list[dict]) -> dict:
 # Contract, map, identity parsing and path safety
 
 
-def test_contract_mismatch_is_reported_before_the_map_is_read(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
-    (ws.root / "workspace.yaml").write_text("not: [valid", encoding="utf-8")
-    status, results = ws.cli(capsys, "audit", "--project", PROJECT, "--contract", "2")
-    assert status == 2
-    assert single(results)["reason"] == "CONTRACT_INCOMPATIBLE"
-
-
 def test_malformed_map_is_map_invalid(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
     (ws.root / "workspace.yaml").write_text("version: 1\nworkspace_root: 3\n", encoding="utf-8")
     status, results = ws.run(capsys, "audit", None, None)
@@ -152,7 +145,7 @@ def test_atc_root_override_pointing_elsewhere_is_map_invalid(ws: Workspace, tmp_
 
 
 def test_unknown_project(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
-    status, results = ws.cli(capsys, "audit", "--project", "missing", "--contract", "1")
+    status, results = ws.cli(capsys, "audit", "--project", "missing")
     assert (status, single(results)["reason"]) == (2, "UNKNOWN_PROJECT")
 
 
@@ -169,10 +162,10 @@ def two_projects(ws: Workspace) -> Path:
 def test_project_is_inferred_from_the_repository_and_its_worktrees(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
     two_projects(ws)
     (ws.repo / "sub").mkdir()
-    status, results = ws.cli(capsys, "create", "--owner", "claude", "--topic", "topic", "--contract", "1", cwd=ws.repo / "sub")
+    status, results = ws.cli(capsys, "create", "--owner", "claude", "--topic", "topic", cwd=ws.repo / "sub")
     assert (status, single(results)["reason"]) == (0, "OK")
     assert os.path.normcase(single(results)["target"]) == os.path.normcase(str(ws.path("claude", "topic")))
-    status, results = ws.cli(capsys, "audit", "--contract", "1", cwd=ws.path("claude", "topic"))
+    status, results = ws.cli(capsys, "audit", cwd=ws.path("claude", "topic"))
     assert status == 0
     assert [os.path.normcase(r["target"]) for r in results] == [os.path.normcase(str(ws.path("claude", "topic")))]
 
@@ -181,14 +174,14 @@ def test_explicit_project_wins_over_the_working_directory(ws: Workspace, capsys:
     other = two_projects(ws)
     status, results = ws.run(capsys, "create")
     assert status == 0
-    status, results = ws.cli(capsys, "audit", "--project", "other-project", "--contract", "1", cwd=ws.path("claude", "topic"))
+    status, results = ws.cli(capsys, "audit", "--project", "other-project", cwd=ws.path("claude", "topic"))
     assert status == 0
     assert os.path.normcase(single(results)["target"]) == os.path.normcase(str(other.parents[1] / "worktrees" / "other-project"))
 
 
 def test_uninferable_project_lists_the_registered_names(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
     two_projects(ws)
-    status, results = ws.cli(capsys, "audit", "--contract", "1", cwd=ws.root)
+    status, results = ws.cli(capsys, "audit", cwd=ws.root)
     assert (status, single(results)["reason"]) == (2, "UNKNOWN_PROJECT")
     assert f"registered: {PROJECT}, other-project" in single(results)["detail"]
 
@@ -202,17 +195,17 @@ def root_repo(ws: Workspace) -> Path:
 
 
 @pytest.mark.integration
-def test_repo_runs_the_whole_lifecycle_for_the_workspace_root(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+def test_project_root_runs_the_whole_lifecycle_for_the_workspace_root(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
     topics = root_repo(ws)
     target = topics / "claude+topic"
-    identity = ["--repo", str(ws.root), "--owner", "claude", "--topic", "topic", "--contract", "1"]
+    identity = ["--project", "root", "--owner", "claude", "--topic", "topic"]
     status, results = ws.cli(capsys, "create", *identity)
     assert (status, single(results)["reason"]) == (0, "OK")
     assert os.path.normcase(single(results)["target"]) == os.path.normcase(str(target))
     assert run_git(target, "branch", "--show-current") == "worktree-claude+topic"
     status, results = ws.cli(capsys, "resume", *identity)
     assert (status, single(results)["reason"]) == (0, "OK")
-    status, results = ws.cli(capsys, "audit", "--repo", str(ws.root), "--contract", "1")
+    status, results = ws.cli(capsys, "audit", "--project", "root")
     assert (status, [os.path.normcase(r["target"]) for r in results]) == (0, [os.path.normcase(str(target))])
     status, results = ws.cli(capsys, "cleanup", *identity)
     assert (status, single(results)["reason"]) == (0, "OK")
@@ -223,23 +216,12 @@ def test_repo_runs_the_whole_lifecycle_for_the_workspace_root(ws: Workspace, cap
 @pytest.mark.integration
 def test_root_is_inferred_only_under_its_worktrees_root(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
     topics = root_repo(ws)
-    status, _ = ws.cli(capsys, "create", "--repo", str(ws.root), "--owner", "claude", "--topic", "topic", "--contract", "1")
+    status, _ = ws.cli(capsys, "create", "--project", "root", "--owner", "claude", "--topic", "topic")
     assert status == 0
-    status, results = ws.cli(capsys, "audit", "--contract", "1", cwd=topics / "claude+topic")
+    status, results = ws.cli(capsys, "audit", cwd=topics / "claude+topic")
     assert (status, [os.path.normcase(r["target"]) for r in results]) == (0, [os.path.normcase(str(topics / "claude+topic"))])
-    status, results = ws.cli(capsys, "audit", "--contract", "1", cwd=ws.root)
+    status, results = ws.cli(capsys, "audit", cwd=ws.root)
     assert (status, single(results)["reason"]) == (2, "UNKNOWN_PROJECT")
-
-
-@pytest.mark.integration
-def test_repo_takes_only_the_workspace_root(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
-    root_repo(ws)
-    status, results = ws.cli(capsys, "audit", "--repo", str(ws.repo), "--contract", "1")
-    assert (status, single(results)["reason"]) == (2, "UNKNOWN_PROJECT")
-    assert "--repo takes the workspace root" in single(results)["detail"]
-    with pytest.raises(SystemExit) as exc:
-        hw.main(["audit", "--repo", str(ws.root), "--project", PROJECT, "--contract", "1"], root=ws.root, environ=ws.environ, home=str(ws.home))
-    assert exc.value.code == 2
 
 
 @pytest.mark.parametrize("topic", ["Upper", "-lead", "a+b", "a_b", "a" * 49, ""])
@@ -421,7 +403,7 @@ def test_audit_with_no_worktrees_is_ok(ws: Workspace, capsys: pytest.CaptureFixt
 
 
 def test_human_output_is_one_ascii_line_per_target(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
-    status = hw.main(["audit", "--project", PROJECT, "--contract", "1"], root=ws.root, environ=ws.environ, home=str(ws.home))
+    status = hw.main(["audit", "--project", PROJECT], root=ws.root, environ=ws.environ, home=str(ws.home))
     out = capsys.readouterr().out
     assert status == 0
     assert out.strip().splitlines() == [f"OK {PROJECT}/ (no worktrees) - continue"]
@@ -430,7 +412,7 @@ def test_human_output_is_one_ascii_line_per_target(ws: Workspace, capsys: pytest
 @pytest.mark.integration
 def test_create_and_cleanup_print_one_verdict_line_each(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
     main = run_git(ws.repo, "rev-parse", "main")[:12]
-    common = ["--project", PROJECT, "--owner", "claude", "--topic", "topic", "--contract", "1"]
+    common = ["--project", PROJECT, "--owner", "claude", "--topic", "topic"]
     kwargs = dict(root=ws.root, environ=ws.environ, home=str(ws.home))
     assert hw.main(["create", *common], **kwargs) == 0
     assert capsys.readouterr().out.splitlines() == [f"CREATED {PROJECT}/claude+topic base {main}"]
@@ -814,7 +796,7 @@ def test_json_keeps_the_verdict_reason_evidence_shape(ws: Workspace, capsys: pyt
     status, results = ws.run(capsys, "resume")
     assert set(single(results)) == {"verdict", "reason", "target", "detail", "next", "evidence"}
     assert (results[0]["verdict"], results[0]["reason"]) == ("STOP", "NOT_FOUND")
-    status, results = ws.cli(capsys, "audit", "--project", "missing", "--contract", "1")
+    status, results = ws.cli(capsys, "audit", "--project", "missing")
     assert single(results)["verdict"] == "ERROR"
 
 
@@ -1625,11 +1607,11 @@ def test_recovery_of_a_busy_directory_keeps_the_branch(ws: Workspace, monkeypatc
 
 
 @pytest.mark.integration
-def test_the_contract_flag_defaults_to_the_current_contract(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
-    status, _ = ws.cli(capsys, "audit", "--project", PROJECT)
-    assert status == 0
-    status, results = ws.cli(capsys, "audit", "--project", PROJECT, "--contract", "2")
-    assert (status, single(results)["reason"]) == (2, "CONTRACT_INCOMPATIBLE")
+@pytest.mark.parametrize("flag", [["--contract", "1"], ["--repo", "."]])
+def test_the_removed_flags_are_unknown_options(ws: Workspace, flag: list[str]) -> None:
+    with pytest.raises(SystemExit) as exc:
+        hw.main(["audit", "--project", PROJECT, *flag], root=ws.root, environ=ws.environ, home=str(ws.home))
+    assert exc.value.code == 2
 
 
 @pytest.mark.integration

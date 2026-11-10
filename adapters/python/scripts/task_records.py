@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Task records: write, list and check `.atc/tasks/<task_id>.yaml` (`docs/TASKS.md`).
 
-    atc task new --scope TEXT [--project P | --repo ROOT]
-    atc task list [--project P | --repo ROOT | --all] [--status S] [--json]
+    atc task new --scope TEXT [--project P]
+    atc task list [--project P | --all] [--status S] [--json]
     atc task check [DIR]
 
 `new` writes a record in the topic worktree holding the working directory.
@@ -152,11 +152,11 @@ def common_dir(repo: Path) -> str:
     return os.path.normcase(os.path.realpath(out))
 
 
-def resolve(root: Path, environ: dict[str, str], cwd: str, project: str | None, repo: str | None, every: bool = False,
+def resolve(root: Path, environ: dict[str, str], cwd: str, project: str | None, every: bool = False,
             task: str | None = None):
     """The targets as (name, main checkout) pairs, named as `atc worktree` names them.
 
-    Without ``repo`` and ``project``, a record ID ``task`` names the one repository declaring its prefix; with none
+    Without ``project``, a record ID ``task`` names the one repository declaring its prefix; with none
     or several, the working directory's project.
     """
     import hami_worktree as hw
@@ -169,11 +169,6 @@ def resolve(root: Path, environ: dict[str, str], cwd: str, project: str | None, 
     if every:
         return [(root_target.name, Path(ws.root))] + [
             (p.name, Path(p.repo)) for p in sorted(ws.projects.values(), key=lambda p: p.name) if Path(p.repo).is_dir()]
-    if repo is not None:
-        if hw.key(os.path.realpath(repo)) != hw.key(os.path.realpath(ws.root)):
-            raise Refused("UNKNOWN_PROJECT", f"--repo takes the workspace root {ws.root} only; a registered project "
-                                             f"takes --project; {registered}")
-        return [(root_target.name, Path(ws.root))]
     if project == root_target.name:
         return [(root_target.name, Path(ws.root))]
     if project is not None:
@@ -245,27 +240,20 @@ def bound_governance(name: str, root: Path, worktree: Path) -> tuple[str, str]:
     return source, revision
 
 
-def new_hint(root: Path, project: bool = False) -> str:
-    """What `atc task new` refused for its place or `--repo` says to do instead; ``project`` adds the registered
-    project's form."""
-    hint = f"Run it inside the new worktree with an absolute --repo: atc task new --repo \"{root}\" --scope <text>"
-    return f"{hint}; for a registered project: atc task new --project <name> --scope <text>" if project else hint
+def new_hint() -> str:
+    """What `atc task new` refused for its place says to do instead."""
+    return "Run it inside the new worktree: atc task new --project <name> --scope <text>, root for the workspace root"
 
 
-def new(root: Path, environ: dict[str, str], cwd: str, scope: str, project: str | None, repo: str | None) -> Path:
+def new(root: Path, environ: dict[str, str], cwd: str, scope: str, project: str | None) -> Path:
     worktree = toplevel(Path(cwd))
     if worktree is None:
         raise Refused("NOT_IN_REPOSITORY", f"{cwd} is in no Git working tree")
     if os.path.normcase(os.path.realpath(worktree)) == os.path.normcase(os.path.realpath(root)):
         raise Refused("CHECKOUT_CANONICAL", f"{worktree} is the workspace root's canonical checkout; "
                                             "write the record in the topic's worktree under worktrees/root. "
-                                            f"{new_hint(root)}")
-    try:
-        [(name, main_checkout)] = resolve(root, environ, cwd, project, repo)
-    except Refused as refused:
-        if refused.token != "UNKNOWN_PROJECT" or repo is None:
-            raise
-        raise Refused(refused.token, f"{refused.detail}. {new_hint(root, project=True)}") from None
+                                            f"{new_hint()}")
+    [(name, main_checkout)] = resolve(root, environ, cwd, project)
     if common_dir(worktree) != common_dir(main_checkout):
         raise Refused("WRONG_REPOSITORY", f"{worktree} is not a worktree of {name} ({main_checkout})")
     branch = git(worktree, "branch", "--show-current").stdout.strip()
@@ -435,8 +423,7 @@ def build_parser() -> argparse.ArgumentParser:
     list_parser = sub.add_parser("list", allow_abbrev=False, help="list tasks with their derived status")
     for p in (new_parser, list_parser):
         target = p.add_mutually_exclusive_group()
-        target.add_argument("--project")
-        target.add_argument("--repo", metavar="ROOT")
+        target.add_argument("--project", help="registered project name from workspace.yaml; root names the workspace root")
         if p is list_parser:
             target.add_argument("--all", action="store_true")
     list_parser.add_argument("--status", choices=STATUSES)
@@ -461,10 +448,10 @@ def main(argv: list[str] | None = None, root: Path = ROOT, environ: dict[str, st
                 print(f"ok: {directory}")
             return 1 if found else 0
         if args.command == "new":
-            path = new(root, environ, cwd, args.scope, args.project, args.repo)
+            path = new(root, environ, cwd, args.scope, args.project)
             print(f"CREATED {path.stem} {path}")
             return 0
-        targets = resolve(root, environ, cwd, args.project, args.repo, every=args.all)
+        targets = resolve(root, environ, cwd, args.project, every=args.all)
         rows = [row for name, repo in targets for row in tasks(name, repo, fold_warnings=not args.json)]
         if args.status:
             rows = [row for row in rows if row["status"] == args.status]
