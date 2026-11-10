@@ -133,6 +133,9 @@ workflow prose still requires its applicable policy review, static validation
 and activation authority. Record the classification and supporting checks in
 the delivery evidence. Required CI and publication gates remain applicable.
 
+A range that changes only files under `.atc/tasks/` is verified by the record
+check and needs no formal review.
+
 ### Full regression timing and evidence reuse
 
 This section applies to full regression checks already required by a task or
@@ -193,6 +196,9 @@ section above; this section covers the rest of the test workflow.
 - While iterating, run the touched test files.
 - Before a commit or push, run the project's impact-selected `not slow` tests
   (its pre-push gate, where it has one).
+- Writers and reviewers run the selection (`select_tests.py`, or the
+  project's own selection); only the integration verifier runs the full
+  suite.
 
 A project's local pre-push gate, where it has one, runs the impact-selected
 `not slow` tests for the pushed paths. Unknown paths select the project's
@@ -272,6 +278,17 @@ that needs them is rewritten until it does not. Evidence names the command
 that ran and the revision it ran against.
 
 ## Independent review
+
+A SHA's first review is a fresh reviewer: a subagent or a separate session
+that has not seen the writer's conversation. A re-review that only fixes the
+last round's findings continues the same reviewer with the findings and the
+fix diff; new design or new files get a fresh reviewer. No rule requires the
+final round to be fresh.
+
+A verdict's first line is the verdict token, then one line per finding
+(severity, `file:line`, required fix), the verified items as one line, and no
+narrative. A PASS ends with the runnable
+`atc integrate --task ... --reviewed ...` line.
 
 ## Verification requires evidence, not confidence
 
