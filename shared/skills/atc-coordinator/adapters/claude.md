@@ -8,5 +8,5 @@
 - Sessions are addressed by the exact name ListAgents shows.
 - Subscribe to the writer's idle notice where the harness offers it,
   instead of polling.
-- Once the task is closed, archive both sessions through the session
+- Sessions are archived at close-out (step 6) through the session
   management tools.
