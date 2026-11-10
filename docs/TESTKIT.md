@@ -88,8 +88,10 @@ order. Each is one pytest invocation over the selected paths.
   markers a test carries. The `interactive` stage excludes `slow`, so this
   invocation is the one run of a test that is both `slow` and
   `interactive_desktop`; it therefore runs on the desktop the CI job starts
-  it from, with no private desktop. It passes when it collects no test. The
-  project decides which CI job holds it.
+  it from, with no private desktop, and the runner sets
+  `ATC_DESKTOP_GUARD=0` for it unless the caller set the variable (§ Private
+  desktop). It passes when it collects no test. The project decides which CI
+  job holds it.
 - No project has a test that is both `slow` and `interactive_desktop`, so no
   run has shown that a hosted Windows CI runner's job desktop serves one. The
   first such test's first CI run of this invocation shows it.
@@ -278,10 +280,35 @@ Windows only; on other platforms a stage starts normally.
 - A test that needs the interactive desktop (native tray icons are the
   known case) carries `interactive_desktop` and runs in the
   `interactive` stage, which still shows windows.
-- `atc test run` runs on a private desktop when called with
-  `ATC_PRIVATE_DESKTOP=1`, and then excludes `interactive_desktop` tests.
-- A pytest run started directly, outside the gate, the verifier and
-  `atc test run`, runs on the desktop it was started from.
+- `atc test run` and `atc test mutants` run on a private desktop and
+  exclude `interactive_desktop` tests, saying so in one line:
+  `NOTE private desktop: interactive_desktop tests are excluded; ATC_PRIVATE_DESKTOP=0 runs on the interactive desktop with them`.
+  `ATC_PRIVATE_DESKTOP=0` runs on the interactive desktop with those tests
+  included. Unset and `1` are private; any other value is refused with
+  `PRIVATE_DESKTOP_INVALID` (exit 9) before any test runs.
+- `atc test private <command> [args...]` runs one command on a private
+  desktop (§ Commands); `atc_testkit.desktop.run(command, cwd=, env=)` does
+  the same for a Python caller. A project script that starts pytest itself
+  goes through one of them.
+- A pytest run started directly, outside these, runs on the desktop it was
+  started from. On that desktop the plugin's guard refuses a Tk window:
+  - The guard is on when the session's own desktop is `WinSta0\Default`.
+    `ATC_DESKTOP_GUARD` overrides the detection: `0` off, `1` on, unset
+    automatic; any other value stops the run as a usage error
+    (`DESKTOP_GUARD_INVALID`, exit 4).
+  - A Tk root created for a test not marked `interactive_desktop` is refused
+    before Tcl creates the window: `tkinter.Tk()` with `useTk` true and
+    `Tk.loadtk` raise `INTERACTIVE_DESKTOP_WINDOW` naming the test and the two
+    ways out, `atc test run` or the marker. The test's report is failed at
+    teardown as well, so code that catches the exception does not hide it.
+  - A fixture's setup and teardown count as part of the test being set up or
+    torn down, so a module- or session-scoped Tk fixture set up for a marked
+    test passes. A root created at collection, or at session start before
+    any test, is refused and stops the run.
+  - `tkinter.Tcl()` opens no window and passes. The plugin imports `tkinter`
+    only when the guard is on; a Python without it has nothing to guard.
+  - A window opened by a child process a test starts is outside the guard;
+    the private desktop, which the child inherits, is what covers it.
 
 ## CI runner
 
@@ -336,7 +363,8 @@ the scratch `<scratch>` (`ATC_HOME.md` § Test scratch). In order:
    namespace directories, and require each to load from inside the tree:
    `COPY_IMPORT_MISMATCH` (exit 8). This guard is what proves the copy, not
    an installed checkout, is what runs.
-5. Print `NOTE no .venv` when the tree has none, then `== <label> ==`, and
+5. Print `NOTE no .venv` when the tree has none, the private desktop's
+   exclusion line (§ Private desktop), then `== <label> ==`, and
    run pytest with `-p no:cacheprovider`, `-n 0` when xdist is installed,
    `-q` and `--basetemp <scratch>/bt`, printing the last fifteen lines of its
    output.
@@ -370,8 +398,9 @@ in a log. The form is chosen by the first argument: an option selects it.
    selected paths come before the pytest arguments.
 3. pytest runs as in step 5 above with `PYTHONUNBUFFERED=1`, its output
    written as it arrives to `<scratch>/runs/<UTC time>-<label>.log` after
-   the § Running and logging header. The console shows `LOG <path>` first
-   and, with `--progress`, the output too.
+   the § Running and logging header. The console shows `LOG <path>` first,
+   then the private desktop's exclusion line, and, with `--progress`, the
+   output too.
 4. One summary line ends the command: `PASS`, `FAIL`, `NO_TESTS`,
    `INTERRUPTED` or `ERROR exit <code>`, pytest's counts, the failed and
    errored tests by node ID, and the log path. A run that `--timeout` ends
@@ -386,7 +415,9 @@ Applies each mutant alone to `<scratch>/tree`, the export of `<sha>`, through
 
 - `<sha>` must name a commit in `<worktree>` (`git rev-parse --verify`):
   `SHA_NOT_FOUND` (exit 9) before the scratch is touched, then
-  `PYTHON_NOT_FOUND` and the scratch refusals of `atc test run` (exit 9).
+  `PYTHON_NOT_FOUND`, the scratch refusals of `atc test run` and
+  `PRIVATE_DESKTOP_INVALID` (exit 9). The private desktop's exclusion line
+  comes first when the runs are private.
 - The tests run once unmutated first; a failing baseline prints
   `BASELINE-RED` and exits 1 before any mutant is applied.
 - A mutant is a label and a list of edits `{path, old, new}`. An `old` that
@@ -410,6 +441,14 @@ Applies each mutant alone to `<scratch>/tree`, the export of `<sha>`, through
   `done: N of M mutants, S survived <labels>` after any abort, also one on the
   last mutant, where `N` counts the mutants that printed a `KILLED`,
   `SURVIVED` or `INCONCLUSIVE` line.
+
+### `atc test private [--] <command> [args...]`
+
+Runs `<command>` on a private desktop from the current directory with the
+current environment. It prints `desktop: private`, or `desktop: interactive`
+with the line § Private desktop names when no desktop can be created, then
+streams the command's merged output, and exits with its code. Without a
+command it prints its usage (exit 2).
 
 ### `atc tmp checkout`, `atc tmp list`, `atc tmp clean`, `atc tmp prune`
 

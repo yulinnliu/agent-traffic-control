@@ -2,7 +2,8 @@
 
 It registers the markers, enforces the marker contract, groups tests that share a wider-scoped fixture for
 ``--dist loadgroup`` (docs/TESTKIT.md § Stages), moves the temporary directory (docs/ATC_HOME.md § Resolving the
-locations) and ends child processes (docs/TESTKIT.md § Child processes).
+locations), ends child processes (docs/TESTKIT.md § Child processes) and, on the interactive desktop, refuses Tk
+windows of tests not marked ``interactive_desktop`` (docs/TESTKIT.md § Private desktop).
 """
 from __future__ import annotations
 
@@ -11,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from . import children, config as project_config, locations
+from . import children, config as project_config, desktop_guard, locations
 from .markers import MARKER_DESCRIPTIONS, load_unmarked_baseline, marker_contract_violations
 
 TEMP_ROOT_VARIABLE = "PYTEST_DEBUG_TEMPROOT"
@@ -45,6 +46,8 @@ def pytest_configure(config):
     for name, description in MARKER_DESCRIPTIONS.items():
         config.addinivalue_line("markers", f"{name}: {description}")
     reap_seconds(config)
+    if desktop_guard.enabled(os.environ):
+        config.pluginmanager.register(desktop_guard.Guard().install(), "atc_desktop_guard")
     if config.option.basetemp or os.environ.get(TEMP_ROOT_VARIABLE):
         return
     try:

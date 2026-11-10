@@ -48,7 +48,8 @@ def tree(tmp_path: Path) -> Path:
 
 
 def test_a_run_prints_the_note_the_label_and_the_tail(tree: Path, atc_tmp: Path) -> None:
-    run = run_command("test", "run", str(tree), "s1", sys.executable, "the label", "-s", "tests", HAMI_X="set")
+    run = run_command("test", "run", str(tree), "s1", sys.executable, "the label", "-s", "tests", HAMI_X="set",
+                      ATC_PRIVATE_DESKTOP="0")
     assert run.returncode == 0, run.stdout + run.stderr
     lines = run.stdout.splitlines()
     assert lines[0].startswith("NOTE no .venv") and lines[1] == "== the label =="
@@ -70,7 +71,8 @@ def test_the_exit_code_is_pytests(tree: Path, atc_tmp: Path) -> None:
 def test_only_the_last_fifteen_lines_are_printed(tree: Path, atc_tmp: Path) -> None:
     body = "def test_lines():\n    for i in range(40): print('LINE', i)\n"
     (tree / "tests/test_lines.py").write_text(body, encoding="utf-8")
-    run = run_command("test", "run", str(tree), "s", sys.executable, "l", "-s", "tests/test_lines.py")
+    run = run_command("test", "run", str(tree), "s", sys.executable, "l", "-s", "tests/test_lines.py",
+                      ATC_PRIVATE_DESKTOP="0")
     assert "LINE 0\n" not in run.stdout and run.stdout.count("\n") <= 2 + 15
 
 
@@ -184,7 +186,8 @@ def test_the_guard_descends_through_namespace_directories(tree: Path, atc_tmp: P
 
 def test_the_tree_has_no_venv_note_when_it_holds_one(tree: Path, atc_tmp: Path) -> None:
     (tree / ".venv").mkdir()
-    assert "NOTE" not in run_command("test", "run", str(tree), "s", sys.executable, "l", "tests").stdout
+    assert "NOTE" not in run_command("test", "run", str(tree), "s", sys.executable, "l", "tests",
+                                     ATC_PRIVATE_DESKTOP="0").stdout
 
 
 def test_the_registry_gets_one_line_per_scratch(tree: Path, atc_tmp: Path) -> None:
@@ -210,9 +213,23 @@ def test_a_private_desktop_run_excludes_interactive_tests(tree: Path, atc_tmp: P
             "@pytest.mark.interactive_desktop\ndef test_interactive():\n    assert False\n")
     (tree / "tests/test_desktop.py").write_text(body, encoding="utf-8")
     (tree / "pyproject.toml").write_text('[tool.pytest.ini_options]\nmarkers = ["interactive_desktop: x"]\n', encoding="utf-8")
-    run = run_command("test", "run", str(tree), "s", sys.executable, "l", "tests/test_desktop.py", ATC_PRIVATE_DESKTOP="1")
-    assert run.returncode == 0, run.stdout + run.stderr
-    assert "1 passed, 1 deselected" in run.stdout
+    for value in ("1", ""):
+        run = run_command("test", "run", str(tree), "s", sys.executable, "l", "tests/test_desktop.py",
+                          ATC_PRIVATE_DESKTOP=value)
+        assert run.returncode == 0, run.stdout + run.stderr
+        assert "1 passed, 1 deselected" in run.stdout and testrun.EXCLUSION_NOTE in run.stdout
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(os.name != "nt", reason="a private desktop exists on Windows only")
+def test_zero_runs_on_the_interactive_desktop_and_another_value_is_refused(tree: Path, atc_tmp: Path) -> None:
+    body = "import pytest\n@pytest.mark.interactive_desktop\ndef test_interactive():\n    pass\n"
+    (tree / "tests/test_desktop.py").write_text(body, encoding="utf-8")
+    (tree / "pyproject.toml").write_text('[tool.pytest.ini_options]\nmarkers = ["interactive_desktop: x"]\n', encoding="utf-8")
+    run = run_command("test", "run", str(tree), "s", sys.executable, "l", "tests/test_desktop.py", ATC_PRIVATE_DESKTOP="0")
+    assert run.returncode == 0 and "1 passed" in run.stdout and testrun.EXCLUSION_NOTE not in run.stdout
+    run = run_command("test", "run", str(tree), "s", sys.executable, "l", "tests", ATC_PRIVATE_DESKTOP="yes")
+    assert run.returncode == 9 and run.stderr.startswith("PRIVATE_DESKTOP_INVALID ")
 
 
 def test_the_exclusion_joins_a_given_marker_expression() -> None:
@@ -271,7 +288,7 @@ SURVIVING = {"label": "S two", "edits": [{"path": "src/fixture_pkg/__init__.py",
 
 def test_mutants_are_killed_or_survive_and_files_are_restored(export: Export, tmp_path: Path) -> None:
     run = export.run(tmp_path, [KILLED, SURVIVING])
-    lines = run.stdout.splitlines()
+    lines = [line for line in run.stdout.splitlines() if line != testrun.EXCLUSION_NOTE]
     assert run.returncode == 0, run.stdout + run.stderr
     assert lines[0].startswith("BASELINE-OK")
     assert lines[1].startswith("KILLED") and "K one" in lines[1] and "FAILED" in lines[1]
@@ -285,7 +302,8 @@ def test_a_red_baseline_applies_no_mutant(export: Export, tmp_path: Path) -> Non
     export.file.write_text("def value():\n    return 9\n", encoding="utf-8")
     applicable = {"label": "K one", "edits": [{"path": "src/fixture_pkg/__init__.py", "old": "return 9", "new": "return 1"}]}
     run = export.run(tmp_path, [applicable])
-    assert run.returncode == 1 and run.stdout.startswith("BASELINE-RED") and "K one" not in run.stdout + run.stderr
+    lines = [line for line in run.stdout.splitlines() if line != testrun.EXCLUSION_NOTE]
+    assert run.returncode == 1 and lines[0].startswith("BASELINE-RED") and "K one" not in run.stdout + run.stderr
 
 
 @pytest.mark.parametrize("old", ["absent text", "\n"])
@@ -326,7 +344,7 @@ def test_a_same_size_write_in_the_files_last_second_reaches_the_run(export: Expo
         held_writes.chdir(tmp_path)
         code = testrun.mutants([export.place.name, export.sha, str(export.worktree), str(listing), "--python",
                                 sys.executable, "--tests", "tests"], bytecode_written)
-    lines = capsys.readouterr().out.splitlines()
+    lines = [line for line in capsys.readouterr().out.splitlines() if line != testrun.EXCLUSION_NOTE]
     assert code == 0, lines
     assert lines[1].startswith("KILLED") and "K one" in lines[1]
     assert lines[2].startswith("SURVIVED") and "other file" in lines[2]
@@ -502,3 +520,15 @@ def test_tmp_clean_takes_only_the_tree_name_option(monkeypatch: pytest.MonkeyPat
     assert capsys.readouterr().err.startswith("usage: atc tmp clean")
     assert commands.main(["tmp", "clean", "--project", "p"]) == 2
     assert capsys.readouterr().err.startswith("usage: atc tmp clean")
+
+
+@pytest.mark.integration
+def test_mutants_refuse_an_invalid_private_desktop_value_before_the_baseline(
+        export: Export, tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
+    listing = tmp_path / "m.json"
+    listing.write_text("[]", encoding="utf-8")
+    monkeypatch.setenv("ATC_PRIVATE_DESKTOP", "yes")
+    code = commands.main(["test", "mutants", export.place.name, export.sha, str(export.worktree), str(listing),
+                          "--python", sys.executable, "--tests", "tests"])
+    captured = capsys.readouterr()
+    assert code == 9 and captured.err.startswith("PRIVATE_DESKTOP_INVALID ") and "BASELINE" not in captured.out

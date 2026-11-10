@@ -198,3 +198,15 @@ def test_the_slow_invocation_starts_no_private_desktop(project: Path, monkeypatc
     monkeypatch.chdir(project)
     monkeypatch.setattr(ci, "run_pytest", lambda args, **_options: (args, 0)[1] if args == ["-q", "-m", "slow", "-n", "0"] else 9)
     assert ci.main(["--slow"]) == 0
+
+
+@pytest.mark.unit
+def test_the_slow_invocation_turns_the_desktop_guard_off_unless_set(project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from atc_testkit import desktop_guard
+    monkeypatch.chdir(project)
+    seen = []
+    monkeypatch.setattr(ci, "run_pytest", lambda args, **_options: seen.append(os.environ.get(desktop_guard.GUARD_VARIABLE)) or 0)
+    monkeypatch.delenv(desktop_guard.GUARD_VARIABLE, raising=False)
+    assert ci.main(["--slow"]) == 0 and desktop_guard.GUARD_VARIABLE not in os.environ
+    monkeypatch.setenv(desktop_guard.GUARD_VARIABLE, "1")
+    assert ci.main(["--slow"]) == 0 and seen == ["0", "1"]

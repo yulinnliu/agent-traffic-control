@@ -167,3 +167,18 @@ def kill_tree(pid: int) -> None:
             os.killpg(pid, signal.SIGKILL)
         except OSError:
             pass
+
+
+def run(command: Sequence[str], *, cwd: Path | str, env: Mapping[str, str]) -> int:
+    """Run ``command`` on a private desktop, print ``desktop: <where>`` and stream its output; return its exit code."""
+    import sys
+    process, where = start(command, cwd=cwd, env=env, private=True)
+    print(f"desktop: {where}", flush=True)
+    sink = getattr(sys.stdout, "buffer", None)
+    for chunk in iter(lambda: process.stdout.read1(65536), b""):
+        if sink is not None:
+            sink.write(chunk)
+            sink.flush()
+        else:
+            sys.stdout.write(chunk.decode(errors="backslashreplace"))
+    return process.wait()

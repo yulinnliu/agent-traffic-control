@@ -28,6 +28,8 @@ MUTANT_SECONDS = 900.0
 SUMMARY_WIDTH = 150
 PRIVATE_DESKTOP_VARIABLE = "ATC_PRIVATE_DESKTOP"
 INTERACTIVE_EXCLUSION = "not interactive_desktop"
+EXCLUSION_NOTE = (f"NOTE private desktop: interactive_desktop tests are excluded; {PRIVATE_DESKTOP_VARIABLE}=0 "
+                  "runs on the interactive desktop with them")
 KILLED, SURVIVED, INCONCLUSIVE = "KILLED", "SURVIVED", "INCONCLUSIVE"
 IMPORT_GUARD = r"""
 import glob, importlib, os, sys
@@ -157,7 +159,16 @@ def isolate(tree: Path, place: Path, python: str, environ: MutableMapping[str, s
     guard = _capture([python, "-c", IMPORT_GUARD, str(tree)], tree, environ, False, None)
     if guard.code != 0:
         raise Refusal("COPY_IMPORT_MISMATCH", "\n".join(guard.lines), GUARD_EXIT)
-    return environ.get(PRIVATE_DESKTOP_VARIABLE) == "1"
+    return private_desktop(environ)
+
+
+def private_desktop(environ: Mapping[str, str]) -> bool:
+    """On Windows a run is private unless ``ATC_PRIVATE_DESKTOP=0``; another value than 0 or 1 is refused."""
+    value = environ.get(PRIVATE_DESKTOP_VARIABLE, "")
+    if value not in ("", "0", "1"):
+        raise Refusal("PRIVATE_DESKTOP_INVALID", f"{PRIVATE_DESKTOP_VARIABLE}={value!r}: use 0 for the interactive "
+                                                 "desktop, 1 or nothing for a private one")
+    return os.name == "nt" and value != "0"
 
 
 def _pytest_command(python: str, tree: Path, place: Path, environ: Mapping[str, str], private: bool,
@@ -182,6 +193,8 @@ def execute(tree_argument: str, scratch_argument: str, python_argument: str, lab
         if not (tree / ".venv").exists():
             print(f"NOTE no .venv in {tree}: tests that launch source children need one; "
                   "prepare it as the project's AGENTS.md says.", flush=True)
+        if private:
+            print(EXCLUSION_NOTE, flush=True)
         print(f"== {label} ==", flush=True)
     command = _pytest_command(python, tree, place, environ, private, pytest_arguments)
     result = _capture(command, tree, environ, private, timeout)
@@ -292,6 +305,8 @@ def mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None = None
     _root, place = prepare_scratch(args.scratch, environ)
     tree = place / "tree"
     pytest_arguments = ["-x", *args.tests]
+    if private_desktop(environ):
+        print(EXCLUSION_NOTE, flush=True)
 
     def attempt(label: str) -> Result:
         return execute(str(tree), str(place), python, label, pytest_arguments, environ, quiet=True,
@@ -506,6 +521,8 @@ def run_flags(argv: Sequence[str], environ: MutableMapping[str, str] | None = No
     label = LABEL_CHARACTERS.sub("_", args.label)[:40] or "run"
     log = place / RUNS / f"{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}-{label}.log"
     print(f"LOG {log}", flush=True)
+    if private:
+        print(EXCLUSION_NOTE, flush=True)
     command = _pytest_command(python, tree, place, environ, private, pytest_arguments)
     try:
         result: Result | None = _logged(command, tree, environ, private, args.timeout, log, args.progress)

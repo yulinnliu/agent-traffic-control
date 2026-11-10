@@ -50,7 +50,7 @@ def summary_line(run: subprocess.CompletedProcess[str]) -> str:
 @pytest.mark.integration
 def test_a_run_prints_its_log_and_one_summary_line(tree: Path, atc_tmp: Path) -> None:
     run = run_command("--scratch", "f1", "--tree", str(tree), "--python", sys.executable, "--label", "my run",
-                      "--", "tests/test_value.py")
+                      "--", "tests/test_value.py", ATC_PRIVATE_DESKTOP="0")
     assert run.returncode == 0, run.stdout + run.stderr
     first, last = run.stdout.splitlines()[0], summary_line(run)
     log = Path(first.removeprefix("LOG "))

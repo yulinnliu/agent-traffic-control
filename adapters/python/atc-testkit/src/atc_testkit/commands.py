@@ -6,9 +6,10 @@ stderr and exits 2.
 from __future__ import annotations
 
 from collections.abc import Sequence
+import os
 import sys
 
-from . import checkout, scratch, testrun
+from . import checkout, desktop, scratch, testrun
 from .locations import Refusal
 
 USAGE_EXIT = 2
@@ -22,6 +23,7 @@ USAGES = {
                      "[--label <label>] [--timeout <s>] [--progress] [-- <pytest args...>]",
     ("test", "mutants"): "usage: atc test mutants <scratch> <sha> <worktree> <mutants.json> --python <py> "
                          "--tests <path>...",
+    ("test", "private"): "usage: atc test private [--] <command> [args...]",
     ("tmp", "checkout"): "usage: atc tmp checkout <sha> --task <ID> [--worktree <path>] [--scratch <name>] "
                          "[--lock-dir <dir>]",
     ("tmp", "list"): "usage: atc tmp list [--json]",
@@ -40,7 +42,11 @@ DESCRIPTIONS = {
 The flag form keeps pytest's output in <scratch>/runs/ and prints the log
 path and one summary line; `atc test run --scratch x --help` lists its options.
 
-Exit: pytest's code, 8 for a guard refusal, 9 for a location refusal.""",
+Exit: pytest's code, 8 for a guard refusal, 9 for a refusal before the run (a location or
+ATC_PRIVATE_DESKTOP).""",
+    ("test", "private"): """Run one command on a private desktop from the current directory with the current
+environment; print `desktop: private` (or `desktop: interactive` where none can be
+created), stream its merged output and exit with its code (docs/TESTKIT.md § Commands).""",
     ("tmp", "list"): """Print one line per registered scratch: its name, its tree relative to the scratch
 (the full path when the tree lies outside it), its age, `missing` when the directory is
 gone, and its task; delete nothing. A last line counts the missing ones and names
@@ -61,7 +67,7 @@ Exit: 0, 1 for a refused directory, 2 before anything is deleted.""",
     ("tmp", "prune"): """Delete entries of <tmp>/systmp and <tmp>/candidates older than seven days
 (docs/ATC_HOME.md § Deleting).""",
 }
-GROUPS = {"test": ("run", "mutants"), "tmp": ("checkout", "list", "clean", "prune")}
+GROUPS = {"test": ("run", "mutants", "private"), "tmp": ("checkout", "list", "clean", "prune")}
 
 
 def _group_usage(group: str) -> str:
@@ -112,6 +118,11 @@ def _dispatch(arguments: Sequence[str]) -> int:
         return _help(f"{USAGES[command]}\n\n{DESCRIPTIONS[command]}")
     if command == ("test", "run"):
         return testrun.run(rest)
+    if command == ("test", "private"):
+        rest = rest[1:] if rest[:1] == ["--"] else rest
+        if not rest:
+            return _usage(USAGES[command])
+        return desktop.run(rest, cwd=os.getcwd(), env=os.environ)
     if command == ("tmp", "clean"):
         return _clean(rest)
     if command == ("tmp", "list") and rest in ([], ["--json"]):

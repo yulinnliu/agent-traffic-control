@@ -40,7 +40,9 @@ sets pytest `strict_markers` also fails collection on an unregistered marker.
 `pytest_plugins = ("atc_testkit.plugin",)`. It moves a run's temporary directory
 below the ATC home, enforces the marker contract, ends the child processes a test
 started through `children`, and fails a run that leaves one alive
-(`CHILD_PROCESSES_ALIVE`).
+(`CHILD_PROCESSES_ALIVE`). On the interactive Windows desktop it refuses a Tk
+window for a test not marked `interactive_desktop`
+(`INTERACTIVE_DESKTOP_WINDOW`; `docs/TESTKIT.md` § Private desktop).
 
 `selection` takes a repository-owned `SelectionPolicy`: dependencies, ordered test
 paths, shared inputs, special package inputs and fixture consumers. Unknown paths
@@ -100,9 +102,10 @@ diagnostics. A project supplies data.
 - `ci` is the runner a CI job calls: `python -m atc_testkit.ci --stages` runs the
   stages, `--slow` the slow tests, and any other arguments go to pytest. A project
   adds failure context, hints and initialization through `ci.main`.
-- `atc test run`, `atc test mutants` and `atc tmp list|clean|prune` run a test
-  tree under a scratch directory, kill mutants of a committed tree and manage the
-  scratch registry; `python -m atc_testkit.commands` is the same entry point.
+- `atc test run`, `atc test mutants`, `atc test private` and
+  `atc tmp checkout|list|clean|prune` run a test tree under a scratch directory on
+  a private desktop, kill mutants of a committed tree, run one command on a
+  private desktop, and export commits into and manage the scratch registry; `python -m atc_testkit.commands` is the same entry point.
   `-h` after a subcommand prints its help and exits 0. `atc tmp clean
   --tree-name <name>` takes the registry rows of one tree. A refusal token goes to stderr; the per-directory lines `DELETED`, `SKIPPED`,
   `REFUSED`, `ANOMALY` and `LEFT` are the normal output of `atc tmp` on stdout.

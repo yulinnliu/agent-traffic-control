@@ -20,7 +20,7 @@ import threading
 
 import pytest
 
-from . import config, locations, stages
+from . import config, desktop_guard, locations, stages
 from .evidence import Stage
 
 REPORT_LIMIT = 4000  # characters of a failing report kept, counted from its end where the exception line sits
@@ -163,7 +163,14 @@ def main(args: Sequence[str] | None = None, *, context: Context | None = None, h
         return run_all_stages(rest, workers)
     if arguments[:1] == ["--slow"]:
         slow = Stage(stages.SLOW.name, stages.SLOW.marker, config.ignored_paths(Path.cwd()))
-        code = run_pytest([*stages.pytest_arguments(slow), *arguments[1:]], context=context, hints=hints, init=init)
+        saved = os.environ.get(desktop_guard.GUARD_VARIABLE)
+        os.environ.setdefault(desktop_guard.GUARD_VARIABLE, "0")
+        try:
+            code = run_pytest([*stages.pytest_arguments(slow), *arguments[1:]], context=context, hints=hints,
+                              init=init)
+        finally:
+            if saved is None:
+                os.environ.pop(desktop_guard.GUARD_VARIABLE, None)
         return 0 if code == stages.PYTEST_NO_TESTS_COLLECTED else code
     return run_pytest(arguments, context=context, hints=hints, init=init)
 

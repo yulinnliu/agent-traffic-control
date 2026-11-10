@@ -241,3 +241,77 @@ def test_a_bad_reap_window_is_a_usage_error(project: Path, atc_tmp: Path, value:
     run = pytest_in(project, "-o", f"atc_testkit_reap_seconds={value}")
     assert run.returncode == 4, run.stdout + run.stderr
     assert "REAP_SECONDS_INVALID" in run.stdout + run.stderr
+
+
+GUARDED_TEST = '''import tkinter
+import pytest
+
+pytestmark = pytest.mark.unit
+
+
+@pytest.fixture(scope="module")
+def shared_root():
+    root = tkinter.Tk()
+    yield root
+    root.destroy()
+
+
+def test_unmarked():
+    tkinter.Tk().destroy()
+
+
+def test_swallowed():
+    try:
+        tkinter.Tk().destroy()
+    except Exception:
+        pass
+
+
+def test_tcl_only():
+    tkinter.Tcl()
+
+
+@pytest.mark.interactive_desktop
+def test_marked(shared_root):
+    assert shared_root.winfo_exists()
+'''
+
+
+def guarded_run(project: Path, *args: str, **env: str) -> tuple[int, str]:
+    """A child pytest on a private desktop, so a window the guard lets through shows nowhere."""
+    from atc_testkit import desktop
+    environment = {key: value for key, value in os.environ.items() if not key.startswith("PYTEST_")}
+    environment.update(env, PYTHONIOENCODING="utf-8")
+    process, _kind = desktop.start([sys.executable, "-m", "pytest", "-p", "no:cacheprovider", "-n", "0", "-rA", *args],
+                                   cwd=project, env=environment, private=True)
+    output = process.stdout.read().decode("utf-8", errors="replace")
+    return process.wait(), output
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(os.name != "nt", reason="the interactive desktop is a Windows notion")
+def test_the_desktop_guard_refuses_unmarked_tk_roots(project: Path, atc_tmp: Path) -> None:
+    pytest.importorskip("tkinter")
+    (project / "tests/test_tk.py").write_text(GUARDED_TEST, encoding="utf-8")
+    code, output = guarded_run(project, "tests/test_tk.py", ATC_DESKTOP_GUARD="1")
+    assert code == 1, output
+    assert "FAILED tests/test_tk.py::test_unmarked" in output and "ERROR tests/test_tk.py::test_swallowed" in output
+    assert "PASSED tests/test_tk.py::test_tcl_only" in output and "PASSED tests/test_tk.py::test_marked" in output
+    assert "INTERACTIVE_DESKTOP_WINDOW tests/test_tk.py::test_swallowed" in output
+    code, output = guarded_run(project, "tests/test_tk.py::test_unmarked", ATC_DESKTOP_GUARD="0")
+    assert code == 0, output
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(os.name != "nt", reason="the interactive desktop is a Windows notion")
+def test_a_tk_root_at_collection_is_refused(project: Path, atc_tmp: Path) -> None:
+    pytest.importorskip("tkinter")
+    (project / "tests/test_early.py").write_text("import tkinter\nROOT = tkinter.Tk()\n", encoding="utf-8")
+    code, output = guarded_run(project, "tests/test_early.py", ATC_DESKTOP_GUARD="1")
+    assert code == 2 and "INTERACTIVE_DESKTOP_WINDOW collection or session start" in output, output
+
+
+@pytest.mark.integration
+def test_a_bad_desktop_guard_value_is_a_usage_error(project: Path, atc_tmp: Path) -> None:
+    run = pytest_in(project, ATC_DESKTOP_GUARD="yes")
+    assert run.returncode == 4 and "DESKTOP_GUARD_INVALID" in run.stdout + run.stderr
