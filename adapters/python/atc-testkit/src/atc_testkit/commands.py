@@ -24,7 +24,7 @@ USAGES = {
                          "--tests <path>...",
     ("tmp", "checkout"): "usage: atc tmp checkout <sha> --task <ID> [--worktree <path>] [--scratch <name>] "
                          "[--lock-dir <dir>]",
-    ("tmp", "list"): "usage: atc tmp list",
+    ("tmp", "list"): "usage: atc tmp list [--json]",
     ("tmp", "clean"): f"usage: atc tmp clean [{WITH_RUNS_OPTION}] (<dir>... | {TREE_NAME_OPTION} <name>)",
     ("tmp", "prune"): "usage: atc tmp prune",
 }
@@ -41,7 +41,13 @@ The flag form keeps pytest's output in <scratch>/runs/ and prints the log
 path and one summary line; `atc test run --scratch x --help` lists its options.
 
 Exit: pytest's code, 8 for a guard refusal, 9 for a location refusal.""",
-    ("tmp", "list"): """Print the scratch registry with each scratch's size; delete nothing
+    ("tmp", "list"): """Print one line per registered scratch: its name, its tree relative to the scratch
+(the full path when the tree lies outside it), its age, `missing` when the directory is
+gone, and its task; delete nothing. A last line counts the missing ones and names
+`atc tmp prune`. `atc tmp clean` takes the name as printed.
+
+  --json          every registry field of each scratch plus `size` in bytes (null when missing)
+
 (docs/ATC_HOME.md § Scratch registry).""",
     ("tmp", "clean"): f"""Delete scratches (docs/ATC_HOME.md § Deleting).
 
@@ -108,10 +114,10 @@ def _dispatch(arguments: Sequence[str]) -> int:
         return testrun.run(rest)
     if command == ("tmp", "clean"):
         return _clean(rest)
+    if command == ("tmp", "list") and rest in ([], ["--json"]):
+        return scratch.list_scratches(as_json=True) if rest else scratch.list_scratches()
     if rest:
         return _usage(USAGES[command])
-    if command == ("tmp", "list"):
-        return scratch.list_scratches()
     return scratch.prune()
 
 

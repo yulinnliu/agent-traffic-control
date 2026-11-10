@@ -410,6 +410,17 @@ def test_human_output_is_one_ascii_line_per_target(ws: Workspace, capsys: pytest
     assert out.strip().splitlines() == [f"OK {PROJECT}/ (no worktrees) - continue"]
 
 
+@pytest.mark.integration
+def test_create_and_cleanup_print_one_verdict_line_each(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    main = run_git(ws.repo, "rev-parse", "main")[:12]
+    common = ["--project", PROJECT, "--owner", "claude", "--topic", "topic", "--contract", "1"]
+    kwargs = dict(root=ws.root, environ=ws.environ, home=str(ws.home))
+    assert hw.main(["create", *common], **kwargs) == 0
+    assert capsys.readouterr().out.splitlines() == [f"CREATED {PROJECT}/claude+topic base {main}"]
+    assert hw.main(["cleanup", *common], **kwargs) == 0
+    assert capsys.readouterr().out.splitlines() == [f"REMOVED {PROJECT}/claude+topic main {main}"]
+
+
 # Create and resume
 
 

@@ -428,15 +428,58 @@ def test_concurrent_changes_keep_every_line(atc_tmp: Path, tmp_path: Path) -> No
     assert len(scratch.registered(atc_tmp)) == 20
 
 
-def test_list_prints_the_registry_with_sizes_and_deletes_nothing(atc_tmp: Path, tmp_path: Path) -> None:
+@pytest.mark.integration
+def test_list_prints_one_line_per_scratch_and_deletes_nothing(atc_tmp: Path, tmp_path: Path) -> None:
+    created = datetime(2026, 11, 1, 12, 0, tzinfo=UTC)
     present = atc_tmp / "present"
     write(present / "file.txt", "12345")
-    add(atc_tmp, present, atc_tmp / "absent")
+    scratch.register(atc_tmp, present, present / "tree", created, task="ATC-0008")
+    scratch.register(atc_tmp, atc_tmp / "absent", atc_tmp / "absent" / "tree", created)
+    scratch.register(atc_tmp, atc_tmp / "outside", tmp_path / "elsewhere", created)
+    write(atc_tmp / "outside" / "f")
     lines: list[str] = []
-    assert scratch.list_scratches(say=lines.append) == 0
-    assert lines[0] == "project\tscratch\ttree\tcreated_utc\ttask\tsource\tcommit\tsize"
-    assert lines[1].endswith("\t5") and lines[2].endswith("\tmissing")
+    assert scratch.list_scratches(say=lines.append, now=created + timedelta(days=3, hours=2)) == 0
+    assert lines == [
+        "present  tree  3d  ATC-0008",
+        "absent  tree  3d  missing",
+        f"outside  {tmp_path / 'elsewhere'}  3d",
+        "1 missing; atc tmp prune",
+    ]
     assert present.is_dir()
+
+
+@pytest.mark.integration
+def test_list_without_a_missing_scratch_has_no_count_line(atc_tmp: Path) -> None:
+    write(atc_tmp / "here" / "f")
+    scratch.register(atc_tmp, atc_tmp / "here", atc_tmp / "here")
+    lines: list[str] = []
+    scratch.list_scratches(say=lines.append)
+    assert len(lines) == 1 and lines[0].startswith("here  .  0m")
+
+
+@pytest.mark.integration
+def test_list_json_carries_every_row_field_and_the_size(atc_tmp: Path) -> None:
+    import json
+    write(atc_tmp / "present" / "file.txt", "12345")
+    scratch.register(atc_tmp, atc_tmp / "present", atc_tmp / "present", task="ATC-1", source="src", commit="c" * 40)
+    scratch.register(atc_tmp, atc_tmp / "absent", atc_tmp / "absent")
+    lines: list[str] = []
+    assert scratch.list_scratches(say=lines.append, as_json=True) == 0
+    rows = json.loads("\n".join(lines))
+    assert [set(row) for row in rows] == [set(scratch.Row._fields) | {"size"}] * 2
+    assert (rows[0]["task"], rows[0]["source"], rows[0]["commit"], rows[0]["size"]) == ("ATC-1", "src", "c" * 40, 5)
+    assert rows[1]["size"] is None
+
+
+@pytest.mark.integration
+def test_clean_takes_the_name_tmp_list_prints(atc_tmp: Path) -> None:
+    directory = write(atc_tmp / "named" / "f").parent
+    scratch.register(atc_tmp, directory, directory)
+    lines: list[str] = []
+    scratch.list_scratches(say=lines.append)
+    name = lines[0].split("  ")[0]
+    code, out = clean(name)
+    assert code == 0 and not directory.exists() and out == [f"DELETED {directory}"]
 
 
 # prune

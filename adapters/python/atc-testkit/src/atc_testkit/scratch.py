@@ -5,6 +5,7 @@ from collections.abc import Callable, Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 import fnmatch
+import json
 import os
 from pathlib import Path
 import re
@@ -374,13 +375,45 @@ def _size(path: str) -> int:
     return total
 
 
-def list_scratches(*, say: Callable[[str], None] = print, environ=None) -> int:
-    """``atc tmp list``: the registry with each scratch's size in bytes; a missing scratch shows ``missing``."""
+def _age(created_utc: str, now: datetime) -> str:
+    try:
+        seconds = (now - datetime.strptime(created_utc, TIME_FORMAT).replace(tzinfo=UTC)).total_seconds()
+    except ValueError:
+        return "?"
+    for unit, length in (("d", 86400), ("h", 3600), ("m", 60)):
+        if seconds >= length:
+            return f"{int(seconds // length)}{unit}"
+    return "0m"
+
+
+def _relative_tree(row: Row) -> str:
+    """The row's tree relative to its scratch; the full path when the tree lies outside the scratch."""
+    if locations.same_path(row.tree, row.scratch) or not row.tree.strip():
+        return "."
+    inside = os.path.relpath(row.tree, row.scratch)
+    return row.tree if inside.startswith("..") or os.path.isabs(inside) else inside
+
+
+def list_scratches(*, say: Callable[[str], None] = print, environ=None, as_json: bool = False,
+                   now: datetime | None = None) -> int:
+    """``atc tmp list``: one line per scratch (name, tree, age, ``missing``, task); ``as_json`` prints every row with its size."""
     root = locations.locate(environ).tmp
-    say(f"{REGISTRY_HEADER}\tsize")
-    for row in registered(root):
-        size = str(_size(row.scratch)) if os.path.isdir(row.scratch) else "missing"
-        say("\t".join((*row, size)))
+    rows = registered(root)
+    sizes = [_size(row.scratch) if os.path.isdir(row.scratch) else None for row in rows]
+    if as_json:
+        say(json.dumps([{**row._asdict(), "size": size} for row, size in zip(rows, sizes)], indent=2))
+        return 0
+    now = now or datetime.now(UTC)
+    for row, size in zip(rows, sizes):
+        fields = [os.path.basename(row.scratch), _relative_tree(row), _age(row.created_utc, now)]
+        if size is None:
+            fields.append("missing")
+        if row.task:
+            fields.append(row.task)
+        say("  ".join(fields))
+    missing = sizes.count(None)
+    if missing:
+        say(f"{missing} missing; atc tmp prune")
     return 0
 
 

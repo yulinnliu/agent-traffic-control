@@ -463,7 +463,7 @@ def test_mutants_refuse_a_sha_that_names_no_commit_before_the_baseline(
 # dispatch
 
 
-@pytest.mark.parametrize("arguments", [("test",), ("test", "other"), ("tmp",), ("tmp", "list", "x"), ("tmp", "clean"),
+@pytest.mark.parametrize("arguments", [("test",), ("test", "other"), ("tmp",), ("tmp", "list", "x"), ("tmp", "list", "--json", "x"), ("tmp", "clean"),
                                        ("tmp", "clean", "--tree-name"), ("tmp", "clean", "--project"),
                                        ("tmp", "clean", "--tree"), ("other",)])
 def test_a_wrong_command_exits_two(arguments: tuple[str, ...], atc_tmp: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -476,6 +476,7 @@ def test_a_wrong_command_exits_two(arguments: tuple[str, ...], atc_tmp: Path, ca
     (["test", "run", "a", "b"], "run", testrun, (["a", "b"],)),
     (["test", "mutants", "a"], "mutants", testrun, (["a"],)),
     (["tmp", "list"], "list_scratches", scratch, ()),
+    (["tmp", "list", "--json"], "list_scratches", scratch, ({"as_json": True},)),
     (["tmp", "prune"], "prune", scratch, ()),
     (["tmp", "clean", "a", "b"], "clean", scratch, (["a", "b"], {"with_runs": False})),
     (["tmp", "clean", "--tree-name", "p"], "clean", scratch, ((), "p", {"with_runs": False})),

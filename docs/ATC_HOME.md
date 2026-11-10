@@ -176,8 +176,13 @@ registered, so `atc tmp clean <scratch>` removes it.
   none, whether or not the directory already exists.
 - Every change to the file is made under `<tmp>/scratch-dirs.lock` and
   replaces the file in one step.
-- `atc tmp list` prints the registry with each scratch's size and deletes
-  nothing.
+- `atc tmp list` prints one line per scratch and deletes nothing: its name,
+  its tree relative to the scratch (the full path when the tree lies outside
+  it), its age, `missing` when the directory is gone, and its task when the
+  row has one. A last line counts the missing scratches and names
+  `atc tmp prune`. `atc tmp clean` takes the name as printed.
+  `atc tmp list --json` prints every row with all its columns plus `size` in
+  bytes (`null` when the directory is missing).
 
 Scratches are classified by the `project` column, never by a directory level,
 so classification costs no path length.

@@ -1135,10 +1135,33 @@ def display_target(target: str, ws: Workspace | None) -> str:
     return target
 
 
-def render(results: list[Result], ws: Workspace | None = None) -> str:
-    """Human output: project names in place of paths and 12-character SHAs; full values stay in `--json`."""
+def verdict_line(command: str, r: Result, ws: Workspace | None) -> str | None:
+    """`CREATED <project>/<topic> base <sha12>` or `REMOVED <project>/<topic> main <sha12>`; None for any other result."""
+    if r.code != "OK" or command not in ("create", "cleanup"):
+        return None
+    name = display_target(r.target, ws)
+    if command == "create":
+        return f"CREATED {name} base {str(r.evidence.get('base', ''))[:12]}"
+    main_sha = ""
+    if ws is not None:
+        for project in [root_project(ws), *ws.projects.values()]:
+            if within(r.target, project.worktrees):
+                main_sha = (commit_of(project.repo, "main") or "")[:12]
+                break
+    return f"REMOVED {name} main {main_sha}".rstrip()
+
+
+def render(results: list[Result], ws: Workspace | None = None, command: str = "") -> str:
+    """Human output: project names in place of paths and 12-character SHAs; full values stay in `--json`.
+
+    A successful `create` or `cleanup` prints one verdict line; its evidence is in `--json`.
+    """
     lines = []
     for r in results:
+        line = verdict_line(command, r, ws)
+        if line is not None:
+            lines.append(line)
+            continue
         detail = " (" + FULL_SHA_WORD.sub(r"\1", r.detail) + ")" if r.detail else ""
         lines.append(f"{r.code} {display_target(r.target, ws)}{detail} - {r.next}")
     return "\n".join(lines)
@@ -1169,7 +1192,7 @@ def main(argv: list[str] | None = None, root: Path = ROOT, environ: dict[str, st
             ws = load_workspace(root, environ)
         except (Stop, OSError):
             ws = None
-        print(render(results, ws))
+        print(render(results, ws, args.command))
     return exit_status(args.command, results)
 
 
