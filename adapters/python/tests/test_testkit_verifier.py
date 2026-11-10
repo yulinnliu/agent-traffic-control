@@ -11,8 +11,8 @@ from pathlib import Path
 import pytest
 
 import git_integrate as gi
-from atc_testkit import selection, verifier
-from atc_testkit.project import Project, StaticCheck, TestCommand
+from atc_testkit import selection, stages, verifier
+from atc_testkit.project import Project, StaticCheck
 
 PYPROJECT = """[tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -51,11 +51,12 @@ class Recorder:
     """Git runs for real; every other command returns the code set for a word in its argv or log name."""
 
     def __init__(self, **codes: int):
-        self.codes, self.calls = codes, []
+        self.codes, self.calls, self.cwds = codes, [], []
 
     def __call__(self, command, *, cwd, env, log, private=False):
         command = [str(item) for item in command]
         self.calls.append((command, Path(log).name, env, private))
+        self.cwds.append(Path(cwd))
         log.parent.mkdir(parents=True, exist_ok=True)
         for word, code in self.codes.items():
             if word == Path(log).stem or word in command:
@@ -110,7 +111,7 @@ def consumer(root: Path, **options) -> Project:
 
 def root_form(root: Path, **options) -> Project:
     defaults = dict(root=root, argv_file=root / "argv.json", product_prefixes=("fixture_prod",), credentials=(), data_roots=(),
-                    test_command=TestCommand(("root-tests",)),
+                    test_paths=lambda paths: [], runner=("root-runner",),
                     documentation_only=lambda paths: all(p.startswith("docs/") and p.endswith(".md") for p in paths))
     return Project(**{**defaults, **options})
 
@@ -365,16 +366,59 @@ def test_stage_processes_get_the_isolated_environment_with_their_base_inside_it(
 # the root form
 
 
-def test_the_root_form_has_no_consumer_rows(candidate: Candidate, tmp_path: Path) -> None:
+STAGE_LOGS = ["pytest-parallel.log", "pytest-serial.log", "pytest-interactive.log"]
+
+
+@pytest.mark.integration
+def test_the_root_form_has_no_consumer_rows_and_runs_the_stages(candidate: Candidate, tmp_path: Path) -> None:
     candidate.advance()
     report = tmp_path / "report.json"
     checks = (StaticCheck("workspace", "WORKSPACE_FAILED", ("workspace-tool",)),)
     recorder = Recorder()
-    assert verifier.main(root_form(candidate.root, checks=checks), candidate.env(ATC_VERIFICATION_REPORT=str(report)), recorder) == 0
-    assert recorder.logs == ["diff_check_failed.log", "workspace.log", "tests.log"]
+    project = root_form(candidate.root, checks=checks)
+    assert verifier.main(project, candidate.env(ATC_VERIFICATION_REPORT=str(report)), recorder) == 0
+    assert recorder.logs == ["diff_check_failed.log", "workspace.log", *STAGE_LOGS]
     assert not report.exists(), "the root writes no verification report"
-    command = recorder.calls[-1][0]
-    assert command[0] == "root-tests" and Path(command[command.index("--basetemp") + 1]).is_relative_to(recorder.calls[-1][2]["TEMP"])
+    for (command, _log, env, private), stage in zip(recorder.calls[-3:], project.stage_list()):
+        assert command[:3] == ["root-runner", "-q", "-m"] and command[3] == stage.marker
+        assert Path(command[command.index("--basetemp") + 1]).is_relative_to(env["TEMP"])
+        assert private == (stage.name != "interactive")
+    bases = {call[0][call[0].index("--basetemp") + 1] for call in recorder.calls[-3:]}
+    assert len(bases) == 3, "each stage has its own base directory"
+
+
+@pytest.mark.integration
+def test_the_root_stages_run_its_selection_in_its_tests_directory(candidate: Candidate) -> None:
+    candidate.advance()
+    seen = []
+    project = root_form(candidate.root, tests_dir="adapter",
+                        test_paths=lambda paths: seen.append(list(paths)) or ["tests/test_x.py"])
+    recorder = Recorder()
+    assert verifier.main(project, candidate.env(), recorder) == 0
+    assert seen == [["src/fixture_prod/tool.py"]]
+    assert recorder.cwds[-3:] == [candidate.root / "adapter"] * 3
+    assert all(call[0][-1] == "tests/test_x.py" for call in recorder.calls[-3:])
+
+
+@pytest.mark.integration
+def test_a_root_selection_of_no_test_runs_no_stage(candidate: Candidate, capsys: pytest.CaptureFixture[str]) -> None:
+    candidate.advance()
+    recorder = Recorder()
+    assert verifier.main(root_form(candidate.root, test_paths=lambda paths: None), candidate.env(), recorder) == 0
+    assert recorder.logs == ["diff_check_failed.log"]
+    assert "selection: no test selected" in capsys.readouterr().out
+
+
+@pytest.mark.integration
+def test_a_root_selection_that_fails_refuses_before_any_check(candidate: Candidate,
+                                                               capsys: pytest.CaptureFixture[str]) -> None:
+    candidate.advance()
+    recorder = Recorder()
+
+    def broken(_paths):
+        raise ValueError("graph broke")
+    lines = refused(root_form(candidate.root, test_paths=broken), candidate.env(), capsys, recorder)
+    assert lines[:2] == ["SELECTION_FAILED", "ValueError: graph broke"] and recorder.calls == []
 
 
 def test_the_root_reads_its_range_with_its_own_token(candidate: Candidate, capsys: pytest.CaptureFixture[str],
@@ -384,24 +428,60 @@ def test_the_root_reads_its_range_with_its_own_token(candidate: Candidate, capsy
     assert refused(root_form(candidate.root), candidate.env(), capsys)[0] == "RANGE_UNREADABLE"
 
 
-def test_a_root_range_of_markdown_under_docs_skips_the_test_command(candidate: Candidate) -> None:
+@pytest.mark.integration
+def test_a_root_range_of_markdown_under_docs_skips_the_selection_and_the_stages(candidate: Candidate) -> None:
     candidate.advance("docs/a.md")
     recorder = Recorder()
-    assert verifier.main(root_form(candidate.root), candidate.env(), recorder) == 0
+
+    def unused(_paths):
+        raise AssertionError("a documentation-only range selects nothing")
+    assert verifier.main(root_form(candidate.root, test_paths=unused), candidate.env(), recorder) == 0
     assert recorder.logs == ["diff_check_failed.log"]
 
 
-def test_root_markdown_outside_docs_runs_the_test_command(candidate: Candidate) -> None:
+@pytest.mark.integration
+def test_root_markdown_outside_docs_runs_the_stages(candidate: Candidate) -> None:
     candidate.advance("README.md")
     recorder = Recorder()
     assert verifier.main(root_form(candidate.root), candidate.env(), recorder) == 0
-    assert recorder.logs[-1] == "tests.log"
+    assert recorder.logs[-3:] == STAGE_LOGS
 
 
-def test_the_root_test_command_tokens(candidate: Candidate, capsys: pytest.CaptureFixture[str]) -> None:
+@pytest.mark.integration
+def test_the_root_stage_tokens(candidate: Candidate, capsys: pytest.CaptureFixture[str]) -> None:
     candidate.advance()
-    assert refused(root_form(candidate.root), candidate.env(), capsys, Recorder(tests=1))[0] == "TESTS_FAILED"
-    assert refused(root_form(candidate.root), candidate.env(), capsys, Recorder(tests=5))[0] == "NO_TESTS_COLLECTED"
+    assert refused(root_form(candidate.root), candidate.env(), capsys,
+                   Recorder(**{"pytest-serial": 1}))[0] == "TESTS_FAILED"
+    empty = Recorder(**{"pytest-parallel": 5, "pytest-serial": 5, "pytest-interactive": 5})
+    assert refused(root_form(candidate.root), candidate.env(), capsys, empty)[0] == "NO_TESTS_COLLECTED"
+
+
+@pytest.mark.integration
+def test_the_stages_take_the_host_files_workers(candidate: Candidate, tmp_path: Path,
+                                                monkeypatch: pytest.MonkeyPatch,
+                                                capsys: pytest.CaptureFixture[str]) -> None:
+    candidate.advance()
+    host = tmp_path / "config.toml"
+    host.write_text("test_workers = 3\n", encoding="utf-8")
+    monkeypatch.setattr(stages, "host_config", lambda: host)
+    recorder = Recorder()
+    assert verifier.main(root_form(candidate.root), candidate.env(), recorder) == 0
+    parallel = next(call[0] for call in recorder.calls if call[1] == "pytest-parallel.log")
+    assert parallel[parallel.index("-n") + 1] == "3"
+    assert "workers: 3 (~/.atc/config.toml)" in capsys.readouterr().out
+
+
+@pytest.mark.integration
+def test_a_bad_host_file_refuses_before_any_check(candidate: Candidate, tmp_path: Path,
+                                                  monkeypatch: pytest.MonkeyPatch,
+                                                  capsys: pytest.CaptureFixture[str]) -> None:
+    candidate.advance()
+    host = tmp_path / "config.toml"
+    host.write_text("test_workers = 0\n", encoding="utf-8")
+    monkeypatch.setattr(stages, "host_config", lambda: host)
+    recorder = Recorder()
+    assert verifier.main(consumer(candidate.root), candidate.env(), recorder) == 9
+    assert capsys.readouterr().err.splitlines()[0] == "ATC_CONFIG_INVALID" and recorder.calls == []
 
 
 # the real path: `atc integrate` to the exit code
@@ -410,13 +490,12 @@ def test_the_root_test_command_tokens(candidate: Candidate, capsys: pytest.Captu
 VERIFIER_SCRIPT = """import sys
 from pathlib import Path
 from atc_testkit import verifier
-from atc_testkit.project import Project, StaticCheck, TestCommand
+from atc_testkit.project import Project, StaticCheck
 
 root = Path(__file__).resolve().parent
 project = Project(root=root, argv_file=root / "argv.json", product_prefixes=("fixture_prod",), credentials=(), data_roots=(),
                   checks=(StaticCheck("own", "OWN_TOKEN", (sys.executable, "own_check.py")),),
-                  test_command=TestCommand((sys.executable, "-m", "pytest", "-p", "no:cacheprovider", "-q", "-n", "0", "tests")),
-                  documentation_only=lambda paths: False)
+                  test_paths=lambda paths: ["tests"], documentation_only=lambda paths: False)
 sys.exit(verifier.main(project))
 """
 
@@ -484,4 +563,4 @@ def test_atc_integrate_reports_the_skeletons_refusal_token(integration_repo: Pat
     assert "TESTS_FAILED" in captured.out + captured.err
     assert git(integration_repo, "rev-parse", "main") == before
     kept = list((atc_tmp / "systmp").iterdir())
-    assert len(kept) == 1 and (kept[0] / "tests.log").is_file()
+    assert len(kept) == 1 and (kept[0] / "pytest-parallel.log").is_file()

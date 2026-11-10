@@ -58,6 +58,7 @@ TESTS = f"{ADAPTER}/tests"
 CONFTEST = f"{TESTS}/conftest.py"
 PLUGIN_MODULE = "atc_testkit.plugin"
 SELF_TEST = "test_select_tests.py"
+STAGE_RUNNER = (sys.executable, "-m", "atc_testkit.ci", "--stages")
 # Files that name other modules as data, not as inputs: only their imports are edges.
 IMPORTS_ONLY = frozenset({"select_tests.py", SELF_TEST})
 FULL_FILES = frozenset({
@@ -395,7 +396,9 @@ def main(argv: list[str] | None = None) -> int:
     source = parser.add_mutually_exclusive_group()
     source.add_argument("--base", default="main", help="compare HEAD and the working tree with this base (default main)")
     source.add_argument("--paths", nargs="+", help="explain these workspace-relative paths instead")
-    parser.add_argument("--run", action="store_true", help="run pytest on the selection; arguments after -- go to pytest")
+    parser.add_argument("--run", action="store_true",
+                        help="run the testkit's stages on the selection; arguments after -- go to pytest")
+    parser.add_argument("--workers", type=int, help="the parallel stage's worker count for this run (with --run)")
     args = parser.parse_args(argv)
     paths = args.paths if args.paths else changed_paths(args.base)
     selection = select(paths)
@@ -405,7 +408,8 @@ def main(argv: list[str] | None = None) -> int:
     targets = pytest_args(selection)
     if targets is None:
         return 0
-    return subprocess.run([sys.executable, "-m", "pytest", *targets, *extra], cwd=ADAPTER_DIR).returncode
+    workers = [] if args.workers is None else ["--workers", str(args.workers)]
+    return subprocess.run([*STAGE_RUNNER, *workers, *targets, *extra], cwd=ADAPTER_DIR).returncode
 
 
 if __name__ == "__main__":

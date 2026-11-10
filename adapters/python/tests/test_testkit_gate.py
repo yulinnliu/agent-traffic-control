@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from atc_testkit import evidence, gate, selection
+from atc_testkit import evidence, gate, selection, stages
 from atc_testkit.project import Project, StaticCheck
 
 ZERO = "0" * 40
@@ -216,6 +216,36 @@ def test_stages_run_when_no_record_covers_the_push(repo: Path, capsys: pytest.Ca
     assert [call[3] for call in recorder.calls] == [True, True, False]
     assert recorder.calls[0][0][0] == "runner" and recorder.calls[0][0][-1] == "tests"
     assert [path for path in (atc_tmp / "systmp").iterdir()] == [], "the passing run's working directory is removed"
+
+
+@pytest.mark.integration
+def test_the_worker_flag_sets_the_parallel_stage(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    base = git(repo, "rev-parse", "HEAD")
+    sha = commit(repo, "a.py")
+    recorder = Recorder()
+    assert gate.main(project(repo), ["--run", "--workers", "3"], [push_line(repo, base, sha)], recorder) == 0
+    command = recorder.calls[0][0]
+    assert command[command.index("-n") + 1] == "3" and "workers: 3 (flag)" in capsys.readouterr().out
+
+
+@pytest.mark.integration
+def test_a_bad_worker_flag_is_a_usage_error(repo: Path) -> None:
+    with pytest.raises(SystemExit) as stopped:
+        gate.main(project(repo), ["--run", "--workers", "0"], [])
+    assert stopped.value.code == 2
+
+
+@pytest.mark.integration
+def test_a_bad_host_file_stops_the_run_before_any_check(repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                       capsys: pytest.CaptureFixture[str]) -> None:
+    host = tmp_path / "config.toml"
+    host.write_text("test_workers = 0\n", encoding="utf-8")
+    monkeypatch.setattr(stages, "host_config", lambda: host)
+    monkeypatch.delenv("CI", raising=False)
+    base = git(repo, "rev-parse", "HEAD")
+    recorder = Recorder()
+    assert gate.main(project(repo), ["--run"], [push_line(repo, base, commit(repo, "a.py"))], recorder) == 9
+    assert capsys.readouterr().err.startswith("ATC_CONFIG_INVALID ") and recorder.calls == []
 
 
 def test_each_stage_environment_is_isolated(repo: Path, atc_tmp: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -11,13 +11,15 @@ import pytest
 
 import integration_verify as iv
 import select_tests
-from atc_testkit import isolation, locations, verifier
+from atc_testkit import isolation, locations, stages, verifier
 
 pytestmark = pytest.mark.integration
 
 ADAPTER = Path(__file__).resolve().parents[1]
 WORKSPACE = ADAPTER.parents[1]
 FAILING_OUTPUT = "output line\nFAILED tests/test_x.py::test_y - boom\nlast line\n"
+STAGE_NAMES = {stage.marker: stage.name for stage in stages.stages()}
+STAGE_RUNNER = ["-m", "atc_testkit.ci"]
 
 
 def run_git(repo: Path, *args: str) -> str:
@@ -35,7 +37,14 @@ def commit(repo: Path, path: str, content: str) -> str:
 
 
 def name(argv: list[str]) -> str:
-    return "selection" if "scripts/select_tests.py" in argv else argv[-1]
+    """A stage's name for a stage command, the last argument for a static check."""
+    if argv[1:3] == STAGE_RUNNER:
+        return STAGE_NAMES[argv[argv.index("-m", 3) + 1]]
+    return argv[-1]
+
+
+def base_directory(argv: list[str]) -> Path:
+    return Path(argv[argv.index("--basetemp") + 1])
 
 
 class Candidate:
@@ -60,8 +69,8 @@ class Candidate:
             result = subprocess.run(argv, cwd=cwd, env=env, capture_output=True, text=True)
             log.write_text(result.stdout + result.stderr, encoding="utf-8")
             return result.returncode
-        if name(argv) == "selection":  # what the suite leaves in its base directory: a repository's read-only object
-            left = Path(argv[-1]) / "repo/object"
+        if name(argv) == "parallel":  # what the suite leaves in its base directory: a repository's read-only object
+            left = base_directory(argv) / "repo/object"
             left.parent.mkdir(parents=True)
             left.write_bytes(b"x")
             left.chmod(stat.S_IREAD)
@@ -105,20 +114,22 @@ def test_full_range_runs_the_roots_checks_in_order(candidate: Candidate, atc_tmp
     assert captured.out.splitlines()[0] == "classification: full"
     assert captured.out.splitlines()[-1] == f"integration verification: PASS {sha}"
     adapter = candidate.root / iv.ADAPTER_DIR
-    selection_argv = candidate.calls[-1][0]
-    assert [call[:2] for call in candidate.calls] == [
+    assert [call[:2] for call in candidate.calls[:3]] == [
         (["git", "diff", "--check", f"{candidate.main}..{sha}"], candidate.root),
-        (list(iv.WORKSPACE_CHECK.argv), adapter), (list(iv.POLICY_CHECK.argv), adapter), (selection_argv, adapter),
+        (list(iv.WORKSPACE_CHECK.argv), adapter), (list(iv.POLICY_CHECK.argv), adapter),
     ]
-    assert selection_argv[:-2] == [*iv.SELECTION, "--base", candidate.main, "--run", "--"]
-    assert selection_argv[-2] == "--basetemp"
+    assert candidate.started()[3:] == ["parallel", "serial", "interactive"]
+    for argv, cwd, env, _private in candidate.calls[3:]:
+        assert cwd == adapter and argv[1:4] == [*STAGE_RUNNER, "-q"]
+        assert base_directory(argv).is_relative_to(env["TEMP"])
+    assert "tests/" not in " ".join(candidate.calls[3][0]), "a path no rule maps runs the full suite"
 
 
 def test_the_working_directory_holds_the_base_directory_and_is_removed_after_a_pass(
         candidate: Candidate, atc_tmp: Path) -> None:
     candidate.advance()
     assert iv.main(candidate.env(), candidate.root, candidate.run) == 0
-    base = Path(candidate.calls[-1][0][-1])
+    base = base_directory(candidate.calls[3][0])
     work = base.parents[1]
     assert work.parent == atc_tmp / locations.SYSTMP and len(work.name) <= isolation.WORK_NAME_BOUND
     assert not verifier.inside(base, candidate.root)
@@ -136,7 +147,7 @@ def test_the_checks_run_in_the_isolated_environment(candidate: Candidate, atc_tm
         assert env["USERPROFILE"] == env["HOME"] and "SOME_API_KEY" not in env
         assert env["ATC_TMP"] == str(atc_tmp) and env["TEMP"] == str(work)
         assert env["UV_CACHE_DIR"] == locations.cache_directories()["UV_CACHE_DIR"]
-    assert [call[3] for call in candidate.calls] == [False, False, False, True]
+    assert [call[3] for call in candidate.calls] == [False, False, False, True, True, False]
 
 
 def test_documentation_only_range_skips_the_tests_only(candidate: Candidate, capsys: pytest.CaptureFixture[str]) -> None:
@@ -187,7 +198,7 @@ def test_file_moved_into_docs_is_not_documentation_only(candidate: Candidate, ca
     run_git(candidate.root, "commit", "-q", "-m", "move")
     assert iv.main(candidate.env(), candidate.root, candidate.run) == 0
     assert capsys.readouterr().out.splitlines()[0] == "classification: full"
-    assert "selection" in candidate.started()
+    assert "parallel" in candidate.started()
 
 
 def test_product_module_imported_from_outside_the_candidate_is_refused(
@@ -210,9 +221,9 @@ def test_this_checkout_imports_its_own_product_modules() -> None:
 
 
 @pytest.mark.parametrize(("failing", "token", "later"), [
-    ("scripts/validate_workspace.py", "WORKSPACE_VALIDATION_FAILED", ["../../shared/policies/examples", "selection"]),
-    ("../../shared/policies/examples", "POLICY_CHECK_FAILED", ["selection"]),
-    ("selection", "TESTS_FAILED", []),
+    ("scripts/validate_workspace.py", "WORKSPACE_VALIDATION_FAILED", ["../../shared/policies/examples", "parallel"]),
+    ("../../shared/policies/examples", "POLICY_CHECK_FAILED", ["parallel"]),
+    ("parallel", "TESTS_FAILED", ["serial", "interactive"]),
 ])
 def test_failing_check_is_refused_and_stops_the_run(
     candidate: Candidate, capsys: pytest.CaptureFixture[str], failing: str, token: str, later: list[str],
@@ -228,18 +239,18 @@ def test_failing_suite_reports_its_failure_lines_and_keeps_its_log(
     candidate: Candidate, atc_tmp: Path, capsys: pytest.CaptureFixture[str],
 ) -> None:
     candidate.advance()
-    candidate.codes["selection"] = 1
+    candidate.codes["serial"] = 1
     _code, err = candidate.verify(capsys)
     (work,) = (atc_tmp / locations.SYSTMP).iterdir()
-    log = work / "tests.log"
-    assert err[1] == f"{' '.join(candidate.calls[-1][0])} exited 1; log {log}"
+    log = work / "pytest-serial.log"
+    assert err[1] == f"serial stage exited 1; log {log}"
     assert err[2:] == ["FAILED tests/test_x.py::test_y - boom", f"working directory kept: {work}"]
     assert "last line" in log.read_text(encoding="utf-8")
 
 
 def test_suite_that_collects_no_test_is_refused(candidate: Candidate, capsys: pytest.CaptureFixture[str]) -> None:
     candidate.advance()
-    candidate.codes["selection"] = 5
+    candidate.codes.update(parallel=5, serial=5, interactive=5)
     code, err = candidate.verify(capsys)
     assert (code, err[0]) == (1, "NO_TESTS_COLLECTED")
 
@@ -266,6 +277,7 @@ def test_the_adapter_suite_carries_the_plugin_from_its_tree_with_no_base_directo
     assert plugin is not None and verifier.inside(plugin.__file__, ADAPTER / "atc-testkit/src")
     assert "basetemp" not in (ADAPTER / "tests/conftest.py").read_text(encoding="utf-8")
     assert "--basetemp" not in pytestconfig.getini("addopts")
+    assert "-q" not in pytestconfig.getini("addopts"), "the stages pass -q; a second one hides pytest's count line"
 
 
 def test_the_verifier_imports_the_package_without_a_search_path_insert() -> None:
@@ -273,20 +285,25 @@ def test_the_verifier_imports_the_package_without_a_search_path_insert() -> None
     assert "sys.path" not in source and "from atc_testkit import" in source
 
 
-def test_ci_runs_the_full_suite_and_the_verifiers_static_checks() -> None:
-    """The dispatched CI job runs the full suite where the local verifier runs the selection, and the same static checks."""
+def test_ci_runs_the_full_suite_through_the_stages_and_the_verifiers_static_checks() -> None:
+    """The dispatched CI job runs every stage over the full suite where the local verifier runs them over the selection."""
     workflow = (WORKSPACE / ".github/workflows/validate.yml").read_text(encoding="utf-8")
     job = workflow[workflow.index("  python-adapter:"):]
     assert f"working-directory: {iv.ADAPTER_DIR}" in job
     assert [line.split("- run: ", 1)[1] for line in job.splitlines() if "- run: " in line] == [
-        "uv run --locked pytest", *(" ".join(argv) for argv in (iv.WORKSPACE_CHECK.argv, iv.POLICY_CHECK.argv))
+        "uv run --locked python -m atc_testkit.ci --stages", "uv run --locked python -m atc_testkit.ci --slow",
+        *(" ".join(argv) for argv in (iv.WORKSPACE_CHECK.argv, iv.POLICY_CHECK.argv))
     ]
-    assert iv.project(WORKSPACE, {"ATC_EXPECTED_MAIN_SHA": "0" * 40}).test_command.argv == (
-        *iv.SELECTION, "--base", "0" * 40, "--run", "--")
+    assert iv.project(WORKSPACE).tests_dir == iv.ADAPTER_DIR
 
 
-def test_the_selection_command_falls_back_to_main_without_the_base() -> None:
-    assert iv.project(WORKSPACE).test_command.argv == (*iv.SELECTION, "--base", "main", "--run", "--")
+def test_the_selection_gives_the_stages_adapter_paths_the_full_suite_or_none(capsys: pytest.CaptureFixture[str]) -> None:
+    test_file = f"{iv.ADAPTER_DIR}/tests/{select_tests.SELF_TEST}"
+    assert iv.selected_tests([test_file], WORKSPACE) == [f"tests/{select_tests.SELF_TEST}"]
+    assert iv.selected_tests([f"{iv.ADAPTER_DIR}/pyproject.toml"], WORKSPACE) == []
+    unnamed = "docs/" + "NO_TEST_NAMES" + "_THIS.md"  # built at run time, so no test file names it
+    assert iv.selected_tests([unnamed], WORKSPACE) is None
+    assert "no test file selected" in capsys.readouterr().out
 
 
 def test_agents_section_names_the_argv_file_that_starts_the_verifier() -> None:

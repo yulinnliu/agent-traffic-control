@@ -1053,10 +1053,18 @@ change, its side effects, their mitigations.
     `shared/governance/` edit: `VERIFICATION.md` makes 30 minutes (1800 s)
     the verifier test budget of every project, with D.20's rule that a run
     over it is a signal to optimise the tests or for the Owner to decide.
-    - Side effects: hami-quant declares 3600 s and would either fit its
-      verifier into 1800 s or carry an Owner-approved exception;
-      hami-quant-trading (1800 s) and ria-project (600 s) already fit. The
-      29 vendored governance copies change at the final sync.
+    - Side effects: hami-quant declares 3600 s; hami-quant-trading
+      (1800 s) and ria-project (600 s) already fit; my-heartopia-tools
+      declares no verifier. The four vendored `VERIFICATION.md` copies
+      (hami-quant, hami-quant-trading, my-heartopia-tools, ria-project)
+      change at the final sync.
+    - Exception path for hami-quant, for the Owner to decide with the
+      authorization: either its verifier fits 1800 s before the rule
+      reaches it (its stages under the testkit's workers, then D.21-style
+      work on its slowest tests), or `VERIFICATION.md` lets a project's
+      `AGENTS.md` declare a larger budget next to `Verifier timeout` with
+      the Owner's recorded approval and the reason, the rule's breach
+      signal then counting against that declared budget.
     - Not designed further until the authorization; no governance file
       changes in ATC-0008 without it.
 23. The parallel stage's scheduler, testkit-wide: `loadscope` cost the

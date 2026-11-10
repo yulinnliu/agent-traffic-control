@@ -192,7 +192,7 @@ try {
     }
 
     if ($Tests) {
-        & uv run --locked pytest
+        & uv run --locked python -m atc_testkit.ci --stages
         if ($LASTEXITCODE -ne 0) {
             throw "workspace tooling tests failed with exit code $LASTEXITCODE"
         }

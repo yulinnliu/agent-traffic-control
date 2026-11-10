@@ -2,20 +2,22 @@
 
 The root's data for the verifier skeleton (docs/TESTKIT.md § Integration verifier, the workspace-root paragraph),
 imported from the candidate's own tree: the environment ``scripts/integration-verify.json`` builds from ``uv.lock``
-under the candidate's ignored ``adapters/python/.venv/`` installs ``atc_testkit`` from there. Its test command is
-``select_tests.py`` over the integration range; the full suite runs in a dispatched CI run.
+under the candidate's ignored ``adapters/python/.venv/`` installs ``atc_testkit`` from there. The skeleton runs the
+testkit's stages over ``select_tests.py``'s selection of the integration range; the full suite runs in a dispatched
+CI run.
 
     uv run --quiet --locked --project adapters/python python adapters/python/scripts/integration_verify.py
 """
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
+from functools import cache
 from pathlib import Path, PurePosixPath
 import os
 import sys
 
 from atc_testkit import stages, verifier
-from atc_testkit.project import Project, StaticCheck, TestCommand
+from atc_testkit.project import Project, StaticCheck
 
 import select_tests
 
@@ -25,21 +27,15 @@ PRODUCT_PREFIXES = ("atc_cli", "atc_testkit")
 SOURCE_ROOTS = (f"{ADAPTER_DIR}/src", f"{ADAPTER_DIR}/atc-testkit/src")
 DOCUMENTATION_PREFIX = "docs/"
 TASK_RECORDS = ".atc/tasks/"
-BASE_VARIABLE = "ATC_EXPECTED_MAIN_SHA"
 
 WORKSPACE_CHECK = StaticCheck("workspace", "WORKSPACE_VALIDATION_FAILED",
                               ("uv", "run", "--locked", "python", "scripts/validate_workspace.py"), cwd=ADAPTER_DIR)
 POLICY_CHECK = StaticCheck("policies", "POLICY_CHECK_FAILED",
                            ("uv", "run", "--locked", "python", "scripts/policies.py", "check",
                             "../../shared/policies/examples"), cwd=ADAPTER_DIR)
-SELECTION = ("uv", "run", "--locked", "python", "scripts/select_tests.py")
 
 
-def selection_command(base: str | None) -> TestCommand:
-    """The selection over ``base``..HEAD, run; the skeleton's ``--basetemp`` reaches pytest after ``--``."""
-    return TestCommand((*SELECTION, "--base", base or "main", "--run", "--"), cwd=ADAPTER_DIR)
-
-
+@cache
 def graph(root: Path) -> select_tests.Graph:
     return select_tests.Graph(root)
 
@@ -59,17 +55,28 @@ def documentation_predicate(root: Path) -> Callable[[Sequence[str]], bool]:
     return lambda paths: documentation_only(paths, root)
 
 
-def project(root: Path = ROOT, environ: Mapping[str, str] | None = None) -> Project:
+def selected_tests(paths: Sequence[str], root: Path = ROOT) -> list[str] | None:
+    """The selection's test files relative to the adapter, ``[]`` for the full suite, ``None`` for none."""
+    selection = select_tests.select(list(paths), graph(root))
+    print(select_tests.describe(selection), flush=True)
+    return select_tests.pytest_args(selection)
+
+
+def selection_predicate(root: Path) -> Callable[[Sequence[str]], list[str] | None]:
+    return lambda paths: selected_tests(paths, root)
+
+
+def project(root: Path = ROOT) -> Project:
     return Project(root=root, argv_file=root / ADAPTER_DIR / "scripts/integration-verify.json",
                    checks=(WORKSPACE_CHECK, POLICY_CHECK), source_roots=SOURCE_ROOTS,
                    product_prefixes=PRODUCT_PREFIXES, credentials=(), data_roots=(),
-                   test_command=selection_command((environ or {}).get(BASE_VARIABLE)),
+                   test_paths=selection_predicate(root), tests_dir=ADAPTER_DIR,
                    documentation_only=documentation_predicate(root))
 
 
 def main(environ: Mapping[str, str] | None = None, root: Path = ROOT, run: stages.Run = stages.run_logged) -> int:
     environ = os.environ if environ is None else environ
-    return verifier.main(project(root, environ), environ, run)
+    return verifier.main(project(root), environ, run)
 
 
 if __name__ == "__main__":

@@ -17,6 +17,13 @@ LOG_PATTERN = "prepush-*.log"
 SELECTION_FAILED_EXIT = 2
 
 
+def _count(value: str) -> int:
+    count = stages.positive_count(value)
+    if count is None:
+        raise argparse.ArgumentTypeError("takes an integer of 1 or more")
+    return count
+
+
 def _git(root: Path):
     def run(*args: str) -> str:
         result = subprocess.run(["git", *args], cwd=root, capture_output=True, text=True, env=git_env(),
@@ -88,7 +95,7 @@ def _run_checks(project: Project, checks: Iterable[StaticCheck], isolated: isola
 
 
 def _run_tests(project: Project, push_lines: list[str], pytest_paths: list[str], isolated: isolation.IsolatedRun,
-               logs: Path, git, run: stages.Run) -> int:
+               logs: Path, git, run: stages.Run, workers: stages.Workers | None = None) -> int:
     decisions = _decisions(project, push_lines, pytest_paths, git)
     for decision in decisions:
         print(evidence.describe(decision), flush=True)
@@ -100,7 +107,7 @@ def _run_tests(project: Project, push_lines: list[str], pytest_paths: list[str],
         project.runner, pytest_paths, cwd=project.root, stage_list=project.stage_list(),
         env_for=lambda stage: isolated.environment(stage.name),
         options_for=lambda stage: isolated.pytest_options(stage.name),
-        log_for=lambda stage: logs / f"prepush-{stage.name}.log", run=run)
+        log_for=lambda stage: logs / f"prepush-{stage.name}.log", workers=workers, run=run)
     if outcome.token == stages.NO_TESTS_COLLECTED:
         print(f"pre-push: {outcome.token}; push aborted (logs: {logs})", file=sys.stderr)
     elif outcome.token:
@@ -117,7 +124,16 @@ def main(project: Project, argv: Sequence[str] | None = None, stdin: Iterable[st
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--run", action="store_true", help="read the pushed refs from stdin and run the gate")
     mode.add_argument("--paths", nargs="+", help="print the selection for these paths and run nothing")
+    parser.add_argument("--workers", type=_count, help="the parallel stage's worker count for this run; overrides "
+                                                       "test_workers in ~/.atc/config.toml")
     args = parser.parse_args(argv)
+    workers = None
+    if args.run:
+        try:
+            workers = stages.resolve_workers(args.workers)
+        except locations.Refusal as refusal:
+            print(f"{refusal.token} {refusal.detail}", file=sys.stderr)
+            return refusal.code
     git = _git(project.root)
     push_lines = [] if args.paths else list(sys.stdin if stdin is None else stdin)
     try:
@@ -149,7 +165,7 @@ def main(project: Project, argv: Sequence[str] | None = None, stdin: Iterable[st
                                      data_roots=project.data_root_variables)
     code = _run_checks(project, checks, isolated, logs, run)
     if not code and pytest_paths is not None:
-        code = _run_tests(project, push_lines, pytest_paths, isolated, logs, git, run)
+        code = _run_tests(project, push_lines, pytest_paths, isolated, logs, git, run, workers)
     if code:
         print(f"pre-push: working directory kept: {work}", file=sys.stderr)
         return code

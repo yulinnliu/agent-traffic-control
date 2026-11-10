@@ -40,8 +40,8 @@ Tasks here are identified by record (governance `CORE.md` § Task identity).
 `GIT_WORKFLOW.md` § Integration verifier source).
 
 - Verifier argv file: adapters/python/scripts/integration-verify.json
-- Verifier timeout: 2520
-  (`adapters/python/README.md` states how this value is derived)
+- Verifier timeout: 1800
+  (the test budget; `adapters/python/README.md` states its rule)
 
 The argv runs `adapters/python/scripts/integration_verify.py` in the
 candidate's own `adapters/python/.venv/` built from `uv.lock`; that script
@@ -55,10 +55,10 @@ Every range passes `git diff --check` of the range and the static checks of
 the `python-adapter` job in `.github/workflows/validate.yml`, run from
 `adapters/python`: `uv run --locked python scripts/validate_workspace.py` and
 `uv run --locked python scripts/policies.py check ../../shared/policies/examples`.
-In place of the job's full `uv run --locked pytest`, it runs the impact
-selection over the range, `uv run --locked python scripts/select_tests.py
---base <expected main> --run`, which runs the full suite only where the
-selector's rules widen to it (`adapters/python/README.md` § Selected tests).
+In place of the job's full run of the testkit's stages, it runs the stages
+over the impact selection of the range (`select_tests.py`), which is the full
+suite only where the selector's rules widen to it (`adapters/python/README.md`
+§ Selected tests).
 The candidate has no `workspace.yaml`, `projects/`, `worktrees/` or `state/`,
 so the checks read the committed tree only, as CI does.
 

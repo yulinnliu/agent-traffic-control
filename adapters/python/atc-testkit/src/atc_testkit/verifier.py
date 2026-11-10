@@ -198,8 +198,10 @@ class _Row:
 class _Checks:
     """Runs one check or the stages of a run, refusing with the row's token."""
 
-    def __init__(self, project: Project, work: Path, isolated: isolation.IsolatedRun, run: stages.Run):
+    def __init__(self, project: Project, work: Path, isolated: isolation.IsolatedRun, run: stages.Run,
+                 workers: stages.Workers | None = None):
         self.project, self.work, self.isolated, self.run_logged = project, work, isolated, run
+        self.workers = workers
 
     def row(self, row: _Row | StaticCheck, name: str | None = None) -> None:
         log = self.work / f"{(name or row.token).lower()}.log"
@@ -218,33 +220,20 @@ class _Checks:
         self.row(_Row("COLLECTION_FAILED", (sys.executable, "-m", "pytest", "--collect-only", "-q", "-n", "0",
                                             "-p", "no:cacheprovider", *options)))
 
-    def stages(self, pytest_paths: list[str]) -> None:
+    def stages(self, pytest_paths: list[str], cwd: Path | None = None) -> None:
         project = self.project
         outcome = stages.run_stages(
-            project.runner, pytest_paths, cwd=project.root, stage_list=project.stage_list(),
+            project.runner, pytest_paths, cwd=project.root if cwd is None else cwd, stage_list=project.stage_list(),
             env_for=lambda stage: self.isolated.environment(stage.name),
             options_for=lambda stage: self.isolated.pytest_options(stage.name),
-            log_for=lambda stage: self.work / f"pytest-{stage.name}.log", run=self.run_logged)
+            log_for=lambda stage: self.work / f"pytest-{stage.name}.log", workers=self.workers,
+            run=self.run_logged)
         if outcome.token == stages.NO_TESTS_COLLECTED:
             raise VerifyError(outcome.token, f"selected {' '.join(pytest_paths) or 'the default suite'}; "
                                              f"logs in {self.work}")
         if outcome.token:
             raise VerifyError(outcome.token, f"{outcome.stage.name} stage exited {outcome.code}; log {outcome.log}",
                               *stages.failure_lines(outcome.log))
-
-    def test_command(self) -> None:
-        """The root form's one test command, with its base directory in the working directory."""
-        command = self.project.test_command
-        log = self.work / "tests.log"
-        argv = [*command.argv, "--basetemp", str(self.isolated.base_directory(stages.TEST_COMMAND_STAGE))]
-        code = self.run_logged(argv, cwd=self.project.root / command.cwd,
-                               env=self.isolated.environment(stages.TEST_COMMAND_STAGE),
-                               log=log, private=True)
-        if code == stages.PYTEST_NO_TESTS_COLLECTED:
-            raise VerifyError(stages.NO_TESTS_COLLECTED, f"{' '.join(argv)} collected no test")
-        if code:
-            raise VerifyError(stages.TESTS_FAILED, f"{' '.join(argv)} exited {code}; log {log}",
-                              *stages.failure_lines(log))
 
 
 def check_final_state(root: Path, sha: str) -> None:
@@ -295,14 +284,22 @@ def _consumer_checks(project: Project, checks: _Checks, base: str, sha: str, pat
 
 
 def _root_checks(project: Project, checks: _Checks, base: str, sha: str, paths: list[str]) -> None:
-    """The root form: its static checks, then its one test command unless the range is documentation-only."""
+    """The root form: its static checks, then the stages over its selection unless the range is documentation-only."""
     doc_only = project.documentation_only(paths)
     print(f"classification: {'documentation-only' if doc_only else 'full'}", flush=True)
+    pytest_paths = None
+    if not doc_only:
+        try:
+            pytest_paths = project.test_paths(paths)
+        except Exception as error:  # noqa: BLE001 - a selection failure refuses the candidate
+            raise VerifyError("SELECTION_FAILED", f"{type(error).__name__}: {error}") from error
     checks.static((check for check in project.checks if check.first), paths)
     checks.row(_Row("DIFF_CHECK_FAILED", ("git", "diff", "--check", f"{base}..{sha}")))
     checks.static((check for check in project.checks if not check.first), paths)
-    if not doc_only:
-        checks.test_command()
+    if pytest_paths is not None:
+        checks.stages(pytest_paths, project.root / project.tests_dir)
+    elif not doc_only:
+        print("selection: no test selected", flush=True)
 
 
 def main(project: Project, environ: Mapping[str, str] | None = None, run: stages.Run = stages.run_logged) -> int:
@@ -312,6 +309,7 @@ def main(project: Project, environ: Mapping[str, str] | None = None, run: stages
     try:
         isolation.drop_hami_variables(os.environ)
         locations.enter()
+        workers = stages.resolve_workers(environ=environ)
         values = require_env(environ)
         check_candidate(project.root, values, Path.cwd())
         check_imports(project, values["ATC_CANDIDATE_DIR"])
@@ -328,7 +326,7 @@ def main(project: Project, environ: Mapping[str, str] | None = None, run: stages
         locations.enter(work)
         isolated = isolation.IsolatedRun(work, credentials=project.credential_variables,
                                          data_roots=project.data_root_variables)
-        checks = _Checks(project, work, isolated, run)
+        checks = _Checks(project, work, isolated, run, workers)
         if project.select is None:
             _root_checks(project, checks, base, sha, paths)
             check_final_state(project.root, sha)

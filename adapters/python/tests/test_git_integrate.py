@@ -373,7 +373,8 @@ def test_verifier_timeout_is_reported_and_main_stays_unchanged(
     before = main_tip(repo)
     slow = json.dumps([sys.executable, "-c", "import time; time.sleep(2)"])
     assert integrate(repo, "topic", tip, "--verify-command", slow, "--verify-timeout", "0.05") == 3
-    assert "candidate verification timed out" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "candidate verification timed out" in err and "test budget exceeded" in err
     assert main_tip(repo) == before
 
 

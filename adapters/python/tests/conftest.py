@@ -9,7 +9,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from atc_testkit import locations
+from atc_testkit import locations, stages
 
 pytest_plugins = ("atc_testkit.plugin",)
 
@@ -25,6 +25,12 @@ import root_reads  # noqa: E402  (needs SCRIPTS on the path for select_tests)
 
 def pytest_configure(config: pytest.Config) -> None:
     config.pluginmanager.register(root_reads.RootReads.for_checkout(), "root_reads")
+
+
+@pytest.fixture(autouse=True)
+def _no_host_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Code a test runs in process reads no ``~/.atc/config.toml`` of the host; a test that needs one supplies it."""
+    monkeypatch.setattr(stages, "host_config", lambda: SCRIPTS / "no-host-config.toml")
 
 
 @pytest.fixture(autouse=True)

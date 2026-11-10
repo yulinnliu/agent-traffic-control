@@ -1,7 +1,7 @@
 """The CI runner: pytest with failure context and shutdown thread evidence (docs/TESTKIT.md § CI runner, § Stages).
 
     python -m atc_testkit.ci [pytest args]                 one invocation, for a targeted run
-    python -m atc_testkit.ci --stages [--workers N] [paths]  the three stages
+    python -m atc_testkit.ci --stages [--workers N] [paths]  the three stages; N overrides ~/.atc/config.toml
     python -m atc_testkit.ci --slow [paths]                the ``slow`` invocation
 
 A project's own runner script calls ``main`` with its additions. ``ci_init`` in ``[tool.atc-testkit]`` names its
@@ -20,12 +20,14 @@ import threading
 
 import pytest
 
-from . import config, stages
+from . import config, locations, stages
 from .evidence import Stage
 
 REPORT_LIMIT = 4000  # characters of a failing report kept, counted from its end where the exception line sits
 CAUSE_LIMIT = 20  # chain elements listed, root cause first
 CAUSE_MESSAGE_LIMIT = 300  # characters of one element's crash message
+USAGE = "USAGE"
+USAGE_EXIT = 2
 
 Context = Callable[[object, object], dict]
 Hints = Callable[[object], list[str]]
@@ -132,6 +134,11 @@ def run_all_stages(paths: Sequence[str], workers: int | None, run: stages.Run = 
     refused = stages.refuse_log_directory(logs)
     if refused:
         return refused
+    try:
+        workers = stages.resolve_workers(workers)
+    except locations.Refusal as refusal:
+        print(f"{refusal.token} {refusal.detail}", file=sys.stderr, flush=True)
+        return refusal.code
     outcome = stages.run_stages(_self_command(), paths, cwd=Path.cwd(),
                                 stage_list=stages.stages(config.ignored_paths(Path.cwd())),
                                 env_for=lambda stage: dict(os.environ), options_for=lambda stage: (),
@@ -148,7 +155,11 @@ def main(args: Sequence[str] | None = None, *, context: Context | None = None, h
         rest = arguments[1:]
         workers = None
         if rest[:1] == ["--workers"]:
-            workers, rest = int(rest[1]), rest[2:]
+            workers = stages.positive_count(rest[1]) if len(rest) > 1 else None
+            if workers is None:
+                print(f"{USAGE} --workers takes an integer of 1 or more", file=sys.stderr, flush=True)
+                return USAGE_EXIT
+            rest = rest[2:]
         return run_all_stages(rest, workers)
     if arguments[:1] == ["--slow"]:
         slow = Stage(stages.SLOW.name, stages.SLOW.marker, config.ignored_paths(Path.cwd()))

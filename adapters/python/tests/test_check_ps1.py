@@ -80,7 +80,7 @@ def test_the_processes_it_starts_get_the_locations_and_the_cache_values(check: C
         assert call["env"]["UV_CACHE_DIR"] == str(atc_tmp / ".atc" / "cache" / "uv")
         assert call["env"]["UV_PYTHON_INSTALL_DIR"] == str(atc_tmp / ".atc" / "cache" / "python")
     assert validate["args"] == ["run", "--locked", "python", "scripts/validate_workspace.py"]
-    assert tests["args"] == ["run", "--locked", "pytest"]
+    assert tests["args"] == ["run", "--locked", "python", "-m", "atc_testkit.ci", "--stages"]
 
 
 def test_the_callers_cache_values_stay(check: Check, atc_tmp: Path) -> None:

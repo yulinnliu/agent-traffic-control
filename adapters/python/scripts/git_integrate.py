@@ -34,6 +34,7 @@ from integration_slot import IntegrationSlot
 
 FULL_SHA = re.compile(r"[0-9a-f]{40}")
 CANDIDATE_ID_BYTES = 6
+BUDGET_EXCEEDED = "test budget exceeded: optimise the tests or ask the Owner; a retry does not help"
 WORKTREE_BRANCH = re.compile(r"worktree-[^+]+\+(?P<topic>.+)")
 # Formats: shared/conformance/verification-evidence/README.md
 REPORT_SCHEMA = "atc-verification-report/1"
@@ -413,7 +414,8 @@ def _verify_candidate(
     returncode, stdout, stderr, warning = _run_verifier(argv, candidate_dir, env, timeout, captures)
     if returncode is None:
         raise stop(
-            "VERIFICATION_TIMEOUT", f"candidate verification timed out after {timeout:g}s for {candidate_sha}",
+            "VERIFICATION_TIMEOUT", f"candidate verification timed out after {timeout:g}s for {candidate_sha}; "
+            f"{BUDGET_EXCEEDED}",
             after_candidate=True, extra=_tails(stdout, stderr),
         )
     if returncode:

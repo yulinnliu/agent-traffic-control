@@ -34,16 +34,12 @@ class StaticCheck:
 
 
 @dataclass(frozen=True)
-class TestCommand:
-    """The workspace root's one test command, in place of the stages."""
-    __test__ = False
-    argv: tuple[str, ...]
-    cwd: str = "."
-
-
-@dataclass(frozen=True)
 class Project:
-    """One repository's data; a project with no ``select`` is the workspace root of the verifier's root form."""
+    """One repository's data; a project with no ``select`` is the workspace root of the verifier's root form.
+
+    The root form's ``test_paths`` maps the range's paths to the pytest paths its stages run, relative to
+    ``tests_dir``: ``[]`` for the default suite, ``None`` for no test.
+    """
     root: Path
     argv_file: Path
     select: Select | None = None
@@ -59,7 +55,8 @@ class Project:
     automation_prefixes: tuple[str, ...] | None = None
     lint_scope: tuple[str, ...] | None = None
     ignore: tuple[str, ...] | None = None
-    test_command: TestCommand | None = None
+    test_paths: Callable[[Sequence[str]], list[str] | None] | None = None
+    tests_dir: str = "."
     documentation_only: Callable[[Sequence[str]], bool] | None = None
     table: dict = field(init=False, compare=False, repr=False)
 

@@ -45,6 +45,7 @@ whole directory loses nothing. Persistent state lives elsewhere
 
 ```text
 ~/.atc/
+  config.toml                   host settings, written by hand (§ Host settings)
   tmp/                          disposable
     scratch-dirs.tsv            registry of scratch directories
     <scratch>/                  one per isolated test run; the run's temporary directory
@@ -59,6 +60,20 @@ whole directory loses nothing. Persistent state lives elsewhere
     python/                     UV_PYTHON_INSTALL_DIR
     ruff/                       RUFF_CACHE_DIR
 ```
+
+## Host settings
+
+`~/.atc/config.toml` holds settings of this host, outside every repository,
+so none reaches CI or another host. It is a TOML table written by hand; a
+missing file or key means the default.
+
+| Key | Meaning |
+| --- | --- |
+| `test_workers` | the testkit's parallel-stage worker count (`TESTKIT.md` § Stages), an integer of 1 or more |
+
+With `CI` set the file is not read. An entry point reads it in its own
+process, before a run's environment points `HOME` into the run's working
+directory, so a child the run starts never reads it.
 
 ## Resolving the locations
 

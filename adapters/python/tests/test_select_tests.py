@@ -134,14 +134,18 @@ def test_top_level_markdown_is_guarded(graph, path, readers):
     assert not select_tests.covers(select_tests.TOP_MARKDOWN, f"docs/{path}")
 
 
-def test_the_run_starts_no_pytest_for_an_empty_selection_and_the_full_suite_for_a_widened_one(monkeypatch):
+def test_the_run_starts_no_stage_for_an_empty_selection_and_the_full_suite_for_a_widened_one(monkeypatch):
     started = []
     monkeypatch.setattr(select_tests.subprocess, "run",
                         lambda argv, cwd: started.append(argv) or select_tests.subprocess.CompletedProcess(argv, 0))
-    assert select_tests.main(["--paths", "docs/NO_TEST_NAMES_THIS.md", "--run", "--", "--basetemp", "b"]) == 0
+    runner = [select_tests.sys.executable, "-m", "atc_testkit.ci", "--stages"]
+    assert select_tests.main(["--paths", "docs/NO_TEST_NAMES_THIS.md", "--run", "--", "-x"]) == 0
     assert started == []
-    assert select_tests.main(["--paths", "somewhere/unknown.bin", "--run", "--", "--basetemp", "b"]) == 0
-    assert started == [[select_tests.sys.executable, "-m", "pytest", "--basetemp", "b"]]
+    assert select_tests.main(["--paths", "somewhere/unknown.bin", "--run", "--", "-x"]) == 0
+    assert started == [[*runner, "-x"]]
+    started.clear()
+    assert select_tests.main(["--paths", f"{select_tests.TESTS}/{select_tests.SELF_TEST}", "--run", "--workers", "16"]) == 0
+    assert started == [[*runner, "--workers", "16", f"tests/{select_tests.SELF_TEST}"]]
 
 
 @pytest.mark.parametrize("path", ["shared/governance/", "shared/governance", ".claude/skills/atc-review/"])

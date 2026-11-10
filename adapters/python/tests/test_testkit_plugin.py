@@ -140,14 +140,14 @@ SLEEPER = "import sys,time; time.sleep(120)"
 def test_starts(tmp_path):
     children.start([sys.executable, "-c", SLEEPER, str(tmp_path)])
 """
-ESCAPED_TEST = """import subprocess, sys
+ESCAPED_TEST = """import pathlib, subprocess, sys
 import pytest
 
 @pytest.mark.unit
 def test_escapes(tmp_path):
     flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
     child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)", str(tmp_path)], creationflags=flags)
-    (tmp_path.parents[1] / "pid.txt").write_text(str(child.pid))
+    (pathlib.Path(__file__).resolve().parents[2] / "pid.txt").write_text(str(child.pid))
 """
 
 
@@ -158,10 +158,12 @@ def test_a_child_started_through_the_testkit_ends_with_its_test(project: Path, a
     assert "CHILD_PROCESSES_ALIVE" not in run.stdout
 
 
-def test_a_surviving_child_fails_the_run_with_its_token(project: Path, tmp_path: Path, atc_tmp: Path) -> None:
+@pytest.mark.parametrize("workers", [(), ("-n", "2")], ids=["serial", "xdist"])
+def test_a_surviving_child_fails_the_run_with_its_token(project: Path, tmp_path: Path, atc_tmp: Path,
+                                                        workers: tuple[str, ...]) -> None:
     (project / "tests/test_a.py").write_text(ESCAPED_TEST, encoding="utf-8")
     base = tmp_path / "base"
-    run = pytest_in(project, "--basetemp", str(base))
+    run = pytest_in(project, "--basetemp", str(base), *workers)
     pid = int((tmp_path / "pid.txt").read_text())
     try:
         assert run.returncode == 1, run.stdout + run.stderr

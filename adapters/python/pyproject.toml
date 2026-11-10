@@ -33,4 +33,4 @@ unmarked_baseline = "tests/unmarked_baseline.txt"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q -p no:cacheprovider"
+addopts = "-p no:cacheprovider"

@@ -29,6 +29,77 @@ def test_workers_are_at_most_eight(monkeypatch: pytest.MonkeyPatch) -> None:
     assert stages.default_workers() == 1
 
 
+def host_file(tmp_path: Path, text: str) -> Path:
+    path = tmp_path / "config.toml"
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+@pytest.mark.unit
+def test_the_flag_wins_over_the_host_file_and_the_host_file_over_the_default(tmp_path: Path,
+                                                                             monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(os, "cpu_count", lambda: 32)
+    host = host_file(tmp_path, "other = 'kept for later keys'\ntest_workers = 16\n")
+    assert stages.resolve_workers(4, {}, host) == stages.Workers(4, "flag")
+    assert stages.resolve_workers(None, {}, host) == stages.Workers(16, "~/.atc/config.toml")
+    assert stages.resolve_workers(None, {}, tmp_path / "absent.toml") == stages.Workers(8, "default")
+    assert stages.resolve_workers(None, {}, host_file(tmp_path, "other = 1\n")) == stages.Workers(8, "default")
+    assert stages.Workers(16, "~/.atc/config.toml").line() == "workers: 16 (~/.atc/config.toml)"
+
+
+@pytest.mark.unit
+def test_ci_never_reads_the_host_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(os, "cpu_count", lambda: 4)
+    assert stages.resolve_workers(None, {"CI": "true"}, host_file(tmp_path, "test_workers = 16\n")) == \
+        stages.Workers(4, "default")
+    assert stages.resolve_workers(None, {"CI": "true"}, host_file(tmp_path, "not toml [")).source == "default"
+
+
+@pytest.mark.unit
+def test_the_host_file_is_beside_tmp_and_cache_in_the_users_home(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.undo()  # drops the suite's stand-in for the host file
+    assert stages.host_config() == Path.home() / ".atc" / "config.toml"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("text", ["test_workers = 0\n", "test_workers = -2\n", "test_workers = 'eight'\n",
+                                  "test_workers = true\n", "test_workers = 2.5\n", "test_workers = [\n"])
+def test_a_bad_host_file_is_refused_with_its_path(tmp_path: Path, text: str) -> None:
+    host = host_file(tmp_path, text)
+    with pytest.raises(stages.locations.Refusal) as refused:
+        stages.resolve_workers(None, {}, host)
+    assert (refused.value.token, refused.value.code) == ("ATC_CONFIG_INVALID", 9)
+    assert str(host) in refused.value.detail
+
+
+@pytest.mark.unit
+def test_an_unreadable_host_file_is_refused(tmp_path: Path) -> None:
+    with pytest.raises(stages.locations.Refusal) as refused:
+        stages.resolve_workers(None, {}, tmp_path)
+    assert refused.value.token == "ATC_CONFIG_INVALID"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(("value", "count"), [("1", 1), ("16", 16), (3, 3), ("0", None), ("-1", None), ("x", None),
+                                              ("", None), (True, None), (0, None), (2.0, None)])
+def test_a_count_is_an_integer_of_one_or_more(value: object, count: int | None) -> None:
+    assert stages.positive_count(value) == count
+
+
+@pytest.mark.unit
+def test_the_parallel_stage_prints_its_count_before_it_starts(tmp_path: Path,
+                                                              capsys: pytest.CaptureFixture[str]) -> None:
+    printed = []
+
+    def fake(command, **_options):
+        printed.append(capsys.readouterr().out)
+        return 0
+    stages.run_stages(["runner"], [], cwd=tmp_path, stage_list=stages.stages(), env_for=lambda stage: {},
+                      options_for=lambda stage: [], log_for=lambda stage: tmp_path / f"{stage.name}.log",
+                      workers=stages.Workers(5, "flag"), run=fake)
+    assert printed == ["workers: 5 (flag)\n", "", ""]
+
+
 def test_every_stage_passes_its_worker_option_explicitly() -> None:
     parallel, serial, interactive = stages.stages(("tests/x.py",))
     assert stages.pytest_arguments(parallel, 3) == ["-q", "-m", parallel.marker, "-n", "3", "--dist", "loadscope",

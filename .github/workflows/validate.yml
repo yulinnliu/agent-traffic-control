@@ -100,6 +100,7 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
-      - run: uv run --locked pytest
+      - run: uv run --locked python -m atc_testkit.ci --stages
+      - run: uv run --locked python -m atc_testkit.ci --slow
       - run: uv run --locked python scripts/validate_workspace.py
       - run: uv run --locked python scripts/policies.py check ../../shared/policies/examples

@@ -42,8 +42,9 @@ gate and verifier skeletons, and the installed-artifact check a consuming projec
 runs in CI. This adapter depends on it by in-tree path.
 
 ```powershell
-uv run --locked pytest                                  # suite, including shared/conformance
-uv run --locked pytest tests/test_tooling.py -k name    # one test
+uv run --locked python -m atc_testkit.ci --stages       # suite through the testkit's stages, including shared/conformance
+uv run --locked python -m atc_testkit.ci --stages --workers 16   # the same with 16 workers in the parallel stage
+uv run --locked pytest tests/test_tooling.py -k name    # one test, one invocation
 uv run atc validate                                     # this checkout's contract
 uv run atc onboard --sync --root-only                   # re-render .claude/ .agents/ .dsh/ after a canonical skill change (topic worktree only)
 pwsh -File check.ps1 -Projects -Tests                   # one-shot with temporary files and caches under ~/.atc
@@ -55,10 +56,19 @@ Tests build throwaway repositories under pytest's base directory
 under its marker contract: a new test carries a category, and
 `tests/unmarked_baseline.txt` lists the tests that have none yet.
 
-The `Verifier timeout` in the root `AGENTS.md` is three times the measured
-wall clock of a full run in the verifier (822 s gives 2520 s), rounded up to
-a whole minute and never below 300 seconds, since the verifier's selection
-can widen to the full suite; re-measure it when the suite's duration changes.
+The suite runs through the testkit's stages (`docs/TESTKIT.md` § Stages): the
+`parallel` stage on `min(8, cpu count)` workers, then `serial` and
+`interactive`, which no test here enters yet. `--workers N` sets the parallel
+stage's count for one run, and `test_workers = N` in `~/.atc/config.toml` for
+every run on this host outside CI (`docs/ATC_HOME.md` § Host settings). Each
+stage logs to `.tmp/ci-<stage>.log`.
+
+The `Verifier timeout` in the root `AGENTS.md` is the test budget, 1800 s,
+fixed rather than derived from a run and not scaled by the worker count. A
+verifier run that exceeds it stops with `VERIFICATION_TIMEOUT` and "test
+budget exceeded": the tests are optimised, or the Owner decides; nothing
+raises the budget on its own. The staged full suite takes about 232 s at 8
+workers on this repository's development host.
 
 ## Selected tests
 
@@ -69,7 +79,7 @@ candidate. The full suite runs in a manually dispatched run of
 misses.
 
 ```powershell
-uv run --locked python scripts/select_tests.py --run               # select against main, then run pytest on it
+uv run --locked python scripts/select_tests.py --run               # select against main, then run the stages on it
 uv run --locked python scripts/select_tests.py                     # print the selection only
 uv run --locked python scripts/select_tests.py --paths A B         # explain workspace-relative paths
 uv run --locked python scripts/select_tests.py --base REF --run -- -x   # another base; pytest arguments after --

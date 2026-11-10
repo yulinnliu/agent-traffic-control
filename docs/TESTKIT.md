@@ -50,12 +50,22 @@ order. Each is one pytest invocation over the selected paths.
 
 | Stage | Marker expression | Workers | Desktop |
 | --- | --- | --- | --- |
-| `parallel` | `not slow and not serial and not interactive_desktop` | `-n min(8, cpu count) --dist loadscope` | private |
+| `parallel` | `not slow and not serial and not interactive_desktop` | `-n <workers> --dist loadscope` | private |
 | `serial` | `serial and not slow and not interactive_desktop` | `-n 0` | private |
 | `interactive` | `interactive_desktop and not slow` | `-n 0` | interactive |
 
 - Every stage passes its worker option explicitly, so a project's `addopts`
-  cannot change it. A project that carries the testkit has `pytest-xdist`
+  cannot change it.
+- `<workers>` is, in order: the `--workers N` of the command that starts the
+  stages (the CI runner's `--stages`, the gate's `--run`); `test_workers` in
+  the host file `~/.atc/config.toml` (`ATC_HOME.md` § Host settings), read
+  only when `CI` is not set; `min(8, cpu count)`. The verifier takes no flag,
+  so the host file is its override. A count is an integer of 1 or more: a
+  bad flag stops with `USAGE`, a host file that cannot be read or a bad key
+  with `ATC_CONFIG_INVALID` (exit 9), before any check or stage runs. The
+  parallel stage prints `workers: <n> (<flag|~/.atc/config.toml|default>)`
+  before it starts; the evidence record holds no count, so a record covers
+  a push whatever count ran it. A project that carries the testkit has `pytest-xdist`
   installed.
 - A stage that collects no test passes. A run in which every stage collects
   no test is refused with `NO_TESTS_COLLECTED`.
@@ -188,15 +198,16 @@ this order:
   stage definition, which is what lets a record of one be reused by the other.
 - The workspace root builds the testkit and vendors no wheel. Its verifier
   is the same skeleton, imported from the tree, with the rows a consumer's
-  data feeds absent: no selection, lock, contract, lint or collection row,
-  and its own test command, run once with its base directory in the working
-  directory, in place of the stages. Its own rows carry its own tokens:
-  after the ancestry rows it reads the range, and a range Git cannot read
-  refuses with `RANGE_UNREADABLE`; its static checks follow. Its test command
-  and its documentation-only predicate are the root's data (root `AGENTS.md`
-  § Integration verification): the command runs the root's impact selection
-  over the range, and a documentation-only range skips it. It writes no
-  verification report.
+  data feeds absent: no selection hook, lock, contract, lint or collection
+  row. Its own rows carry its own tokens: after the ancestry rows it reads
+  the range, and a range Git cannot read refuses with `RANGE_UNREADABLE`;
+  its static checks follow, then the stages. Its documentation-only
+  predicate and its test selection are the root's data (root `AGENTS.md`
+  § Integration verification): `test_paths` maps the range to the pytest
+  paths the stages run in `tests_dir`, `[]` for the default suite and `None`
+  for none, which skips the stages, and a failure of it refuses with
+  `SELECTION_FAILED`; a documentation-only range skips the selection and the
+  stages. It writes no verification report.
   § Isolated environment, § Running and
   logging and the working-directory rules bind it as they bind a project's
   verifier.

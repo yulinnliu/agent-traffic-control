@@ -20,6 +20,8 @@ workspace.yaml
 .pytest_cache/
 __pycache__/
 **/tests/.tmp*/
+# Stage logs of the testkit's runner and gate.
+/adapters/python/.tmp/
 
 # Personal tool settings and OS noise
 .claude/settings.local.json
