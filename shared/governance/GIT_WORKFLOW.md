@@ -154,7 +154,7 @@ Before its step report the writer runs `atc integrate --check` on its tip and
 puts the verdict token in the report. On `REBASE_REQUIRED` or `OVERLAP` it
 rebases onto `main` itself and reports the new tip. A writer whose task has
 no grant on `main` gets `AUTHORITY_MISSING` from that check (§ Integrate) and
-reports that token.
+reports that token as pending authority.
 
 Published history follows the publication restrictions below. After formal
 review, use the frozen-history and integration rules below; a task-authorized
@@ -228,11 +228,13 @@ without an `origin` remote, which fetches nothing, every topic is unpublished.
 takes no slot, creates no candidate and prints the verdict, a reason code
 and the evidence. Its verdict is a topology decision; integration still
 requires the authority and verification steps of this section. The check
-resolves the task's authority as the integration does, so the caller passes
-the authority the integration will use; a check without authority arrives
-with topic D of `docs/TASK_CONTRACT_PLAN.md` (D.5). Until then a
-`STOP AUTHORITY_MISSING` from `--check` is a missing authority, not a
-topology verdict:
+resolves the task's authority as the integration does; a check without
+authority arrives with topic D of `docs/TASK_CONTRACT_PLAN.md` (D.5). Until
+then `AUTHORITY_MISSING` from `--check` means the authority is pending, not
+a refusal: after the reviewer's PASS the coordinator asks the Owner for the
+word without a pre-word `--check`, and the integration run checks the
+topology itself and stops safely (`REBASE_REQUIRED`, `OVERLAP`). After D.5
+the check runs before the Owner is asked:
 
 ```text
 atc integrate --check --repo <integration-checkout> --reviewed <full sha> --task <task> [--owner-words <quote>]
@@ -450,6 +452,10 @@ Who runs which form is split by flag:
   and passes `--owner-words`, from the Owner's quoted words; an instruction
   carrying `--owner-words` is run by the coordinator itself and never
   forwarded to a writer.
+
+In a paste-only setup with no coordinator session, the user who runs the
+instruction with their own words counts as the coordinator for
+`--owner-words`.
 
 The writer keeps the record's `delivery.status`. A grant ends the moment the
 Owner narrows or revokes it, whatever the record on `main` still reads. A

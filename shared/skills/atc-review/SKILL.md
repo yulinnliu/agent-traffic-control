@@ -33,14 +33,14 @@ the `atc-coordinator` skill's `references/briefs.md`.
   are already known to both sessions and stay out of the block, and so does
   what the receiver can read: a reviewer reads the code at the named SHA, so a
   report gives results rather than narrating the implementation.
-- A report or verdict is saved as a file under `~/.atc/reports/` and its
-  path travels in the message. A notification that truncates (a short note,
-  a preview) is a pointer, never the report.
-- On the paste carrier the report or verdict is saved the same way, and the
-  reply gives its path (with a verdict's token) as one code block the user
-  pastes whole. Any other block, such as a prompt, is inline in that code
-  block; a prompt that is long and revised repeatedly, or a lasting
-  template, goes in a file.
+- On session messaging, a report or verdict is saved as a file under
+  `~/.atc/reports/`, and the message's first line is its conclusion plus
+  that path. A notification that truncates (a short note, a preview) is a
+  pointer, never the report.
+- On the paste carrier, the report or verdict goes inline, in full, in the
+  one code block the user pastes whole; the file and path are for session
+  messaging only. A prompt that is long and revised repeatedly, or a
+  lasting template, goes in a file.
 - A block the user pastes must not contain nested code fences: internal
   triple backticks prematurely close the outer block. Put commands, scripts
   and quoted output on plain text lines or use indentation instead.
@@ -68,8 +68,8 @@ End every completed step with a step report in the shape governance
    `OVERLAP`, rebase onto `main`, rerun the selection and report only the
    new tip.
 3. Stop every background job (governance `DELIVERY.md` § Background work).
-4. Save the report to `~/.atc/reports/<task>-<short sha>.md` and send that
-   path to the coordinator.
+4. Deliver the report to the coordinator as "Every block you write" says;
+   on session messaging its file is `~/.atc/reports/<task>-<short sha>.md`.
 5. End your own session with one line for the Owner, in plain Chinese with
    no tokens, for example
    「報告已送 coordinator（tip <sha>），等審查與你核准；尚未整合、未 push。」.
@@ -170,14 +170,14 @@ diff against your last round's findings.
 ## Reviewer: the verdict block
 
 The verdict takes the shape governance `VERIFICATION.md` § Independent review
-gives. Save it to `~/.atc/reports/<task>-<short sha>-review.md`; the message
-carries the verdict token and that path.
+gives. Deliver it as "Every block you write" says; on session messaging its
+file is `~/.atc/reports/<task>-<short sha>-review.md`.
 
 - The verified line: test counts, mutant results, read-only host evidence.
 - On a PASS, when the project's adopted process lets a PASS carry an
   integration instruction, the integration instruction. The Owner's word on
-  the exact reviewed SHA approves integration. The holder of that word (the
-  user, or a coordinator that has the Owner's word for that SHA) runs the
+  the exact reviewed SHA approves integration. The holder of that word, a
+  coordinator or on the paste carrier the user who counts as one, runs the
   instruction or forwards it to the writer as governance `GIT_WORKFLOW.md`
   § Task and authority splits the forms by flag. Before writing it, run
   `atc integrate --check --json` (governance `GIT_WORKFLOW.md` § Integrate)
@@ -187,17 +187,15 @@ carries the verdict token and that path.
   `preflight.reason` and every entry of `resolved.warnings` in the verified
   line. A `refusal`, such as a missing `## Integration verification`
   section, leaves the PASS without an instruction: give the holder its
-  `reason`, `detail` and `next`. An `AUTHORITY_MISSING` refusal is a missing
-  authority, not a topology verdict (§ Integrate): the PASS still carries
-  the instruction with that refusal quoted, and the coordinator checks again
-  with the authority the integration will use. A `refusal` whose `next`
-  names a rebase (`REBASE_REQUIRED`, or `OVERLAP` or `CONFLICT` of an
-  unpublished topic) still carries the instruction, with that refusal
-  quoted. In a repository
-  without managed worktrees, a `CHECKOUT_NOT_ON_MAIN` refusal naming the
-  topic branch is the expected check result: the PASS still carries the
-  instruction, the verified line quotes that refusal and every entry
-  of `resolved.warnings`, and the writer's run after `switch main` assesses a
+  `reason`, `detail` and `next`. `AUTHORITY_MISSING` is pending authority
+  (§ Integrate): the PASS still carries the instruction with it quoted. A
+  `refusal` whose `next` names a rebase (`REBASE_REQUIRED`, or `OVERLAP` or
+  `CONFLICT` of an unpublished topic) still carries the instruction, with
+  that refusal quoted. In a repository without managed worktrees, a
+  `CHECKOUT_NOT_ON_MAIN` refusal naming the topic branch is the expected
+  check result: the PASS still carries the instruction, the verified line
+  quotes that refusal and every entry of `resolved.warnings`, and the
+  writer's run after `switch main` assesses a
   dirty checkout and `FF` or `NO_FF`.
 
   When `main` has moved, the topic follows governance `GIT_WORKFLOW.md`

@@ -82,13 +82,15 @@ own commits write; session names belong only in the hand-over.
    `references/briefs.md`, relaying the step report verbatim as its path.
    Start it fresh or continue the last reviewer as governance
    `VERIFICATION.md` § Independent review states. Relay findings to the
-   writer verbatim as the verdict's path; never review the work yourself. Done when the verdict is
-   received whole.
+   writer verbatim as the verdict's path; never review the work yourself.
+   Done when the verdict is received whole.
 5. **Carry the Owner's word.** A PASS does not by itself trigger an
    integration. On a PASS that carries an integration instruction, run
-   `atc integrate --check --json` with the instruction's arguments plus the
-   authority the integration will use: `--owner-words` when the record on
-   `main` does not grant it (governance `GIT_WORKFLOW.md` § Integrate).
+   `atc integrate --check --json` with the instruction's arguments when the
+   record on `main` grants the integration. When it does not, the authority
+   is pending: ask the Owner for the word on the reviewed SHA without a
+   pre-word `--check`, as governance `GIT_WORKFLOW.md` § Integrate states
+   until D.5, and handle the integration run's own stops below.
    - On `preflight.verdict` `FF` or `NO_FF` with no `refusal`, or a
      `CHECKOUT_NOT_ON_MAIN` refusal for a root checkout, give the Owner the
      reviewed SHA, that verdict and the instruction, and ask for the word on
@@ -99,11 +101,11 @@ own commits write; session names belong only in the hand-over.
      `OVERLAP` or `CONFLICT` of an unpublished topic), the writer rebases
      and reports the new tip; run
      `atc integrate --check --json --reviewed <reviewed SHA> --rebased <rebased tip>`
-     as governance `GIT_WORKFLOW.md` § After formal review states. When the
-     carry-over holds, ask the Owner for
-     the word on the rebased tip, naming the carried-from SHA and the `main`
-     commits in between; on `CARRY_OVER_REFUSED`, the reviewer re-reviews
-     the rebased tip first.
+     as governance `GIT_WORKFLOW.md` § After formal review states, or, while
+     the authority is pending, leave the carry-over to the integration run.
+     When the carry-over holds, ask the Owner for the word on the rebased tip,
+     naming the carried-from SHA and the `main` commits in between; on
+     `CARRY_OVER_REFUSED`, the reviewer re-reviews the rebased tip first.
    - On any other `refusal`, follow its `next` (`GIT_WORKFLOW.md`
      § Command results); a `next` that names a re-review goes back to the
      reviewer before any word is asked for.
