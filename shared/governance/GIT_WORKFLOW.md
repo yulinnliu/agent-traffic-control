@@ -229,14 +229,14 @@ takes no slot, creates no candidate and prints one `CHECK` line: the
 verdict, a reason code, the project, branch, tip and task binding; `--json`
 carries the full evidence. Its verdict is a topology decision; integration still
 requires the authority and verification steps of this section. The check
-resolves the task's authority as the integration does, but needs none:
-without `--task` and `--owner-words` it reports `authority=not_checked`, and
-a task whose record grants no `integrate_main` reports `authority=missing`
-where the integration stops with `AUTHORITY_MISSING`. After the reviewer's
-PASS the check runs before the Owner is asked:
+resolves the task's authority as the integration does, but needs none: it
+always names the task, and without `--owner-words` a task whose record grants
+no `integrate_main` reports `authority=missing` where the integration stops
+with `AUTHORITY_MISSING`. After the reviewer's PASS the check runs before the
+Owner is asked:
 
 ```text
-atc integrate --check --repo <integration-checkout> --reviewed <sha> --task <task> [--owner-words <quote>]
+atc integrate --check --project <project> --reviewed <sha> --task <task> [--owner-words <quote>]
 ```
 
 The Python integration adapter acquires the repository Integration Slot before
@@ -422,18 +422,16 @@ Formal evidence follows `VERIFICATION.md`; changing the delivered revision inval
 `atc integrate` names the task with `--task` and takes its authority from
 exactly one source.
 
-- `--task <prefix>-<four digits>`, with a prefix declared under
-  `## Task records` in `AGENTS.md`, names a task record and derives the
+- `--task` is required. `<prefix>-<four digits>`, with a prefix declared
+  under `## Task records` in `AGENTS.md`, names a task record and derives the
   repository from the prefix. The record must exist in the reviewed commit's
-  tree (`TASK_NOT_FOUND`) with the integrated branch as its `branch`
-  (`TASK_BRANCH_MISMATCH`). Any other value is a task identity string
-  (`CORE.md` § Task identity) and needs `--project` or `--repo`.
+  tree (`TASK_NOT_FOUND`), and for a range beyond `.atc/tasks/` its `branch`
+  is the integrated branch, which must hold the reviewed SHA as its tip. Any
+  other value is a task identity string (`CORE.md` § Task identity) and needs
+  `--project` (`root` for the workspace root). A task identity string and a
+  records-only range integrate the one local branch at the reviewed SHA.
 - The authority is either the record on `main` with `integrate_main: true`,
   or `--owner-words <quote>`, the Owner's words quoted.
-- `--authority-reference <string>` is deprecated: its value becomes the task
-  identity string, its authority is recorded as unclassified, it never
-  satisfies a record's `integrate_main`, and it is refused for a range that
-  touches `.atc/tasks/` (`AUTHORITY_REFERENCE_REFUSED`).
 - A range whose changed paths all lie under `.atc/tasks/` is records-only: the
   record check runs in place of the verifier.
 - Recovering an interrupted integration takes `--task`.
@@ -466,9 +464,9 @@ grant counts only when it entered `main` through this machine's records-only
 
 Each `integrations.jsonl` line carries `task`, `records_only` and
 `authority`: `{"kind": "record", "task_id": ...}`,
-`{"kind": "owner_words", "quote": ...}`, `{"kind": "sync"}` for a
-governance sync commit, or `{"kind": "unclassified"}` for
-`--authority-reference`. A records-only integration that binds several tasks
+`{"kind": "owner_words", "quote": ...}` or `{"kind": "sync"}` for a
+governance sync commit; `{"kind": "unclassified"}` remains a value readers
+accept in existing logs. A records-only integration that binds several tasks
 writes one line per task with the same candidate, and every records-only line
 carries `main_before`.
 
@@ -627,7 +625,7 @@ The first stderr line of a refusal takes one of these forms:
 | --- | --- |
 | No reviewed SHA, or one that is invalid, ambiguous or names no commit | Run again with the full SHA the formal review named |
 | Topic already merged into `main` | Nothing to integrate; continue with `Cleanup trigger` |
-| Several local branches at the reviewed SHA | Run again with `--branch` naming the reviewed topic branch among those listed |
+| Several local branches at the reviewed SHA | Delete or move the other local branches at the reviewed SHA, or integrate with the task's record ID |
 | No local branch at the reviewed SHA, and none containing it | Restore the reviewed topic branch at the reviewed SHA, or run again with the full SHA the formal review named |
 | Integration checkout not on `main` | Check out `main` in the integration checkout, then run again |
 | Integration checkout has uncommitted changes | Have the owner of the listed paths commit or remove them, then run again |
