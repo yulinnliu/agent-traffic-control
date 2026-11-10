@@ -5,9 +5,12 @@ comes to share one task record and one `atc task` tool, `atc integrate`
 comes to read a task's authority from `main` and to record task and
 authority apart, and governance comes to state the coordinator flow. The
 record, its authority on `main`, its derived status and the tool are
-specified in `docs/TASKS.md`. Three topics in this repository, in order, each
+specified in `docs/TASKS.md`. Four topics in this repository, in order, each
 reviewed under `atc-review` and integrated with `atc integrate`; topic C
-carries the Owner's authorization for `shared/governance/` edits.
+carries the Owner's authorization for `shared/governance/` edits. Every CLI
+change in topic D and in the CLI trim after the final sync passes a
+side-effect review of its entry below before it is built, then the usual
+implementation review.
 
 No project repository changes in these topics. Projects receive the result in
 the final sync after the `.atc/` layout work.
@@ -120,41 +123,419 @@ the final sync after the `.atc/` layout work.
 
 ## C. Governance and skills
 
-1. `GIT_WORKFLOW.md`: § Authority reference becomes § Task and authority (B's
-   flags and record keys); § Integrate states `docs/TASKS.md` § Authority on
-   `main` as rule: a record on `main` with `integrate_main: true` is the
-   Owner's integration authority for `FF` after an unconditional PASS on the
-   exact SHA, never for `NO_FF`, a push or a deploy; only the coordinator
-   writes `authority`, from the Owner's quoted words; a grant ends the moment
-   the Owner narrows or revokes it.
-2. `VERIFICATION.md`: a range that changes only `.atc/tasks/` is verified by
-   the record check and needs no formal review.
-3. `DELIVERY.md`: writers report to the coordinator only; the coordinator
-   relays step reports and findings verbatim and never reviews what it
-   integrates; the reviewer is a fresh subagent or a separate session that
-   has not seen the writer's conversation; close-out (archiving the task's
-   sessions, deleting the scratches sessions report by exact name) is part
-   of the task authority, replacing the rule that only the Owner's word
-   deletes scratches; every session stops its background work before its
-   final report, and every background wait has a ceiling.
+Each rule lands in the one home the placement table names; C.1 to C.7 write
+the rules and steps, C.8 is the editorial pass over every file they touched.
+
+1. `GIT_WORKFLOW.md`:
+   - § Authority reference becomes § Task and authority (B's flags and record
+     keys). § Integrate states `docs/TASKS.md` § Authority on `main` as rule:
+     a record on `main` with `integrate_main: true` is the Owner's
+     integration authority for `FF` after an unconditional PASS on the exact
+     SHA, never for `NO_FF`, a push or a deploy; only the coordinator writes
+     `authority`, from the Owner's quoted words; the writer keeps the
+     record's `delivery.status`; a grant ends the moment the Owner narrows or
+     revokes it. Recovering an interrupted integration takes `--task`.
+   - § Integration verifier source: the verifier argv comes only from the
+     `AGENTS.md` declaration; only `--verify-timeout` may override it. The
+     paragraph on `--verify-command-file` and `--verify-command` goes.
+   - § Explicitly authorized squash and every other mention of
+     `atc preflight merge` name `atc integrate --check`.
+   - The reviewed commit is named by its full SHA or a unique prefix of at
+     least 12 characters; the integration record holds the full SHA.
+   - § Mainline check before final self-verification: before its step report
+     the writer runs `atc integrate --check` and puts the verdict token in
+     the report; on `REBASE_REQUIRED` or `OVERLAP` it rebases and reports the
+     new tip.
+   - § After formal review: after a rebase the writer reports only the new
+     tip; the coordinator runs `atc integrate --check`, with `--rebased` when
+     a review exists, for carry-over and `OVERLAP`, and runs no range-diff or
+     file diff by hand.
+   - § Command results becomes the output rule for every `atc` command (see
+     Tool output below); its exit-code and refusal-line tables stay.
+2. `VERIFICATION.md`:
+   - A range that changes only `.atc/tasks/` is verified by the record check
+     and needs no formal review.
+   - § Testing: writers and reviewers run the selection (`select_tests.py`,
+     or the project's selection); only the integration verifier runs the
+     full suite.
+   - § Independent review: a SHA's first review is a fresh reviewer, a
+     subagent or a separate session that has not seen the writer's
+     conversation; a re-review that only fixes the last round's findings
+     continues the same reviewer with the findings and the fix diff; new
+     design or new files get a fresh reviewer. No rule requires the final
+     round to be fresh.
+3. `DELIVERY.md`:
+   - Writers report to the coordinator only; the coordinator relays step
+     reports and findings verbatim, as file paths, and never reviews what it
+     integrates.
+   - Close-out is a standing rule of every task: after a task is integrated
+     and pushed, the coordinator removes that task's worktree and scratches
+     and archives its sessions, then reports. Keep exceptions are written in
+     the task record. Items outside the task, `REFUSED` and `ANOMALY` lines,
+     refused archives and failed integrations go to the Owner. Every push
+     needs the Owner's word. This replaces the rule that only the Owner's
+     word deletes scratches.
+   - Every session stops its background work before its final report;
+     every background wait has a ceiling; no background work remains after
+     the final report, and a later notification gets one delta line or
+     nothing. Reviewers run their tests in the foreground.
 4. `CORE.md` § Task identity: a repository with a `## Task records`
    declaration identifies tasks by record.
-5. `shared/skills/atc-review`: the step report's fields (task, branch,
-   reviewed SHA, range, verification as command and result, rulings,
-   deviations, open items), at most 40 lines or 3,000 characters, no diff,
-   log, file content or narrative, large material as `<sha>:<path>` or path
-   plus SHA-256; the coordinator returns an oversized report unchanged; a
-   PASS verdict ends with the runnable `atc integrate --task ... --reviewed
-   ...` line.
-6. `shared/skills/atc-coordinator`: the flow of § 3, binding a pre-authorized
-   task on `main`, `atc task list --all` for status questions.
+5. `shared/skills/atc-review`:
+   - The step report: task, branch, tip, range, verification as command and
+     result, check verdict token, rulings, deviations, open items; at most
+     40 lines or 3,000 characters; no diff, log, file content or narrative of
+     what changed, which the commits and the diff carry; large material as
+     `<sha>:<path>` or path plus SHA-256. The writer saves it to
+     `~/.atc/reports/<task>-<short sha>.md` and sends that path; its closing
+     message in its own session is one line pointing at the sent report.
+     The coordinator returns an oversized report unchanged.
+   - The verdict: first line the verdict token; one line per finding
+     (severity, `file:line`, required fix); verified items as one line; no
+     narrative; saved to `~/.atc/reports/<task>-<short sha>-review.md`, and
+     the message carries the token and the path. A PASS ends with the
+     runnable `atc integrate --task ... --reviewed ...` line.
+   - Steps citing C.1 to C.3: the writer's `--check` before the report and
+     its own rebase, the reviewer reuse rule, the selection, the foreground
+     and background rules.
+   - The `.venv` bullet under "Prepare it": `atc tmp clean` takes every
+     `.venv` beside a `pyproject.toml` in the scratch out as a link.
+6. `shared/skills/atc-coordinator`:
+   - The flow of C.3, binding a pre-authorized task on `main`,
+     `atc task list --all` for status questions.
+   - `references/briefs.md` holds both brief templates, where the briefs
+     already live; `atc-review` points to them. Writer brief: task ID,
+     worktree path, plan section, and the Owner's special rulings only when
+     there are any. Reviewer brief: task, SHA and report path. Scope and
+     authority come from the task record, rules from `AGENTS.md` and the
+     skills; a brief restates neither.
+   - Close-out steps: the list comes from `atc tmp list`, with each
+     scratch's dependent runs (a `tree` inside it); sessions are archived
+     after a successful `atc worktree cleanup`; a refused archive is read
+     through the session's state: a running session's writer ends its work,
+     a pinned or idle one goes to the Owner.
 7. `shared/conformance/verification-evidence/README.md` and `docs/GLOSSARY.md`
-   follow B's record keys; `atc onboard --sync --root-only` re-renders the
-   root's managed skill copies in the topic worktree.
+   follow B's record keys (`/2`); `atc onboard --sync --root-only` re-renders
+   the root's managed skill copies in the topic worktree.
+8. Editorial pass, the last step of C: over every file C.1 to C.7 touched,
+   reorder, merge duplicates, drop stale wording, and check against the
+   `hami-writing-for-agents` skill. No rule changes. Its reviewer checks
+   that the meaning is unchanged, that no rule sits in two places, and the
+   line count of each file before and after.
 
-## After C
+### Placement
+
+Governance holds the rule, a skill holds the steps and cites the rule,
+`AGENTS.md` holds an entry pointer. Any other file that needs the rule gets
+a one-line pointer to its home.
+
+| Rule | Home | Steps | Pointers |
+| --- | --- | --- | --- |
+| Task and authority, record grant, recovery needs `--task`, `delivery.status` | `GIT_WORKFLOW.md` § Task and authority | `atc-coordinator`, `atc-review` | `docs/TASKS.md` § Authority on `main` stays the record's specification |
+| Verifier argv from the declaration only | `GIT_WORKFLOW.md` § Integration verifier source | none | `AGENTS.md` `## Integration verification` |
+| Writer's `--check` before the report, own rebase | `GIT_WORKFLOW.md` § Mainline check before final self-verification | `atc-review` writer | none |
+| After a rebase: new tip only, coordinator's `--check --rebased` | `GIT_WORKFLOW.md` § After formal review | `atc-coordinator` | `atc-review` |
+| Tool output principle | `GIT_WORKFLOW.md` § Command results | none | `docs/TESTKIT.md` § Running and logging |
+| Records-only range needs no review | `VERIFICATION.md` | `atc-coordinator` | none |
+| Selection for writers and reviewers, full suite for the verifier | `VERIFICATION.md` § Testing | `atc-review` | none |
+| Reviewer freshness and reuse | `VERIFICATION.md` § Independent review | `atc-review`, `atc-coordinator` | none |
+| Report routing, verbatim relay, coordinator never reviews | `DELIVERY.md` | `atc-coordinator` | `atc-review` |
+| Close-out standing rule (variant A) | `DELIVERY.md` | `atc-coordinator` close-out | `atc-review` after integration |
+| Background work and ceilings | `DELIVERY.md` | `atc-review` | none |
+| Task identity by record | `CORE.md` § Task identity | none | `AGENTS.md` `## Task records` |
+| Step report and verdict shapes, report files | `atc-review` | `atc-review` | `atc-coordinator` |
+| Brief templates | `atc-coordinator` `references/briefs.md` | `atc-coordinator` | `atc-review` |
+
+## Tool output
+
+Measured from Bash and PowerShell tool results in the 419 session
+transcripts of the 21 days before this plan, in the root's transcript folder
+and the worktree folders beside it. Size is characters of the tool result. A
+compound command counts its whole result, so the median is the robust
+figure; many calls already cut their output with `tail` or `head`, so these
+sizes are a floor of what the commands print.
+
+| Rank | Command | Calls | Total (k chars) | Median | p90 |
+| --- | --- | --- | --- | --- | --- |
+| 1 | `pytest` run directly | 1101 | 974 | 486 | 1903 |
+| 2 | `atc integrate` | 375 | 321 | 561 | 1753 |
+| 3 | `atc onboard`, all modes | 176 | 316 | 945-2041 | 1551-4481 |
+| 4 | `atc worktree audit` | 252 | 252 | 374 | 2248 |
+| 5 | `atc worktree create` | 332 | 191 | 251 | 987 |
+| 6 | `atc worktree cleanup` | 363 | 157 | 473 | 691 |
+| 7 | `atc integrate --check` | 194 | 135 | 416 | 1332 |
+| 8 | `atc validate` | 126 | 127 | 523 | 2065 |
+| 9 | `atc test run` | 133 | 111 | 464 | 1688 |
+| 10 | `atc tmp list` | 42 | 58 | 740 | 2243 |
+| 11 | `select_tests.py` | 25 | 48 | 1486 | 3705 |
+| 12 | `atc tmp clean` | 79 | 42 | 312 | 1721 |
+| 13 | `atc test mutants` | 41 | 37 | 685 | 1968 |
+| 14 | `atc worktree --help` | 18 | 17 | 602 | 2050 |
+
+### Principle
+
+A command's default output is its verdict and the next action. Detail sits
+behind a flag or in a log file whose path the command prints; `--json`
+carries the full result for machines; an error is one line naming the cause
+and the next step, and a usage error prints the usage line, not the whole
+help. A run that did not complete reports `TIMEOUT` or `INTERRUPTED` with
+the last lines of its log, never a pass.
+
+### Proposals
+
+1. Direct `pytest`: writers and reviewers move to `atc test run --select`
+   (C.2, D.12), which prints one summary line and keeps the progress dots,
+   `SKIPPED` lines and tracebacks in the log.
+2. `atc integrate`: success prints one line (decision, project, `main`
+   old -> new as 12-character SHAs, task); the verifier's output stays in
+   its log in the run's working directory and the line names it; a failure
+   repeats the log's last twenty `FAILED` or `ERROR` lines as `TESTKIT.md`
+   § Running and logging states.
+3. `atc onboard`: `--check --all` prints 18,402 characters today, 135 of its
+   172 lines being `is current` skips. Default output prints only items that
+   change or stop, and one count line per checkout (`skip 29, update 0`);
+   `--verbose` lists the skips.
+4. `atc worktree audit`: its own output is one line per worktree (40 to 46
+   characters measured); the transcript sizes come from commands chained to
+   it. No change.
+5. `atc worktree create` and `atc worktree cleanup`: one verdict line
+   (`CREATED` or `REMOVED`, project/topic, base or main as a 12-character
+   SHA); evidence under `--json`.
+6. `atc integrate --check`: the one-line verdict mode of D.10 becomes the
+   default human output; `--json` keeps the full report.
+7. `atc validate`: 38 characters on success; no change.
+8. `atc test run`: D.12.
+9. `atc tmp list`: one line per scratch with its name, its tree relative to
+   the project and its age; full paths under `--json`. Registry entries
+   whose scratch is gone show as `missing` today; the list ends with one
+   line counting them and naming `atc tmp prune`.
+10. `select_tests.py`: D.15.
+11. `atc tmp clean` and `atc test mutants`: already one line per item; no
+    change.
+12. `--help`: covered by the principle's usage-error line; no command change
+    beyond argparse's usage line plus one `next:` line on a usage error.
+13. `atc task list --all`: 6,969 characters today; 9 of its 53 lines are
+    `INVALID_RECORD` warnings, one per bad ria record. The warnings fold into one
+    line per repository with the count and `atc task check <repo>`.
+
+Proposals 2, 3, 5, 6, 9, 12 and 13 are built in D with the side effects
+below; they share one risk, a reader that parses the human output, mitigated
+by B.3's move of every reader in `shared/skills/` and the tests to `--json`
+and by a test per command that pins its default output.
+
+| Proposal | Side effect | Mitigation |
+| --- | --- | --- |
+| 2 | A failed verifier's detail is one step away | The failure line names the log and repeats its last twenty failure lines |
+| 3 | A drift buried in skips was visible in the full list | Counts per checkout; every non-skip item is printed; `--verbose` restores the list |
+| 5, 6 | Evidence a reader used from the human block is gone | `--json` unchanged; skills read `--json` (B.3) |
+| 9 | Full scratch paths needed for `tmp clean <dir>` | `tmp clean` takes the scratch name as `tmp list` prints it |
+| 12 | A caller that relied on the help on error | `--help` still prints it |
+| 13 | A bad record no longer listed by name | `atc task check` names each one |
+
+## Verified CLI facts
+
+1. `atc preflight cleanup` duplicates `atc worktree cleanup`: the check is
+   the same. `worktree cleanup` runs `git_preflight.cleanup_preflight`
+   (`hami_worktree.py:824`) before it removes anything; `preflight cleanup`
+   runs that check alone, read-only. No root doc, skill, project skill or
+   project doc names it, and the transcripts hold no call; its one test is
+   the routing row in `tests/test_atc_cli.py:19`.
+2. `onboard --apply` existed only for heartopia: not confirmed. The mode is
+   generic (create missing managed files, update nothing, commit nothing)
+   and has been in the code from the first commit. Its one caller is
+   `atc bootstrap add` (`bootstrap.py:167-168`); `adapters/python/README.md:19`
+   documents it; no doc or skill gives it as a command, and the transcripts
+   hold no direct call.
+3. `--contract` accepts only 1: confirmed. It is a required integer and any
+   value other than `CONTRACT = 1` stops with `CONTRACT_INCOMPATIBLE`
+   (`hami_worktree.py:47`, `:1071`); all 17 call sites pass `--contract 1`.
+4. Reference counts, files that name the flag:
+
+   | Flag | Root docs, skills, governance | Root tests | Project skills | Project docs and vendored governance |
+   | --- | --- | --- | --- | --- |
+   | `--main` | 0 | 0 | 0 | 0 |
+   | `preflight cleanup` | 0 | 1 (routing) | 0 | 0 |
+   | `preflight merge` | 1 (`GIT_WORKFLOW.md`) | 2 | 0 | 4 |
+   | `onboard --apply` | 1 (adapter README) | 0 | 0 | 0 |
+   | `--verify-command`, `--verify-command-file` | 1 (`GIT_WORKFLOW.md`) | 5 | 0 | 4 |
+   | `--contract` | 4 | 3 | 9 | 1 |
+   | `--tree-name` | 2 | 1 | 8 | 0 |
+   | `--authority-reference` | 4 | 5 | 10 | 4 |
+   | `--expected-head` | 1 | 1 | 9 | 1 |
+
+   The project-doc hits for `preflight merge` and the verifier flags are the
+   vendored `GIT_WORKFLOW.md` copies.
+5. `atc test run` writes no log. It collects pytest's output in memory
+   (`testrun.py:105-119`), prints the last fifteen lines after pytest ends,
+   has no timeout, and writes nothing to disk; `TESTKIT.md` § Running and
+   logging, which states live output and a log, does not hold for it today.
+6. The selection for a change to `git_preflight.py` or `git_integrate.py`
+   (23 and 22 of 37 test files): one file comes from the "declared reader of
+   its whole directory" rule (`test_select_tests.py`); the rest reach the
+   module through imports. Narrowing that rule saves one test file, so it
+   stays as it is.
+7. Callers of the commands item 5 still had to inventory, as files that
+   name `atc <command>` and as transcript calls: `friction` 0 files, 2
+   calls; `classify` 0, 0; `policies` 0, 7; `enforce` 2 root and 4 project,
+   18; `bootstrap` 4 root and 4 project, 8.
+
+## D. CLI changes
+
+Code, tests, `shared/conformance/`, `docs/TESTKIT.md`, `docs/ATC_HOME.md` and
+`adapters/python/README.md`. Order: D.5 before D.7 (the alias needs a
+`--check` without authority), D.9 before D.12 (the child encoding), D.13
+before D.12's scratch-name form. Each entry: the change, its side effects,
+their mitigations.
+
+1. `atc worktree create --scope <text>` writes the task record in the new
+   worktree through `task_records.new`.
+   - Side effects: a second entry point that writes records; a record for
+     the branch may already exist; a record written with authority the
+     coordinator did not give.
+   - Mitigations: one writer function; refuse when a record names the
+     branch; the record grants `edit` and `commit` only and is left
+     uncommitted with its path printed.
+2. `atc tmp clean` lists a scratch's dependent runs (a `tree` inside it) and
+   takes them with `--with-runs`.
+   - Side effects: deleting a run another session still reads.
+   - Mitigations: listing is the default; a run with an open file or a live
+     process ends `REFUSED` as scratches do today.
+3. The scratch registry records the task ID; `atc close-out --task <ID>`
+   removes the task's worktree and scratches in one call.
+   - Side effects: a registry format change; one call deleting many items;
+     an item of another task taken by mistake.
+   - Mitigations: entries without a task never match one; it runs only
+     when `integrations.jsonl` has the task's line and `origin/main`
+     contains it, and skips the keep exceptions in the record; every item
+     ends `DELETED`, `SKIPPED` or `REFUSED`; it touches nothing outside the
+     task and runs `worktree cleanup`'s own checks.
+4. Drop `--main` from `atc integrate` and `atc preflight push`.
+   - Side effects: none found (0 references, 0 calls).
+   - Mitigations: argparse's unknown-flag error.
+5. `atc integrate --check` needs no authority.
+   - Side effects: a check that passes says nothing about authority.
+   - Mitigations: with `--task` it still evaluates the grant; without one
+     its line says `authority: not checked`.
+6. `--contract` becomes optional with default 1.
+   - Side effects: none for callers; 17 call sites keep passing 1.
+   - Mitigations: a value other than 1 still stops with
+     `CONTRACT_INCOMPATIBLE`; removal waits for item 5.
+7. Retire `atc preflight merge` and `atc preflight cleanup`.
+   - Side effects: vendored `GIT_WORKFLOW.md` in four projects names
+     `preflight merge` until the final sync; the read-only removability
+     check of `preflight cleanup` is gone.
+   - Mitigations: `preflight merge` stays as an alias that runs
+     `atc integrate --check` with the same flags and prints one stderr line
+     naming it, until item 5; `atc worktree audit` gains each worktree's
+     removability verdict; `preflight cleanup` goes outright.
+8. Drop `--verify-command` and `--verify-command-file`; the four test files
+   that pass them declare a verifier in their fixture repository;
+   `integrations.jsonl` records the verifier's source (argv file, timeout,
+   whether `--verify-timeout` overrode it).
+   - Side effects: the vendored `GIT_WORKFLOW.md` names the flags until the
+     final sync; slower fixtures; a new key in the record.
+   - Mitigations: C.1 already forbids the flags; fixtures commit the
+     `## Integration verification` section once per module; readers of
+     `integrations.jsonl` ignore unknown keys.
+9. `atc` sets `PYTHONIOENCODING=utf-8` in the verifier child's environment
+   and decodes the child's output as UTF-8 with replacement.
+   - Side effects: a project verifier that relied on the inherited value;
+     the display-only decoders `testrun.py:118` and `git_integrate.py:288`.
+   - Mitigations: `TESTKIT.md` § Isolated environment states the value; the
+     two decoders follow the Owner's decision on the `TESTKIT.md`
+     environment contract; the `env -u PYTHONIOENCODING` guidance is removed
+     after D is integrated.
+10. A one-line `--check` verdict: `<TOKEN> <project> <branch> <tip12>`
+    followed by the `next:` line on a stop.
+    - Side effects: readers of the current human block.
+    - Mitigations: readers use `--json` (B.3).
+11. `atc worktree cleanup` given `--expected-head` outside its modes names
+    the modes that take it (`--abandon`, `--squash-integrated`).
+    - Side effects: error text changes.
+    - Mitigations: tests assert the token, not the prose.
+12. `atc test run`:
+    - Python defaults to the tree's `.venv`; a missing one stops with
+      `VENV_MISSING`, never system Python. `--select <base>` runs
+      `select_tests.py` and prints the base and the count. The console
+      prints the log path at start, then one summary line (counts, failed
+      test names, log path); the full log, pytest's dots and the summary
+      line `-q` hides stay in the log in the run directory, written live
+      with `PYTHONUNBUFFERED=1`. `--progress` streams for humans. An
+      incomplete run reports `TIMEOUT` or `INTERRUPTED` with the last lines
+      and never a pass. A log held open blocks cleanup with a one-line
+      report, without retry or hang. The child encoding follows D.9. New
+      forms are flags; the positional form stays until item 5.
+    - Side effects: runs that used system Python stop; disk use for logs;
+      a selection that misses a test; output an agent read in the console
+      is now in a file.
+    - Mitigations: `VENV_MISSING` names `atc tmp checkout` and the project's
+      `AGENTS.md` preparation; logs live in the scratch and go with it; the
+      verifier still runs the full suite; the summary names each failed
+      test and the log.
+13. `atc tmp checkout <sha> --task <ID>` exports the commit, runs
+    `uv sync --locked` and registers the scratch with its task, so
+    `atc test run` takes the scratch name.
+    - Side effects: network and cache use; a tree without `uv.lock`.
+    - Mitigations: the scratch is registered before the sync, so a failed
+      sync is still cleanable; a tree without `uv.lock` stops naming the
+      project's `AGENTS.md` preparation.
+14. `--reviewed` and `--rebased` take a unique prefix of 12 or more
+    characters, record the full SHA and refuse an ambiguous one.
+    - Side effects: a prefix that becomes ambiguous later.
+    - Mitigations: resolved once with `git rev-parse --verify` in the
+      integration checkout; `AMBIGUOUS_SHA` stops the run; every record and
+      output line carries the full SHA.
+15. `select_tests.py` prints a summary by default (selected n of m, one
+    reason line per changed path); the per-test list only with `--explain`.
+    - Side effects: callers that read the per-test list.
+    - Mitigations: its only reader today is `tests/test_select_tests.py`;
+      `atc test run --select` calls the selection as a function, not
+      through its text.
+16. The output proposals 2, 3, 5, 9, 12 and 13 of Tool output, with the
+    side effects and mitigations listed there.
+
+## After D
 
 The `.atc/` layout work, then the final sync to every project (skills,
 governance, `## Task records` declarations with prefixes `HQ`, `HQT`, `RIA`,
-atc-coordinator seeded in hami-quant and hami-quant-trading), then a topic
-removing `--authority-reference`.
+atc-coordinator seeded in hami-quant and hami-quant-trading), then the CLI
+trim below.
+
+## CLI trim after the final sync
+
+Project skills use these until the final sync replaces them.
+
+1. `--authority-reference` goes; `--task` becomes required.
+   - Side effects: a repository without `## Task records` (heartopia) has
+     no record ID.
+   - Mitigations: `--task` keeps its task-identity-string form with
+     `--owner-words` for such a repository.
+2. `--project` replaces `--repo`, the root included.
+   - Side effects: tests drive unregistered fixture repositories through
+     `--repo`.
+   - Mitigations: the tests register their fixtures in a temporary
+     `workspace.yaml`.
+3. Drop `atc integrate --branch`; the record names the branch.
+   - Side effects: a task-identity-string run has no record.
+   - Mitigations: such a run takes the one local branch at `--reviewed`, as
+     the default does today, and stops when there are several.
+4. Drop `--contract`.
+   - Side effects: 9 project skill files pass it until the final sync.
+   - Mitigations: the final sync drops it first; `atc doctor` keeps
+     printing the contract number.
+5. Drop `onboard --apply`.
+   - Side effects: `atc bootstrap add` calls it.
+   - Mitigations: `bootstrap` calls the apply mode as a function; the
+     adapter README row changes with it.
+6. Drop `tmp clean --tree-name`; `close-out --task` replaces it.
+   - Side effects: `atc-review` and 8 project skill files use it.
+   - Mitigations: the final sync moves them to `close-out --task` first.
+7. Drop `atc preflight merge`'s alias (D.7) and `atc test run`'s positional
+   form (D.12).
+   - Side effects: vendored governance and project skills that still name
+     them.
+   - Mitigations: the final sync carries C's governance and skills first.
+8. `friction`, `classify`, `policies`, `enforce` and `bootstrap` stay:
+   `enforce` and `bootstrap` have root and project references,
+   `scripts/policies.py` runs in CI, and `friction` and `classify` carry no cost
+   while unused.
