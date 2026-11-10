@@ -627,6 +627,45 @@ review, one implementation review and one integration:
    - Mitigations: no skill or transcript call uses the old form; the stderr
      line names the new command; `atc worktree audit` gains each worktree's
      removability verdict; `preflight cleanup` goes outright.
+   - Design (batch 2):
+     - `git_preflight.py merge` keeps its parser (`--repo`, `--branch`,
+       `--reviewed`, `--main`, `--json`) and runs
+       `git_integrate.main(["--check", "--repo", <repo>, "--branch",
+       <branch>, "--reviewed", <sha>, *(["--json"])])`, imported inside the
+       function (`git_integrate` imports `git_preflight`). Before it, one
+       stderr line: `NOTE atc preflight merge is retired; this ran atc
+       integrate --check --repo <repo> --reviewed <sha>`. Its exit code is
+       integrate's: 0 for `CHECK FF`/`CHECK NO_FF`, 1 for a stop, 2 for an
+       error.
+     - Refused before integrate runs, `ERROR USAGE <detail>` and exit 2, each
+       naming `atc integrate --check`: `--main` other than `main`; no
+       `--reviewed`.
+     - `cleanup` leaves the parser, so `atc preflight cleanup` is argparse's
+       invalid-choice usage error with atc's `next: atc preflight --help`.
+       `cleanup_preflight()` stays: `atc worktree cleanup` runs it.
+       `merge_preflight()` stays: `atc integrate` runs it.
+     - `atc worktree audit`: `state_evidence()` adds `removable`, true when
+       the worktree is present, clean and merged into `main` (the
+       `REMOVABLE` condition of `cleanup_preflight()`), and the human line
+       of an `OK` or `LEGACY_TARGET` result gains the detail `removable` or
+       `not removable: <unmerged, uncommitted changes or missing>`. Exit
+       codes do not change: removability is evidence, not a finding.
+     - `GIT_WORKFLOW.md` § Command results: exit 0 reads "Integrated, a
+       `CHECK FF` or `CHECK NO_FF` verdict, or a preflight `PUSH`"; exit 1
+       reads "a `CHECK STOP` or preflight `STOP` verdict" in place of "a
+       preflight `STOP` or cleanup `KEEP` verdict".
+     - Docs: `git_preflight.py` docstring and usage, `atc_cli` summary line,
+       `adapters/python/README.md` command table. The conformance README
+       keeps `REMOVABLE`: `cleanup_preflight()` still returns it.
+     - Tests: the alias's `--check` line and exit code for an `FF` topic,
+       its `--json`, the NOTE line, each `USAGE` refusal, `preflight
+       cleanup` refused as a usage error, and `audit`'s `removable` for a
+       merged clean, an unmerged and a dirty worktree.
+     - Side effects (beyond the entry's): a script that parsed `FF
+       FAST_FORWARD` from `preflight merge` now reads a `CHECK` line; none
+       in this repository or the skills does. `--check` takes no slot and
+       creates no candidate, so the alias stays read-only apart from the
+       fetch.
 8. Drop `--verify-command` and `--verify-command-file`; the five test files
    that pass them (`test_git_integrate.py`, `test_integrate_task.py`,
    `test_integrate_moving_main.py`, `test_testkit_evidence.py`,
@@ -768,6 +807,36 @@ review, one implementation review and one integration:
       `--expected-main` and `--integrated-as` stay full-SHA only
       (`hami_worktree.py:1025-1031`): they bind a deletion, and their values
       come from `--json` or `integrations.jsonl`, which carry full SHAs.
+    - Design (batch 2):
+      - `git_integrate.resolve()` checks the form first: 12 to 40
+        hexadecimal characters, case-insensitive, else
+        `REVIEWED_SHA_INVALID` naming the form. After the fetch, a helper
+        `resolve_commit(repo, value, flag)` runs `git rev-parse --verify
+        --quiet <value>^{commit}`. A result that does not start with the
+        value (a ref whose name is hex wins over an abbreviated ID, as in
+        `merge_preflight()`) or no result is `REVIEWED_SHA_UNKNOWN`, unless
+        `git rev-parse --disambiguate=<value>` lists two or more commits or
+        tags, which is the new stop `AMBIGUOUS_SHA` listing them as 12-character
+        IDs. Exit 1, before any candidate; `gp.REASONS` and `gp.NEXT` gain
+        it ("run again with the full SHA the formal review named").
+      - `--rebased` resolves through the same helper. From there on
+        `reviewed` and `carried_from` hold the full SHA, so the record, the
+        authority check, the candidate and `--json` carry it.
+      - `atc verify` shares `resolve()` and so takes the prefix too.
+      - Help text: "full SHA, or a unique prefix of 12 or more characters".
+      - `GIT_WORKFLOW.md` § Integrate: the usage line's `--reviewed <full
+        sha>` becomes `--reviewed <sha>`, and the sentence reads "Name the
+        reviewed commit by its full 40-character SHA or a unique prefix of
+        at least 12 characters, which the run resolves once to the full SHA
+        the integration record holds; an ambiguous prefix stops."
+        § Command results: the first stop row reads "No reviewed SHA, or one
+        that is invalid, ambiguous or names no commit".
+      - Tests: a 12-character prefix integrates and its record holds the
+        full SHA; `--rebased` by prefix; 11 characters is
+        `REVIEWED_SHA_INVALID`; an unknown prefix is `REVIEWED_SHA_UNKNOWN`;
+        `AMBIGUOUS_SHA` with the minimum length patched to 1 over 17 commits
+        (two share a first character); `atc verify` by prefix.
+      - Side effects: none beyond the entry's; a full SHA behaves as now.
 15. `select_tests.py` prints a summary by default (selected n of m, one
     reason line per changed path); the per-test list only with `--explain`;
     a new `--json` flag prints the selected test paths as a JSON array, the
@@ -1295,8 +1364,33 @@ review, one implementation review and one integration:
       `AGENTS.md` declare a larger budget next to `Verifier timeout` with
       the Owner's recorded approval and the reason, the rule's breach
       signal then counting against that declared budget.
-    - Not designed further until the authorization; no governance file
-      changes in ATC-0008 without it.
+    - Owner's authorization (2026-11-10): 「三項都授權」 for the governance
+      edits of D.22, D.14 and D.7; the exception path 「AGENTS.md
+      宣告較大上限」.
+    - Design (batch 2):
+      - `VERIFICATION.md` gains `### Verifier test budget` after § Full
+        regression timing and evidence reuse: a project's `Verifier
+        timeout` (`GIT_WORKFLOW.md` § Project verification section) is its
+        verifier's test budget, at most 1800 s; the budget is fixed, not
+        derived from a run nor scaled by the worker count; a run over it is
+        a signal to optimise the tests or for the Owner to decide, never a
+        retry, and nothing raises it automatically. A larger budget is
+        declared in the project's `AGENTS.md` beside `Verifier timeout`
+        with a line `Verifier budget approval: <the Owner's recorded
+        words and date>; reason: <reason>`; the breach signal then counts
+        against that budget. The 300-second default for a project that
+        declares no timeout stays (`GIT_WORKFLOW.md`).
+      - No code: `atc integrate`'s timeout stop already says "test budget
+        exceeded" against the timeout in force. A check that refuses a
+        declaration over 1800 s without the approval line would reach
+        hami-quant through the installed `atc` before its `AGENTS.md`
+        carries the line, so it is not built.
+      - Root `AGENTS.md`'s `Verifier timeout` note points to the new
+        section; `adapters/python/README.md` keeps its root-specific text
+        and points to it too.
+      - After D: hami-quant's `AGENTS.md` gains the approval line for its
+        3600 s with the final sync, on the Owner's recorded word.
+      - Tests: none new; the root's guidance change selects its readers.
 23. The parallel stage's scheduler, testkit-wide. `loadscope` keeps a
     module on one worker; the root's 228 s parallel stage is exactly its
     longest module (D.21), against 174 s under `load` (D.20). What
