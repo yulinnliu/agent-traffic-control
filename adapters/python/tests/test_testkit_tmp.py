@@ -10,7 +10,7 @@ import subprocess
 import pytest
 
 import atc_testkit
-from atc_testkit import isolation, locations, scratch
+from atc_testkit import commands, isolation, locations, scratch
 
 
 def link_directory(link: Path, target: Path) -> None:
@@ -695,3 +695,20 @@ def test_an_error_reading_a_parent_is_its_refusal(atc_tmp: Path, monkeypatch: py
         patch.setattr(scratch.os, failing, refuse)
         code, lines = prune()
     assert code == 1 and lines == [f"REFUSED {atc_tmp / 'candidates'} (error: cannot read)"]
+
+
+@pytest.mark.unit
+def test_dependent_runs_are_listed_and_taken_with_runs(atc_tmp: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    review, run, other = scratch_dir(atc_tmp, "review"), scratch_dir(atc_tmp, "run"), scratch_dir(atc_tmp, "other")
+    scratch.register(atc_tmp, review, review / "tree")
+    scratch.register(atc_tmp, run, review / "tree")
+    scratch.register(atc_tmp, other, other / "tree")
+    assert clean(review) == (0, [f"DEPENDENT {run} (its tree is inside {review}; --with-runs deletes it)",
+                                 f"DELETED {review}"])
+    assert run.is_dir() and registered_names(atc_tmp) == ["run", "other"]
+    review = scratch_dir(atc_tmp, "review")
+    scratch.register(atc_tmp, review, review / "tree")
+    assert commands.main(["tmp", "clean", "--with-runs", "review"]) == 0
+    assert capsys.readouterr().out.splitlines() == [f"DELETED {run}", f"DELETED {review}"]
+    assert other.is_dir() and registered_names(atc_tmp) == ["other"]
+    assert commands.main(["tmp", "clean", "--with-runs"]) == 2

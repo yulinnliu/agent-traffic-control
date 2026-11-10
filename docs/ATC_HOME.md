@@ -127,17 +127,50 @@ A scratch is the working directory of one isolated test run made through
   temporary directory, which product code that requires isolated state
   checks. `qdr` inside it is the data root.
 - An exported copy of a tree (`git archive <sha>`) that a review runs against
-  is placed at `<tmp>/<scratch>/tree`.
+  is placed at `<tmp>/<scratch>/tree`; `atc tmp checkout` makes one
+  (§ Checkout).
+
+## Checkout
+
+`atc tmp checkout <sha> --task <ID> [--worktree <path>] [--scratch <name>]
+[--lock-dir <dir>]` prepares a scratch for a review or a run of one commit.
+
+1. `<sha>`, a full SHA or a unique prefix, is resolved in the Git working
+   tree that holds `--worktree` (default: the working directory); a commit
+   it does not name stops with `SHA_NOT_FOUND`, a directory outside any
+   working tree with `NOT_IN_REPOSITORY`. `<ID>` has the task form
+   `ATC-0008`; another form stops with `TASK_INVALID`.
+2. The scratch is `--scratch`, by default `<ID>-<first seven characters of
+   the commit>`, resolved as § Test scratch says. A `tree` already in it
+   stops with `SCRATCH_TREE_EXISTS`, which names `atc tmp clean`.
+3. `git archive` of the commit is unpacked into `<tmp>/<scratch>/tree`, and
+   the scratch gets its registry line with its task, the source worktree
+   and the full commit; the line prints as
+   `CHECKOUT <scratch> <tree> <commit>`.
+4. `uv sync --locked` runs in `--lock-dir` (a directory under the tree,
+   default the tree itself) without `VIRTUAL_ENV` and
+   `UV_PROJECT_ENVIRONMENT`, and `SYNCED <environment>` names the `.venv`
+   it built. A directory without `uv.lock` stops with `LOCK_MISSING`,
+   which names the project's `AGENTS.md` preparation; a failed sync stops
+   with `SYNC_FAILED` and the sync's last twenty lines (exit 1).
+
+Refusals exit 9 unless stated. A refusal after step 3 leaves the scratch
+registered, so `atc tmp clean <scratch>` removes it.
 
 ## Scratch registry
 
 `<tmp>/scratch-dirs.tsv` lists every scratch that exists, one per line.
 
 - Encoding UTF-8 without BOM, LF line ends, tab-separated, first line the
-  header `project	scratch	tree	created_utc`.
-- `project`: `[project].name` from `<tree>/pyproject.toml`; the tree's
-  directory name when that file or key is absent.
+  header `project	scratch	tree	created_utc	task	source	commit`.
+- `project`: `[project].name` from `<tree>/pyproject.toml`, or from the
+  `--lock-dir` of `atc tmp checkout`; the directory's name when that file
+  or key is absent.
 - `scratch`, `tree`: absolute native paths. `created_utc`: `YYYY-MM-DDTHH:MM:SSZ`.
+- `task`, `source`, `commit`: the task ID, the source worktree and the full
+  commit of a scratch `atc tmp checkout` made; empty for other scratches.
+  A line of the four-column format reads with the three empty, and a change
+  to the file keeps it as it is.
 - `atc test run` adds the line at the start of a run whenever the scratch has
   none, whether or not the directory already exists.
 - Every change to the file is made under `<tmp>/scratch-dirs.lock` and
@@ -175,6 +208,12 @@ recursive delete in ATC's temporary tooling runs only at the end of them.
 Each `<dir>` ends on one line: `DELETED`, `SKIPPED` or `REFUSED` with the
 reason; an error while handling a `<dir>` is a `REFUSED` with the error. The exit code is the highest across all of them: 0, 1 for a refusal
 at steps 3 to 5, 2 for a refusal at step 1.
+
+A scratch's dependent runs are the other registered scratches whose `tree`
+lies inside it, such as the mutant and test runs made on its export. After
+step 1 each one prints `DEPENDENT <run>` and is left. With `--with-runs`
+(`atc tmp clean --with-runs <dir>...`) each goes through steps 2 to 6
+itself, before the scratch it depends on.
 
 `atc tmp prune` deletes entries whose last modification is older than seven
 days. An entry that is a link prints `REFUSED` and is left. A plain file is

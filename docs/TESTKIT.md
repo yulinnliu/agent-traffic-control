@@ -341,6 +341,44 @@ the scratch `<scratch>` (`ATC_HOME.md` § Test scratch). In order:
    `-q` and `--basetemp <scratch>/bt`, printing the last fifteen lines of its
    output.
 
+### `atc test run --scratch <name> [--tree <tree>] [--python <py>] [--select <base>] [--label <label>] [--timeout <s>] [--progress] [-- <pytest args>]`
+
+The same run as the positional form, steps 2 to 4 included, with its output
+in a log. The form is chosen by the first argument: an option selects it.
+
+1. Before the run, each refusal exits 9 and runs no test. The scratch is
+   checked as in step 1 above. `--tree` defaults to the tree the scratch's
+   registry line names, as `atc tmp checkout` records it; without either,
+   `TREE_NOT_FOUND`. `--python` defaults to the tree's `.venv`
+   interpreter; without one, `VENV_MISSING`, which names
+   `atc tmp checkout` and the project's `AGENTS.md` preparation, and never
+   another Python.
+2. `--select <base>` runs the tree's `[tool.atc-testkit]` `selector`, a
+   list of strings: the argv of a command that takes changed paths as
+   arguments and prints the test paths to run as a JSON array on its last
+   line. It runs with the run's Python and the tree as its working
+   directory. The changed paths are `git diff --name-only <base>` and the
+   untracked files of the tree's working tree, relative to its top; for a
+   tree outside a working tree, the diff from `<base>` to the commit of
+   the scratch's registry line in its source worktree. A tree without the
+   key stops with `SELECTION_UNDECLARED`, a base Git cannot resolve with
+   `SELECTION_BASE_UNKNOWN`, an export whose scratch names no source with
+   `SELECTION_SOURCE_UNKNOWN`, a selector that fails or prints no JSON
+   array of strings with `SELECTOR_FAILED`. The line
+   `SELECT <base>: <n> changed paths, <k> test paths` follows; with none
+   selected, `NO_TESTS no test selected` ends the command with exit 0. The
+   selected paths come before the pytest arguments.
+3. pytest runs as in step 5 above with `PYTHONUNBUFFERED=1`, its output
+   written as it arrives to `<scratch>/runs/<UTC time>-<label>.log` after
+   the § Running and logging header. The console shows `LOG <path>` first
+   and, with `--progress`, the output too.
+4. One summary line ends the command: `PASS`, `FAIL`, `NO_TESTS`,
+   `INTERRUPTED` or `ERROR exit <code>`, pytest's counts, the failed and
+   errored tests by node ID, and the log path. A run that `--timeout` ends
+   prints the log's last fifteen lines and `TIMEOUT` (exit 124); one the
+   caller interrupts prints them and `INTERRUPTED` (exit 130). Neither ever
+   reports a pass. Otherwise the exit code is pytest's.
+
 ### `atc test mutants <scratch> <sha> <worktree> <mutants.json> --python <py> --tests <path>...`
 
 Applies each mutant alone to `<scratch>/tree`, the export of `<sha>`, through
@@ -373,9 +411,10 @@ Applies each mutant alone to `<scratch>/tree`, the export of `<sha>`, through
   last mutant, where `N` counts the mutants that printed a `KILLED`,
   `SURVIVED` or `INCONCLUSIVE` line.
 
-### `atc tmp list`, `atc tmp clean`, `atc tmp prune`
+### `atc tmp checkout`, `atc tmp list`, `atc tmp clean`, `atc tmp prune`
 
-The scratch registry and deletion (`ATC_HOME.md` § Scratch registry,
+A commit exported into a scratch with its environment built, the scratch
+registry and deletion (`ATC_HOME.md` § Checkout, § Scratch registry,
 § Deleting).
 
 ## What a project supplies

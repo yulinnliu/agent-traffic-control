@@ -308,12 +308,29 @@ def _clean_one(directory: str, root: Path, say: Callable[[str], None]) -> int:
         return 1
 
 
+def _within(path: str, directory: str) -> bool:
+    try:
+        inner, outer = (os.path.normcase(os.path.realpath(value)) for value in (path, directory))
+        return Path(inner).is_relative_to(outer)
+    except (OSError, ValueError):
+        return False
+
+
+def dependent_runs(root: Path, directory: str) -> list[str]:
+    """The other scratches whose registered tree lies inside ``directory``: runs made on its export."""
+    return [row.scratch for row in registered(root)
+            if row.tree and _within(row.tree, directory) and not locations.same_path(row.scratch, directory)]
+
+
 def clean(arguments: Sequence[str], tree_name: str | None = None, *, say: Callable[[str], None] = print,
-          environ=None) -> int:
-    """``atc tmp clean``: the highest exit code across the directories; ``tree_name`` picks registry rows."""
+          environ=None, with_runs: bool = False) -> int:
+    """``atc tmp clean``: the highest exit code across the directories; ``tree_name`` picks registry rows.
+
+    A scratch's dependent runs are listed; ``with_runs`` deletes them too, before the scratch.
+    """
     root = locations.locate(environ).tmp
     chosen = ([row.scratch for row in registered(root) if row.project == tree_name] if tree_name is not None
-              else arguments)
+              else list(arguments))
     directories = []
     for argument in chosen:
         directory, why = _resolve_for_clean(argument, root)
@@ -323,6 +340,17 @@ def clean(arguments: Sequence[str], tree_name: str | None = None, *, say: Callab
             directories.append(directory)
     if len(directories) != len(chosen):
         return 2
+    ordered: list[str] = []
+    for directory in directories:
+        for run in dependent_runs(root, directory):
+            if any(locations.same_path(run, seen) for seen in [*ordered, *directories]):
+                continue
+            if with_runs:
+                ordered.append(run)
+            else:
+                say(f"DEPENDENT {run} (its tree is inside {directory}; --with-runs deletes it)")
+        ordered.append(directory)
+    directories = ordered
     code = 0
     for directory in directories:
         code = max(code, _clean_one(directory, root, say))

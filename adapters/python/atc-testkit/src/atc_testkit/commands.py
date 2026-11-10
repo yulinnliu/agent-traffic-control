@@ -14,6 +14,7 @@ from .locations import Refusal
 USAGE_EXIT = 2
 HELP_OPTIONS = ("-h", "--help")
 TREE_NAME_OPTION = "--tree-name"
+WITH_RUNS_OPTION = "--with-runs"
 
 USAGES = {
     ("test", "run"): "usage: atc test run <tree> <scratch> <python> <label> <pytest args...>\n"
@@ -24,7 +25,7 @@ USAGES = {
     ("tmp", "checkout"): "usage: atc tmp checkout <sha> --task <ID> [--worktree <path>] [--scratch <name>] "
                          "[--lock-dir <dir>]",
     ("tmp", "list"): "usage: atc tmp list",
-    ("tmp", "clean"): f"usage: atc tmp clean (<dir>... | {TREE_NAME_OPTION} <name>)",
+    ("tmp", "clean"): f"usage: atc tmp clean [{WITH_RUNS_OPTION}] (<dir>... | {TREE_NAME_OPTION} <name>)",
     ("tmp", "prune"): "usage: atc tmp prune",
 }
 DESCRIPTIONS = {
@@ -47,6 +48,8 @@ Exit: pytest's code, 8 for a guard refusal, 9 for a location refusal.""",
   <dir>...                scratches under the ATC temporary root
   {TREE_NAME_OPTION} <name>       every scratch whose registry `project` column is <name>:
                           the tree's [project].name, else its directory name
+  {WITH_RUNS_OPTION}             also delete each scratch's dependent runs, the scratches
+                          whose registered tree is inside it; without it they are listed
 
 Exit: 0, 1 for a refused directory, 2 before anything is deleted.""",
     ("tmp", "prune"): """Delete entries of <tmp>/systmp and <tmp>/candidates older than seven days
@@ -75,13 +78,15 @@ def _usage(text: str) -> int:
 
 def _clean(arguments: Sequence[str]) -> int:
     usage = USAGES[("tmp", "clean")]
+    with_runs = arguments[:1] == [WITH_RUNS_OPTION]
+    arguments = arguments[1:] if with_runs else arguments
     if arguments[:1] == [TREE_NAME_OPTION]:
         if len(arguments) != 2:
             return _usage(usage)
-        return scratch.clean((), arguments[1])
+        return scratch.clean((), arguments[1], with_runs=with_runs)
     if not arguments or any(argument.startswith("--") for argument in arguments):
         return _usage(usage)
-    return scratch.clean(arguments)
+    return scratch.clean(arguments, with_runs=with_runs)
 
 
 def _dispatch(arguments: Sequence[str]) -> int:
