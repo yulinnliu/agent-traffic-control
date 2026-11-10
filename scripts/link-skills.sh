@@ -16,8 +16,8 @@
 # is migrated). .atc/tasks/ is the repository's and never touched. An adapter
 # without a `managed-by` marker is reported and left alone; a managed file
 # that drifted is rewritten. Stops before writing anything when AGENTS.md
-# lacks its `## Integration verification` section or argv file, or when Git
-# ignores a path it would write.
+# lacks its `## Integration verification` section or argv file, when Git
+# ignores a path it would write, or when .atc/ holds a file sync does not write.
 set -eu
 
 usage() { sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; }
@@ -61,10 +61,15 @@ LEGACY_CLAUDE_SUM=$(printf '%s\n' '# CLAUDE.md' '' \
 
 # GIT_WORKFLOW.md § Lock advancement: no file moves ahead of the lock.
 AGENTS="$REPO/AGENTS.md"
-if grep -q '^#* Integration verifier source[[:space:]]*$' "$ROOT/shared/governance/GIT_WORKFLOW.md"; then
+# The section is parsed as verification_section.declaration parses it: the first
+# `## Integration verification` heading up to the next `## ` heading, and in it the
+# first line that is exactly `[- |* ]Verifier argv file: <path>`, the path one word
+# with optional backticks. Prints `-` without the section and nothing without the line.
+if grep -q '^##* Integration verifier source[[:space:]]*$' "$ROOT/shared/governance/GIT_WORKFLOW.md"; then
   argv=$( [ -f "$AGENTS" ] && tr -d '\r' < "$AGENTS" | awk '
-    /^## / { in_section = ($0 ~ /^## Integration verification[[:space:]]*$/) ; if (in_section) found=1; next }
-    in_section && /^[[:space:]]*([-*][[:space:]]+)?Verifier argv file:/ { sub(/^[[:space:]]*([-*][[:space:]]+)?Verifier argv file:[[:space:]]*/, ""); gsub(/`/, ""); sub(/[[:space:]]+$/, ""); print; exit }
+    /^## / { if (found) in_section = 0; else if ($0 ~ /^## Integration verification[[:space:]]*$/) { in_section = 1; found = 1 }; next }
+    in_section && /^[[:space:]]*([-*][[:space:]]+)?Verifier argv file:[[:space:]]*`?[^`[:space:]]+`?[[:space:]]*$/ {
+      sub(/^[[:space:]]*([-*][[:space:]]+)?Verifier argv file:[[:space:]]*/, ""); gsub(/`/, ""); sub(/[[:space:]]+$/, ""); print; exit }
     END { if (!found) print "-" }' || echo -)
   if [ "$argv" = - ]; then
     echo "stop       VERIFICATION_SECTION_MISSING AGENTS.md has no '## Integration verification' section"; exit 2
@@ -85,7 +90,8 @@ if [ -n "$ignored" ]; then
   echo "stop       IGNORED_OUTPUT every file sync writes is committed; Git ignores or excludes:" $ignored; exit 2
 fi
 
-# .atc/ holds README.md, atc.lock, governance/ and the repository's tasks/; anything else stops the .atc/ part.
+# .atc/ holds README.md, atc.lock, governance/ and the repository's tasks/; anything
+# else is a collision and, as in onboard, nothing in the repository is written.
 atc_ok=1
 if [ -d "$REPO/.atc" ]; then
   strays=$(cd "$REPO" && find .atc \( -type f -o -type l \) | sed 's|^\./||' | sort | while IFS= read -r f; do
@@ -103,6 +109,9 @@ if [ -d "$REPO/.atc" ]; then
   if [ -e "$LOCK" ] && [ "$(tr -d '\r' < "$LOCK" | sed -n 's/^version = //p')" != 1 ]; then
     echo "collision  .atc/atc.lock (version is not 1, .atc/ left alone)"; status=1; atc_ok=0
   fi
+fi
+if [ "$atc_ok" = 0 ]; then
+  echo "stop       nothing written; resolve the .atc/ collision first"; exit 1
 fi
 
 adapter_files() { # dir: its files and links, relative, one per line
@@ -168,21 +177,19 @@ done
 
 # In write order: the bootloader and vendored governance, CLAUDE.md, the pointer line, the lock, the old pin file last.
 GOV="$REPO/.atc/governance"
-if [ "$atc_ok" = 1 ]; then
-  mkdir -p "$GOV"
-  if [ ! -e "$REPO/.atc/README.md" ] || ! same "$ROOT/shared/templates/ATC_README.md" "$REPO/.atc/README.md"; then
-    cp "$ROOT/shared/templates/ATC_README.md" "$REPO/.atc/README.md"; echo "updated    .atc/README.md"; wrote=1
-  fi
-  for src in "$ROOT"/shared/governance/*.md; do
-    name=$(basename -- "$src")
-    dst="$GOV/$name"
-    if [ ! -e "$dst" ]; then
-      cp "$src" "$dst"; echo "installed  .atc/governance/$name"; wrote=1
-    elif ! same "$src" "$dst"; then
-      cp "$src" "$dst"; echo "updated    .atc/governance/$name"; wrote=1
-    fi
-  done
+mkdir -p "$GOV"
+if [ ! -e "$REPO/.atc/README.md" ] || ! same "$ROOT/shared/templates/ATC_README.md" "$REPO/.atc/README.md"; then
+  cp "$ROOT/shared/templates/ATC_README.md" "$REPO/.atc/README.md"; echo "updated    .atc/README.md"; wrote=1
 fi
+for src in "$ROOT"/shared/governance/*.md; do
+  name=$(basename -- "$src")
+  dst="$GOV/$name"
+  if [ ! -e "$dst" ]; then
+    cp "$src" "$dst"; echo "installed  .atc/governance/$name"; wrote=1
+  elif ! same "$src" "$dst"; then
+    cp "$src" "$dst"; echo "updated    .atc/governance/$name"; wrote=1
+  fi
+done
 
 if [ ! -e "$REPO/CLAUDE.md" ]; then
   cp "$ROOT/CLAUDE.md" "$REPO/CLAUDE.md"; echo "installed  CLAUDE.md"; wrote=1
@@ -213,24 +220,22 @@ else
   mv "$tmp" "$AGENTS"; echo "updated    AGENTS.md (pointer line inserted before the first section)"; wrote=1
 fi
 
-if [ "$atc_ok" = 1 ]; then
-  source=$(git -C "$ROOT" remote get-url origin 2>/dev/null | sed -n 's|.*[:/]\([^/:]*/[^/]*\)$|\1|p' | sed 's/\.git$//')
-  revision=$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || true)
-  : "${source:=unknown}" "${revision:=unknown}"
-  locked=$( [ -e "$LOCK" ] && tr -d '\r' < "$LOCK" | sed -n 's/^revision = "\(.*\)"$/\1/p' | head -n 1 || true)
-  lsource=$( [ -e "$LOCK" ] && tr -d '\r' < "$LOCK" | sed -n 's/^source = "\(.*\)"$/\1/p' | head -n 1 || true)
-  # A locked revision missing from this checkout's history is re-locked, as check-skills.sh reports it stale.
-  stale=0
-  if [ "$revision" != unknown ] && [ -n "$locked" ] && ! git -C "$ROOT" merge-base --is-ancestor "$locked" HEAD 2>/dev/null; then stale=1; fi
-  if [ ! -e "$LOCK" ] || [ -e "$LEGACY" ] || [ "$wrote" = 1 ] || [ "$stale" = 1 ] || [ -z "$locked" ] || [ "$lsource" != "$source" ]; then
-    printf 'version = 1\nsource = "%s"\nrevision = "%s"\n' "$source" "$revision" > "$LOCK"
-    echo "locked     .atc/atc.lock ($source @ $revision)"
-  else
-    echo "current    .atc/"
-  fi
-  if [ -e "$LEGACY" ]; then
-    rm -f "$LEGACY"; echo "removed    .atc/governance.yaml (migrated to .atc/atc.lock)"
-  fi
+source=$(git -C "$ROOT" remote get-url origin 2>/dev/null | sed -n 's|.*[:/]\([^/:]*/[^/]*\)$|\1|p' | sed 's/\.git$//')
+revision=$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || true)
+: "${source:=unknown}" "${revision:=unknown}"
+locked=$( [ -e "$LOCK" ] && tr -d '\r' < "$LOCK" | sed -n 's/^revision = "\(.*\)"$/\1/p' | head -n 1 || true)
+lsource=$( [ -e "$LOCK" ] && tr -d '\r' < "$LOCK" | sed -n 's/^source = "\(.*\)"$/\1/p' | head -n 1 || true)
+# A locked revision missing from this checkout's history is re-locked, as check-skills.sh reports it stale.
+stale=0
+if [ "$revision" != unknown ] && [ -n "$locked" ] && ! git -C "$ROOT" merge-base --is-ancestor "$locked" HEAD 2>/dev/null; then stale=1; fi
+if [ ! -e "$LOCK" ] || [ -e "$LEGACY" ] || [ "$wrote" = 1 ] || [ "$stale" = 1 ] || [ -z "$locked" ] || [ "$lsource" != "$source" ]; then
+  printf 'version = 1\nsource = "%s"\nrevision = "%s"\n' "$source" "$revision" > "$LOCK"
+  echo "locked     .atc/atc.lock ($source @ $revision)"
+else
+  echo "current    .atc/"
+fi
+if [ -e "$LEGACY" ]; then
+  rm -f "$LEGACY"; echo "removed    .atc/governance.yaml (migrated to .atc/atc.lock)"
 fi
 
 if ! command -v atc >/dev/null 2>&1; then

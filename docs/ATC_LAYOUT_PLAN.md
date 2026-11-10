@@ -98,21 +98,23 @@ Side effects:
    vendored governance, a rendered skill copy, the pointer line, `CLAUDE.md`)
    or when the recorded revision is not in the history of ATC `main`.
 3. The verification gate (`GIT_WORKFLOW.md` § Lock advancement): when
-   `shared/governance/GIT_WORKFLOW.md` at the ATC `HEAD` carries
-   § Integration verifier source and the project's `AGENTS.md` has no
-   `## Integration verification` section, or the argv file it names does not
-   exist, sync stops the project with `VERIFICATION_SECTION_MISSING` before
-   writing anything. Onboard parses the section with
+   `shared/governance/GIT_WORKFLOW.md` at the ATC `HEAD` carries a heading
+   `Integration verifier source` (one or more `#`) and the project's
+   `AGENTS.md` has no `## Integration verification` section, or the argv file
+   it names does not exist, onboard in every mode (check, apply, sync) and
+   `link-skills.sh` stop the project with `VERIFICATION_SECTION_MISSING`
+   before writing anything. Onboard parses the section with
    `verification_section.declaration`, the parser `atc integrate` uses: the
-   section runs from the `## Integration verification` heading line to the
-   next `## ` heading or the end of the file, and the argv path is the first
-   line in it matching `Verifier argv file: <path>` (an optional `- ` or
-   `* ` bullet, optional backticks around the path), resolved against the
-   repository root. `link-skills.sh` runs the same check with `sed` on the
-   same lines, CRs stripped, and stops with the same code. Files and lock
-   therefore always come from one revision (`CORE.md`: the copy is byte-equal
-   to the bound revision). A test runs a sync against a project without the
-   section and asserts the code, an unchanged tree and an unchanged lock.
+   section runs from the first `## Integration verification` heading line to
+   the next `## ` heading or the end of the file, and the argv path is the
+   first line in it that is exactly `Verifier argv file: <path>` (an optional
+   `- ` or `* ` bullet, the path one word with optional backticks), resolved
+   against the repository root. `link-skills.sh` runs the same check with
+   `awk` on the same lines, CRs stripped, and stops with the same code. Files
+   and lock therefore always come from one revision (`CORE.md`: the copy is
+   byte-equal to the bound revision). Tests run onboard and `link-skills.sh`
+   against a project without the section and assert the code, an unchanged
+   tree and an unchanged lock.
 4. `bound_governance` in `task_records.py`, which gives `atc task new` a
    project's `governance_source` and `governance_revision`, reads
    `.atc/atc.lock`. When no lock exists it reads `.atc/governance.yaml` that
@@ -162,8 +164,9 @@ Side effects:
    validate checks it only through the task-record check `docs/TASKS.md`
    specifies.
 2. Validate reports any other file under `.atc/`.
-3. Onboard treats such a file as a collision and writes nothing into `.atc/`,
-   except the migration source of § 4.
+3. Onboard and `link-skills.sh` treat such a file as a collision and write
+   nothing into the project, except that the migration source of § 4 is not
+   such a file.
 4. `managed-by` is no longer read or written for anything under `.atc/`; it
    stays on rendered skill copies.
 
@@ -320,7 +323,8 @@ Side effects:
    `test_task_records.py` follow the new names; new tests cover the lock
    bytes and version check, CRLF on disk read by both readers, lock
    advancement on a skill-only change, `VERIFICATION_SECTION_MISSING`
-   writing nothing, a stray file under `.atc/`, `.atc/tasks/` left untouched
+   writing nothing, a stray file under `.atc/`, the same stops and the lock
+   and pointer writes through `link-skills.sh` (`test_shell_install.py`), `.atc/tasks/` left untouched
    by sync and accepted by validate, the migration of § 4 from a project in
    today's layout with task records and its write order, `bound_governance`
    reading the lock, the legacy file and the lock winning over both,
