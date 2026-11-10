@@ -83,3 +83,14 @@ The selection sees imports and names written in strings, not globs: a test
 that reads every file of a directory (a package-wide scan, a copy, a digest)
 selects nothing through the graph, so it is declared in `DIRECTORY_READERS`
 in the script, and a new such test is added there.
+
+The root's guidance and skills (`shared/governance/`, `shared/skills/`, the
+rendered `.claude/skills/`, `.agents/skills/` and `.dsh/skills/`, the root
+`AGENTS.md` and `CLAUDE.md`) select only the tests declared in
+`DIRECTORY_READERS` as reading them in this checkout; their own check is
+`uv run --locked atc validate`, run after touching them. `tests/root_reads.py`
+records each test file's reads of those paths, and counts a run of this
+checkout's `scripts/*.sh` as reading all of them; a session in which a test
+file reads one undeclared fails with `ROOT_READ_UNDECLARED`, naming the
+test and the paths. Existence checks and what a child Python process opens
+are not recorded.

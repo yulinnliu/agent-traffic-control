@@ -20,6 +20,12 @@ SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
+import root_reads  # noqa: E402  (needs SCRIPTS on the path for select_tests)
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    config.pluginmanager.register(root_reads.RootReads.for_checkout(), "root_reads")
+
 
 @pytest.fixture(autouse=True)
 def _guard_checks_no_live_checkout(monkeypatch: pytest.MonkeyPatch) -> None:

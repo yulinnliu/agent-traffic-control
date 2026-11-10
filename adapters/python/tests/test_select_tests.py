@@ -66,8 +66,36 @@ def test_a_removed_test_file_selects_nothing_unless_another_module_imports_it(gr
         del graph.modules["test_tooling_helpers_user"]
 
 
-def test_the_selector_selects_its_own_tests(graph):
-    assert "tests/test_select_tests.py" in chosen(graph, f"{ADAPTER}/scripts/select_tests.py")
+def test_the_selector_and_its_guard_select_the_full_suite(graph):
+    """`conftest.py` loads the reader guard, which imports the selector and its testkit modules."""
+    for path in (f"{ADAPTER}/scripts/select_tests.py", f"{ADAPTER}/tests/root_reads.py",
+                 f"{ADAPTER}/atc-testkit/src/atc_testkit/selection.py", f"{ADAPTER}/atc-testkit/src/atc_testkit/git.py"):
+        assert chosen(graph, path) == [], path
+
+
+@pytest.mark.parametrize(("path", "readers"), [
+    ("shared/governance/VERIFICATION.md", ["tests/test_shell_install.py"]),
+    ("shared/skills/atc-review/SKILL.md", ["tests/test_shell_install.py", "tests/test_tooling.py"]),
+    (".claude/skills/atc-review/SKILL.md", ["tests/test_shell_install.py"]),
+    (".dsh/skills/atc-worktree/SKILL.md", ["tests/test_shell_install.py", "tests/test_tooling.py"]),
+    ("AGENTS.md", ["tests/test_integration_verify.py", "tests/test_shell_install.py"]),
+    ("CLAUDE.md", ["tests/test_shell_install.py"]),
+    (r"shared\governance\CORE.md", ["tests/test_shell_install.py"]),
+])
+def test_a_guarded_path_selects_its_declared_readers_only(graph, path, readers):
+    assert chosen(graph, path) == readers
+
+
+def test_a_root_file_entry_selects_its_reader_and_nothing_beside_it(graph, monkeypatch):
+    monkeypatch.setattr(select_tests, "DIRECTORY_READERS", {f"{ADAPTER}/tests/test_integration_verify.py": ("AGENTS.md",)})
+    assert chosen(graph, "AGENTS.md") == ["tests/test_integration_verify.py"]
+    assert select_tests.covers("AGENTS.md", "AGENTS.md") and not select_tests.covers("AGENTS.md", "AGENTS.mdx")
+
+
+def test_a_guarded_path_no_declared_test_reads_selects_by_kind(graph, monkeypatch):
+    monkeypatch.setattr(select_tests, "DIRECTORY_READERS", {})
+    assert chosen(graph, "shared/skills/atc-review/SKILL.md") is None
+    assert chosen(graph, ".agents/skills/atc-review/helper.py") == []
 
 
 @pytest.mark.parametrize("path", [

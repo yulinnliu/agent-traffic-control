@@ -8,9 +8,16 @@ root. Selection is by test file and reads the static structure of the code:
   every test file that reaches it, through imports or by naming it in a string
   (a script's module name or file name), transitively. A test file is such a
   module too: it selects itself and the test files that import it.
-- A test file that reads every file of a directory is declared in
-  `DIRECTORY_READERS` and runs for any change there; the graph cannot see a glob.
-- `conftest.py`, the pytest plugin and everything they import at load time,
+- A test file that reads a directory or file of this checkout the graph cannot
+  see (a glob, a copy, a script reading its own checkout) is declared in
+  `DIRECTORY_READERS` and runs for a change to that entry or below it.
+- A guarded path (`GUARDED`: `shared/governance/`, `shared/skills/`, the
+  rendered `.claude/skills/`, `.agents/skills/` and `.dsh/skills/`, the root
+  `AGENTS.md` and `CLAUDE.md`) selects its declared readers only, never through
+  names; with none, Markdown selects nothing and another file the full suite.
+  `validate_workspace.py`, not the selection, checks them.
+- `conftest.py`, the pytest plugin and everything they import at load time
+  (the reader guard `tests/root_reads.py` and this script among them),
   `pyproject.toml`, `uv.lock` and the unmarked baseline select the full suite.
 - A path under `shared/<area>/` selects the test files whose reach names
   `<area>` or `shared/<area>`; a task record under `.atc/tasks/` selects the
@@ -69,14 +76,29 @@ TASK_RECORDS = ".atc/tasks"
 SCRIPTS = f"{ADAPTER}/scripts"
 CLI_SRC = f"{ADAPTER}/src/atc_cli"
 TESTKIT_SRC = f"{ADAPTER}/atc-testkit/src/atc_testkit"
-# Test files that read every file of a directory (a glob, a copy, a digest). The
-# graph sees imports and names, not globs, so each is declared here and runs
-# for any change under its directories.
+# The root's own guidance, skills and rendered copies: only their declared readers select for them.
+GUARDED = (
+    "shared/governance", "shared/skills", ".claude/skills", ".agents/skills", ".dsh/skills",
+    "AGENTS.md", "CLAUDE.md",
+)
+# Test files that read a directory or file of this checkout the graph cannot
+# see: a glob, a copy, a digest, a guarded path, or a script that reads them.
+# Each runs for a change to an entry or below it; `tests/root_reads.py` fails
+# a session whose test files read a guarded path undeclared.
 DIRECTORY_READERS = {
     f"{TESTS}/test_testkit_tmp.py": (TESTKIT_SRC,),
     f"{TESTS}/test_testkit_release.py": (TESTKIT_SRC,),
     f"{TESTS}/test_select_tests.py": (SCRIPTS, CLI_SRC, TESTKIT_SRC, TESTS),
+    f"{TESTS}/test_tooling.py": ("shared/skills", ".dsh/skills"),
+    f"{TESTS}/test_integration_verify.py": ("AGENTS.md",),
+    # scripts/link-skills.sh and check-skills.sh read their own checkout.
+    f"{TESTS}/test_shell_install.py": (*GUARDED, "shared/templates/PROJECT_AGENTS.md"),
 }
+
+
+def covers(entry: str, path: str) -> bool:
+    """Whether ``path`` is the declared ``entry`` or lies below it."""
+    return path == entry or path.startswith(f"{entry}/")
 
 
 @dataclass
@@ -247,7 +269,15 @@ def classify(path: str, selection: TestSelection, graph: Graph) -> None:
     if path in FULL_FILES:
         selection.widen(path, "collection, dependency or marker input of every test")
         return
-    readers = {test for test, dirs in DIRECTORY_READERS.items() if path.startswith(tuple(f"{d}/" for d in dirs))}
+    readers = {test for test, entries in DIRECTORY_READERS.items() if any(covers(e, path) for e in entries)}
+    if any(covers(entry, path) for entry in GUARDED):
+        if readers:
+            selection.add(path, readers, "declared readers in this checkout; validate_workspace.py checks it")
+        elif pure.suffix.lower() == ".md":
+            selection.add(path, (), "guarded Markdown no declared test reads; validate_workspace.py checks it")
+        else:
+            selection.widen(path, "guarded path no declared test reads")
+        return
     if readers:
         selection.add(path, readers, "declared reader of its whole directory")
     if str(pure.parent) == TESTS and pure.name.startswith("test_") and pure.suffix == ".py":
