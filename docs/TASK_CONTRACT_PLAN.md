@@ -423,8 +423,9 @@ Code, tests, `shared/conformance/`, `docs/TESTKIT.md`, `docs/ATC_HOME.md` and
 before D.12's scratch-name form, D.15 before D.12 (the `--json` form
 `--select` runs), D.17 last; D.18 and D.19 are done ahead of the rest, D.20
 first of the rest, D.21 after D.20, D.22 only on the Owner's
-governance authorization, D.23 after D.20. Each entry: the
-change, its side effects, their mitigations.
+governance authorization, D.23 after D.20; D.5's governance and skill
+part only on the Owner's governance authorization, D.24 and D.25 at any
+point. Each entry: the change, its side effects, their mitigations.
 
 1. `atc worktree create --scope <text>` writes the task record in the new
    worktree through `task_records.new`.
@@ -457,10 +458,92 @@ change, its side effects, their mitigations.
 4. Drop `--main` from `atc integrate` and `atc preflight push`.
    - Side effects: none found (0 references, 0 calls).
    - Mitigations: argparse's unknown-flag error.
-5. `atc integrate --check` needs no authority.
-   - Side effects: a check that passes says nothing about authority.
-   - Mitigations: with `--task` it still evaluates the grant; without one
-     its line says `authority: not checked`.
+5. Relay-first integration. The writer integrates its own reviewed
+   tip and cleans its own items; the coordinator keeps the Owner's
+   words, the push and the session archive.
+   - `atc integrate --check` needs no authority.
+     - Side effects: a check that passes says nothing about authority.
+     - Mitigations: with `--task` it still evaluates the grant; without
+       one its line says `authority: not checked`.
+   - The flow, per task:
+     1. The Owner says start. The coordinator creates the worktree, runs
+        `atc task new` there (a record granting `edit` and `commit`
+        only), commits it, and integrates that records-only commit with
+        `--owner-words` quoting the start word; the record check runs in
+        place of the verifier, so this takes seconds. The topic branch
+        already contains the record, so it stays a fast-forward.
+     2. The coordinator starts the writer with its working directory at
+        the task's place: a project task at the project's checkout
+        folder, a root task at its root worktree (the canonical root
+        checkout stays on a clean `main`). The brief names the ID, the
+        record path and the integration step: "after the reviewer's PASS
+        and the Owner's word, run `atc integrate` and close out", in
+        place of "do not integrate".
+     3. Design, review, implementation and review run as today.
+     4. After an unconditional PASS the coordinator runs
+        `atc integrate --check` (no authority needed), asks the Owner
+        for the integration word, and relays the Owner's exact words
+        and the reviewed full SHA to the writer.
+     5. The writer runs `atc integrate --task <ID> --reviewed <sha>
+        --owner-words "<the relayed words>"` against the integration
+        checkout by absolute path, then `atc close-out --task <ID>`
+        (D.3): its scratches and `~/.atc/reports/<ID>-*.md`, and its
+        worktree unless the session's working directory is inside it.
+        It reports the integrated SHA and every close-out line.
+     6. The coordinator asks the Owner for the push word once for
+        whatever is integrated, pushes, archives the task's sessions,
+        removes a worktree the writer's close-out skipped, and checks
+        `atc tmp list` and `atc worktree list`.
+   - Governance and skills, on the Owner's authorization for these
+     files:
+     - `GIT_WORKFLOW.md` § Integrate: `--owner-words` is passed by the
+       coordinator or by the writer it relays the Owner's exact words to,
+       for the reviewed SHA the relay names; this revises the ATC-0004
+       ruling "`--owner-words`: coordinator only". Record authority
+       (`integrate_main`) stays as it is.
+     - `DELIVERY.md` § Close-out: the integrating session removes the
+       task's items; the coordinator archives the sessions and removes
+       what the integrating session could not.
+     - `FAILURE_ESCALATION.md`: a port or service the Owner's steps
+       expect is taken: stop and ask the Owner, never switch ports or end
+       the process holding it.
+     - `atc-review` skill: the writer's integration and close-out step;
+       on a takeover of a published topic, fetch and confirm the remote
+       tip before committing; Owner-facing text in the Owner's language
+       with the fixed English role terms (writer, reviewer, coordinator,
+       Owner).
+     - `atc-coordinator` skill: the flow above as the ticket flow;
+       delegated sessions run Opus or Sonnet by task, another model only
+       after asking the Owner; the Owner's language and role terms as in
+       `atc-review`.
+     - After they land, the memory notes they replace are listed per
+       file for the Owner, then trimmed.
+   - Side effects:
+     - A writer session in auto mode may be refused `atc integrate`: the
+       relayed words arrive as a peer message, which the session does not
+       treat as the user's approval (seen once in four Hami relays).
+     - Several writers integrating at once into one `main`.
+     - A root writer cannot remove the worktree its session runs in.
+     - Projects carry vendored governance and skills that say the
+       coordinator integrates and never forwards `--owner-words`.
+     - Every task adds a records-only commit to `main` at its start; an
+       abandoned task leaves its record there.
+     - A relayed quote is the coordinator's copy of the Owner's words.
+   - Mitigations:
+     - A refused writer stops and reports `BLOCKED`; the Owner then
+       approves in the writer's session. No permission rule changes.
+     - The Integration Slot serialises runs; a moved `main` stops with
+       `REBASE_REQUIRED` or `OVERLAP` and takes the existing route.
+     - Close-out reports that worktree `SKIPPED` and the coordinator
+       removes it after archiving the session.
+     - Relay-first applies to root tasks once D.5 lands, and to a project
+       once the final sync carries the new governance and skills; until
+       then project tasks keep coordinator integration.
+     - The record's `delivery.status` closes the task, abandoned or
+       done; `atc task list` reads it.
+     - The coordinator relays the words verbatim with the SHA, and
+       `integrations.jsonl` records the quote and the reviewed SHA as
+       for any `--owner-words` run.
 6. `--contract` becomes optional with default 1.
    - Side effects: none for callers; 17 call sites keep passing 1.
    - Mitigations: a value other than 1 still stops with
@@ -501,14 +584,36 @@ change, its side effects, their mitigations.
    - Mitigations: C.1 already forbids the flags; fixtures commit the
      `## Integration verification` section once per module; readers of
      `integrations.jsonl` ignore unknown keys.
-9. `atc` sets `PYTHONIOENCODING=utf-8` in the verifier child's environment
-   and decodes the child's output as UTF-8 with replacement.
-   - Side effects: a project verifier that relied on the inherited value;
-     the display-only decoders `testrun.py:118` and `git_integrate.py:288`.
-   - Mitigations: `TESTKIT.md` § Isolated environment states the value; the
-     two decoders follow the Owner's decision on the `TESTKIT.md`
-     environment contract; the `env -u PYTHONIOENCODING` guidance is removed
-     after D is integrated.
+9. `atc` sets UTF-8 for every child it starts (Owner's ruling A). Its
+   console entry (`atc_cli.main` called with no `argv`, the `atc` script
+   and `python -m atc_cli`) sets `PYTHONIOENCODING=utf-8` in its own
+   environment before dispatch, so every child inherits it: the
+   verifier, `git`, `uv` and the scripts' Python children. The testkit's
+   isolated environment sets the same value for each stage and static
+   check, so the pre-push gate's stages get it too; `ci --stages`, which
+   builds no isolated environment, keeps the caller's (CI sets none). The
+   display-only decoders `testrun.py:118` and `git_integrate.py:312-313`
+   stay `utf-8` with `errors="replace"`. `PYTHONUTF8` stays unset.
+   - Side effects:
+     - Non-Python children (`git`, `uv`, `sh`, `pwsh`) ignore the
+       variable.
+     - A caller's own value is replaced; the PowerShell tool sets
+       `utf-8:surrogateescape`, under which the testkit's child tests
+       fail.
+     - A project verifier that relied on the inherited value.
+     - Tests that call `atc_cli.main` in-process.
+     - A Python child writing to an inherited console.
+   - Mitigations:
+     - Their bytes reach the replacing decoders, so a non-UTF-8 byte
+       shows as U+FFFD in display text and changes no verdict.
+     - Replacing that value is the point; the `env -u PYTHONIOENCODING`
+       guidance in the adapter README and memory goes once D is
+       integrated.
+     - `TESTKIT.md` § Isolated environment states the value.
+     - Tests pass `argv`, so the test process's environment stays as it
+       is.
+     - Python writes a console through the console API whatever the
+       variable says; only pipes and files change.
 10. A short `--check` output: the `CHECK <verdict> <reason>` line (now
     also naming project, branch and the 12-character tip), every `WARNING`
     line, and the `next:` line on a stop; the evidence block moves to
@@ -839,10 +944,23 @@ change, its side effects, their mitigations.
         which replaces 1800 s in root `AGENTS.md`, since the verifier still
         widens to the full suite (`conftest.py`, the selector,
         `pyproject.toml`, an unmapped path).
-      - The addition to D where the verifier subtracts what the writer
-        already ran is not in this plan yet; for the root it would find
-        nothing to subtract, since the root writes no evidence the writer's
-        run could match, so it concerns the consumer form only.
+      - The addition where the verifier subtracts what the writer
+        already ran (and the coordinator's evidence run during review)
+        is not taken into D, re-checked against D.19 and D.20:
+        - The root: its verifier runs only the impact selection through
+          the stages, and the root writes no evidence a writer's run could
+          match; nothing is left to subtract.
+        - Projects: reuse already runs from the verifier's evidence to the
+          pre-push gate (`TESTKIT.md` § Pre-push gate). Subtracting the
+          writer's run needs writer-side evidence `atc test run` does not
+          write, at the exact candidate SHA (fast-forward only), and trusts
+          the writer's environment, which the verifier is there to replace
+          (`VERIFICATION.md` § Independent review).
+        - The time it would save is bounded by D.22's budget; D.21 and
+          D.23 cut the same time with no trust cost.
+        - It returns only if a project's verifier stays over budget after
+          D.21 and D.23, as part of D.22's exception path. The Owner
+          agreed to the addition, so dropping it needs the Owner's word.
       - Markdown that the selection maps to tests by a bare name stays not
         documentation-only (`adapters/python/README.md` selects the five
         tests that name some `README.md`); this errs toward running tests.
@@ -1080,6 +1198,36 @@ change, its side effects, their mitigations.
     or keep `loadscope`. The evidence record names no scheduler, so a
     change leaves reuse as it is; a fixture that holds a shared resource
     per module is the side effect to check.
+24. `atc integrate --repo .` prints every `.` in its human output as the
+    project name (`integration_verifyrootpy`, `AGENTSrootmd`): the
+    human stream replaces `str(target.repo)`, which is `.`. It replaces
+    only the resolved absolute path, and the given path only when it is
+    absolute.
+    - Side effects: a relative `--repo` other than `.` shows as given in
+      place of the project name.
+    - Mitigations: the `CHECK` and result lines name the project from
+      the target, not from the path; a test runs `--repo .` and asserts
+      that `integration_verify.py` and `AGENTS.md` print unchanged.
+25. Folded LOWs:
+    - `onboard_project.check_project_checkout` compares
+      `git rev-parse --show-toplevel` with the project path through
+      `os.path.abspath`, which keeps a Windows 8.3 short name
+      (`ANDYLI~1`) while Git prints the long one, so a short-named path
+      stops with `NOT_A_REPOSITORY`. Both sides go through
+      `os.path.realpath`.
+      - Side effects: a project path that is a link or junction now
+        compares by its target.
+      - Mitigations: both sides resolve alike, so a link to the checkout
+        top still matches and a link into another repository still
+        stops; the test takes the short name from `GetShortPathNameW` and
+        skips on a volume without 8.3 names.
+    - `stages.flag_count` passes a digit string of more than 4300 digits
+      to `int`, which raises `ValueError` (Python's integer-string limit)
+      as a traceback. A string longer than `str(most_workers())` is
+      refused before `int`.
+      - Side effects: none; a leading-zero value within that length
+        (`08`) still parses.
+      - Mitigations: a test passes 5000 digits and expects `None`.
 
 ## After D
 
