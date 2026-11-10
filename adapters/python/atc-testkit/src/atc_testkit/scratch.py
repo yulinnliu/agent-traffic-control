@@ -24,7 +24,9 @@ RESERVED_NAMES = frozenset({SYSTMP, CANDIDATES})
 SCRATCH_NAME_BOUND = 64
 REGISTRY_NAME = "scratch-dirs.tsv"
 LOCK_NAME = "scratch-dirs.lock"
-REGISTRY_HEADER = "project\tscratch\ttree\tcreated_utc"
+REGISTRY_HEADER = "project\tscratch\ttree\tcreated_utc\ttask\tsource\tcommit"
+HEADER_START = "project\tscratch\t"
+OLD_FIELDS = 4
 PRUNE_AGE = timedelta(days=7)
 TIME_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 LOCK_SECONDS = 60.0
@@ -32,10 +34,14 @@ WINDOW_HIDDEN = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
 
 class Row(NamedTuple):
+    """A registry line; a line of the four-column format has an empty task, source and commit."""
     project: str
     scratch: str
     tree: str
     created_utc: str
+    task: str = ""
+    source: str = ""
+    commit: str = ""
 
 
 def _is_reserved(name: str) -> bool:
@@ -101,12 +107,12 @@ def _registry_lines(root: Path) -> list[str]:
         text = (root / REGISTRY_NAME).read_bytes().decode("utf-8")
     except FileNotFoundError:
         return []
-    return [line for line in text.split("\n") if line and line != REGISTRY_HEADER]
+    return [line for line in text.split("\n") if line and not line.startswith(HEADER_START)]
 
 
 def _parse(line: str) -> Row | None:
     fields = line.split("\t")
-    return Row(*fields) if len(fields) == len(Row._fields) else None
+    return Row(*fields) if len(fields) in (OLD_FIELDS, len(Row._fields)) else None
 
 
 def _write_registry(root: Path, lines: Iterable[str]) -> None:
@@ -121,15 +127,16 @@ def registered(root: Path) -> list[Row]:
     return [row for row in map(_parse, _registry_lines(root)) if row is not None]
 
 
-def register(root: Path, scratch: Path, tree: Path, now: datetime | None = None) -> None:
-    """Add the scratch's line when it has none."""
+def register(root: Path, scratch: Path, tree: Path, now: datetime | None = None, *, task: str = "",
+             source: str = "", commit: str = "", project: str | None = None) -> None:
+    """Add the scratch's line when it has none; ``project`` defaults to the tree's ``project_name``."""
     field = lambda value: re.sub(r"[\t\r\n]", " ", str(value))  # noqa: E731 - the format has no quoting
     created = (now or datetime.now(UTC)).strftime(TIME_FORMAT)
     with _locked(root):
         lines = _registry_lines(root)
         if any(row and locations.same_path(row.scratch, scratch) for row in map(_parse, lines)):
             return
-        _write_registry(root, [*lines, "\t".join(map(field, (project_name(tree), scratch, tree, created)))])
+        _write_registry(root, [*lines, "\t".join(map(field, (project or project_name(tree), scratch, tree, created, task, source, commit)))])
 
 
 def _unregister(root: Path, directory: str) -> None:

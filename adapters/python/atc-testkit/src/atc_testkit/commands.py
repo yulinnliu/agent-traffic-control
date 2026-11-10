@@ -8,7 +8,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 import sys
 
-from . import scratch, testrun
+from . import checkout, scratch, testrun
 from .locations import Refusal
 
 USAGE_EXIT = 2
@@ -19,6 +19,8 @@ USAGES = {
     ("test", "run"): "usage: atc test run <tree> <scratch> <python> <label> <pytest args...>",
     ("test", "mutants"): "usage: atc test mutants <scratch> <sha> <worktree> <mutants.json> --python <py> "
                          "--tests <path>...",
+    ("tmp", "checkout"): "usage: atc tmp checkout <sha> --task <ID> [--worktree <path>] [--scratch <name>] "
+                         "[--lock-dir <dir>]",
     ("tmp", "list"): "usage: atc tmp list",
     ("tmp", "clean"): f"usage: atc tmp clean (<dir>... | {TREE_NAME_OPTION} <name>)",
     ("tmp", "prune"): "usage: atc tmp prune",
@@ -45,7 +47,7 @@ Exit: 0, 1 for a refused directory, 2 before anything is deleted.""",
     ("tmp", "prune"): """Delete entries of <tmp>/systmp and <tmp>/candidates older than seven days
 (docs/ATC_HOME.md § Deleting).""",
 }
-GROUPS = {"test": ("run", "mutants"), "tmp": ("list", "clean", "prune")}
+GROUPS = {"test": ("run", "mutants"), "tmp": ("checkout", "list", "clean", "prune")}
 
 
 def _group_usage(group: str) -> str:
@@ -88,6 +90,8 @@ def _dispatch(arguments: Sequence[str]) -> int:
         return _usage(_group_usage(group))
     if command == ("test", "mutants"):
         return testrun.mutants(rest)
+    if command == ("tmp", "checkout"):
+        return checkout.checkout(rest)
     if _asks_help(rest):
         return _help(f"{USAGES[command]}\n\n{DESCRIPTIONS[command]}")
     if command == ("test", "run"):

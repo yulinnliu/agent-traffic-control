@@ -382,8 +382,25 @@ def test_the_registry_format(atc_tmp: Path, tmp_path: Path) -> None:
     tree = write(tmp_path / "t/pyproject.toml", '[project]\nname = "alpha"\n').parent
     scratch.register(atc_tmp, atc_tmp / "s", tree, datetime(2026, 11, 6, 1, 2, 3, tzinfo=UTC))
     raw = (atc_tmp / "scratch-dirs.tsv").read_bytes()
-    assert raw == (f"project\tscratch\ttree\tcreated_utc\nalpha\t{atc_tmp / 's'}\t{tree}\t2026-11-06T01:02:03Z\n").encode()
+    assert raw == (f"project\tscratch\ttree\tcreated_utc\ttask\tsource\tcommit\n"
+                   f"alpha\t{atc_tmp / 's'}\t{tree}\t2026-11-06T01:02:03Z\t\t\t\n").encode()
     assert not list(atc_tmp.glob("scratch-dirs.tsv.*"))
+    scratch.register(atc_tmp, atc_tmp / "t", tree, datetime(2026, 11, 6, 1, 2, 3, tzinfo=UTC), task="ATC-0008",
+                     source=str(tmp_path), commit="a" * 40, project="beta")
+    assert scratch.registered(atc_tmp)[1] == scratch.Row("beta", str(atc_tmp / "t"), str(tree), "2026-11-06T01:02:03Z",
+                                                         "ATC-0008", str(tmp_path), "a" * 40)
+
+
+@pytest.mark.unit
+def test_a_four_column_registry_is_read_and_kept(atc_tmp: Path, tmp_path: Path) -> None:
+    old = f"project\tscratch\ttree\tcreated_utc\nalpha\t{atc_tmp / 'old'}\t{tmp_path}\t2026-11-06T01:02:03Z\n"
+    (atc_tmp / "scratch-dirs.tsv").write_bytes(old.encode())
+    assert scratch.registered(atc_tmp) == [scratch.Row("alpha", str(atc_tmp / "old"), str(tmp_path),
+                                                       "2026-11-06T01:02:03Z")]
+    scratch.register(atc_tmp, atc_tmp / "new", tmp_path, task="ATC-0008")
+    lines = (atc_tmp / "scratch-dirs.tsv").read_text(encoding="utf-8").splitlines()
+    assert lines[0] == scratch.REGISTRY_HEADER and lines[1] == old.splitlines()[1]
+    assert [row.task for row in scratch.registered(atc_tmp)] == ["", "ATC-0008"]
 
 
 def test_a_scratch_gets_one_line(atc_tmp: Path, tmp_path: Path) -> None:
@@ -417,7 +434,7 @@ def test_list_prints_the_registry_with_sizes_and_deletes_nothing(atc_tmp: Path, 
     add(atc_tmp, present, atc_tmp / "absent")
     lines: list[str] = []
     assert scratch.list_scratches(say=lines.append) == 0
-    assert lines[0] == "project\tscratch\ttree\tcreated_utc\tsize"
+    assert lines[0] == "project\tscratch\ttree\tcreated_utc\ttask\tsource\tcommit\tsize"
     assert lines[1].endswith("\t5") and lines[2].endswith("\tmissing")
     assert present.is_dir()
 

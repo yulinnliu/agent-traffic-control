@@ -23,7 +23,7 @@ SUBCOMMANDS = [
     ("doctor",), ("policies",), ("policies", "check"), ("enforce",), ("classify",),
     ("friction",), ("friction", "add"), ("friction", "list"), ("friction", "summary"), ("friction", "resolve"),
     ("test",), ("test", "run"), ("test", "mutants"),
-    ("tmp",), ("tmp", "list"), ("tmp", "clean"), ("tmp", "prune"),
+    ("tmp",), ("tmp", "checkout"), ("tmp", "list"), ("tmp", "clean"), ("tmp", "prune"),
 ]
 
 
