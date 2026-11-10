@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -57,8 +59,8 @@ def verifier_argv() -> list[str]:
     return [sys.executable, "-c", script]
 
 
-@pytest.fixture
-def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def isolate(base: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """The Git identity and configuration and the temporary directory a repository here is built under."""
     for key in [key for key in os.environ if key.startswith("GIT_")]:
         monkeypatch.delenv(key)
     for key, value in {
@@ -67,10 +69,13 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
     }.items():
         monkeypatch.setenv(key, value)
-    scratch = tmp_path / "tmp"
+    scratch = base / "tmp"
     scratch.mkdir()
     monkeypatch.setattr(tempfile, "tempdir", str(scratch))
-    root = tmp_path / "repo"
+    return base / "repo"
+
+
+def build(root: Path) -> Path:
     root.mkdir()
     run_git(root, "init", "-q", "-b", "main")
     commit(root, "uv.lock", "lock 1\n")
@@ -78,6 +83,11 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     commit(root, ARGV_FILE, json.dumps(verifier_argv()))
     commit(root, "AGENTS.md", f"# AGENTS.md\n\n## Integration verification\n\n- Verifier argv file: {ARGV_FILE}\n")
     return root
+
+
+@pytest.fixture
+def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    return build(isolate(tmp_path, monkeypatch))
 
 
 def topic(repo: Path, edits: dict[str, str], branch: str) -> str:
@@ -103,11 +113,22 @@ def record_path(repo: Path, sha: str) -> Path:
     return repo / ".git" / "atc" / "verification-evidence" / f"{sha}.json"
 
 
+@pytest.fixture(scope="module")
+def verified_template(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, str]:
+    """A repository after one fast-forward integration whose verifier ran the tests of package a, built once."""
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        root = build(isolate(tmp_path_factory.mktemp("verified"), monkeypatch))
+        tip = topic(root, {"packages/a/src/x.py": "x = 1\n"}, "first")
+        integrate(root, "first", tip)
+    return root, tip
+
+
 @pytest.fixture
-def verified(repo: Path) -> str:
-    """Main after one fast-forward integration whose verifier ran the tests of package a."""
-    tip = topic(repo, {"packages/a/src/x.py": "x = 1\n"}, "first")
-    integrate(repo, "first", tip)
+def verified(repo: Path, verified_template: tuple[Path, str]) -> str:
+    """``repo`` replaced by a copy of the template at the same path; the record names commits, not paths."""
+    template, tip = verified_template
+    shutil.rmtree(repo, onexc=lambda function, path, _error: (os.chmod(path, stat.S_IWRITE), function(path)))
+    shutil.copytree(template, repo, symlinks=True)
     return tip
 
 
