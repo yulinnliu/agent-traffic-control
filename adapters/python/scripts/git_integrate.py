@@ -23,7 +23,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
-from atc_testkit import locations
+from atc_testkit import locations, stages
 import git_preflight as gp
 import hami_worktree as hw
 import task_authority as ta
@@ -48,6 +48,8 @@ TAIL_LINES = 20
 SHORT_SHA = 12
 FULL_SHA_WORD = re.compile(r"\b([0-9a-f]{12})[0-9a-f]{28}\b")
 RECORD_CHECK = "record check"
+# The verifier log's path rides in the result for the human line only; `--json` keeps its keys.
+LOG_KEY = "_verifier_log"
 ALIAS_NOTICE = (
     "--authority-reference is deprecated; name the task with --task and the authority with --owner-words "
     "or the record's integrate_main on main"
@@ -327,6 +329,39 @@ def _tails(stdout: str, stderr: str) -> list[str]:
     return lines
 
 
+def verifier_log(candidate_dir: Path) -> Path:
+    """The verifier's log beside its candidate and report; it outlives the candidate until `atc tmp prune`."""
+    return candidate_dir.with_name(candidate_dir.name + ".verify.log")
+
+
+def _write_verifier_log(
+    path: Path, argv: list[str], cwd: Path, returncode: int | None, stdout: str, stderr: str,
+) -> Path | None:
+    """Write the log after `docs/TESTKIT.md` § Running and logging's header; ``None`` when it cannot be written."""
+    header = [
+        f"time: {datetime.now(timezone.utc).isoformat(timespec='seconds')}",
+        f"platform: {sys.platform} {platform.machine()}",
+        f"working directory: {cwd}",
+        f"command: {json.dumps(argv, ensure_ascii=False)}",
+        f"exit: {'timeout' if returncode is None else returncode}",
+    ]
+    text = "\n".join([*header, "--- stdout ---", stdout.rstrip(), "--- stderr ---", stderr.rstrip()]) + "\n"
+    try:
+        path.write_text(text, encoding="utf-8")
+    except OSError:
+        return None
+    return path
+
+
+def _failure_extra(log: Path | None, stdout: str, stderr: str) -> list[str]:
+    """The lines after a verifier stop: the log, the verifier's first stderr line (its refusal token,
+    `docs/TESTKIT.md` § Integration verifier) and the log's last twenty `FAILED` or `ERROR` lines."""
+    if log is None:
+        return _tails(stdout, stderr)
+    first = stderr.strip().splitlines()[:1]
+    return [f"log {log}", *(f"verifier: {line}" for line in first), *(f"  {line}" for line in stages.failure_lines(log))]
+
+
 def parse_verify_command(command: str) -> list[str]:
     try:
         argv = json.loads(command)
@@ -401,8 +436,8 @@ def _write_evidence(repo: Path, record: dict) -> Path:
 def _verify_candidate(
     argv: list[str], candidate_dir: Path, candidate_sha: str, expected_main: str, reviewed: str,
     timeout: float, captures: Path, report_path: Path,
-) -> str | None:
-    """Run the verifier in the candidate; return the isolation warning, if any."""
+) -> tuple[str | None, Path | None]:
+    """Run the verifier in the candidate; return the isolation warning, if any, and the log written."""
     env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
     env.update({
         "ATC_INTEGRATION_SHA": candidate_sha,
@@ -412,24 +447,25 @@ def _verify_candidate(
         "ATC_VERIFICATION_REPORT": str(report_path),
     })
     returncode, stdout, stderr, warning = _run_verifier(argv, candidate_dir, env, timeout, captures)
+    log = _write_verifier_log(verifier_log(candidate_dir), argv, candidate_dir, returncode, stdout, stderr)
     if returncode is None:
         raise stop(
             "VERIFICATION_TIMEOUT", f"candidate verification timed out after {timeout:g}s for {candidate_sha}; "
             f"{BUDGET_EXCEEDED}",
-            after_candidate=True, extra=_tails(stdout, stderr),
+            after_candidate=True, extra=_failure_extra(log, stdout, stderr),
         )
     if returncode:
         last = (stderr.strip() or stdout.strip()).splitlines()
         raise stop(
             "VERIFICATION_FAILED",
             f"candidate verification failed for {candidate_sha} (exit {returncode}): {last[-1] if last else 'no output'}",
-            after_candidate=True, extra=_tails(stdout, stderr),
+            after_candidate=True, extra=_failure_extra(log, stdout, stderr),
         )
     if rev(candidate_dir, "HEAD") != candidate_sha:
         raise stop("CANDIDATE_CHANGED", "verification command changed candidate HEAD; candidate SHA is no longer bound", after_candidate=True)
     if git(candidate_dir, "status", "--porcelain").stdout.strip():
         raise stop("CANDIDATE_CHANGED", "verification command dirtied candidate checkout; refusing integration", after_candidate=True)
-    return warning
+    return warning, log
 
 
 def _record_integration(repo: Path, records: list[dict]) -> Path:
@@ -670,15 +706,6 @@ def carry_over(repo: Path, main: str, approved: str, rebased: str, main_tip: str
     return {"carried_over_from": approved, "rebased": rebased, "commits": len(old), "main_between": between}
 
 
-def render_carry_over(carried: dict) -> list[str]:
-    return [
-        f"carried over: the approval for reviewed {carried['carried_over_from']} applies to rebased {carried['rebased']} "
-        f"({carried['commits']} commits, every patch-id equal, clean replay)",
-        f"main commits between: {len(carried['main_between'])}",
-        *(f"  {line}" for line in carried["main_between"]),
-    ]
-
-
 def render_binding(binding: Binding) -> str:
     """The tasks and the authority by kind; the quote stays in `--json` and the records."""
     tasks = ",".join(binding.tasks)
@@ -746,7 +773,8 @@ class Target:
         )
 
 
-def integrate(t: Target) -> tuple[int, dict]:
+def integrate(t: Target, progress: bool = True) -> tuple[int, dict]:
+    """Integrate ``t``; ``progress`` prints the `verify:` line that `--json` keeps on stderr."""
     repo, main, branch, reviewed = t.repo, t.main, t.branch, t.reviewed
     with IntegrationSlot(repo):
         main_tip_for_refs = rev(repo, main)
@@ -853,15 +881,19 @@ def integrate(t: Target) -> tuple[int, dict]:
 
             verification_started = time.monotonic()
             if t.binding.records_only:
-                print(f"verify: candidate {candidate_sha} {RECORD_CHECK}", file=sys.stderr)
+                if progress:
+                    print(f"verify: candidate {candidate_sha} {RECORD_CHECK}", file=sys.stderr)
                 _check_records(candidate_dir, candidate_sha)
                 verification_warning, verifier_report, evidence_reason = None, None, "RECORDS_ONLY"
             else:
-                print(f"verify: candidate {candidate_sha} timeout {t.timeout:g}s ({t.timeout_source})", file=sys.stderr)
-                verification_warning = _verify_candidate(
+                if progress:
+                    print(f"verify: candidate {candidate_sha} timeout {t.timeout:g}s ({t.timeout_source})", file=sys.stderr)
+                verification_warning, log = _verify_candidate(
                     t.verify_argv, candidate_dir, candidate_sha, main_before, reviewed, t.timeout, places.systmp,
                     report_path,
                 )
+                if log is not None:
+                    result[LOG_KEY] = str(log)
                 verifier_report, evidence_reason = _read_report(report_path)
             result["verification"] = "PASS"
             result["verification_seconds"] = round(time.monotonic() - verification_started, 1)
@@ -1258,15 +1290,24 @@ def resolve(args: argparse.Namespace, root: Path, root_given: bool, cwd: str) ->
     )
 
 
-def render_result(result: dict, binding: Binding, project: str) -> str:
-    line = f"{result['verdict']} {project} main {result['main_before']} -> {result['main_after']}"
-    if result.get("candidate_sha"):
-        line += f" candidate {result['candidate_sha']} verification={result['verification']}"
-    if result["verdict"] == "NO_FF":
-        line += f" (parents {result['first_parent']} {result['second_parent']})"
-    if result.get("verification") == "PASS":
-        line += f" evidence={'recorded' if result.get('evidence') else 'NONE(' + str(result.get('evidence_reason')) + ')'}"
-    return f"{line} {render_binding(binding)}"
+def render_result(result: dict, binding: Binding, project: str, log: str | None = None) -> str:
+    """The success line: decision, project, `main` old -> new, task, and the verifier log; the rest is `--json`."""
+    line = (
+        f"{result['verdict']} {project} main {gp.short(result['main_before'])} -> {gp.short(result['main_after'])} "
+        f"{render_binding(binding)}"
+    )
+    if result.get("carried_over"):
+        line += f" carried_from={gp.short(result['carried_over']['carried_over_from'])}"
+    return f"{line} log {log}" if log else line
+
+
+def render_check(verdict: str, reason: str, t: Target, tip: str | None, carried: dict | None = None) -> str:
+    """The `--check` line: `CHECK <verdict> <reason>:` then project, branch, tip and binding; evidence is `--json`."""
+    line = (
+        f"CHECK {verdict} {reason}: {t.project} branch={t.branch or '-'} tip={gp.short(tip)} "
+        f"{render_binding(t.binding)}"
+    )
+    return f"{line} carried_from={gp.short(carried['carried_over_from'])}" if carried else line
 
 
 class _Human:
@@ -1340,8 +1381,6 @@ def _print_stop_report(report: gp.Report, payload: dict, as_json: bool) -> None:
     print("\n".join(lines[:2]), file=sys.stderr)
     if as_json:
         print(json.dumps({**payload, "preflight": asdict(report), "refusal": _report_refusal(report)}, indent=2))
-    else:
-        print("\n".join(lines[2:]))
 
 
 def _print_refusal(refusal: Refused, payload: dict, as_json: bool) -> None:
@@ -1361,7 +1400,7 @@ def check(t: Target, as_json: bool) -> int:
         elif as_json:
             print(json.dumps({**payload, **result}, indent=2))
         else:
-            print(f"CHECK {result['verdict']} {result['reason']}: main {result['main_after']} is the candidate of this request")
+            print(render_check(result["verdict"], result["reason"], t, result["main_after"]))
         return code
     if t.branch is None:
         _print_refusal(
@@ -1386,9 +1425,7 @@ def check(t: Target, as_json: bool) -> int:
     if as_json:
         print(json.dumps({**payload, "preflight": asdict(report), **({"carried_over": carried} if carried else {})}, indent=2))
     else:
-        print(f"CHECK {render(report)}")
-        if carried:
-            print("\n".join(render_carry_over(carried)))
+        print(render_check(report.verdict, report.reason, t, report.evidence["topic_tip"], carried))
     return 0
 
 
@@ -1420,12 +1457,13 @@ def _main(args: argparse.Namespace, root: Path, root_given: bool, cwd: str | Non
             if isinstance(stream, _Human):
                 stream.paths.update({str(path): target.project for path in (target.repo, target.repo.resolve())
                                      if path.is_absolute()})
-        print(target.line(), file=sys.stderr)
+        if args.json:
+            print(target.line(), file=sys.stderr)
         for warning in target.warnings:
             print(f"WARNING {warning}", file=sys.stderr)
         if args.check:
             return check(target, args.json)
-        code, result = integrate(target)
+        code, result = integrate(target, progress=args.json)
     except locations.Refusal as refusal:
         print(f"{refusal.token} {refusal.detail}", file=sys.stderr)
         if args.json:
@@ -1439,6 +1477,7 @@ def _main(args: argparse.Namespace, root: Path, root_given: bool, cwd: str | Non
     except (GitError, RuntimeError) as exc:
         _print_refusal(Refused("GIT" if isinstance(exc, GitError) else "RUNTIME", str(exc)), payload, args.json)
         return ERROR
+    log = result.pop(LOG_KEY, None)
     result["project"] = target.project
     result["warnings"] = target.warnings
     report = result.pop("report", None)
@@ -1467,12 +1506,7 @@ def _main(args: argparse.Namespace, root: Path, root_given: bool, cwd: str | Non
     elif args.json:
         print(json.dumps(result, indent=2))
     else:
-        lines = [render_result(result, target.binding, target.project)]
-        if result.get("carried_over"):
-            lines += render_carry_over(result["carried_over"])
-        if result.get("push"):
-            lines += gp.render_push(result["push"])
-        print("\n".join(lines))
+        print(render_result(result, target.binding, target.project, log))
     return code
 
 

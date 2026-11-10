@@ -114,8 +114,7 @@ def test_fast_forward_advances_main_to_reviewed(repo: Path, capsys: pytest.Captu
     assert integrate(repo, "topic", tip) == 0
     assert main_tip(repo) == tip
     line = capsys.readouterr().out.strip()
-    assert line.startswith(f"FF repo main {before[:12]} -> {tip[:12]} candidate {tip[:12]} verification=PASS")
-    assert line.endswith('task="test-owner-authorization" authority=unclassified')
+    assert line.startswith(f'FF repo main {before[:12]} -> {tip[:12]} task="test-owner-authorization" authority=unclassified log ')
     assert run_git(repo, "status", "--porcelain") == ""
 
 
@@ -127,7 +126,7 @@ def test_no_ff_merges_with_subject_and_parents(repo: Path, capsys: pytest.Captur
     after = main_tip(repo)
     assert run_git(repo, "rev-parse", "main^1", "main^2").split() == [before, tip]
     assert run_git(repo, "log", "-1", "--format=%s", "main") == "merge(demo-topic): integrate reviewed changes"
-    assert capsys.readouterr().out.strip().startswith(f"NO_FF repo main {before[:12]} -> {after[:12]} candidate ")
+    assert capsys.readouterr().out.strip().startswith(f"NO_FF repo main {before[:12]} -> {after[:12]} task=")
 
 
 @pytest.mark.parametrize(("branch", "expected"), [
@@ -494,7 +493,7 @@ def test_the_candidate_and_its_report_lie_in_candidates_under_a_twelve_digit_id(
     assert tree.parent == atc_tmp / "candidates" and re.fullmatch(r"[0-9a-f]{12}", tree.name)
     assert report == tree.with_name(tree.name + ".report.json")
     assert seen["tmp"] == str(atc_tmp) and Path(seen["temp"]) == atc_tmp / "systmp"
-    assert list((atc_tmp / "candidates").iterdir()) == []
+    assert list((atc_tmp / "candidates").iterdir()) == [tree.with_name(tree.name + ".verify.log")]
 
 
 @pytest.mark.integration
@@ -868,7 +867,7 @@ def test_valid_report_writes_evidence_record(repo: Path, capsys: pytest.CaptureF
     assert integrate_with(repo, "topic", tip) == 0
     path = evidence_dir(repo) / f"{tip}.json"
     line = capsys.readouterr().out.strip()
-    assert line.startswith(f"FF repo main {before[:12]} -> {tip[:12]} candidate {tip[:12]} verification=PASS evidence=recorded ")
+    assert line.startswith(f"FF repo main {before[:12]} -> {tip[:12]} task=")
     assert records(repo) == [f"{tip}.json"]
     record = json.loads(path.read_text(encoding="utf-8"))
     assert record.pop("duration_seconds") >= 0
@@ -910,8 +909,9 @@ def test_verifier_without_report_integrates_and_writes_no_record(
 ) -> None:
     declare_verifier(repo, report_command(None))
     tip = topic(repo, {"a.txt": "a2\n"})
-    assert integrate_with(repo, "topic", tip) == 0
-    assert "verification=PASS evidence=NONE(NO_REPORT) " in capsys.readouterr().out
+    assert integrate_with(repo, "topic", tip, "--json") == 0
+    data = json.loads(capsys.readouterr().out)
+    assert (data["verification"], data["evidence"], data["evidence_reason"]) == ("PASS", None, "NO_REPORT")
     assert main_tip(repo) == tip
     assert records(repo) == []
 
@@ -962,8 +962,9 @@ def test_record_write_failure_keeps_the_integration(
     monkeypatch.setattr(gi, "_write_evidence", refuse)
     declare_verifier(repo, report_command(json.dumps(REPORT)))
     tip = topic(repo, {"a.txt": "a2\n"})
-    assert integrate_with(repo, "topic", tip) == 0
-    assert "verification=PASS evidence=NONE(WRITE_FAILED) " in capsys.readouterr().out
+    assert integrate_with(repo, "topic", tip, "--json") == 0
+    data = json.loads(capsys.readouterr().out)
+    assert (data["verification"], data["evidence"], data["evidence_reason"]) == ("PASS", None, "WRITE_FAILED")
     assert main_tip(repo) == tip
 
 
@@ -996,13 +997,13 @@ def stderr_lines(capsys: pytest.CaptureFixture[str]) -> list[str]:
 @pytest.mark.integration
 def test_the_resolved_values_are_the_first_stderr_line(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     tip = topic(repo, {"a.txt": "a2\n"})
-    assert integrate(repo, "topic", tip) == 0
+    assert integrate(repo, "topic", tip, "--json") == 0
     lines = stderr_lines(capsys)
     assert lines[0].startswith("resolved: repo main=main@")
-    assert f"branch=topic (--branch) reviewed={tip[:12]} " in lines[0]
+    assert f"branch=topic (--branch) reviewed={tip} " in lines[0]
     assert 'task="test-owner-authorization" authority=unclassified ' in lines[0]
     assert lines[0].endswith("(AGENTS.md verify.json) timeout=300s (default)")
-    assert f"verify: candidate {tip[:12]} timeout 300s (default)" in lines
+    assert f"verify: candidate {tip} timeout 300s (default)" in lines
     assert f"WARNING {gi.ALIAS_NOTICE}" in lines
 
 
@@ -1010,7 +1011,7 @@ def test_the_resolved_values_are_the_first_stderr_line(repo: Path, capsys: pytes
 def test_the_declared_argv_and_timeout_are_the_defaults(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     declare_verifier(repo, verify_command(), timeout="1234")
     tip = topic(repo, {"a.txt": "a2\n"})
-    assert run(repo, "--repo", str(repo), "--reviewed", tip, "--authority-reference", "x") == 0
+    assert run(repo, "--repo", str(repo), "--reviewed", tip, "--authority-reference", "x", "--json") == 0
     lines = stderr_lines(capsys)
     assert lines[0].endswith("(AGENTS.md verify.json) timeout=1234s (AGENTS.md)")
     assert not [line for line in lines if line.startswith("WARNING") and "atc tool checkout" not in line
@@ -1082,7 +1083,7 @@ def test_the_one_branch_at_the_reviewed_sha_is_inferred(repo: Path, capsys: pyte
     tip = topic(repo, {"a.txt": "a2\n"}, branch="worktree-claude+demo")
     publish(repo, "worktree-claude+demo")
     commit(repo, "c.txt", "c\n")
-    assert run(repo, "--repo", str(repo), "--reviewed", tip, "--authority-reference", "x") == 0
+    assert run(repo, "--repo", str(repo), "--reviewed", tip, "--authority-reference", "x", "--json") == 0
     assert "branch=worktree-claude+demo (inferred)" in stderr_lines(capsys)[0]
     assert run_git(repo, "log", "-1", "--format=%s", "main") == "merge(demo): integrate reviewed changes"
 
@@ -1163,8 +1164,8 @@ def test_every_integration_appends_its_record(repo: Path) -> None:
 
 
 @pytest.mark.integration
-def test_a_failed_verification_records_no_integration_and_keeps_both_tails(
-    repo: Path, capsys: pytest.CaptureFixture[str],
+def test_a_failed_verification_records_no_integration_and_names_its_log(
+    repo: Path, atc_tmp: Path, capsys: pytest.CaptureFixture[str],
 ) -> None:
     declare_verifier(repo, json.dumps([sys.executable, "-c", "import sys; print('out line'); print('err line', file=sys.stderr); sys.exit(4)"]))
     tip = topic(repo, {"a.txt": "a2\n"})
@@ -1173,10 +1174,42 @@ def test_a_failed_verification_records_no_integration_and_keeps_both_tails(
     first, after = refusal("\n".join(lines))
     assert first == f"STOP VERIFICATION_FAILED: candidate verification failed for {tip[:12]} (exit 4): err line"
     assert after.startswith("next: correct the cause on the topic branch")
-    assert lines[lines.index(after) + 1:] == [
-        "verifier stdout (last 1 lines):", "  out line", "verifier stderr (last 1 lines):", "  err line",
-    ]
+    named = lines[lines.index(after) + 1]
+    log = Path(named.removeprefix("log "))
+    assert named.startswith("log ") and log.parent == atc_tmp / "candidates" and log.name.endswith(".verify.log")
+    text = log.read_text(encoding="utf-8")
+    assert "--- stdout ---\nout line\n--- stderr ---\nerr line\n" in text and "exit: 4" in text
+    # The verifier's first stderr line, then, from a log without FAILED or ERROR lines, its last twenty lines.
+    assert lines[lines.index(named) + 1:] == ["verifier: err line", *(f"  {line}" for line in text.splitlines())]
     assert not (repo / ".git" / "atc" / "integrations.jsonl").exists()
+
+
+FAILING_VERIFIER = (
+    "import sys; print('collected 30 items'); "
+    "[print(f'FAILED tests/test_x.py::test_{n} - assert 0') for n in range(25)]; "
+    "print('TESTS_FAILED', file=sys.stderr); print('ERROR tests/test_y.py::test_z', file=sys.stderr); sys.exit(1)"
+)
+
+
+@pytest.mark.integration
+def test_a_failed_verification_repeats_the_last_twenty_failure_lines_of_its_log(
+    repo: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    declare_verifier(repo, json.dumps([sys.executable, "-c", FAILING_VERIFIER]))
+    tip = topic(repo, {"a.txt": "a2\n"})
+    assert integrate(repo, "topic", tip) == 3
+    captured = capsys.readouterr()
+    lines = captured.err.splitlines()
+    first, after = refusal(captured.err)
+    assert first == f"STOP VERIFICATION_FAILED: candidate verification failed for {tip[:12]} (exit 1): ERROR tests/test_y.py::test_z"
+    at = lines.index(after)
+    assert lines[at + 1].startswith("log ") and lines[at + 1].endswith(".log")
+    assert lines[at + 2:] == [
+        "verifier: TESTS_FAILED",
+        *(f"  FAILED tests/test_x.py::test_{n} - assert 0" for n in range(6, 25)),
+        "  ERROR tests/test_y.py::test_z",
+    ]
+    assert captured.out == ""
 
 
 @pytest.mark.integration
@@ -1268,7 +1301,7 @@ def test_main_moved_since_its_declaration_was_read_is_ref_drift(
 def test_the_declaration_comes_from_main_not_the_topic(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     declare_verifier(repo, verify_command(), timeout="1234")
     tip = topic(repo, {"AGENTS.md": "# AGENTS.md\n\n## Integration verification\n\n- Verifier argv file: other.json\n- Verifier timeout: 5\n"})
-    assert run(repo, "--repo", str(repo), "--reviewed", tip, "--authority-reference", "x") == 0
+    assert run(repo, "--repo", str(repo), "--reviewed", tip, "--authority-reference", "x", "--json") == 0
     assert stderr_lines(capsys)[0].endswith("(AGENTS.md verify.json) timeout=1234s (AGENTS.md)")
     assert main_tip(repo) == tip
 
@@ -1305,7 +1338,7 @@ def test_check_resolves_and_preflights_without_a_candidate(repo: Path, capsys: p
     assert run(repo, "--repo", str(repo), "--reviewed", tip, "--authority-reference", "x", "--check") == 0
     captured = capsys.readouterr()
     assert captured.out.startswith("CHECK FF FAST_FORWARD: ")
-    assert captured.err.startswith("resolved: ")
+    assert "resolved: " not in captured.err
     assert main_tip(repo) == before
     assert run_git(repo, "worktree", "list").count("\n") == 0
     assert not (repo / ".git" / "atc").exists()
@@ -1320,6 +1353,54 @@ def test_check_resolves_and_preflights_without_a_candidate(repo: Path, capsys: p
     assert refusal(captured.err)[0].startswith("STOP CONFLICT: ")
     data = json.loads(captured.out)
     assert (data["check"], data["refusal"]["reason"], data["resolved"]["branch"]) == (True, "CONFLICT", "topic")
+
+
+def not_warnings(text: str) -> list[str]:
+    return [line for line in text.splitlines() if not line.startswith("WARNING ")]
+
+
+@pytest.mark.integration
+def test_the_default_check_output_is_the_check_line(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    tip = topic(repo, {"a.txt": "a2\n"})
+    assert integrate(repo, "topic", tip, "--check") == 0
+    captured = capsys.readouterr()
+    assert captured.out == (
+        f'CHECK FF FAST_FORWARD: repo branch=topic tip={tip[:12]} task="test-owner-authorization" authority=unclassified\n'
+    )
+    assert f"WARNING {gi.ALIAS_NOTICE}" in captured.err.splitlines()
+    assert not_warnings(captured.err) == []
+
+
+@pytest.mark.integration
+def test_a_default_check_stop_is_the_stop_and_next_lines(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    tip = topic(repo, {"a.txt": "topic\n"})
+    commit(repo, "a.txt", "main\n")
+    assert run(repo, "--repo", str(repo), "--reviewed", tip, "--authority-reference", "x", "--check") == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert not_warnings(captured.err) == [
+        "STOP CONFLICT: main advanced and the merge conflicts; reconcile on the topic branch and re-review",
+        f"next: {gi.gp.NEXT_UNPUBLISHED['CONFLICT']}",
+    ]
+
+
+@pytest.mark.integration
+def test_the_default_integration_output_is_one_line_naming_the_log(
+    repo: Path, atc_tmp: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    before = main_tip(repo)
+    tip = topic(repo, {"a.txt": "a2\n"})
+    assert integrate(repo, "topic", tip) == 0
+    captured = capsys.readouterr()
+    match = re.fullmatch(
+        rf'FF repo main {before[:12]} -> {tip[:12]} task="test-owner-authorization" authority=unclassified '
+        r"log (?P<log>.+[0-9a-f]{12}\.verify\.log)\n", captured.out,
+    )
+    assert match, captured.out
+    log = Path(match["log"])
+    assert log.parent == atc_tmp / "candidates"
+    assert "exit: 0\n--- stdout ---\n" in log.read_text(encoding="utf-8")
+    assert not_warnings(captured.err) == []
 
 
 @pytest.fixture
@@ -1338,7 +1419,7 @@ def workspace(repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Pa
 def test_project_resolves_through_the_workspace_map(repo: Path, workspace: Path, capsys: pytest.CaptureFixture[str]) -> None:
     tip = topic(repo, {"a.txt": "a2\n"})
     assert run(repo, "--project", "demo", "--reviewed", tip, "--authority-reference", "x", root=workspace, cwd=workspace) == 0
-    assert stderr_lines(capsys)[0].startswith("resolved: demo main=main@")
+    assert capsys.readouterr().out.startswith("FF demo main ")
     assert main_tip(repo) == tip
 
 
@@ -1408,6 +1489,6 @@ def test_a_relative_repo_keeps_every_dot_in_the_output(repo: Path, capsys: pytes
     declare_verifier(repo, verify_command(), timeout="1234")
     tip = topic(repo, {"a.txt": "a2\n"})
     monkeypatch.chdir(repo)
-    assert run(repo, "--repo", ".", "--reviewed", tip, "--authority-reference", "x", "--check", cwd=repo) == 0
-    lines = stderr_lines(capsys)
-    assert lines[0].endswith("(AGENTS.md verify.json) timeout=1234s (AGENTS.md)")
+    assert run(repo, "--repo", ".", "--reviewed", tip, "--authority-reference", "x", cwd=repo) == 0
+    log = capsys.readouterr().out.strip().rsplit(" log ", 1)[1]
+    assert log.endswith(".log") and Path(log).is_file()

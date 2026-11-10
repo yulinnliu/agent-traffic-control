@@ -134,7 +134,7 @@ def test_the_human_result_names_the_task_and_the_authority_kind(tasks_repo: Path
     work = on_branch(tasks_repo, "work", {"a.txt": "work\n"})
     assert run(tasks_repo, work, "--task", "DEMO-0001") == 0
     captured = capsys.readouterr()
-    assert captured.out.splitlines()[0].endswith('task="DEMO-0001" authority=record')
+    assert 'task="DEMO-0001" authority=record log ' in captured.out.splitlines()[0]
     assert not re.search(r"\b[0-9a-f]{40}\b", captured.out + captured.err)
     assert str(tasks_repo) not in captured.out + captured.err
 
@@ -477,8 +477,8 @@ def test_a_check_needs_no_authority(tasks_repo: Path, capsys: pytest.CaptureFixt
     before = main_tip(tasks_repo)
     assert run(tasks_repo, work, "--check") == 0
     captured = capsys.readouterr()
-    assert 'task="" authority=not_checked' in captured.err.splitlines()[0]
     assert captured.out.startswith("CHECK FF ")
+    assert captured.out.rstrip().endswith('task="" authority=not_checked')
     assert run(tasks_repo, work) == 2
     assert main_tip(tasks_repo) == before
 
@@ -490,8 +490,8 @@ def test_a_check_reports_a_missing_grant_and_the_run_still_stops(tasks_repo: Pat
     work = on_branch(tasks_repo, "work", {"a.txt": "work\n"})
     assert run(tasks_repo, work, "--task", "DEMO-0001", "--check") == 0
     captured = capsys.readouterr()
-    assert 'task="DEMO-0001" authority=missing' in captured.err.splitlines()[0]
     assert captured.out.startswith("CHECK FF ")
+    assert captured.out.rstrip().endswith('task="DEMO-0001" authority=missing')
     status, data, _ = run_json(tasks_repo, capsys, work, "--task", "DEMO-0001")
     assert (status, data["refusal"]["reason"]) == (1, "AUTHORITY_MISSING")
 

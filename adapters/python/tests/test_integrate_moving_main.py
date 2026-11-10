@@ -77,10 +77,10 @@ def test_main_behind_origin_stops_before_the_verifier(repo: Path, tmp_path: Path
     before = main_tip(repo)
     assert run(repo, tip, "--check") == 1
     assert refusal(capsys.readouterr().err)[0].startswith("STOP MAIN_BEHIND_ORIGIN: ")
-    assert run(repo, tip) == 1
+    assert run(repo, tip, "--json") == 1
     err = capsys.readouterr().err
     first, after = refusal(err)
-    assert first == f"STOP MAIN_BEHIND_ORIGIN: local main {short(before)} is 1 commits behind origin/main {short(remote)}"
+    assert first == f"STOP MAIN_BEHIND_ORIGIN: local main {before} is 1 commits behind origin/main {remote}"
     assert after.startswith("next: fast-forward local main to origin/main")
     assert "fetched=origin" in err
     assert not marker.exists()
@@ -171,18 +171,17 @@ def test_a_clean_rebase_carries_the_approval_over(repo: Path, capsys: pytest.Cap
     reviewed, between = stale_two_commit_topic(repo)
     rebased = rebase(repo, "topic")
     assert run(repo, reviewed, "--rebased", rebased, "--check") == 0
-    assert (f"carried over: the approval for reviewed {short(reviewed)} applies to rebased {short(rebased)}"
-            in capsys.readouterr().out)
+    assert capsys.readouterr().out.rstrip().endswith(f"carried_from={short(reviewed)}")
+    assert run(repo, reviewed, "--rebased", rebased, "--check", "--json") == 0
+    carried = json.loads(capsys.readouterr().out)["carried_over"]
+    assert (carried["carried_over_from"], carried["rebased"], carried["commits"]) == (reviewed, rebased, 2)
+    assert len(carried["main_between"]) == 1 and carried["main_between"][0].startswith(between)
     assert run(repo, reviewed, "--rebased", rebased) == 0
     captured = capsys.readouterr()
     lines = captured.out.splitlines()
-    assert lines[0].startswith(f"FF repo main {short(between)} -> {short(rebased)} candidate {short(rebased)} verification=PASS")
-    assert lines[1] == (
-        f"carried over: the approval for reviewed {short(reviewed)} applies to rebased {short(rebased)} "
-        "(2 commits, every patch-id equal, clean replay)"
-    )
-    assert lines[2:4] == ["main commits between: 1", f"  {short(between)} edit c.txt"]
-    assert f"reviewed={short(rebased)} carried_from={short(reviewed)}" in captured.err
+    assert len(lines) == 1
+    assert lines[0].startswith(f"FF repo main {short(between)} -> {short(rebased)} task=")
+    assert f" carried_from={short(reviewed)} log " in lines[0]
     assert main_tip(repo) == rebased
     assert (records(repo)[-1]["reviewed"], records(repo)[-1]["carried_over_from"]) == (rebased, reviewed)
     assert (records(repo)[-1]["task"], records(repo)[-1]["authority"]) == ("owner-approval", {"kind": "unclassified"})
@@ -318,7 +317,10 @@ def test_the_integration_lists_and_flags_what_a_push_carries(repo: Path, capsys:
     mine = topic(repo, {"b.txt": "b2\n"}, branch="mine")
     assert run(repo, mine) == 0
     captured = capsys.readouterr()
-    lines = captured.out.splitlines()
+    assert len(captured.out.splitlines()) == 1
+    assert "WARNING 2 commits in origin/main..main come from other integrations or none" in captured.err
+    # The listing itself is the `--json` result's `push`, as `atc preflight push` renders it.
+    lines = ["", *gp.render_push(gp.push_listing(repo, "main", {mine}))]
     assert lines[1:8] == [
         f"push: 3 commits origin/main {short(origin)} -> main {short(mine)}",
         f'  integration {short(other)} task="owner-approval" authority=unclassified [NO PUSH APPROVAL]',
