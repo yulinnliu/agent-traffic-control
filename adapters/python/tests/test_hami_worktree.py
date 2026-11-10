@@ -357,8 +357,25 @@ def test_audit_reports_v1_and_legacy_without_writing(ws: Workspace, capsys: pyte
     assert set(by_code) == {"OK", "LEGACY_TARGET"}
     assert by_code["OK"]["evidence"] | {"head": None} == {
         "branch": "worktree-claude+topic", "head": None, "locked": True,
-        "lock_reason": "claude:topic:s1", "clean": True, "merged": True,
+        "lock_reason": "claude:topic:s1", "clean": True, "merged": True, "removable": True,
     }
+    assert by_code["OK"]["detail"] == "removable"
+
+
+@pytest.mark.integration
+def test_audit_says_what_keeps_a_worktree(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    assert ws.run(capsys, "create")[0] == 0
+    path = ws.path("claude", "topic")
+    (path / "extra.txt").write_text("x\n", encoding="utf-8")
+    status, results = ws.run(capsys, "audit", None, None)
+    assert (status, single(results)["detail"], results[0]["evidence"]["removable"]) == (
+        0, "not removable: uncommitted changes", False)
+    run_git(path, "add", "extra.txt")
+    run_git(path, "commit", "-q", "-m", "extra")
+    status, results = ws.run(capsys, "audit", None, None)
+    assert (status, single(results)["detail"]) == (0, "not removable: unmerged")
+    (path / "more.txt").write_text("y\n", encoding="utf-8")
+    assert single(ws.run(capsys, "audit", None, None)[1])["detail"] == "not removable: unmerged, uncommitted changes"
 
 
 def test_audit_finds_a_missing_lock(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:

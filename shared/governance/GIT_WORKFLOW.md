@@ -236,15 +236,15 @@ where the integration stops with `AUTHORITY_MISSING`. After the reviewer's
 PASS the check runs before the Owner is asked:
 
 ```text
-atc integrate --check --repo <integration-checkout> --reviewed <full sha> --task <task> [--owner-words <quote>]
+atc integrate --check --repo <integration-checkout> --reviewed <sha> --task <task> [--owner-words <quote>]
 ```
 
 The Python integration adapter acquires the repository Integration Slot before
 preflight, prepares the integration revision in an isolated candidate worktree,
 and requires a passing verification command before updating `main`. Name the
-reviewed commit by its full 40-character SHA, which the integration record
-holds; a unique prefix of at least 12 characters arrives with topic D of
-`docs/TASK_CONTRACT_PLAN.md` (D.14). Name the task and its authority as
+reviewed commit by its full 40-character SHA or a unique prefix of at least 12
+characters, which the run resolves once to the full SHA the integration record
+holds; an ambiguous prefix stops. Name the task and its authority as
 `Task and authority` below states; `Integration verifier source` names where
 the verification argv comes from. The command
 runs from the candidate checkout with these environment variables:
@@ -609,8 +609,8 @@ with the last lines of its log, never a pass.
 
 | Exit | Meaning |
 | --- | --- |
-| 0 | Integrated, or a preflight verdict of `FF`, `NO_FF`, `REMOVABLE` or `PUSH` |
-| 1 | Stopped before a candidate exists: a preflight `STOP` or cleanup `KEEP` verdict, a missing `## Integration verification` section, ref drift found before the candidate, a failed fetch, a local `main` behind or diverged from `origin/main`, a required rebase, or a refused carry-over |
+| 0 | Integrated, a `CHECK FF` or `CHECK NO_FF` line, or a preflight `PUSH` verdict |
+| 1 | Stopped before a candidate exists: a preflight `STOP` verdict, a missing `## Integration verification` section, ref drift found before the candidate, a failed fetch, a local `main` behind or diverged from `origin/main`, a required rebase, or a refused carry-over |
 | 2 | `ERROR`: an invalid invocation or a Git or runtime fault |
 | 3 | Stopped after the candidate exists: the verifier failed or timed out, the candidate changed, or the refs drifted before the update, each with `main` unchanged; or a required recovery, where `main` or its checkout no longer matches the candidate after the update, found by that update or at the start of a later run |
 
@@ -625,7 +625,7 @@ The first stderr line of a refusal takes one of these forms:
 
 | Stop | Next step |
 | --- | --- |
-| No reviewed SHA, or one that is invalid or names no commit | Run again with the full SHA the formal review named |
+| No reviewed SHA, or one that is invalid, ambiguous or names no commit | Run again with the full SHA the formal review named |
 | Topic already merged into `main` | Nothing to integrate; continue with `Cleanup trigger` |
 | Several local branches at the reviewed SHA | Run again with `--branch` naming the reviewed topic branch among those listed |
 | No local branch at the reviewed SHA, and none containing it | Restore the reviewed topic branch at the reviewed SHA, or run again with the full SHA the formal review named |

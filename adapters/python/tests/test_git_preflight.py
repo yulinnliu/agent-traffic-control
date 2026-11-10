@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 from pathlib import Path
@@ -70,7 +69,7 @@ def test_no_ff_when_main_advanced_on_other_files(repo: Path) -> None:
     tip = topic(repo, {"a.txt": "a2\n"})
     publish(repo, "topic")
     commit(repo, "c.txt", "c\n")
-    report = gp.merge_preflight(repo, "topic", tip[:10])
+    report = gp.merge_preflight(repo, "topic", tip[:12])
     assert (report.verdict, report.reason) == ("NO_FF", "COMPATIBLE")
     assert report.evidence["main_advanced_by"] == 1
     assert report.evidence["reviewed_sha"] == tip
@@ -121,7 +120,7 @@ def test_rewritten_review_stops(repo: Path) -> None:
     assert (report.verdict, report.reason) == ("STOP", "REVIEW_REWRITTEN")
 
 
-@pytest.mark.parametrize("reviewed", ["topic", "topic~0", "HEAD", "abc123", "x" * 7])
+@pytest.mark.parametrize("reviewed", ["topic", "topic~0", "HEAD", "abc123", "x" * 12, "abcdef12345"])
 def test_non_sha_review_is_invalid(repo: Path, reviewed: str) -> None:
     topic(repo, {"a.txt": "a2\n"})
     report = gp.merge_preflight(repo, "topic", reviewed)
@@ -131,7 +130,7 @@ def test_non_sha_review_is_invalid(repo: Path, reviewed: str) -> None:
 
 def test_full_and_uppercase_reviewed_sha_still_work(repo: Path) -> None:
     tip = topic(repo, {"a.txt": "a2\n"})
-    for reviewed in (tip, tip[:7].upper()):
+    for reviewed in (tip, tip[:12].upper()):
         report = gp.merge_preflight(repo, "topic", reviewed)
         assert (report.verdict, report.reason) == ("FF", "FAST_FORWARD")
         assert report.evidence["reviewed_sha"] == tip
@@ -145,8 +144,8 @@ def test_unknown_sha_stops(repo: Path) -> None:
 
 def test_hex_named_branch_does_not_stand_in_for_a_sha(repo: Path) -> None:
     topic(repo, {"a.txt": "a2\n"})
-    run_git(repo, "branch", "deadbeef", "topic")
-    report = gp.merge_preflight(repo, "topic", "deadbeef")
+    run_git(repo, "branch", "deadbeefdead", "topic")
+    report = gp.merge_preflight(repo, "topic", "deadbeefdead")
     assert (report.verdict, report.reason) == ("STOP", "REVIEWED_SHA_UNKNOWN")
 
 
@@ -177,26 +176,14 @@ def test_cleanup_refuses_main_checkout_and_unknown_path(repo: Path, tmp_path: Pa
     assert gp.cleanup_preflight(repo, tmp_path / "nowhere").reason == "NOT_A_WORKTREE"
 
 
-def test_cli_json_and_exit_codes(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    tip = topic(repo, {"a.txt": "a2\n"})
-    assert gp.main(["merge", "--repo", str(repo), "--branch", "topic", "--reviewed", tip, "--json"]) == 0
-    data = json.loads(capsys.readouterr().out)
-    assert data["verdict"] == "FF" and data["reason"] == "FAST_FORWARD"
-    assert data["evidence"]["topic_tip"] == tip
-    assert gp.main(["merge", "--repo", str(repo), "--branch", "topic"]) == 1
-    assert capsys.readouterr().out.startswith("STOP NO_REVIEWED_SHA")
-    assert gp.main(["merge", "--repo", str(repo), "--branch", "missing", "--reviewed", tip]) == 2
-
-
 @pytest.mark.integration
-def test_every_stop_names_its_next_step(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_every_stop_names_its_next_step(repo: Path) -> None:
     assert set(gp.NEXT) == {reason for reason in gp.REASONS if reason not in (
         "FAST_FORWARD", "COMPATIBLE", "NOT_A_WORKTREE", "MAIN_CHECKOUT", "NOT_MERGED", "WORKTREE_DIRTY", "SAFE_TO_REMOVE",
         "PUSH_LISTED",
     )}
     tip = topic(repo, {"a.txt": "a2\n"})
     (repo / "b.txt").write_text("dirty\n", encoding="utf-8")
-    assert gp.main(["merge", "--repo", str(repo), "--branch", "topic", "--reviewed", tip]) == 1
-    lines = capsys.readouterr().out.splitlines()
+    lines = gp.render(gp.merge_preflight(repo, "topic", tip)).splitlines()
     assert lines[0] == "STOP CHECKOUT_DIRTY: the integration checkout has uncommitted changes to tracked files: b.txt"
     assert lines[1] == "next: have the owner of the listed paths commit or remove them, then run again"

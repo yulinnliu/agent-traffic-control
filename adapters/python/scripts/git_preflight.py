@@ -1,26 +1,24 @@
 #!/usr/bin/env python3
 """Read-only Git preflight for the lifecycle in shared/governance/GIT_WORKFLOW.md.
 
-`merge` evaluates that file's integration table for one topic branch and
-prints a verdict (FF / NO_FF / STOP), a stable reason code, and the evidence
-behind it; it compares against `origin` as last fetched. `cleanup` reports
-whether a linked worktree is safe to hand to the repo's own removal tooling
-(REMOVABLE / KEEP). `push` runs `git fetch origin` and lists every commit a
-push of main would carry, grouped by the integration that brought it in
-(PUSH / STOP). None of them writes a branch, the index or the working tree:
-conflicts are detected with `git merge-tree --write-tree`, which creates only
-unreferenced objects, and the fetch updates only remote-tracking refs.
+`push` runs `git fetch origin` and lists every commit a push of main would
+carry, grouped by the integration that brought it in (PUSH / STOP). `merge`
+is retired: it runs `atc integrate --check` until the CLI trim (plan D.7).
+`merge_preflight()` evaluates that file's integration table for `atc
+integrate`, and `cleanup_preflight()` judges a worktree's removal for `atc
+worktree cleanup`. None of them writes a branch, the index or the working
+tree: conflicts are detected with `git merge-tree --write-tree`, which creates
+only unreferenced objects, and the fetch updates only remote-tracking refs.
 
 Usage:
-  git_preflight.py merge --repo <checkout> --branch <topic> [--reviewed <sha>] [--main main] [--json]
-  git_preflight.py cleanup --repo <checkout> --worktree <path> [--main main] [--json]
-  git_preflight.py push --repo <checkout> [--main main] [--json]
+  git_preflight.py push --repo <checkout> [--integration <sha>] [--json]
+  git_preflight.py merge --repo <checkout> --branch <topic> --reviewed <sha> [--json]   (retired)
 
 A STOP verdict carries a `next:` line naming the step that resolves it
 (governance `GIT_WORKFLOW.md` § Integrate and § Command results).
 
-Exit status: 0 for FF, NO_FF, REMOVABLE or PUSH; 1 for STOP or KEEP; 2 for a
-usage or git error.
+Exit status: 0 for PUSH; 1 for STOP; 2 for a usage or git error; `merge`
+exits as `atc integrate --check` does.
 """
 
 from __future__ import annotations
@@ -42,15 +40,16 @@ INTEGRATIONS = ("atc", "integrations.jsonl")
 
 # A review binds to an object ID, never to a ref or revision expression that
 # can move after the review.
-REVIEWED_SHA = re.compile(r"[0-9a-fA-F]{7,40}")
+REVIEWED_SHA = re.compile(r"[0-9a-fA-F]{12,40}")
 SHORT_SHA = 12
 AUTHORITY_ENDING = re.compile(r"\s@\s+\S+$")
 FULL_SHA_WORD = re.compile(r"\b([0-9a-f]{12})[0-9a-f]{28}\b")
 
 REASONS = {
     "NO_REVIEWED_SHA": "no reviewed SHA given; integration requires a formal review bound to a commit",
-    "REVIEWED_SHA_INVALID": "the reviewed SHA is not a 7-40 character hexadecimal object ID",
+    "REVIEWED_SHA_INVALID": "the reviewed SHA is not a full SHA or a prefix of 12 or more hexadecimal characters",
     "REVIEWED_SHA_UNKNOWN": "the reviewed SHA does not resolve to a commit in this repository",
+    "AMBIGUOUS_SHA": "the prefix matches several objects in this repository",
     "REVIEW_REWRITTEN": "the reviewed SHA is not an ancestor of the topic tip; reviewed history was rewritten",
     "UNREVIEWED_COMMITS": "the topic tip has commits after the reviewed SHA; review the delta first",
     "ALREADY_MERGED": "the topic tip is already reachable from main; nothing to integrate",
@@ -95,6 +94,7 @@ NEXT = {
     "NO_REVIEWED_SHA": _RUN_WITH_REVIEWED,
     "REVIEWED_SHA_INVALID": _RUN_WITH_REVIEWED,
     "REVIEWED_SHA_UNKNOWN": _RUN_WITH_REVIEWED,
+    "AMBIGUOUS_SHA": "run again with a longer prefix or the full SHA the formal review named",
     "REVIEW_REWRITTEN": _REVIEW_DELTA,
     "UNREVIEWED_COMMITS": _REVIEW_DELTA,
     "ALREADY_MERGED": "nothing to integrate; continue with GIT_WORKFLOW.md § Cleanup trigger",
@@ -540,50 +540,55 @@ def render(report: Report) -> str:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(allow_abbrev=False, description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
-    merge = sub.add_parser("merge", allow_abbrev=False, help="evaluate the integration table for a topic branch")
-    merge.add_argument("--repo", type=Path, required=True, help="integration checkout")
-    merge.add_argument("--branch", required=True, help="topic branch")
-    merge.add_argument("--reviewed", help="SHA named by the latest formal review")
-    cleanup = sub.add_parser("cleanup", allow_abbrev=False, help="check whether a linked worktree is safe to remove")
-    cleanup.add_argument("--repo", type=Path, required=True, help="integration checkout")
-    cleanup.add_argument("--worktree", type=Path, required=True, help="linked worktree path")
     push = sub.add_parser("push", allow_abbrev=False, help="fetch origin and list what a push of main would carry")
     push.add_argument("--repo", type=Path, required=True, help="integration checkout")
     push.add_argument(
         "--integration", help="candidate SHA whose commits carry push approval; every other commit is flagged",
     )
-    for p in (merge, cleanup):  # `--main` goes with these commands in D.7
-        p.add_argument("--main", default="main", help="integration branch (default: main)")
-    for p in (merge, cleanup, push):
+    merge = sub.add_parser("merge", allow_abbrev=False, help="retired: runs atc integrate --check")
+    merge.add_argument("--repo", type=Path, required=True, help="integration checkout")
+    merge.add_argument("--branch", required=True, help="topic branch")
+    merge.add_argument("--reviewed", help="SHA named by the formal review, as atc integrate takes it")
+    merge.add_argument("--main", default="main", help="accepted only as main")
+    for p in (merge, push):
         p.add_argument("--json", action="store_true", help="print the report as JSON")
     return parser
 
 
+def retired_merge(args: argparse.Namespace) -> int:
+    """`preflight merge` as `atc integrate --check` (plan D.7); its exit code is integrate's."""
+    if args.main != "main" or args.reviewed is None:
+        given = f"--main {args.main}" if args.main != "main" else "no --reviewed"
+        print(f"ERROR USAGE atc preflight merge is retired and runs atc integrate --check, which takes "
+              f"--reviewed <sha> and integrates into main only; {given}", file=sys.stderr)
+        return 2
+    import git_integrate  # imports this module, so not at the top
+
+    print(f"NOTE atc preflight merge is retired; this ran atc integrate --check --repo {args.repo} "
+          f"--reviewed {args.reviewed}", file=sys.stderr)
+    forwarded = ["--check", "--repo", str(args.repo), "--branch", args.branch, "--reviewed", args.reviewed]
+    return git_integrate.main([*forwarded, *(["--json"] if args.json else [])])
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    listing = None
+    if args.command == "merge":
+        return retired_merge(args)
     try:
-        if args.command == "merge":
-            report = merge_preflight(args.repo, args.branch, args.reviewed, args.main)
-        elif args.command == "push":
-            own = rev(args.repo, args.integration) if args.integration else None
-            if args.integration and own is None:
-                raise GitError(f"cannot resolve --integration {args.integration}")
-            report, listing = push_preflight(args.repo, "main", own)
-        else:
-            report = cleanup_preflight(args.repo, args.worktree, args.main)
+        own = rev(args.repo, args.integration) if args.integration else None
+        if args.integration and own is None:
+            raise GitError(f"cannot resolve --integration {args.integration}")
+        report, listing = push_preflight(args.repo, "main", own)
     except GitError as exc:
         print(f"ERROR {exc}", file=sys.stderr)
         return 2
     if args.json:
         print(json.dumps({**asdict(report), **({"push": listing} if listing else {})}, indent=2))
-    elif args.command == "push":
+    else:
         print(FULL_SHA_WORD.sub(r"\1", render(report)))
         if listing:
             print("\n".join(render_push(listing)))
-    else:
-        print(render(report))
-    return 0 if report.verdict in ("FF", "NO_FF", "REMOVABLE", "PUSH") else 1
+    return 0 if report.verdict == "PUSH" else 1
 
 
 if __name__ == "__main__":

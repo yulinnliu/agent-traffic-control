@@ -917,14 +917,14 @@ def cmd_audit(ctx: Context, owner: str | None, topic: str | None) -> list[Result
             continue
         evidence = state_evidence(project.repo, entry, main_tip)
         if identity is None:
-            results.append(Result("LEGACY_TARGET", entry["worktree"], evidence=evidence))
+            results.append(Result("LEGACY_TARGET", entry["worktree"], removability(evidence), evidence))
             continue
         try:
             check_target_path(ws, project, entry["worktree"], [])
             problem = identity_problem(entry, *identity, None)
         except Stop as stop:
             problem = stop.result
-        result = problem or Result("OK", entry["worktree"])
+        result = problem or Result("OK", entry["worktree"], removability(evidence))
         result.evidence = {**evidence, **result.evidence}
         results.append(result)
     if os.path.isdir(project.worktrees) and reparse is None:
@@ -940,13 +940,26 @@ def state_evidence(repo: str, entry: dict, main_tip: str) -> dict:
     path, head = entry["worktree"], entry.get("HEAD", "")
     evidence: dict = {"branch": entry.get("branch"), "head": head, "locked": "locked" in entry, "lock_reason": entry.get("locked") or None}
     if "prunable" in entry or not os.path.isdir(path):
-        evidence["missing"] = True
+        evidence.update(missing=True, removable=False)
         return evidence
     status = git(path, "status", "--porcelain", readonly=True)
     evidence["clean"] = status.returncode == 0 and not status.stdout.strip()
     if main_tip and head:
         evidence["merged"] = git(repo, "merge-base", "--is-ancestor", head, main_tip, readonly=True).returncode == 0
+    # `cleanup_preflight()`'s REMOVABLE condition over the evidence above (plan D.7).
+    evidence["removable"] = evidence["clean"] and evidence.get("merged") is True
     return evidence
+
+
+def removability(evidence: dict) -> str:
+    """The audit line's detail: `removable`, or what keeps the worktree."""
+    if evidence.get("removable"):
+        return "removable"
+    if evidence.get("missing"):
+        return "not removable: missing"
+    reasons = [reason for reason, holds in (("unmerged", evidence.get("merged") is not True),
+                                            ("uncommitted changes", not evidence.get("clean"))) if holds]
+    return f"not removable: {', '.join(reasons)}"
 
 
 def readiness(root: Path, environ: dict[str, str], home: str) -> tuple[str, str]:

@@ -225,14 +225,114 @@ def test_preflight_stop_leaves_main_unchanged(repo: Path, capsys: pytest.Capture
 
 
 @pytest.mark.integration
-def test_a_short_reviewed_sha_stops(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_a_reviewed_prefix_under_twelve_characters_stops(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     tip = topic(repo, {"a.txt": "a2\n"})
     before = main_tip(repo)
-    assert integrate(repo, "topic", tip[:12]) == 1
+    assert integrate(repo, "topic", tip[:11]) == 1
     first, after = refusal(capsys.readouterr().err)
-    assert first.startswith("STOP REVIEWED_SHA_INVALID: --reviewed must be the full 40-character SHA")
+    assert first.startswith("STOP REVIEWED_SHA_INVALID: --reviewed must be the full SHA or a unique prefix of 12 or more")
     assert after == "next: run again with the full SHA the formal review named"
     assert main_tip(repo) == before
+
+
+@pytest.mark.integration
+def test_a_twelve_character_prefix_integrates_and_the_record_holds_the_full_sha(
+        repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    tip = topic(repo, {"a.txt": "a2\n"})
+    assert integrate(repo, "topic", tip[:12].upper()) == 0
+    assert main_tip(repo) == tip
+    record = json.loads((repo / ".git" / "atc" / "integrations.jsonl").read_text(encoding="utf-8").splitlines()[-1])
+    assert record["reviewed"] == tip
+
+
+@pytest.mark.integration
+def test_an_unknown_prefix_stops(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    topic(repo, {"a.txt": "a2\n"})
+    assert integrate(repo, "topic", "0" * 12) == 1
+    assert refusal(capsys.readouterr().err)[0] == (
+        "STOP REVIEWED_SHA_UNKNOWN: the reviewed SHA does not resolve to a commit in this repository: 000000000000")
+
+
+def colliding_commits(repo: Path, length: int) -> tuple[str, str]:
+    """Write two commit objects whose IDs share their first ``length`` characters."""
+    import hashlib
+
+    tree = run_git(repo, "rev-parse", "main^{tree}")
+    seen: dict[str, bytes] = {}
+    for n in range(1 << 20):
+        body = f"tree {tree}\nauthor t <t@example.com> {n} +0000\ncommitter t <t@example.com> {n} +0000\n\nc\n".encode()
+        sha = hashlib.sha1(b"commit %d\x00" % len(body) + body).hexdigest()
+        if sha[:length] in seen:
+            ids = []
+            for content in (seen[sha[:length]], body):
+                written = subprocess.run(["git", "-C", str(repo), "hash-object", "-t", "commit", "-w", "--stdin"],
+                                         input=content, capture_output=True, check=True)
+                ids.append(written.stdout.decode().strip())
+            return ids[0], ids[1]
+        seen[sha[:length]] = body
+    raise AssertionError("no collision")
+
+
+@pytest.mark.integration
+def test_an_ambiguous_prefix_stops_and_lists_the_matches(
+        repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    # Git abbreviates no shorter than four characters, so the floor drops to four.
+    monkeypatch.setattr(gi, "MIN_PREFIX", 4)
+    topic(repo, {"a.txt": "a2\n"})
+    first_id, second_id = colliding_commits(repo, 4)
+    before = main_tip(repo)
+    assert integrate(repo, "topic", first_id[:4]) == 1
+    line, after = refusal(capsys.readouterr().err)
+    assert line.startswith(f"STOP AMBIGUOUS_SHA: --reviewed {first_id[:4]} matches ")
+    shown = line.rsplit(": ", 1)[1].split(", ")
+    for full in (first_id, second_id):
+        assert [cut for cut in shown if full.startswith(cut) and 4 < len(cut) < 40] != []
+    assert after == "next: run again with a longer prefix or the full SHA the formal review named"
+    assert integrate(repo, "topic", first_id[:4], "--json") == 1
+    matches = json.loads(capsys.readouterr().out)["refusal"]["evidence"]["matches"]
+    assert {first_id, second_id} <= set(matches) and len(shown) == len(matches)
+    assert main_tip(repo) == before
+
+
+@pytest.mark.integration
+def test_preflight_merge_runs_integrate_check(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    import git_preflight as gp
+
+    tip = topic(repo, {"a.txt": "a2\n"})
+    assert gp.main(["merge", "--repo", str(repo), "--branch", "topic", "--reviewed", tip]) == 0
+    captured = capsys.readouterr()
+    assert captured.err.splitlines()[0] == (
+        f"NOTE atc preflight merge is retired; this ran atc integrate --check --repo {repo} --reviewed {tip}")
+    assert captured.out.startswith(f"CHECK FF FAST_FORWARD: repo branch=topic tip={tip[:12]} ")
+    assert gp.main(["merge", "--repo", str(repo), "--branch", "topic", "--reviewed", tip[:12], "--json"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert (data["command"], data["check"], data["preflight"]["verdict"]) == ("integrate", True, "FF")
+    (repo / "b.txt").write_text("dirty\n", encoding="utf-8")
+    assert gp.main(["merge", "--repo", str(repo), "--branch", "topic", "--reviewed", tip]) == 1
+    assert refusal(capsys.readouterr().err)[0].startswith("STOP CHECKOUT_DIRTY: ")
+    assert main_tip(repo) != tip
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("extra, given", [((), "no --reviewed"), (("--reviewed", "f" * 40, "--main", "trunk"), "--main trunk")])
+def test_preflight_merge_refuses_what_integrate_check_does_not_take(
+        repo: Path, capsys: pytest.CaptureFixture[str], extra: tuple[str, ...], given: str) -> None:
+    import git_preflight as gp
+
+    assert gp.main(["merge", "--repo", str(repo), "--branch", "topic", *extra]) == 2
+    err = capsys.readouterr().err
+    assert err.startswith("ERROR USAGE atc preflight merge is retired and runs atc integrate --check")
+    assert err.rstrip().endswith(given)
+
+
+@pytest.mark.integration
+def test_preflight_cleanup_is_gone(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    import git_preflight as gp
+
+    with pytest.raises(SystemExit) as exited:
+        gp.main(["cleanup", "--repo", str(repo), "--worktree", str(repo)])
+    assert exited.value.code == 2
+    assert "invalid choice: 'cleanup'" in capsys.readouterr().err
 
 
 @pytest.mark.integration
@@ -1521,6 +1621,13 @@ def test_atc_verify_builds_the_merge_for_a_no_ff_and_moves_nothing(repo: Path, c
     last = capsys.readouterr().out.splitlines()[-1]
     assert last.startswith("VERIFY PASS ") and " NO_FF" in last
     assert main_tip(repo) == before and run_git(repo, "for-each-ref") == refs
+
+
+@pytest.mark.integration
+def test_atc_verify_takes_a_reviewed_prefix(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    tip = topic(repo, {"a.txt": "a2\n"})
+    assert verify(repo, "topic", tip[:12]) == 0
+    assert capsys.readouterr().out.splitlines()[-1].startswith(f"VERIFY PASS {tip[:12]} FF log ")
 
 
 @pytest.mark.integration

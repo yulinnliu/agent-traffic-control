@@ -34,6 +34,9 @@ from git_preflight import GitError, git, is_ancestor, merge_preflight, render, r
 from integration_slot import IntegrationSlot
 
 FULL_SHA = re.compile(r"[0-9a-f]{40}")
+# `--reviewed` and `--rebased`: the full SHA or a unique prefix (plan D.14).
+MIN_PREFIX = 12
+SHA_FORM = "the full SHA or a unique prefix of 12 or more hexadecimal characters"
 CANDIDATE_ID_BYTES = 6
 BUDGET_EXCEEDED = "test budget exceeded: optimise the tests or ask the Owner; a retry does not help"
 WORKTREE_BRANCH = re.compile(r"worktree-[^+]+\+(?P<topic>.+)")
@@ -101,11 +104,13 @@ NEXT = {
 class Refused(Exception):
     """A refusal: `STOP <TOKEN>` with exit 1 or 3, or `ERROR <TOKEN>` with exit 2."""
 
-    def __init__(self, token: str, detail: str, code: int = ERROR, extra: list[str] | None = None) -> None:
+    def __init__(self, token: str, detail: str, code: int = ERROR, extra: list[str] | None = None,
+                 evidence: dict | None = None) -> None:
         super().__init__(detail)
         self.token, self.detail, self.code = token, detail, code
         self.next = NEXT[token] if code != ERROR else None
         self.extra = extra or []
+        self.evidence = evidence
 
     @property
     def kind(self) -> str:
@@ -117,11 +122,46 @@ class Refused(Exception):
         return [f"STOP {self.token}: {self.detail}", f"next: {self.next}", *self.extra]
 
     def as_dict(self) -> dict:
-        return {"verdict": self.kind, "reason": self.token, "detail": self.detail, "next": self.next}
+        found = {"verdict": self.kind, "reason": self.token, "detail": self.detail, "next": self.next}
+        return {**found, "evidence": self.evidence} if self.evidence is not None else found
 
 
-def stop(token: str, detail: str, *, after_candidate: bool = False, extra: list[str] | None = None) -> Refused:
-    return Refused(token, detail, STOP_AFTER_CANDIDATE if after_candidate else STOP_BEFORE_CANDIDATE, extra)
+def stop(token: str, detail: str, *, after_candidate: bool = False, extra: list[str] | None = None,
+         evidence: dict | None = None) -> Refused:
+    return Refused(token, detail, STOP_AFTER_CANDIDATE if after_candidate else STOP_BEFORE_CANDIDATE, extra, evidence)
+
+
+def sha_form(value: str, flag: str) -> str:
+    """``value`` lowered when it has the form of a full SHA or a prefix of at least `MIN_PREFIX`, else the stop."""
+    value = value.strip().lower()
+    if not (MIN_PREFIX <= len(value) <= 40 and all(ch in "0123456789abcdef" for ch in value)):
+        raise stop("REVIEWED_SHA_INVALID", f"{flag} must be {SHA_FORM}: {value}")
+    return value
+
+
+def distinguishing(ids: list[str], floor: int) -> list[str]:
+    """``ids`` cut to the shortest common length above ``floor`` that tells them apart, kept below 40."""
+    for length in range(floor + 1, 40):
+        if len({sha[:length] for sha in ids}) == len(ids):
+            return [sha[:length] for sha in ids]
+    return [sha[:39] for sha in ids]
+
+
+def resolve_commit(repo: Path, value: str, flag: str) -> str:
+    """The full SHA of the one commit ``value`` names, resolved once (plan D.14); else the stop."""
+    found = git(repo, "rev-parse", "--verify", "--quiet", f"{value}^{{commit}}", check=False).stdout.strip()
+    # A ref whose name is hex wins over an abbreviated ID, and a tag's prefix
+    # peels to its commit; the flag names a commit, so the ID must start with it.
+    if found and found.startswith(value):
+        return found
+    listed = git(repo, "rev-parse", f"--disambiguate={value}", check=False).stdout.split()
+    named = sorted(sha for sha in listed if _git_ok(repo, "cat-file", "-t", sha) in ("commit", "tag"))
+    if len(named) > 1:
+        raise stop("AMBIGUOUS_SHA", f"{flag} {value} matches {len(named)} objects: "
+                                    f"{', '.join(distinguishing(named, len(value)))}", evidence={"matches": named})
+    if flag == "--reviewed":
+        raise stop("REVIEWED_SHA_UNKNOWN", f"{gp.REASONS['REVIEWED_SHA_UNKNOWN']}: {value}")
+    raise stop("REVIEWED_SHA_UNKNOWN", f"--rebased names no commit in this repository: {value}")
 
 
 def topic_name(branch: str) -> str:
@@ -1252,9 +1292,8 @@ def resolve_authority_of(
 
 
 def resolve(args: argparse.Namespace, root: Path, root_given: bool, cwd: str) -> Target:
-    reviewed = args.reviewed.strip().lower()
-    if not FULL_SHA.fullmatch(reviewed):
-        raise stop("REVIEWED_SHA_INVALID", f"--reviewed must be the full 40-character SHA: {args.reviewed}")
+    reviewed = sha_form(args.reviewed, "--reviewed")
+    rebased = sha_form(args.rebased, "--rebased") if args.rebased is not None else None
     if args.authority_reference is not None and (args.task is not None or args.owner_words is not None):
         raise Refused("USAGE", "--authority-reference is the deprecated form of --task with an authority; "
                                "give --task and --owner-words, or --authority-reference alone")
@@ -1274,8 +1313,7 @@ def resolve(args: argparse.Namespace, root: Path, root_given: bool, cwd: str) ->
     main_tip = rev(repo, main)
     if main_tip is None:
         raise Refused("GIT", f"cannot resolve {main} in {repo}")
-    if rev(repo, reviewed) != reviewed:
-        raise stop("REVIEWED_SHA_UNKNOWN", f"{gp.REASONS['REVIEWED_SHA_UNKNOWN']}: {reviewed}")
+    reviewed = resolve_commit(repo, reviewed, "--reviewed")
     warnings: list[str] = []
     alias = None
     if args.authority_reference is not None:
@@ -1284,12 +1322,8 @@ def resolve(args: argparse.Namespace, root: Path, root_given: bool, cwd: str) ->
         if warning := authority_record_warning(repo, alias, reviewed):
             warnings.append(warning)
     carried_from = None
-    if args.rebased is not None:
-        rebased = args.rebased.strip().lower()
-        if not FULL_SHA.fullmatch(rebased):
-            raise stop("REVIEWED_SHA_INVALID", f"--rebased must be the full 40-character SHA: {args.rebased}")
-        if rev(repo, rebased) != rebased:
-            raise stop("REVIEWED_SHA_UNKNOWN", f"--rebased names no commit in this repository: {rebased}")
+    if rebased is not None:
+        rebased = resolve_commit(repo, rebased, "--rebased")
         if rebased == reviewed:
             raise Refused("USAGE", "--rebased equals --reviewed; integrate the reviewed SHA without --rebased")
         carried_from, reviewed = reviewed, rebased
@@ -1390,10 +1424,10 @@ def build_parser() -> argparse.ArgumentParser:
     target.add_argument("--repo", type=Path, help="main checkout of the repository; the workspace root takes this form")
     target.add_argument("--project", help="registered project name from workspace.yaml; root names the workspace root")
     parser.add_argument("--branch", help="reviewed topic branch (default: the one local branch at --reviewed)")
-    parser.add_argument("--reviewed", required=True, help="full 40-character SHA named by the review")
+    parser.add_argument("--reviewed", required=True, help="SHA named by the review: " + SHA_FORM)
     parser.add_argument(
         "--rebased",
-        help="full SHA of the unpublished topic rebased onto main; integrates it carrying over the approval "
+        help="SHA of the unpublished topic rebased onto main (" + SHA_FORM + "); integrates it carrying over the approval "
         "of --reviewed when the rebase is clean and every patch-id matches",
     )
     parser.add_argument(
@@ -1567,8 +1601,8 @@ def build_verify_parser() -> argparse.ArgumentParser:
     target.add_argument("--repo", type=Path, help="main checkout of the repository; the workspace root takes this form")
     target.add_argument("--project", help="registered project name from workspace.yaml; root names the workspace root")
     parser.add_argument("--branch", help="reviewed topic branch (default: the one local branch at --reviewed)")
-    parser.add_argument("--reviewed", required=True, help="full 40-character SHA named by the review")
-    parser.add_argument("--rebased", help="full SHA of the topic rebased onto main, as `atc integrate --rebased` takes it")
+    parser.add_argument("--reviewed", required=True, help="SHA named by the review: " + SHA_FORM)
+    parser.add_argument("--rebased", help="SHA of the topic rebased onto main, as `atc integrate --rebased` takes it")
     parser.add_argument("--json", action="store_true", help="print the result as JSON")
     return parser
 

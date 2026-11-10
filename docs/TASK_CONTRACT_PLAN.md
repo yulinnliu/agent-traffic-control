@@ -656,9 +656,10 @@ review, one implementation review and one integration:
        `render` prints. Exit codes do not change: removability is
        evidence, not a finding.
      - `GIT_WORKFLOW.md` § Command results: exit 0 reads "Integrated, a
-       `CHECK FF` or `CHECK NO_FF` verdict, or a preflight `PUSH`"; exit 1
-       reads "a `CHECK STOP` or preflight `STOP` verdict" in place of "a
-       preflight `STOP` or cleanup `KEEP` verdict".
+       `CHECK FF` or `CHECK NO_FF` line, or a preflight `PUSH` verdict";
+       exit 1 reads "a preflight `STOP` verdict" in place of "a preflight
+       `STOP` or cleanup `KEEP` verdict" (`--check`'s stop is the
+       preflight's `STOP <TOKEN>:` line).
      - Docs: `git_preflight.py` docstring and usage, `atc_cli` summary line,
        `adapters/python/README.md` command table. The conformance README
        keeps `REMOVABLE`: `cleanup_preflight()` still returns it.
