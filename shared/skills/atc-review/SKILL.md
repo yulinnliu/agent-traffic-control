@@ -35,7 +35,8 @@ the `atc-coordinator` skill's `references/briefs.md`.
   report gives results rather than narrating the implementation.
 - On session messaging, a report or verdict is saved as a file under
   `~/.atc/reports/`, and the message's first line is its conclusion plus
-  that path. A notification that truncates (a short note, a preview) is a
+  that path. The coordinator deletes a task's report files at close-out
+  (governance `DELIVERY.md` § Close-out). A notification that truncates (a short note, a preview) is a
   pointer, never the report.
 - On the paste carrier, the report or verdict goes inline, in full, in the
   one code block the user pastes whole; the file and path are for session
@@ -253,14 +254,14 @@ other action need their own instruction. Who may run which form of
 Stop on a `switch` failure or a result mismatch: leave `main` and the branch
 as they are and hand the result lines to the holder for the reviewer.
 
-The worktree, branch and scratches are removed at close-out (governance
-`DELIVERY.md` § Close-out). Done when the result matches and the handoff
-check ran, or the stop is with the holder.
+The worktree, branch, scratches and report files are removed at close-out
+(governance `DELIVERY.md` § Close-out). Done when the result matches and the
+handoff check ran, or the stop is with the holder.
 
 ## Reviewer: after integration
 
-The coordinator removes the task's scratches at close-out (governance
-`DELIVERY.md` § Close-out).
+The coordinator removes the task's scratches and report files at close-out
+(governance `DELIVERY.md` § Close-out).
 
 A failing verifier or gate run leaves its working directory under
 `<tmp>/systmp` for inspection; it stays until `atc tmp prune` deletes it,

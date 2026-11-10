@@ -133,6 +133,8 @@ own commits write; session names belong only in the hand-over.
      instead; `-d` deletes only a branch `main` already contains.
    - List the task's scratches with `atc tmp list`, each with its dependent
      runs (a `tree` inside it), and remove them with `atc tmp clean`.
+   - Delete the task's report files, `~/.atc/reports/<task>-*.md` (the
+     writer's and the reviewer's).
    - After a successful `atc worktree cleanup` or `branch -d`, archive the
      task's sessions.
      A refused archive is read through the session's state: a running
