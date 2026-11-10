@@ -152,7 +152,9 @@ revision and environment under `VERIFICATION.md`.
 
 Before its step report the writer runs `atc integrate --check` on its tip and
 puts the verdict token in the report. On `REBASE_REQUIRED` or `OVERLAP` it
-rebases onto `main` itself and reports the new tip.
+rebases onto `main` itself and reports the new tip. A writer whose task has
+no grant on `main` gets `AUTHORITY_MISSING` from that check (§ Integrate) and
+reports that token.
 
 Published history follows the publication restrictions below. After formal
 review, use the frozen-history and integration rules below; a task-authorized
@@ -225,17 +227,23 @@ without an `origin` remote, which fetches nothing, every topic is unpublished.
 `atc integrate --check` checks review binding and integration topology,
 takes no slot, creates no candidate and prints the verdict, a reason code
 and the evidence. Its verdict is a topology decision; integration still
-requires the authority and verification steps of this section:
+requires the authority and verification steps of this section. The check
+resolves the task's authority as the integration does, so the caller passes
+the authority the integration will use; a check without authority arrives
+with topic D of `docs/TASK_CONTRACT_PLAN.md` (D.5). Until then a
+`STOP AUTHORITY_MISSING` from `--check` is a missing authority, not a
+topology verdict:
 
 ```text
-atc integrate --check --repo <integration-checkout> --reviewed <sha> --task <task>
+atc integrate --check --repo <integration-checkout> --reviewed <full sha> --task <task> [--owner-words <quote>]
 ```
 
 The Python integration adapter acquires the repository Integration Slot before
 preflight, prepares the integration revision in an isolated candidate worktree,
 and requires a passing verification command before updating `main`. Name the
-reviewed commit by its full SHA or a unique prefix of at least 12 characters;
-the integration record holds the full SHA. Name the task and its authority as
+reviewed commit by its full 40-character SHA, which the integration record
+holds; a unique prefix of at least 12 characters arrives with topic D of
+`docs/TASK_CONTRACT_PLAN.md` (D.14). Name the task and its authority as
 `Task and authority` below states; `Integration verifier source` names where
 the verification argv comes from. The command
 runs from the candidate checkout with these environment variables:
@@ -352,9 +360,9 @@ requires an authorized context under the applicable repository rules.
 Squash (`git merge --squash`) is not a default integration method. The task
 authority may select it for a specific reviewed tip and target branch. The
 decision records the tip SHA, the reviewed SHA, the target branch, and the
-task with the Owner's words that select the squash; the squash commit message carries the source tip SHA.
-The first row of the table above still applies: the tip must be the reviewed
-SHA before squashing.
+task with the Owner's words that select the squash; the squash commit
+message carries the source tip SHA. The first row of the table above still
+applies: the tip must be the reviewed SHA before squashing.
 
 Squashing leaves the reviewed commits untouched on the topic branch, so the
 freeze rule above holds, but they are no longer ancestors of `main`. The
@@ -432,11 +440,18 @@ exactly one source.
 A record grants nothing by itself; the Owner's words do. A record on `main`
 with `integrate_main: true` is the Owner's integration authority for `FF`
 after an unconditional PASS on the exact SHA, never for `NO_FF`
-(`AUTHORITY_NOT_FF`), a push or a deploy. Anyone the project's rules let
-integrate may run `atc integrate --task <ID>` on the record's authority. Only
-the coordinator, who hears the Owner, writes a record's `authority` and
-passes `--owner-words`, from the Owner's quoted words. The writer keeps the
-record's `delivery.status`. A grant ends the moment the
+(`AUTHORITY_NOT_FF`), a push or a deploy.
+
+Who runs which form is split by flag:
+
+- whoever the project's rules let integrate runs `atc integrate --task <ID>`
+  on the record's authority;
+- only the coordinator, who hears the Owner, writes a record's `authority`
+  and passes `--owner-words`, from the Owner's quoted words; an instruction
+  carrying `--owner-words` is run by the coordinator itself and never
+  forwarded to a writer.
+
+The writer keeps the record's `delivery.status`. A grant ends the moment the
 Owner narrows or revokes it, whatever the record on `main` still reads. A
 grant counts only when it entered `main` through this machine's records-only
 `--owner-words` integration. `docs/TASKS.md` § Authority on `main` states how

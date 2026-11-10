@@ -261,8 +261,9 @@ grants publication authority; local commits are not publication.
 ## Close-out
 
 Close-out is a standing rule of every task. After a task is integrated and
-pushed (the push under § 10), the coordinator removes that task's worktree and
-scratches and archives its sessions, then reports. Keep exceptions are
+pushed (the push under § 10), the coordinator removes that task's worktree,
+its topic branch where the repository has no managed worktrees, and its
+scratches, archives its sessions, then reports. Keep exceptions are
 written in the task record. Items outside the task, `REFUSED` and `ANOMALY`
 lines, refused archives and failed integrations go to the Owner.
 

@@ -66,11 +66,11 @@ The rule of what a record grants and who writes it is governance
   records-only range.
 - A narrowed or revoked grant reaches the record as a records-only range
   integrated with `--owner-words`.
-- The grant's commit is the most recent commit on `main`'s
-  first-parent history of the record whose parsed `authority` or
-  `authority_basis` differs from its first parent's copy, the commit that
-  creates the record counting as a change; a later edit that
-  changes neither, such as `closure`, leaves it in place. That commit must be
+- The grant's commit is the most recent commit on `main`'s first-parent
+  history of the record whose parsed `authority` or `authority_basis`
+  differs from its first parent's copy, the commit that creates the record
+  counting as a change; a later edit that changes neither, such as
+  `closure`, leaves it in place. That commit must be
   one of the new commits of a records-only integration with `--owner-words`
   in this clone's `integrations.jsonl`: reachable from the line's candidate
   and not from its `main_before`, so a binding of several commits and a
@@ -78,9 +78,8 @@ The rule of what a record grants and who writes it is governance
   as a push by someone who does not use Agent Traffic Control or a binding
   made on another machine, grants nothing here: every integration of that
   task on this machine takes `--owner-words`, and the refusal says why. A
-  repository shared with other
-  developers protects `.atc/tasks/` on its host (code owners, branch
-  protection) when it needs a real boundary.
+  repository shared with other developers protects `.atc/tasks/` on its host
+  (code owners, branch protection) when it needs a real boundary.
 - The tool cannot tell whose words a quote holds; it records
   the quote, and the integration record is the evidence the Owner audits.
   This is the limit of a governance layer that is not a security boundary

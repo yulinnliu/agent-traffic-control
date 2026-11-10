@@ -288,7 +288,10 @@ final round to be fresh.
 A verdict's first line is the verdict token, then one line per finding
 (severity, `file:line`, required fix), the verified items as one line, and no
 narrative. A PASS ends with the runnable
-`atc integrate --task ... --reviewed ...` line.
+`atc integrate --task ... --reviewed ...` line, except where the project's
+process gives a PASS no integration instruction or the reviewer's
+`atc integrate --check` refuses one; such a PASS ends with that refusal's
+reason and next step instead.
 
 ## Verification requires evidence, not confidence
 
