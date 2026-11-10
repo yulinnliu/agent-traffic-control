@@ -46,8 +46,9 @@ records with a YAML serializer, so every string is quoted where YAML needs it.
 
 ## Authority on `main`
 
-A record grants nothing by itself; the Owner's words do, and the record is
-where they enter Git.
+The rule of what a record grants and who writes it is governance
+`GIT_WORKFLOW.md` § Task and authority; this section is the mechanism
+`atc integrate` implements.
 
 - A task the Owner pre-authorizes is bound on `main` before its work: the
   coordinator commits the record alone as the topic's first commit and
@@ -63,12 +64,9 @@ where they enter Git.
   a new record refuses that record unless its `authority` grants `edit` and
   `commit` at most, so granted authority reaches `main` only through a
   records-only range.
-- The Owner narrows or revokes a grant by word, effective at once: from that
-  word on, the coordinator integrates nothing under the grant, and it then
-  integrates the narrowed `authority` the same way. The record on `main` may
-  still read `true` in between; the word governs.
-- A grant counts only when it entered `main` through this machine's
-  `atc integrate`. The grant's commit is the most recent commit on `main`'s
+- A narrowed or revoked grant reaches the record as a records-only range
+  integrated with `--owner-words`.
+- The grant's commit is the most recent commit on `main`'s
   first-parent history of the record whose parsed `authority` or
   `authority_basis` differs from its first parent's copy, the commit that
   creates the record counting as a change; a later edit that
@@ -83,8 +81,7 @@ where they enter Git.
   repository shared with other
   developers protects `.atc/tasks/` on its host (code owners, branch
   protection) when it needs a real boundary.
-- Only the coordinator runs `atc integrate`, and only it passes
-  `--owner-words`. The tool cannot tell whose words a quote holds; it records
+- The tool cannot tell whose words a quote holds; it records
   the quote, and the integration record is the evidence the Owner audits.
   This is the limit of a governance layer that is not a security boundary
   (`CORE.md`: capability is not authority).

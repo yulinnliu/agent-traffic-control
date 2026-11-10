@@ -108,6 +108,9 @@ the pre-push gate).
 
 ## Running and logging
 
+The output rule every `atc` command follows is governance `GIT_WORKFLOW.md`
+§ Command results.
+
 - A command's output is shown live and written to a log. The log starts with
   a header: time, platform, Python, working directory, desktop and command.
 - The gate keeps the latest run's logs in the checkout's ignored `.tmp/`

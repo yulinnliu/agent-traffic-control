@@ -150,6 +150,10 @@ Record the updated `base_sha`, finalize the draft commits, then run the affected
 checks on the resulting tip. Reuse only evidence that still applies to that
 revision and environment under `VERIFICATION.md`.
 
+Before its step report the writer runs `atc integrate --check` on its tip and
+puts the verdict token in the report. On `REBASE_REQUIRED` or `OVERLAP` it
+rebases onto `main` itself and reports the new tip.
+
 Published history follows the publication restrictions below. After formal
 review, use the frozen-history and integration rules below; a task-authorized
 rewrite invalidates the previous review. Check the mainline again immediately
@@ -190,6 +194,9 @@ for alignment with task-oriented branch naming.
   `main` is conflict-free and yields the rebased tree. `atc integrate
   --rebased` checks this and still runs the full verification on the rebased
   tip. Otherwise the rebased tip needs a fresh review.
+- After a rebase the writer reports only the new tip. The coordinator runs
+  `atc integrate --check`, with `--rebased` when a review exists, for the
+  carry-over and `OVERLAP`, and runs no range-diff or file diff by hand.
 
 ## Integrate
 
@@ -217,10 +224,11 @@ without an `origin` remote, which fetches nothing, every topic is unpublished.
 
 The Python integration adapter acquires the repository Integration Slot before
 preflight, prepares the integration revision in an isolated candidate worktree,
-and requires a passing verification command before updating `main`. Supply
-the full reviewed SHA and the authority reference in the forms
-`Integration verifier source` below defines; that section also names where the
-verification argv comes from. The command
+and requires a passing verification command before updating `main`. Name the
+reviewed commit by its full SHA or a unique prefix of at least 12 characters;
+the integration record holds the full SHA. Name the task and its authority as
+`Task and authority` below states; `Integration verifier source` names where
+the verification argv comes from. The command
 runs from the candidate checkout with these environment variables:
 
 - `ATC_INTEGRATION_SHA`: immutable candidate commit SHA;
@@ -239,8 +247,9 @@ are defined in `shared/conformance/verification-evidence/README.md`.
 Apart from that evidence, the adapter records every integration that updates
 `main`, with or without a verification report, as one JSON line in
 `<git common dir>/atc/integrations.jsonl`: the candidate SHA, the reviewed
-SHA, the `main` it was integrated onto (`main_before`), the authority
-reference and the time. For a carried-over review, `reviewed` holds the
+SHA, the `main` it was integrated onto (`main_before`), the task, its
+authority, whether the range is records-only, and the time (the keys are in
+`Task and authority`). For a carried-over review, `reviewed` holds the
 rebased tip and `carried_over_from` the SHA the review named; the evidence
 record carries the same pair. The pre-push gate reads only the verification
 evidence of `Test evidence` below, never this record; `atc preflight push`
@@ -249,9 +258,8 @@ reads it to group the commits of a push (`Publication boundary`).
 The verifier must test the candidate identified by `ATC_INTEGRATION_SHA`, not
 resolve a moving branch name. A nonzero result, changed candidate HEAD, dirty
 candidate checkout, or source/main drift blocks the update. The adapter records
-the supplied authority reference; the invoking governance layer remains
-responsible for confirming that the reference actually grants `integrate_main`
-for this repository and task. The string is audit evidence, not an
+the task and authority it ran under; what grants `integrate_main` is
+`Task and authority` below. A recorded quote is audit evidence, not an
 authentication mechanism.
 
 The OS lock coordinates cooperative ATC integration writers only. Every ATC
@@ -335,7 +343,7 @@ requires an authorized context under the applicable repository rules.
 Squash (`git merge --squash`) is not a default integration method. The task
 authority may select it for a specific reviewed tip and target branch. The
 decision records the tip SHA, the reviewed SHA, the target branch, and the
-authorization reference; the squash commit message carries the source tip SHA.
+task with the Owner's words that select the squash; the squash commit message carries the source tip SHA.
 The first row of the table above still applies: the tip must be the reviewed
 SHA before squashing.
 
@@ -361,14 +369,13 @@ squashed Hami Managed Worktree is cleaned up with `cleanup --squash-integrated`
 caller checks the squash commit message and the integration record. The worktree
 is never removed by hand.
 
-`atc preflight merge` checks review binding and integration topology
-read-only and prints the verdict, a reason code, and the evidence. It reads
-`origin` as last fetched and runs no fetch itself. Its verdict
-is a topology decision; integration still requires the authority and
-verification steps above:
+`atc integrate --check` checks review binding and integration topology after
+`git fetch origin`, takes no slot, creates no candidate and prints the
+verdict, a reason code and the evidence. Its verdict is a topology decision;
+integration still requires the authority and verification steps above:
 
 ```text
-atc preflight merge --repo <integration-checkout> --branch <topic-branch> --reviewed <sha>
+atc integrate --check --repo <integration-checkout> --reviewed <sha> --task <task>
 ```
 
 ## Git environment in hooks and tests
@@ -401,36 +408,55 @@ candidate under the applicable review rules before verifying again.
 
 Formal evidence follows `VERIFICATION.md`; changing the delivered revision invalidates evidence that no longer applies.
 
+## Task and authority
+
+`atc integrate` names the task with `--task` and takes its authority from
+exactly one source.
+
+- `--task <prefix>-<four digits>`, with a prefix declared under
+  `## Task records` in `AGENTS.md`, names a task record and derives the
+  repository from the prefix. The record must exist in the reviewed commit's
+  tree (`TASK_NOT_FOUND`) with the integrated branch as its `branch`
+  (`TASK_BRANCH_MISMATCH`). Any other value is a task identity string
+  (`CORE.md` § Task identity) and needs `--project` or `--repo`.
+- The authority is either the record on `main` with `integrate_main: true`,
+  or `--owner-words <quote>`, the Owner's words quoted.
+- `--authority-reference <string>` is deprecated: its value becomes the task
+  identity string, its authority is recorded as unclassified, it never
+  satisfies a record's `integrate_main`, and it is refused for a range that
+  touches `.atc/tasks/` (`AUTHORITY_REFERENCE_REFUSED`).
+- A range whose changed paths all lie under `.atc/tasks/` is records-only: the
+  record check runs in place of the verifier.
+- Recovering an interrupted integration takes `--task`.
+
+A record grants nothing by itself; the Owner's words do. A record on `main`
+with `integrate_main: true` is the Owner's integration authority for `FF`
+after an unconditional PASS on the exact SHA, never for `NO_FF`
+(`AUTHORITY_NOT_FF`), a push or a deploy. Only the coordinator writes a record's
+`authority` and passes `--owner-words`, from the Owner's quoted words; the
+writer keeps the record's `delivery.status`. A grant ends the moment the
+Owner narrows or revokes it, whatever the record on `main` still reads. A
+grant counts only when it entered `main` through this machine's records-only
+`--owner-words` integration. `docs/TASKS.md` § Authority on `main` states how
+`atc integrate` finds the grant's commit and what it refuses.
+
+Each `integrations.jsonl` line carries `task`, `records_only` and
+`authority`: `{"kind": "record", "task_id": ...}`,
+`{"kind": "owner_words", "quote": ...}`, `{"kind": "sync"}` for a
+governance sync commit, or `{"kind": "unclassified"}` for
+`--authority-reference`. A records-only integration that binds several tasks
+writes one line per task with the same candidate, and every records-only line
+carries `main_before`.
+
 ## Integration verifier source
 
-`atc integrate` requires an `--authority-reference`. The adapter records it
-as provenance; the authority itself comes from the integration authorization
-`Integrate` above requires.
-
-The verifier argv file and timeout come from the `## Integration verification`
-section of `AGENTS.md` at the `main` revision being integrated into (`Project
-verification section` below). An explicit argv file
-(`--verify-command-file`), inline argv (`--verify-command`, a JSON string
-array) or timeout (`--verify-timeout`) is allowed and is used in place of the
-declared value; one that differs from the declaration is reported as a
-warning. A repository whose `main` revision has no such section stops the
-integration; the caller obtains one from the owner.
-
-### Authority reference
-
-The authority reference names the task in the identity form `CORE.md`
-§ Task identity gives the project and ends with ` @ <sha>`, where `<sha>` is
-the reviewed full SHA. The adapter appends ` @ <sha>` from `--reviewed` when
-the reference has no such ending, and refuses a reference whose ending SHA
-differs from `--reviewed`. Every form puts the SHA last:
-
-- plan work: the plan file path, section and step
-  (`<plan path> §<section> step <n> @ <sha>`);
-- a numbered task record: the record in the form the project's `AGENTS.md`
-  declares, then ` @ <sha>`;
-- work outside a plan or task record: repository and branch, then `per` the
-  governing document's file and section
-  (`<owner>/<repo> <branch> per <file> § <section> @ <sha>`).
+The verifier argv file and timeout come only from the
+`## Integration verification` section of `AGENTS.md` at the `main` revision
+being integrated into (`Project verification section` below). Only
+`--verify-timeout` may override the declared timeout; a value that differs
+from the declaration is reported as a warning. A repository whose `main`
+revision has no such section stops the integration; the caller obtains one
+from the owner.
 
 ### Project verification section
 
@@ -541,6 +567,13 @@ lock, clean-tree or merged-state checks. Nothing here automatically
 authorizes force push, remote deletion, or cleanup of another writer's work.
 
 ## Command results
+
+Every `atc` command's default output is its verdict and the next action.
+Detail sits behind a flag or in a log file whose path the command prints;
+`--json` carries the full result for machines. An error is one line naming
+the cause and the next step, and a usage error prints the usage line, not the
+whole help. A run that did not complete reports `TIMEOUT` or `INTERRUPTED`
+with the last lines of its log, never a pass.
 
 `atc integrate` and `atc preflight` end with one of these exit codes:
 
