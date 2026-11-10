@@ -219,9 +219,11 @@ def bound_governance(name: str, root: Path, worktree: Path) -> tuple[str, str]:
     return source, revision
 
 
-def new_hint(root: Path) -> str:
-    """What `atc task new` refused for its place or `--repo` says to do instead."""
-    return f"Run it inside the new worktree with an absolute --repo: atc task new --repo \"{root}\" --scope <text>"
+def new_hint(root: Path, project: bool = False) -> str:
+    """What `atc task new` refused for its place or `--repo` says to do instead; ``project`` adds the registered
+    project's form."""
+    hint = f"Run it inside the new worktree with an absolute --repo: atc task new --repo \"{root}\" --scope <text>"
+    return f"{hint}; for a registered project: atc task new --project <name> --scope <text>" if project else hint
 
 
 def new(root: Path, environ: dict[str, str], cwd: str, scope: str, project: str | None, repo: str | None) -> Path:
@@ -237,7 +239,7 @@ def new(root: Path, environ: dict[str, str], cwd: str, scope: str, project: str 
     except Refused as refused:
         if refused.token != "UNKNOWN_PROJECT" or repo is None:
             raise
-        raise Refused(refused.token, f"{refused.detail}. {new_hint(root)}") from None
+        raise Refused(refused.token, f"{refused.detail}. {new_hint(root, project=True)}") from None
     if common_dir(worktree) != common_dir(main_checkout):
         raise Refused("WRONG_REPOSITORY", f"{worktree} is not a worktree of {name} ({main_checkout})")
     branch = git(worktree, "branch", "--show-current").stdout.strip()

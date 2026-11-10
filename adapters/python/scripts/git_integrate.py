@@ -1588,6 +1588,11 @@ def verify(t: Target, as_json: bool) -> int:
         return STOP_BEFORE_CANDIDATE
     payload["preflight"] = asdict(report)
     main_before = report.evidence["main_tip"]
+    if main_before != t.main_tip:
+        _print_refusal(stop(
+            "REF_DRIFT", f"{t.main} moved from {t.main_tip}, whose verification section was read, to {main_before}",
+        ), payload, as_json)
+        return STOP_BEFORE_CANDIDATE
     if t.carried_from:
         try:
             payload["carried_over"] = carry_over(t.repo, t.main, t.carried_from, t.reviewed, main_before)

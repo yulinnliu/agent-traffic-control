@@ -500,3 +500,19 @@ def test_a_check_with_owner_words_still_needs_a_task(tasks_repo: Path, capsys: p
     work = on_branch(tasks_repo, "work", {"a.txt": "work\n"})
     status, data, _ = run_json(tasks_repo, capsys, work, "--check", "--owner-words", WORDS)
     assert (status, data["refusal"]["reason"]) == (2, "USAGE")
+
+
+def test_atc_verify_runs_the_record_check_for_a_records_only_range(
+    tasks_repo: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    put(tasks_repo, {"verify.json": '["no-such-verifier"]'}, "declare a verifier that cannot start")
+    broken = record("DEMO-0001", "work").replace("scope: plan § 1\n", "")
+    tip = on_branch(tasks_repo, "work", {".atc/tasks/DEMO-0001.yaml": broken})
+    before = main_tip(tasks_repo)
+    assert gi.verify_main(["--repo", str(tasks_repo), "--reviewed", tip]) == 3
+    err = capsys.readouterr().err
+    assert "STOP VERIFICATION_FAILED: the record check failed" in err and "schema-violation: DEMO-0001.yaml" in err
+    good = on_branch(tasks_repo, "work2", {".atc/tasks/DEMO-0002.yaml": record("DEMO-0002", "work2")})
+    assert gi.verify_main(["--repo", str(tasks_repo), "--reviewed", good]) == 0
+    assert capsys.readouterr().out.splitlines()[-1].startswith("VERIFY PASS ")
+    assert main_tip(tasks_repo) == before

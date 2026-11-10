@@ -680,6 +680,10 @@ review, one implementation review and one integration:
     also naming project, branch and the 12-character tip), every `WARNING`
     line, and the `next:` line on a stop; the evidence block moves to
     `--json`.
+    - Governance, on the Owner's authorization (「授權，併進第一批」, for
+      that sentence only): `GIT_WORKFLOW.md` § Integrate's "prints the
+      verdict, a reason code and the evidence" becomes the `CHECK` line with
+      the full evidence behind `--json`.
     - Side effects: the vendored `atc-review` skill in every project reads
       `CHECK FF` and `CHECK NO_FF` and quotes every `WARNING` line
       (`projects/hami-quant/.claude/skills/atc-review/SKILL.md:166-175` and

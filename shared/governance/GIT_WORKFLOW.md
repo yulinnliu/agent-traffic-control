@@ -225,8 +225,9 @@ local `main` ahead of `origin/main` proceeds. A topic is published when an
 without an `origin` remote, which fetches nothing, every topic is unpublished.
 
 `atc integrate --check` checks review binding and integration topology,
-takes no slot, creates no candidate and prints the verdict, a reason code
-and the evidence. Its verdict is a topology decision; integration still
+takes no slot, creates no candidate and prints one `CHECK` line: the
+verdict, a reason code, the project, branch, tip and task binding; `--json`
+carries the full evidence. Its verdict is a topology decision; integration still
 requires the authority and verification steps of this section. The check
 resolves the task's authority as the integration does, but needs none:
 without `--task` and `--owner-words` it reports `authority=not_checked`, and

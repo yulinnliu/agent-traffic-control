@@ -1492,3 +1492,53 @@ def test_a_relative_repo_keeps_every_dot_in_the_output(repo: Path, capsys: pytes
     assert run(repo, "--repo", ".", "--reviewed", tip, "--authority-reference", "x", cwd=repo) == 0
     log = capsys.readouterr().out.strip().rsplit(" log ", 1)[1]
     assert log.endswith(".log") and Path(log).is_file()
+
+
+def verify(repo: Path, branch: str, reviewed: str) -> int:
+    return gi.verify_main(["--repo", str(repo), "--branch", branch, "--reviewed", reviewed])
+
+
+@pytest.mark.integration
+def test_atc_verify_builds_the_merge_for_a_no_ff_and_moves_nothing(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    tip = topic(repo, {"a.txt": "a2\n"}, branch="worktree-claude+demo-topic")
+    publish(repo, "worktree-claude+demo-topic")
+    before = commit(repo, "c.txt", "c\n")
+    refs = run_git(repo, "for-each-ref")
+    seen = []
+    real = gi._verify_candidate
+
+    def record_candidate(argv, candidate_dir, candidate_sha, *rest):
+        seen.append(run_git(candidate_dir, "rev-parse", "HEAD^1", "HEAD^2").split())
+        return real(argv, candidate_dir, candidate_sha, *rest)
+
+    gi_patch = pytest.MonkeyPatch()
+    gi_patch.setattr(gi, "_verify_candidate", record_candidate)
+    try:
+        assert verify(repo, "worktree-claude+demo-topic", tip) == 0
+    finally:
+        gi_patch.undo()
+    assert seen == [[before, tip]]
+    last = capsys.readouterr().out.splitlines()[-1]
+    assert last.startswith("VERIFY PASS ") and " NO_FF" in last
+    assert main_tip(repo) == before and run_git(repo, "for-each-ref") == refs
+
+
+@pytest.mark.integration
+def test_atc_verify_stops_when_main_moved_since_its_declaration_was_read(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    tip = topic(repo, {"a.txt": "a2\n"})
+    publish(repo, "topic")
+    real = gi.resolve
+    moved = []
+
+    def resolve_then_advance(*args):
+        target = real(*args)
+        moved.append(commit(repo, "c.txt", "c\n"))
+        return target
+
+    monkeypatch.setattr(gi, "resolve", resolve_then_advance)
+    assert verify(repo, "topic", tip) == 1
+    first, _ = refusal(capsys.readouterr().err)
+    assert first.startswith("STOP REF_DRIFT: main moved from ")
+    assert main_tip(repo) == moved[0] and run_git(repo, "worktree", "list").count("\n") == 0
