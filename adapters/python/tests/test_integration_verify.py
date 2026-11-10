@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 import integration_verify as iv
+import select_tests
 from atc_testkit import isolation, locations, verifier
 
 pytestmark = pytest.mark.integration
@@ -34,7 +35,7 @@ def commit(repo: Path, path: str, content: str) -> str:
 
 
 def name(argv: list[str]) -> str:
-    return "pytest" if "pytest" in argv else argv[-1]
+    return "selection" if "scripts/select_tests.py" in argv else argv[-1]
 
 
 class Candidate:
@@ -59,7 +60,7 @@ class Candidate:
             result = subprocess.run(argv, cwd=cwd, env=env, capture_output=True, text=True)
             log.write_text(result.stdout + result.stderr, encoding="utf-8")
             return result.returncode
-        if name(argv) == "pytest":  # what the suite leaves in its base directory: a repository's read-only object
+        if name(argv) == "selection":  # what the suite leaves in its base directory: a repository's read-only object
             left = Path(argv[-1]) / "repo/object"
             left.parent.mkdir(parents=True)
             left.write_bytes(b"x")
@@ -91,6 +92,7 @@ def candidate(tmp_path: Path, atc_tmp: Path, monkeypatch: pytest.MonkeyPatch) ->
     main = commit(root, "a.txt", "a\n")
     monkeypatch.chdir(root)
     monkeypatch.setattr(iv, "PRODUCT_PREFIXES", ())
+    monkeypatch.setattr(iv, "graph", lambda _root: select_tests.Graph(WORKSPACE))
     return Candidate(root, main)
 
 
@@ -103,12 +105,13 @@ def test_full_range_runs_the_roots_checks_in_order(candidate: Candidate, atc_tmp
     assert captured.out.splitlines()[0] == "classification: full"
     assert captured.out.splitlines()[-1] == f"integration verification: PASS {sha}"
     adapter = candidate.root / iv.ADAPTER_DIR
-    pytest_argv = candidate.calls[-1][0]
+    selection_argv = candidate.calls[-1][0]
     assert [call[:2] for call in candidate.calls] == [
         (["git", "diff", "--check", f"{candidate.main}..{sha}"], candidate.root),
-        (list(iv.WORKSPACE_CHECK.argv), adapter), (list(iv.POLICY_CHECK.argv), adapter), (pytest_argv, adapter),
+        (list(iv.WORKSPACE_CHECK.argv), adapter), (list(iv.POLICY_CHECK.argv), adapter), (selection_argv, adapter),
     ]
-    assert pytest_argv[:-2] == list(iv.TESTS.argv) and pytest_argv[-2] == "--basetemp"
+    assert selection_argv[:-2] == [*iv.SELECTION, "--base", candidate.main, "--run", "--"]
+    assert selection_argv[-2] == "--basetemp"
 
 
 def test_the_working_directory_holds_the_base_directory_and_is_removed_after_a_pass(
@@ -158,7 +161,23 @@ def test_documentation_only_range_skips_the_tests_only(candidate: Candidate, cap
     (["shared/docs/x.md"], False),
 ])
 def test_documentation_only_classification(paths: list[str], expected: bool) -> None:
-    assert iv.documentation_only(paths) is expected
+    assert iv.documentation_only(paths, WORKSPACE) is expected
+
+
+# Built at run time: a literal path in this file would name it, and this test file would read it.
+RECORD = f"{iv.TASK_RECORDS}ATC-0001.yaml"
+UNNAMED = next((WORKSPACE / ".out-of-scope").glob("*.md")).relative_to(WORKSPACE).as_posix()
+
+
+@pytest.mark.parametrize(("paths", "expected"), [
+    ([RECORD], True),
+    (["docs/x.md", RECORD], True),
+    ([RECORD, "adapters/python/scripts/tool.py"], False),
+    ([UNNAMED], True),
+    ([UNNAMED, "README.md"], False),
+])
+def test_records_and_markdown_no_test_reads_are_documentation_only(paths: list[str], expected: bool) -> None:
+    assert iv.documentation_only(paths, WORKSPACE) is expected
 
 
 def test_file_moved_into_docs_is_not_documentation_only(candidate: Candidate, capsys: pytest.CaptureFixture[str]) -> None:
@@ -168,7 +187,7 @@ def test_file_moved_into_docs_is_not_documentation_only(candidate: Candidate, ca
     run_git(candidate.root, "commit", "-q", "-m", "move")
     assert iv.main(candidate.env(), candidate.root, candidate.run) == 0
     assert capsys.readouterr().out.splitlines()[0] == "classification: full"
-    assert "pytest" in candidate.started()
+    assert "selection" in candidate.started()
 
 
 def test_product_module_imported_from_outside_the_candidate_is_refused(
@@ -191,9 +210,9 @@ def test_this_checkout_imports_its_own_product_modules() -> None:
 
 
 @pytest.mark.parametrize(("failing", "token", "later"), [
-    ("scripts/validate_workspace.py", "WORKSPACE_VALIDATION_FAILED", ["../../shared/policies/examples", "pytest"]),
-    ("../../shared/policies/examples", "POLICY_CHECK_FAILED", ["pytest"]),
-    ("pytest", "TESTS_FAILED", []),
+    ("scripts/validate_workspace.py", "WORKSPACE_VALIDATION_FAILED", ["../../shared/policies/examples", "selection"]),
+    ("../../shared/policies/examples", "POLICY_CHECK_FAILED", ["selection"]),
+    ("selection", "TESTS_FAILED", []),
 ])
 def test_failing_check_is_refused_and_stops_the_run(
     candidate: Candidate, capsys: pytest.CaptureFixture[str], failing: str, token: str, later: list[str],
@@ -209,7 +228,7 @@ def test_failing_suite_reports_its_failure_lines_and_keeps_its_log(
     candidate: Candidate, atc_tmp: Path, capsys: pytest.CaptureFixture[str],
 ) -> None:
     candidate.advance()
-    candidate.codes["pytest"] = 1
+    candidate.codes["selection"] = 1
     _code, err = candidate.verify(capsys)
     (work,) = (atc_tmp / locations.SYSTMP).iterdir()
     log = work / "tests.log"
@@ -220,7 +239,7 @@ def test_failing_suite_reports_its_failure_lines_and_keeps_its_log(
 
 def test_suite_that_collects_no_test_is_refused(candidate: Candidate, capsys: pytest.CaptureFixture[str]) -> None:
     candidate.advance()
-    candidate.codes["pytest"] = 5
+    candidate.codes["selection"] = 5
     code, err = candidate.verify(capsys)
     assert (code, err[0]) == (1, "NO_TESTS_COLLECTED")
 
@@ -254,13 +273,20 @@ def test_the_verifier_imports_the_package_without_a_search_path_insert() -> None
     assert "sys.path" not in source and "from atc_testkit import" in source
 
 
-def test_checks_are_the_python_adapter_job_commands() -> None:
+def test_ci_runs_the_full_suite_and_the_verifiers_static_checks() -> None:
+    """The dispatched CI job runs the full suite where the local verifier runs the selection, and the same static checks."""
     workflow = (WORKSPACE / ".github/workflows/validate.yml").read_text(encoding="utf-8")
     job = workflow[workflow.index("  python-adapter:"):]
     assert f"working-directory: {iv.ADAPTER_DIR}" in job
     assert [line.split("- run: ", 1)[1] for line in job.splitlines() if "- run: " in line] == [
-        " ".join(argv) for argv in (iv.TESTS.argv, iv.WORKSPACE_CHECK.argv, iv.POLICY_CHECK.argv)
+        "uv run --locked pytest", *(" ".join(argv) for argv in (iv.WORKSPACE_CHECK.argv, iv.POLICY_CHECK.argv))
     ]
+    assert iv.project(WORKSPACE, {"ATC_EXPECTED_MAIN_SHA": "0" * 40}).test_command.argv == (
+        *iv.SELECTION, "--base", "0" * 40, "--run", "--")
+
+
+def test_the_selection_command_falls_back_to_main_without_the_base() -> None:
+    assert iv.project(WORKSPACE).test_command.argv == (*iv.SELECTION, "--base", "main", "--run", "--")
 
 
 def test_agents_section_names_the_argv_file_that_starts_the_verifier() -> None:

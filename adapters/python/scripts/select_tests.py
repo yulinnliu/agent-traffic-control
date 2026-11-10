@@ -1,7 +1,7 @@
 """The tests of this adapter that a change can affect, and why each one runs.
 
-Writers and reviewers run this selection; the integration verifier runs the
-full suite (`README.md` § Selected tests). Paths are relative to the workspace
+Writers, reviewers and the integration verifier run this selection; the full
+suite runs in a dispatched CI run (`README.md` § Selected tests). Paths are relative to the workspace
 root. Selection is by test file and reads the static structure of the code:
 
 - A Python module of `scripts/`, `src/atc_cli/` or `atc-testkit/src/` selects
@@ -12,12 +12,12 @@ root. Selection is by test file and reads the static structure of the code:
   see (a glob, a copy, a script reading its own checkout) is declared in
   `DIRECTORY_READERS` and runs for a change to that entry or below it.
 - A guarded path (`GUARDED`: `shared/governance/`, `shared/skills/`, the
-  rendered `.claude/skills/`, `.agents/skills/` and `.dsh/skills/`, the root
-  `AGENTS.md` and `CLAUDE.md`) selects its declared readers. Markdown there
-  selects them only, never through names, and so does a directory; a file of
-  another kind adds the test files whose reach names its file name. With no test file, Markdown selects
-  nothing and another file the full suite.
-  `validate_workspace.py`, not the selection, checks them.
+  rendered `.claude/skills/`, `.agents/skills/` and `.dsh/skills/`, and the
+  root's top-level Markdown, `*.md`) selects its declared readers. Markdown
+  there selects them only, never through names, and so does a directory; a
+  file of another kind adds the test files whose reach names its file name.
+  With no test file, Markdown selects nothing and another file the full
+  suite. `validate_workspace.py`, not the selection, checks them.
 - `conftest.py`, the pytest plugin and everything they import at load time
   (the reader guard `tests/root_reads.py` and this script among them),
   `pyproject.toml`, `uv.lock` and the unmarked baseline select the full suite.
@@ -79,9 +79,10 @@ SCRIPTS = f"{ADAPTER}/scripts"
 CLI_SRC = f"{ADAPTER}/src/atc_cli"
 TESTKIT_SRC = f"{ADAPTER}/atc-testkit/src/atc_testkit"
 # The root's own guidance, skills and rendered copies: only their declared readers select for them.
+TOP_MARKDOWN = "*.md"  # every Markdown file at the workspace root
 GUARDED = (
     "shared/governance", "shared/skills", ".claude/skills", ".agents/skills", ".dsh/skills",
-    "AGENTS.md", "CLAUDE.md",
+    TOP_MARKDOWN,
 )
 # Test files that read a directory or file of this checkout the graph cannot
 # see: a glob, a copy, a digest, a guarded path, or a script that reads them.
@@ -99,9 +100,14 @@ DIRECTORY_READERS = {
 
 
 def covers(entry: str, path: str) -> bool:
-    """Whether ``path`` is the declared ``entry`` or lies below it, whatever its separators and case."""
+    """Whether ``path`` is the declared ``entry`` or lies below it, whatever its separators and case.
+
+    ``TOP_MARKDOWN`` covers itself and every Markdown file at the workspace root.
+    """
     entry = entry.replace("\\", "/").rstrip("/").casefold()
     path = path.replace("\\", "/").rstrip("/").casefold()
+    if entry == TOP_MARKDOWN:
+        return path == entry or ("/" not in path and path.endswith(".md"))
     return path == entry or path.startswith(f"{entry}/")
 
 
@@ -275,7 +281,7 @@ def classify(path: str, selection: TestSelection, graph: Graph) -> None:
         return
     readers = {test for test, entries in DIRECTORY_READERS.items() if any(covers(e, path) for e in entries)}
     if any(covers(entry, path) for entry in GUARDED):
-        if pure.suffix and pure.suffix.lower() != ".md" and not path.endswith("/"):
+        if pure.suffix.lower() != ".md" and not path.endswith("/") and not (graph.workspace / path).is_dir():
             readers |= graph.naming((pure.name,))
         if readers:
             selection.add(path, readers, "declared readers in this checkout; validate_workspace.py checks it")

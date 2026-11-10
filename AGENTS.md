@@ -40,7 +40,7 @@ Tasks here are identified by record (governance `CORE.md` § Task identity).
 `GIT_WORKFLOW.md` § Integration verifier source).
 
 - Verifier argv file: adapters/python/scripts/integration-verify.json
-- Verifier timeout: 1800
+- Verifier timeout: 2040
   (`adapters/python/README.md` states how this value is derived)
 
 The argv runs `adapters/python/scripts/integration_verify.py` in the
@@ -51,19 +51,32 @@ clean-tree checks, its environment, working directory and logs. The verifier
 writes no verification report, so `atc integrate` records no evidence for this
 repository.
 
-Every range passes `git diff --check` of the range and the commands of the
-`python-adapter` job in `.github/workflows/validate.yml`, run from
-`adapters/python`: `uv run --locked python scripts/validate_workspace.py`,
-`uv run --locked python scripts/policies.py check ../../shared/policies/examples`
-and `uv run --locked pytest`. The candidate has no `workspace.yaml`,
-`projects/`, `worktrees/` or `state/`, so the checks read the committed tree
-only, as CI does.
+Every range passes `git diff --check` of the range and the static checks of
+the `python-adapter` job in `.github/workflows/validate.yml`, run from
+`adapters/python`: `uv run --locked python scripts/validate_workspace.py` and
+`uv run --locked python scripts/policies.py check ../../shared/policies/examples`.
+In place of the job's full `uv run --locked pytest`, it runs the impact
+selection over the range, `uv run --locked python scripts/select_tests.py
+--base <expected main> --run`, which runs the full suite only where the
+selector's rules widen to it (`adapters/python/README.md` § Selected tests).
+The candidate has no `workspace.yaml`, `projects/`, `worktrees/` or `state/`,
+so the checks read the committed tree only, as CI does.
 
 The verifier applies `VERIFICATION.md` § Documentation-only verification
-itself: when every path in the range is Markdown under `docs/`, the range is
-documentation-only and skips `pytest` alone. Markdown anywhere else is
-rendered into managed copies or read by the tests, so it runs the suite. The
-caller never chooses the exception.
+itself, by consumers: a range is documentation-only, and skips the selection,
+when every path is Markdown under `docs/`, a task record under `.atc/tasks/`,
+or Markdown the selection maps to no test file. Markdown a test reads or a
+tool renders (the guidance, skills and their managed copies, the root's
+top-level Markdown) selects its readers and is not documentation-only. The
+caller never chooses the exception. The verifier's log line
+`classification: full` names every range that is not documentation-only; the
+selector's lines after it say which tests ran.
+
+The full suite, and with it the check that fails a session whose tests read
+the root's guidance undeclared (`ROOT_READ_UNDECLARED`), runs only in a
+manually dispatched run of `.github/workflows/validate.yml`
+(`VERIFICATION.md` § Full regression timing and evidence reuse); the Owner
+starts it.
 
 The installed `atc` is an editable install of `adapters/python`: it reads the
 checkout's code and holds the dependencies of the moment it was installed. An

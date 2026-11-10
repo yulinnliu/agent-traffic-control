@@ -56,14 +56,17 @@ under its marker contract: a new test carries a category, and
 `tests/unmarked_baseline.txt` lists the tests that have none yet.
 
 The `Verifier timeout` in the root `AGENTS.md` is three times the measured
-wall clock of a full run, rounded up to a whole minute and never below 300
-seconds; re-measure it when the suite's duration changes.
+wall clock of a full run (664 s gives 2040 s), rounded up to a whole minute
+and never below 300 seconds, since the verifier's selection can widen to the
+full suite; re-measure it when the suite's duration changes.
 
 ## Selected tests
 
-Writers and reviewers run the tests their change can affect; the integration
-verifier alone runs the full suite, because the installed `atc` runs the
-canonical checkout's `main`.
+Writers, reviewers and the integration verifier run the tests a change can
+affect, the verifier over the range from the expected `main` to the
+candidate. The full suite runs in a manually dispatched run of
+`.github/workflows/validate.yml`, the safety net for what the selection
+misses.
 
 ```powershell
 uv run --locked python scripts/select_tests.py --run               # select against main, then run pytest on it

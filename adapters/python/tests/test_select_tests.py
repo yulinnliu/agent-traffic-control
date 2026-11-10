@@ -117,6 +117,33 @@ def test_a_guarded_file_other_than_markdown_adds_the_tests_that_name_it(graph):
         test.removeprefix(f"{ADAPTER}/") for test in named} | {"tests/test_shell_install.py", "tests/test_tooling.py"}
 
 
+def test_a_suffixless_guarded_file_adds_the_tests_that_name_it(graph):
+    named = {test.removeprefix(f"{ADAPTER}/") for test in graph.naming(("pytest",))}
+    assert named and set(chosen(graph, "shared/skills/demo/pytest")) == named | {
+        "tests/test_shell_install.py", "tests/test_tooling.py"}
+
+
+@pytest.mark.parametrize(("path", "readers"), [
+    ("README.md", ["tests/test_shell_install.py"]),
+    ("GLOSSARY.md", ["tests/test_shell_install.py"]),
+    ("AGENTS.md", ["tests/test_integration_verify.py", "tests/test_shell_install.py"]),
+])
+def test_top_level_markdown_is_guarded(graph, path, readers):
+    assert chosen(graph, path) == readers
+    assert select_tests.covers(select_tests.TOP_MARKDOWN, path)
+    assert not select_tests.covers(select_tests.TOP_MARKDOWN, f"docs/{path}")
+
+
+def test_the_run_starts_no_pytest_for_an_empty_selection_and_the_full_suite_for_a_widened_one(monkeypatch):
+    started = []
+    monkeypatch.setattr(select_tests.subprocess, "run",
+                        lambda argv, cwd: started.append(argv) or select_tests.subprocess.CompletedProcess(argv, 0))
+    assert select_tests.main(["--paths", "docs/NO_TEST_NAMES_THIS.md", "--run", "--", "--basetemp", "b"]) == 0
+    assert started == []
+    assert select_tests.main(["--paths", "somewhere/unknown.bin", "--run", "--", "--basetemp", "b"]) == 0
+    assert started == [[select_tests.sys.executable, "-m", "pytest", "--basetemp", "b"]]
+
+
 @pytest.mark.parametrize("path", ["shared/governance/", "shared/governance", ".claude/skills/atc-review/"])
 def test_a_guarded_directory_selects_its_declared_readers_only(graph, path):
     assert chosen(graph, path) == ["tests/test_shell_install.py"]

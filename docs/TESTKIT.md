@@ -192,9 +192,11 @@ this order:
   and its own test command, run once with its base directory in the working
   directory, in place of the stages. Its own rows carry its own tokens:
   after the ancestry rows it reads the range, and a range Git cannot read
-  refuses with `RANGE_UNREADABLE`; its static checks follow. Its range is
-  documentation-only when every changed path is Markdown under `docs/`, and
-  such a range skips that test command. It writes no verification report.
+  refuses with `RANGE_UNREADABLE`; its static checks follow. Its test command
+  and its documentation-only predicate are the root's data (root `AGENTS.md`
+  § Integration verification): the command runs the root's impact selection
+  over the range, and a documentation-only range skips it. It writes no
+  verification report.
   § Isolated environment, § Running and
   logging and the working-directory rules bind it as they bind a project's
   verifier.
