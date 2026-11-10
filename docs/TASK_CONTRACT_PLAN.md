@@ -428,11 +428,33 @@ review, one implementation review and one integration:
 
 - Batch 1, no governance edit, in this order: D.21 and D.23; the direct
   fixes D.4, D.6 and D.11; D.15, D.13, D.12; D.2 with D.3; D.10 with
-  D.16; D.8; D.17 last. A direct fix is self-evident and gets no design
-  beyond its entry; the implementation review checks its side effects.
-- Not taken: D.1. `atc task new` in the new worktree is one command, and a
-  second entry point that writes records adds the side effects D.1 lists
-  for no saving.
+  D.16; D.8; D.17; then the lifecycle guide. A direct fix is self-evident
+  and gets no design beyond its entry; the implementation review checks
+  its side effects. Direct fixes beside D.4, D.6 and D.11:
+  - `atc task new` refused with `UNKNOWN_PROJECT` (given `--repo .`) or
+    `CHECKOUT_CANONICAL` (run from the canonical checkout) says what to do
+    instead: run it inside the new worktree with an absolute `--repo`. A
+    test asserts the hint.
+- The lifecycle guide, last, once the CLI is settled: `docs/WORKFLOW.md`,
+  one page ordered by a task's life: `atc worktree create`; `atc task new`
+  inside the worktree with an absolute `--repo`; the writer's work and
+  self-checks (`atc test run`, `ci --stages`); the report under
+  `~/.atc/reports/`; the reviewer; `atc integrate --check`; the Owner's
+  word relayed and the writer's `atc integrate --owner-words`; close-out;
+  the coordinator's `atc preflight push` and push, asked each time. Each
+  step names its command, who runs it, and its common refusals with their
+  fix. It says how, never the rules: it links governance (`DELIVERY.md`,
+  `GIT_WORKFLOW.md`) and the skills (`atc-coordinator`, `atc-review`,
+  `atc-worktree`) instead of restating them. Whether `README.md`,
+  `AGENTS.md` and the skills point to it is decided and noted here when it
+  is written.
+  - Side effects: a second place a command form is written, which drifts
+    when the CLI changes.
+  - Mitigations: it is written after D.17, against the settled CLI, and
+    names only commands and refusal tokens that tests pin.
+- Not taken: D.1 (Owner's ruling). `atc task new` in the new worktree is
+  one command, and a second entry point that writes records adds the side
+  effects D.1 lists for no saving.
 - Batch 2, on the Owner's authorization of the governance edits: D.22;
   D.14, whose prefix form `GIT_WORKFLOW.md` § Integrate names as arriving
   with D.14; D.7, whose retired verdicts `REMOVABLE` and cleanup `KEEP`
