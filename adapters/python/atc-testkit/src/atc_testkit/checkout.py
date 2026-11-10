@@ -98,7 +98,7 @@ def checkout(argv: Sequence[str], environ: Mapping[str, str] | None = None, run:
     parser.add_argument("--worktree", help="the repository that holds <sha> (default: the working directory's)")
     parser.add_argument("--scratch", help="scratch name (default: <task>-<first 7 characters of the commit>)")
     parser.add_argument("--lock-dir", default=".",
-                        help="the directory under the tree that holds uv.lock (default: the tree)")
+                        help="the directory under the tree that holds uv.lock, where `atc test run` runs (default: the tree)")
     args = parser.parse_args(argv)
     environ = os.environ if environ is None else environ
     if not TASK_ID.fullmatch(args.task):
@@ -115,7 +115,7 @@ def checkout(argv: Sequence[str], environ: Mapping[str, str] | None = None, run:
         raise Refusal("SCRATCH_TREE_EXISTS", f"{tree} exists; remove the scratch with `atc tmp clean {place.name}` "
                                              "or name another with --scratch")
     export(worktree, commit, tree)
-    scratch.register(root, place, tree, task=args.task, source=str(worktree), commit=commit,
+    scratch.register(root, place, lock_dir, task=args.task, source=str(worktree), commit=commit,
                      project=scratch.project_name(lock_dir))
     say(f"CHECKOUT {place.name} {tree} {commit}")
     venv = sync(lock_dir, environ, run)

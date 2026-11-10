@@ -145,7 +145,8 @@ A scratch is the working directory of one isolated test run made through
    stops with `SCRATCH_TREE_EXISTS`, which names `atc tmp clean`.
 3. `git archive` of the commit is unpacked into `<tmp>/<scratch>/tree`, and
    the scratch gets its registry line with its task, the source worktree
-   and the full commit; the line prints as
+   and the full commit, and as its `tree` the `--lock-dir` directory, where
+   `atc test run --scratch` runs; the line prints as
    `CHECKOUT <scratch> <tree> <commit>`.
 4. `uv sync --locked` runs in `--lock-dir` (a directory under the tree,
    default the tree itself) without `VIRTUAL_ENV` and

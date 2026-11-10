@@ -79,7 +79,8 @@ def test_the_scratch_name_and_the_lock_directory_can_be_named(source: tuple[Path
     sync = Sync()
     code, _lines = run([sha, "--task", TASK, "--scratch", "mine", "--lock-dir", "sub"], sync, dict(os.environ))
     assert code == 0 and sync.calls[0][1] == atc_tmp / "mine/tree/sub"
-    assert scratch.registered(atc_tmp)[0].project == "inner"
+    [row] = scratch.registered(atc_tmp)
+    assert (row.project, row.tree) == ("inner", str((atc_tmp / "mine/tree/sub").resolve()))
 
 
 @pytest.mark.parametrize(("argv", "token"), [
