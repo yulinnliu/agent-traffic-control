@@ -26,6 +26,7 @@ GUARD_EXIT = 8
 LOCATION_EXIT = 9
 MUTANT_SECONDS = 900.0
 SUMMARY_WIDTH = 150
+PYCACHE = "pyc"  # the scratch subdirectory every child of a run compiles into, never the tree
 PRIVATE_DESKTOP_VARIABLE = "ATC_PRIVATE_DESKTOP"
 INTERACTIVE_EXCLUSION = "not interactive_desktop"
 EXCLUSION_NOTE = (f"NOTE private desktop: interactive_desktop tests are excluded; {PRIVATE_DESKTOP_VARIABLE}=0 "
@@ -147,6 +148,7 @@ def isolate(tree: Path, place: Path, python: str, environ: MutableMapping[str, s
     drop_hami_variables(environ)
     for name in config.data_root_variables(tree) or (config.DEFAULT_DATA_ROOT,):
         environ[name] = str(place / "qdr")
+    environ["PYTHONPYCACHEPREFIX"] = str(place / PYCACHE)
     locations.enter(place, environ)
 
     directories = pythonpath_directories(tree)

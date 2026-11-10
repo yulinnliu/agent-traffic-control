@@ -357,7 +357,9 @@ the scratch `<scratch>` (`ATC_HOME.md` § Test scratch). In order:
    `SCRATCH_NOT_RESOLVED`, `SCRATCH_NOT_CREATED` (exit 9).
 2. Remove every `HAMI_*` variable. Point each data-root variable the tree's
    `[tool.atc-testkit]` names, and `QUANT_DATA_ROOT` when it names none, at
-   `<scratch>/qdr`. Make the scratch the temporary directory.
+   `<scratch>/qdr`. Point `PYTHONPYCACHEPREFIX` at `<scratch>/pyc`, so no
+   child of the run (the guard, the selector, pytest) writes bytecode into
+   the tree. Make the scratch the temporary directory.
 3. Set `PYTHONPATH` to the tree's `packages/*/src` and `src` directories. One
    that is absent after entering the tree is refused with
    `PYTHONPATH_MISSING` (exit 8).

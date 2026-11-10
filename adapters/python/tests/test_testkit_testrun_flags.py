@@ -14,11 +14,14 @@ PASSING = "def test_value():\n    assert True\n"
 SELECTOR = ("import json, sys\n"
             "print('noise')\n"
             "print(json.dumps(['tests/test_value.py'] if any(p.startswith('src/') for p in sys.argv[1:]) else []))\n")
+# The desktop choice, and the bytecode settings a host could use to hide a write into the tree.
+DROPPED_SETTINGS = ("ATC_PRIVATE_DESKTOP", "PYTHONDONTWRITEBYTECODE", "PYTHONPYCACHEPREFIX")
 
 
 def run_command(*args: str, **env: str) -> subprocess.CompletedProcess[str]:
+    """The command in the caller's environment less `DROPPED_SETTINGS`."""
     environment = {key: value for key, value in os.environ.items()
-                   if not key.startswith(("PYTEST_", "GIT_")) and key != "ATC_PRIVATE_DESKTOP"}
+                   if not key.startswith(("PYTEST_", "GIT_")) and key not in DROPPED_SETTINGS}
     environment.update(env, PYTHONIOENCODING="utf-8")
     return subprocess.run([sys.executable, "-m", "atc_testkit.commands", "test", "run", *args], env=environment,
                           capture_output=True, text=True, encoding="utf-8", stdin=subprocess.DEVNULL)
@@ -47,6 +50,11 @@ def summary_line(run: subprocess.CompletedProcess[str]) -> str:
     return run.stdout.splitlines()[-1]
 
 
+def bytecode(tree: Path) -> list[Path]:
+    """What a run compiled into the tree it tests; docs/TESTKIT.md § Commands step 2 keeps it in the scratch."""
+    return sorted(tree.rglob("__pycache__"))
+
+
 @pytest.mark.integration
 def test_a_run_prints_its_log_and_one_summary_line(tree: Path, atc_tmp: Path) -> None:
     run = run_command("--scratch", "f1", "--tree", str(tree), "--python", sys.executable, "--label", "my run",
@@ -59,6 +67,7 @@ def test_a_run_prints_its_log_and_one_summary_line(tree: Path, atc_tmp: Path) ->
     assert len(run.stdout.splitlines()) == 2
     text = log.read_text(encoding="utf-8")
     assert "desktop: " in text and "1 passed" in text
+    assert bytecode(tree) == []
 
 
 @pytest.mark.integration
@@ -101,12 +110,14 @@ def test_select_runs_what_the_declared_selector_prints(tree: Path, atc_tmp: Path
     run = run_command("--scratch", "f6", "--tree", str(tree), "--python", sys.executable, "--select", "HEAD")
     assert run.returncode == 0, run.stdout + run.stderr
     assert run.stdout.splitlines() == ["SELECT HEAD: 0 changed paths, 0 test paths", "NO_TESTS no test selected"]
+    assert bytecode(tree) == []
     (tree / "src/flagged_pkg/new.py").write_text("Y = 2\n", encoding="utf-8")
     (tree / "tests/test_value.py").write_text(PASSING + "\n", encoding="utf-8")
     run = run_command("--scratch", "f6", "--tree", str(tree), "--python", sys.executable, "--select", "HEAD")
     assert run.returncode == 0, run.stdout + run.stderr
     assert run.stdout.splitlines()[0] == "SELECT HEAD: 2 changed paths, 1 test paths"
     assert summary_line(run).startswith("PASS 1 passed; log: ")
+    assert bytecode(tree) == []
 
 
 @pytest.mark.integration
