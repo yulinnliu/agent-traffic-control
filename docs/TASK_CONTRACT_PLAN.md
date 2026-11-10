@@ -188,9 +188,9 @@ the rules and steps, C.8 is the editorial pass over every file they touched.
      changed; large material as `<sha>:<path>` or path plus SHA-256; the
      coordinator returns an oversized report unchanged.
    - New § Close-out, after § 10: close-out is a standing rule of every
-     task: after a task is integrated and pushed (the push under § 10), the
-     coordinator removes that task's worktree and scratches and archives its
-     sessions, then reports. Keep exceptions are written in the task record.
+     task: after a task is integrated into `main`, the coordinator removes
+     that task's worktree and scratches and archives its sessions, then
+     reports. Keep exceptions are written in the task record.
      Items outside the task, `REFUSED` and `ANOMALY` lines, refused archives
      and failed integrations go to the Owner. This replaces the rule that
      only the Owner's word deletes scratches, which C.5 and C.6 remove from
@@ -448,8 +448,8 @@ change, its side effects, their mitigations.
    - Side effects: a registry format change; one call deleting many items;
      an item of another task taken by mistake.
    - Mitigations: entries without a task never match one; it runs only
-     when `integrations.jsonl` has the task's line and `origin/main`
-     contains it, and skips the keep exceptions in the record; every item
+     when `integrations.jsonl` has the task's line and the local `main`
+     contains it (no push needed, `DELIVERY.md` § Close-out), and skips the keep exceptions in the record; every item
      ends `DELETED`, `SKIPPED` or `REFUSED`; it touches nothing outside the
      task and runs `worktree cleanup`'s own checks.
 4. Drop `--main` from `atc integrate` and `atc preflight push`.

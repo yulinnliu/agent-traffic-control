@@ -123,8 +123,9 @@ own commits write; session names belong only in the hand-over.
    `carried_over_from` in `<git common dir>/atc/integrations.jsonl`. Check
    the result as `atc-review` "Writer: after integration" says. Done when
    the result matches.
-6. **Close** under governance `DELIVERY.md` § Close-out, after the
-   integration and its push (`DELIVERY.md` § 10):
+6. **Close** under governance `DELIVERY.md` § Close-out, right after the
+   integration into `main`; the push waits for the Owner's word
+   (`DELIVERY.md` § 10) and is not a precondition:
    - Confirm `main` at the integrated SHA and the task record at its
      post-integration state.
    - Remove the task's worktree with `atc worktree cleanup` under the
