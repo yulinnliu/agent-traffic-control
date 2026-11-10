@@ -69,7 +69,7 @@ missing file or key means the default.
 
 | Key | Meaning |
 | --- | --- |
-| `test_workers` | the testkit's parallel-stage worker count (`TESTKIT.md` § Stages), an integer of 1 or more |
+| `test_workers` | the testkit's parallel-stage worker count (`TESTKIT.md` § Stages), a TOML integer from 1 to the logical CPU count |
 
 With `CI` set the file is not read. An entry point reads it in its own
 process, before a run's environment points `HOME` into the run's working

@@ -63,13 +63,34 @@ def test_the_host_file_is_beside_tmp_and_cache_in_the_users_home(monkeypatch: py
 
 @pytest.mark.unit
 @pytest.mark.parametrize("text", ["test_workers = 0\n", "test_workers = -2\n", "test_workers = 'eight'\n",
-                                  "test_workers = true\n", "test_workers = 2.5\n", "test_workers = [\n"])
-def test_a_bad_host_file_is_refused_with_its_path(tmp_path: Path, text: str) -> None:
+                                  "test_workers = '8'\n", "test_workers = true\n", "test_workers = 2.5\n",
+                                  "test_workers = 33\n", "test_workers = [\n"])
+def test_a_bad_host_file_is_refused_with_its_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, text: str) -> None:
+    monkeypatch.setattr(os, "cpu_count", lambda: 32)
     host = host_file(tmp_path, text)
     with pytest.raises(stages.locations.Refusal) as refused:
         stages.resolve_workers(None, {}, host)
     assert (refused.value.token, refused.value.code) == ("ATC_CONFIG_INVALID", 9)
     assert str(host) in refused.value.detail
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("encoded", ["# 工作者\ntest_workers = 4\n".encode("cp950"),
+                                     "test_workers = 4\n".encode("utf-16")], ids=["cp950", "utf-16"])
+def test_a_host_file_that_is_not_utf8_is_refused(tmp_path: Path, encoded: bytes) -> None:
+    host = tmp_path / "config.toml"
+    host.write_bytes(encoded)
+    with pytest.raises(stages.locations.Refusal) as refused:
+        stages.resolve_workers(None, {}, host)
+    assert (refused.value.token, refused.value.code) == ("ATC_CONFIG_INVALID", 9)
+    assert str(host) in refused.value.detail
+
+
+@pytest.mark.unit
+def test_the_host_file_may_name_every_logical_cpu(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(os, "cpu_count", lambda: 24)
+    assert stages.resolve_workers(None, {}, host_file(tmp_path, "test_workers = 24\n")) == \
+        stages.Workers(24, "~/.atc/config.toml")
 
 
 @pytest.mark.unit
@@ -80,10 +101,22 @@ def test_an_unreadable_host_file_is_refused(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize(("value", "count"), [("1", 1), ("16", 16), (3, 3), ("0", None), ("-1", None), ("x", None),
-                                              ("", None), (True, None), (0, None), (2.0, None)])
-def test_a_count_is_an_integer_of_one_or_more(value: object, count: int | None) -> None:
-    assert stages.positive_count(value) == count
+@pytest.mark.parametrize(("text", "count"), [("1", 1), ("16", 16), ("24", 24), ("25", None), ("100000", None),
+                                             ("0", None), ("-1", None), ("x", None), ("", None), (" 8", None),
+                                             ("+8", None), ("\u0661\u0666", None), ("\uff18", None)])
+def test_a_flag_count_is_ascii_digits_from_one_to_the_cpu_count(monkeypatch: pytest.MonkeyPatch, text: str,
+                                                                count: int | None) -> None:
+    monkeypatch.setattr(os, "cpu_count", lambda: 24)
+    assert stages.flag_count(text) == count
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(("value", "count"), [(1, 1), (24, 24), (25, None), (0, None), ("8", None), (True, None),
+                                              (2.0, None), (None, None)])
+def test_a_host_count_is_a_toml_integer_from_one_to_the_cpu_count(monkeypatch: pytest.MonkeyPatch, value: object,
+                                                                  count: int | None) -> None:
+    monkeypatch.setattr(os, "cpu_count", lambda: 24)
+    assert stages.host_count(value) == count
 
 
 @pytest.mark.unit

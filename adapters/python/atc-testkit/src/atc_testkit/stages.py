@@ -74,21 +74,36 @@ def host_config() -> Path:
     return Path.home() / ".atc" / HOST_CONFIG_NAME
 
 
-def positive_count(value: object) -> int | None:
-    """``value`` as a worker count, an integer of 1 or more; ``None`` for anything else."""
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, str):
-        value = int(value) if value.isdecimal() else None
-    return value if isinstance(value, int) and value >= 1 else None
+def most_workers() -> int:
+    """The largest count a flag or the host file may give: the logical CPU count."""
+    return os.cpu_count() or 1
+
+
+def _in_range(count: int) -> int | None:
+    return count if 1 <= count <= most_workers() else None
+
+
+def flag_count(text: str) -> int | None:
+    """A ``--workers`` value: ASCII digits naming 1 to ``most_workers()``; ``None`` for anything else."""
+    return _in_range(int(text)) if text.isascii() and text.isdigit() else None
+
+
+def host_count(value: object) -> int | None:
+    """A ``test_workers`` value: a TOML integer from 1 to ``most_workers()``; ``None`` for anything else."""
+    return _in_range(value) if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def count_rule() -> str:
+    return f"an integer from 1 to {most_workers()}, the logical CPU count"
 
 
 def resolve_workers(flag: int | None = None, environ: Mapping[str, str] | None = None,
                     config: Path | None = None) -> Workers:
     """The flag, then ``test_workers`` in the host file unless ``CI`` is set, then ``default_workers()``.
 
-    A host file that cannot be read or parsed, or a key that is not an integer of 1 or more, raises
-    ``locations.Refusal`` with ``ATC_CONFIG_INVALID``.
+    A host file that cannot be read, decoded or parsed, or a key that is not a TOML integer from 1 to
+    ``most_workers()``, raises ``locations.Refusal`` with ``ATC_CONFIG_INVALID``. The flag is checked where it is
+    parsed (``flag_count``).
     """
     if flag is not None:
         return Workers(flag, SOURCE_FLAG)
@@ -100,13 +115,13 @@ def resolve_workers(flag: int | None = None, environ: Mapping[str, str] | None =
                 table = tomllib.load(handle)
         except FileNotFoundError:
             table = {}
-        except (OSError, tomllib.TOMLDecodeError) as error:
+        except (OSError, ValueError) as error:  # ValueError: TOMLDecodeError and UnicodeDecodeError
             raise locations.Refusal(CONFIG_INVALID, f"{path}: {error}", CONFIG_EXIT) from error
         if WORKERS_KEY in table:
-            count = positive_count(table[WORKERS_KEY])
+            count = host_count(table[WORKERS_KEY])
             if count is None:
-                raise locations.Refusal(CONFIG_INVALID, f"{path}: {WORKERS_KEY} = {table[WORKERS_KEY]!r} is not an "
-                                                        "integer of 1 or more", CONFIG_EXIT)
+                raise locations.Refusal(CONFIG_INVALID, f"{path}: {WORKERS_KEY} = {table[WORKERS_KEY]!r} is not "
+                                                        f"{count_rule()}", CONFIG_EXIT)
             return Workers(count, SOURCE_HOST)
     return Workers(default_workers(), SOURCE_DEFAULT)
 

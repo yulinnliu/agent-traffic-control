@@ -60,9 +60,11 @@ order. Each is one pytest invocation over the selected paths.
   stages (the CI runner's `--stages`, the gate's `--run`); `test_workers` in
   the host file `~/.atc/config.toml` (`ATC_HOME.md` § Host settings), read
   only when `CI` is not set; `min(8, cpu count)`. The verifier takes no flag,
-  so the host file is its override. A count is an integer of 1 or more: a
-  bad flag stops with `USAGE`, a host file that cannot be read or a bad key
-  with `ATC_CONFIG_INVALID` (exit 9), before any check or stage runs. The
+  so the host file is its override. A count is an integer from 1 to the
+  logical CPU count: ASCII digits on the flag, a TOML integer in the key. A
+  bad flag stops with `USAGE`, a host file that cannot be read or decoded
+  as UTF-8 or a bad key with `ATC_CONFIG_INVALID` (exit 9), before any check
+  or stage runs; a count is never clamped. The
   parallel stage prints `workers: <n> (<flag|~/.atc/config.toml|default>)`
   before it starts; the evidence record holds no count, so a record covers
   a push whatever count ran it. A project that carries the testkit has `pytest-xdist`

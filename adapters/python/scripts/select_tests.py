@@ -398,7 +398,7 @@ def main(argv: list[str] | None = None) -> int:
     source.add_argument("--paths", nargs="+", help="explain these workspace-relative paths instead")
     parser.add_argument("--run", action="store_true",
                         help="run the testkit's stages on the selection; arguments after -- go to pytest")
-    parser.add_argument("--workers", type=int, help="the parallel stage's worker count for this run (with --run)")
+    parser.add_argument("--workers", help="worker count for --run, checked by the stage runner")
     args = parser.parse_args(argv)
     paths = args.paths if args.paths else changed_paths(args.base)
     selection = select(paths)
@@ -408,7 +408,7 @@ def main(argv: list[str] | None = None) -> int:
     targets = pytest_args(selection)
     if targets is None:
         return 0
-    workers = [] if args.workers is None else ["--workers", str(args.workers)]
+    workers = [] if args.workers is None else ["--workers", args.workers]
     return subprocess.run([*STAGE_RUNNER, *workers, *targets, *extra], cwd=ADAPTER_DIR).returncode
 
 
