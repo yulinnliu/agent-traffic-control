@@ -25,5 +25,5 @@ When user-invoked skills multiply past what you can remember, that piled-up cogn
 
 A skill shared across workspace projects or agent tools follows the canonical-source + rendered-copy pattern: placement, frontmatter fields, per-tool overlays, drift validation and git tracking are defined in the `atc-shared-skill` skill, and this file does not restate them. Two consequences for the writing:
 
-- The description is duplicated verbatim into every adapter, so a description edit is a multi-file sync (`scripts/validate_workspace.py` catches drift). Budget pointer rewording accordingly: get the branches right before stamping adapters.
+- The description is duplicated verbatim into every adapter, so a description edit is a multi-file sync (`adapters/python/scripts/validate_workspace.py` catches drift). Budget pointer rewording accordingly: get the branches right before stamping adapters.
 - The canonical body is read by every tool, so keep it tool-agnostic per `atc-shared-skill` Step 1; tool-specific mechanics belong in conditional phrasing or in the adapter when behavior genuinely differs.

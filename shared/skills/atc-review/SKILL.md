@@ -154,7 +154,9 @@ diff against your last round's findings.
    blocker to tell the holder now.
 4. **Run tests and mutants.** Run the tests governance `VERIFICATION.md`
    § Independent review assigns a reviewer, and name them in the verified
-   line. Before a PASS on a diff that changes tests or behaviour, run
+   line. Run a project gate in the command form the project's `AGENTS.md`
+   gives, from the scratch copy's root; never with `python -I`, which
+   drops the script's directory from the import path. Before a PASS on a diff that changes tests or behaviour, run
    `atc verify` with the target arguments of the integrate command below
    (`--repo` or `--project`, `--branch`, `--reviewed`, and `--rebased` when
    the integrate command has it): it runs the integration verifier on the
