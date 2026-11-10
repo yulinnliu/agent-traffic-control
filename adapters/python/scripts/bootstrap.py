@@ -13,7 +13,7 @@ creates `projects/`, `worktrees/` and `state/`, and prints how to put the
 a checkout already there; appends the entry to `workspace.yaml`; creates its
 worktree and state directories; installs the requested opt-in skill
 adapters; then runs onboarding `--apply` so the project receives `CLAUDE.md`,
-the policy block in `AGENTS.md` and every baseline adapter, and validates the
+the pointer line in `AGENTS.md`, `.atc/` and every baseline adapter, and validates the
 result. Project-owned files are never rewritten.
 
 `sync [NAME] [--prune]` converges one or every project's workspace-owned

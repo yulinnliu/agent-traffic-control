@@ -192,18 +192,30 @@ def repository_identity(worktree: Path, repo: Path) -> dict[str, str]:
 
 
 def bound_governance(name: str, root: Path, worktree: Path) -> tuple[str, str]:
-    """The governance (source, revision) a new task of ``name`` binds: the root's `main`, or a project's pin."""
+    """The governance (source, revision) a new task of ``name`` binds: the root's `main`, or a project's lock.
+
+    A project not yet migrated to `.atc/atc.lock` binds the `.atc/governance.yaml`
+    carrying sync's marker; the final-sync task removes that fallback."""
+    import validate_workspace as validator
     if name == "root":
         import onboard_project
         return onboard_project.governance_source(root), git(root, "rev-parse", f"refs/heads/{MAIN}").stdout.strip()
-    manifest = worktree / ".atc" / "governance.yaml"
+    lock_path = worktree / validator.ATC_LOCK
     try:
-        pin = yaml.safe_load(manifest.read_text(encoding="utf-8")) or {}
+        lock = validator.read_lock(worktree)
+    except (OSError, ValueError) as exc:
+        raise Refused("NO_GOVERNANCE_BINDING", f"{lock_path}: {exc}; run atc onboard --sync") from None
+    if lock is not None:
+        return lock["source"], lock["revision"]
+    manifest = worktree / validator.LEGACY_MANIFEST
+    try:
+        raw = manifest.read_text(encoding="utf-8")
+        pin = yaml.safe_load(raw) or {} if validator.managed_marker_present(raw) else {}
     except (OSError, yaml.YAMLError):
         pin = {}
     source, revision = pin.get("source") if isinstance(pin, dict) else None, pin.get("revision") if isinstance(pin, dict) else None
     if not isinstance(source, str) or not isinstance(revision, str):
-        raise Refused("NO_GOVERNANCE_BINDING", f"{manifest} names no governance source and revision; run atc onboard --sync")
+        raise Refused("NO_GOVERNANCE_BINDING", f"{lock_path} is missing and no {validator.LEGACY_MANIFEST.as_posix()} names a governance source and revision; run atc onboard --sync")
     return source, revision
 
 

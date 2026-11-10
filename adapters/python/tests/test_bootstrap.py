@@ -57,7 +57,8 @@ def test_add_registers_onboards_and_validates(tmp_path: Path) -> None:
     assert (root / "worktrees" / "second").is_dir()
     assert (root / "state" / "second-data").is_dir()
     assert (project / "CLAUDE.md").read_text(encoding="utf-8") == (root / "CLAUDE.md").read_text(encoding="utf-8")
-    assert validator.POLICY_BEGIN in (project / "AGENTS.md").read_text(encoding="utf-8")
+    assert validator.POINTER_MARKER in (project / "AGENTS.md").read_text(encoding="utf-8")
+    assert (project / ".atc/atc.lock").is_file() and (project / ".atc/README.md").is_file()
     assert (project / ".atc/governance/INDEX.md").is_file()
     for tool in (".claude", ".agents"):
         assert (project / tool / "skills" / "demo-skill" / "SKILL.md").is_file()

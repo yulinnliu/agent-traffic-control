@@ -40,7 +40,7 @@ the one thing every agent and every language already has.
 | `shared/governance/` | The rules every agent reads at a pinned revision: `CORE.md` plus modules routed by `INDEX.md` |
 | `shared/policies/` | JSON Schemas and examples for hard deny, approval required, permission presets and the escalation gate |
 | `shared/skills/` | Canonical skills shared across tools and repositories; `.claude/`, `.agents/` and `.dsh/` hold the managed copies rendered from them |
-| `shared/templates/` | The policy block onboarding inserts into a project's `AGENTS.md` |
+| `shared/templates/` | The pointer line onboarding inserts into a project's `AGENTS.md` and the bootloader it writes to `.atc/README.md` |
 | `shared/conformance/` | Language-neutral fixtures every tool implementation must pass |
 | `scripts/` | POSIX sh entry points that need no language runtime: install and check skill adapters |
 | `adapters/python/` | The Python reference implementation of the tools |
@@ -64,10 +64,13 @@ atc/scripts/link-skills.sh path/to/your-repo atc-worktree hami-writing-for-agent
 
 `link-skills.sh` copies each skill into `.claude/skills/`, `.agents/skills/`
 and `.dsh/skills/` as a complete managed copy, vendors the governance rules
-into `.atc/governance/` with their source and revision pinned in
-`.atc/governance.yaml`, adds the `CLAUDE.md` pointer when the repository has
-none, and inserts the governance block at the top of `AGENTS.md`. The
-repository then depends on nothing outside itself: no environment variable,
+into `.atc/governance/` with the bootloader in `.atc/README.md` and their
+source and revision in `.atc/atc.lock`, adds `CLAUDE.md` when the repository
+has none, and inserts the pointer line before the first section of
+`AGENTS.md`. It stops before writing anything when `AGENTS.md` has no
+`## Integration verification` section or Git ignores a file it would write,
+because every file it writes is committed. The repository then depends on
+nothing outside itself: no environment variable,
 no path back to this checkout. Files the repository owns are reported and
 left alone. `--link` symlinks instead of copying; `--prune` removes adapters
 whose canonical skill no longer exists. On Windows run it from Git Bash.
@@ -149,8 +152,8 @@ per access mode, refuses unresolvable tokens and, with `--check`, compares
 installed copies too; from `workspace.yaml` it also renders a machine-local
 deny on each project's state root, kept out of `generated/enforcement/`.
 `atc validate --projects` checks each project's
-generated enforcement and, on `main`, that its governance pin is in
-`main`'s history.
+generated enforcement and, on `main`, that the revision in its `.atc/atc.lock`
+is in `main`'s history.
 
 ## License
 

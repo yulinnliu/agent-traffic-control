@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Check, apply, or sync the files Agent Traffic Control owns inside a project.
 
-Owned files: the `CLAUDE.md` pointer (only when the project has none), the
-policy block between ownership markers in `AGENTS.md`, the vendored
-governance copy under `.atc/governance/` with its `.atc/governance.yaml`
-pin, and one managed adapter per baseline skill and tool directory. Each
-adapter is rendered from the canonical skill, so a project needs nothing
-from this checkout at run time. A file without an ownership marker is
-project-owned and never rewritten.
+Owned files: `CLAUDE.md` (only when the project has none, or has the
+previous workspace entrypoint), the pointer line in `AGENTS.md`, sync's files
+under `.atc/` (`README.md`, `atc.lock`, `governance/`), and one managed
+adapter per baseline skill and tool directory. Each adapter is rendered from
+the canonical skill, so a project needs nothing from this checkout at run
+time. `.atc/tasks/` is the project's; an adapter without an ownership marker
+is project-owned; neither is ever rewritten. A project in the layout before
+`atc.lock` is migrated in the same pass (docs/LAYOUT.md).
 
 `--sync` with a project or `--all` commits what it writes on each project's
 `main` and records the commit in `integrations.jsonl`; `--root-only` renders
@@ -31,11 +32,21 @@ from pathlib import Path
 import yaml
 
 import validate_workspace as validator
+import verification_section
 from integration_slot import IntegrationSlot
 
 ROOT = Path(__file__).resolve().parents[3]
-MANAGED_BY = validator.MANAGED_BY
-POLICY_PATTERN = validator.POLICY_BLOCK
+LEGACY_POLICY_PATTERN = validator.LEGACY_POLICY_BLOCK
+POINTER_LINE = re.compile(rf"^{re.escape(validator.POINTER_MARKER)}.*$", re.MULTILINE)
+# The workspace root's CLAUDE.md before it imported AGENTS.md; a project copy
+# equal to it is replaced, any other CLAUDE.md is the project's.
+LEGACY_CLAUDE_MD = (
+    "# CLAUDE.md\n\n"
+    "Canonical agent guidance for the directory holding this file lives in the\n"
+    "`AGENTS.md` next to it. Read that `AGENTS.md` in full before starting work and\n"
+    "follow it as if it were this file.\n"
+)
+VERIFIER_SOURCE_HEADING = re.compile(r"^#+ Integration verifier source\s*$", re.MULTILINE)
 
 
 @dataclass(frozen=True)
@@ -85,17 +96,21 @@ def managed_adapter(path: Path, skill: str) -> bool:
     )
 
 
-def policy_plan(project_path: Path, template: str) -> PlanItem:
+def pointer_plan(project_path: Path, line: str) -> PlanItem:
+    """The pointer line in AGENTS.md; an older release's policy block is replaced by it in place."""
     agents_md = project_path / "AGENTS.md"
     if not agents_md.exists():
         return PlanItem("collision", agents_md, "missing; create project-specific AGENTS.md first")
     text = agents_md.read_text(encoding="utf-8")
-    match = POLICY_PATTERN.search(text)
-    if match:
-        if validator.normalise(match.group(0)).strip() == validator.normalise(template).strip():
-            return PlanItem("skip", agents_md, "managed policy reference is current")
-        updated = text[: match.start()] + template.strip() + text[match.end() :]
-        return PlanItem("update", agents_md, "managed policy reference drift", updated)
+    current = POINTER_LINE.search(text)
+    if current:
+        if current.group(0) == line:
+            return PlanItem("skip", agents_md, "pointer line is current")
+        return PlanItem("update", agents_md, "pointer line drift", text[: current.start()] + line + text[current.end() :])
+    legacy = LEGACY_POLICY_PATTERN.search(text)
+    if legacy:
+        return PlanItem("update", agents_md, "older policy block replaced by the pointer line",
+                        text[: legacy.start()] + line + text[legacy.end() :])
     if any(token in text for token in ("shared/governance/INDEX.md", ".atc/governance/INDEX.md", "AGENT_DECISION_POLICY.md", "GIT_LIFECYCLE.md")):
         return PlanItem(
             "collision",
@@ -104,13 +119,13 @@ def policy_plan(project_path: Path, template: str) -> PlanItem:
         )
     heading = re.search(r"^## .+$", text, re.MULTILINE)
     if not heading:
-        return PlanItem("collision", agents_md, "no section heading; cannot place policy block safely")
-    updated = text[: heading.start()] + template.strip() + "\n\n" + text[heading.start() :]
-    return PlanItem("create", agents_md, "insert managed policy reference", updated)
+        return PlanItem("collision", agents_md, "no section heading; cannot place the pointer line safely")
+    updated = text[: heading.start()] + line + "\n\n" + text[heading.start() :]
+    return PlanItem("create", agents_md, "insert the pointer line", updated)
 
 
 def governance_source(root: Path) -> str:
-    """The pinned source name: workspace.yaml's governance_source, else the
+    """The locked source name: workspace.yaml's governance_source, else the
     origin remote's owner/repo, else ``unknown``."""
     workspace_file = root / "workspace.yaml"
     if workspace_file.is_file():
@@ -135,27 +150,35 @@ def governance_revision(root: Path) -> str:
         return "unknown"
 
 
-def governance_manifest(source: str, revision: str) -> str:
-    return (
-        f"# Written by Agent Traffic Control sync; never edited by hand.\n"
-        f"managed-by: {MANAGED_BY}\nsource: {source}\nrevision: {revision}\n"
-    )
+def legacy_manifest(project_path: Path) -> bool:
+    """Whether the project holds the pin file of the layout before `atc.lock`, carrying sync's marker."""
+    path = project_path / validator.LEGACY_MANIFEST
+    return path.is_file() and validator.managed_marker_present(path.read_text(encoding="utf-8"))
 
 
-def governance_plan(project_path: Path, root: Path) -> list[PlanItem]:
-    """Vendor `shared/governance/` into the project's `.atc/governance/` and pin it."""
+def atc_plan(project_path: Path, root: Path) -> list[PlanItem]:
+    """The bootloader and the vendored governance; collisions alone when `.atc/` holds what sync does not own."""
     plan: list[PlanItem] = []
-    manifest = project_path / validator.GOVERNANCE_MANIFEST
-    current: dict = {}
-    if manifest.exists():
-        try:
-            current = yaml.safe_load(manifest.read_text(encoding="utf-8")) or {}
-        except yaml.YAMLError:
-            current = {}
-        if not isinstance(current, dict) or not validator.is_managed(current):
-            plan.append(PlanItem("collision", manifest, "exists without an ownership marker; refusing to manage .atc/governance/"))
-            return plan
-    changed = False
+    for stray in validator.atc_strays(project_path):
+        if stray == validator.LEGACY_MANIFEST:
+            if not legacy_manifest(project_path):
+                plan.append(PlanItem("collision", project_path / stray, "exists without an ownership marker; refusing to manage .atc/"))
+            continue
+        plan.append(PlanItem("collision", project_path / stray, "not a file sync writes; .atc/ holds README.md, atc.lock, governance/ and tasks/"))
+    try:
+        validator.read_lock(project_path)
+    except ValueError as exc:
+        plan.append(PlanItem("collision", project_path / validator.ATC_LOCK, f"{exc}; refusing to manage .atc/"))
+    if plan:
+        return plan
+    readme = project_path / validator.ATC_README
+    expected_readme = validator.atc_readme_template_path(root).read_text(encoding="utf-8")
+    if not readme.exists():
+        plan.append(PlanItem("create", readme, "governance bootloader", expected_readme))
+    elif validator.normalise(readme.read_text(encoding="utf-8")) != validator.normalise(expected_readme):
+        plan.append(PlanItem("update", readme, "governance bootloader drift", expected_readme))
+    else:
+        plan.append(PlanItem("skip", readme, "governance bootloader is current"))
     for module in validator.vendored_governance_modules():
         source = root / "shared" / "governance" / module
         if not source.is_file():
@@ -164,32 +187,42 @@ def governance_plan(project_path: Path, root: Path) -> list[PlanItem]:
         target = project_path / validator.VENDORED_GOVERNANCE / module
         if not target.exists():
             plan.append(PlanItem("create", target, "vendored governance module", expected))
-            changed = True
         elif validator.normalise(target.read_text(encoding="utf-8")) != validator.normalise(expected):
             plan.append(PlanItem("update", target, "vendored governance drift", expected))
-            changed = True
         else:
             plan.append(PlanItem("skip", target, "vendored governance is current"))
-    source_name = governance_source(root)
-    if not manifest.exists():
-        plan.append(PlanItem("create", manifest, "governance pin", governance_manifest(source_name, governance_revision(root))))
-    elif changed or current.get("source") != source_name or current.get("managed-by") != MANAGED_BY:
-        plan.append(PlanItem("update", manifest, "governance pin moves to the synced revision", governance_manifest(source_name, governance_revision(root))))
-    elif (state := validator.pin_state(root, str(current.get("revision", "")))) == "stale":
-        plan.append(PlanItem("update", manifest, "governance pin revision is not in the history of main", governance_manifest(source_name, governance_revision(root))))
-    elif state == "not-main":
-        plan.append(PlanItem("skip", manifest, "governance pin not checked: the ATC checkout is not on main"))
-    else:
-        plan.append(PlanItem("skip", manifest, "governance pin is current"))
     return plan
 
 
-def build_plan(project_path: Path, root: Path = ROOT) -> list[PlanItem]:
-    template_path = validator.policy_template_path(root)
+def lock_plan(project_path: Path, root: Path, changed: bool) -> PlanItem:
+    """`.atc/atc.lock` moves to the ATC HEAD when sync changes any file it writes (GIT_WORKFLOW.md § Lock advancement)."""
+    path = project_path / validator.ATC_LOCK
+    source = governance_source(root)
+    content = validator.render_lock(source, governance_revision(root))
+    lock = validator.read_lock(project_path)
+    if lock is None:
+        return PlanItem("create", path, "ATC lock", content)
+    if changed or lock["source"] != source:
+        return PlanItem("update", path, "ATC lock moves to the synced revision", content)
+    state = validator.lock_state(root, lock["revision"])
+    if state == "stale":
+        return PlanItem("update", path, "ATC lock revision is not in the history of main", content)
+    if state == "not-main":
+        return PlanItem("skip", path, "ATC lock not checked: the ATC checkout is not on main")
+    return PlanItem("skip", path, "ATC lock is current")
+
+
+def build_plan(project_path: Path, root: Path = ROOT, prune: bool = False) -> list[PlanItem]:
+    """Every file sync writes, in its write order: `.atc/` bootloader and governance, the pointer line,
+    `CLAUDE.md`, the adapters, then the lock and last the removal of the previous layout's pin file."""
+    template_path = validator.pointer_template_path(root)
     if not template_path.exists():
-        raise ValueError(f"{template_path}: missing canonical project policy template")
-    template = template_path.read_text(encoding="utf-8")
-    plan: list[PlanItem] = []
+        raise ValueError(f"{template_path}: missing canonical pointer line template")
+    if not validator.atc_readme_template_path(root).exists():
+        raise ValueError(f"{validator.atc_readme_template_path(root)}: missing canonical bootloader template")
+    plan: list[PlanItem] = atc_plan(project_path, root)
+    atc_collision = any(item.action == "collision" for item in plan)
+    plan.append(pointer_plan(project_path, validator.pointer_line(root)))
 
     claude_source = (root / "CLAUDE.md").read_text(encoding="utf-8")
     claude_target = project_path / "CLAUDE.md"
@@ -197,6 +230,8 @@ def build_plan(project_path: Path, root: Path = ROOT) -> list[PlanItem]:
         plan.append(PlanItem("create", claude_target, "workspace entrypoint", claude_source))
     elif claude_target.read_text(encoding="utf-8").strip() == claude_source.strip():
         plan.append(PlanItem("skip", claude_target, "workspace entrypoint is current"))
+    elif validator.normalise(claude_target.read_text(encoding="utf-8")) == LEGACY_CLAUDE_MD:
+        plan.append(PlanItem("update", claude_target, "previous workspace entrypoint; replaced by the import", claude_source))
     else:
         plan.append(
             PlanItem(
@@ -205,8 +240,6 @@ def build_plan(project_path: Path, root: Path = ROOT) -> list[PlanItem]:
                 "differs from workspace entrypoint; no ownership marker, not modified",
             )
         )
-    plan.append(policy_plan(project_path, template))
-    plan.extend(governance_plan(project_path, root))
     import testkit_contract
     testkit_record = testkit_contract.record(project_path)
     if testkit_record is not None:
@@ -242,7 +275,45 @@ def build_plan(project_path: Path, root: Path = ROOT) -> list[PlanItem]:
             if plan[-1].action != "collision":
                 plan.extend(supporting_plan(root, skill, target.parent))
     plan.extend(orphan_plan(project_path, set(canonical)))
+    if not atc_collision:
+        changed = any(item.action in ("create", "update") or (prune and item.action == "prune") for item in plan)
+        plan.append(lock_plan(project_path, root, changed))
+        if legacy_manifest(project_path):
+            plan.append(PlanItem("update", project_path / validator.LEGACY_MANIFEST, "migrated to .atc/atc.lock; sync removes it"))
     return plan
+
+
+def verification_gate(project_path: Path, root: Path) -> str | None:
+    """Why the lock cannot advance to the ATC HEAD (GIT_WORKFLOW.md § Lock advancement), or ``None``.
+
+    Applies once the governance at HEAD carries § Integration verifier source;
+    the section is parsed as `atc integrate` parses it."""
+    workflow = root / "shared" / "governance" / "GIT_WORKFLOW.md"
+    if not workflow.is_file() or not VERIFIER_SOURCE_HEADING.search(workflow.read_text(encoding="utf-8")):
+        return None
+    agents_md = project_path / "AGENTS.md"
+    declared = verification_section.declaration(agents_md.read_text(encoding="utf-8")) if agents_md.is_file() else None
+    if declared is None:
+        return f"AGENTS.md has no '{verification_section.HEADING}' section"
+    if declared.argv_file is None:
+        return f"AGENTS.md '{verification_section.HEADING}' has no 'Verifier argv file:' line"
+    if not (project_path / declared.argv_file).is_file():
+        return f"verifier argv file {declared.argv_file} named by AGENTS.md does not exist"
+    return None
+
+
+def ignored_outputs(project_path: Path, plan: list[PlanItem]) -> list[str]:
+    """Paths the plan would write that Git ignores or excludes, so they would never be committed."""
+    paths = sorted({os.path.relpath(item.path, project_path).replace(os.sep, "/")
+                    for item in plan if item.action in ("create", "update") and item.content is not None})
+    if not paths or not validator.git_toplevel(project_path):
+        return []  # a checkout that is not its own repository stops at check_project_checkout
+    env = {key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")}
+    result = subprocess.run(["git", "-C", str(project_path), "check-ignore", "-z", "--stdin"], input="\0".join(paths) + "\0",
+                            capture_output=True, text=True, encoding="utf-8", env=env)
+    if result.returncode not in (0, 1):
+        return []  # not a Git checkout: nothing to commit into
+    return sorted(entry for entry in result.stdout.split("\0") if entry)
 
 
 UNOWNED_DIRECTORY = "directory holds files but no SKILL.md, so nothing marks it managed; refusing to modify"
@@ -404,7 +475,7 @@ def changed_paths(repo: Path) -> list[str]:
 
 def root_commit_revision(root: Path) -> str:
     """The ATC revision a sync commit names: HEAD of the ATC checkout on main with no tracked change."""
-    if validator.pin_state(root, "HEAD") != "current":
+    if validator.lock_state(root, "HEAD") != "current":
         raise SyncStop("ROOT_NOT_MAIN", "sync commits render from the ATC checkout on main; in a topic run --root-only")
     if _git(root, "status", "--porcelain", "--untracked-files=no").stdout.strip():
         raise SyncStop("ROOT_DIRTY", "the ATC checkout has uncommitted tracked changes")
@@ -501,8 +572,17 @@ def run(mode: str, targets: list[tuple[str, Path]], root: Path = ROOT, prune: bo
             print(f"\n=== {name} ({project_path}) [{mode}] ===")
             print("  readiness: NOT_INITIALIZED (registered repo path is absent)")
             continue
-        plan = build_plan(project_path, root)
+        plan = build_plan(project_path, root, prune)
         print_plan(name, project_path, plan, mode, prune)
+        gate = verification_gate(project_path, root)
+        ignored = ignored_outputs(project_path, plan)
+        if gate or ignored:
+            if gate:
+                print(f"  stop: VERIFICATION_SECTION_MISSING {gate}; add it in the project first (GIT_WORKFLOW.md § Lock advancement)")
+            if ignored:
+                print(f"  stop: IGNORED_OUTPUT every file sync writes is committed; Git ignores or excludes: {', '.join(ignored)}")
+            has_stop = True
+            continue
         project_collision = any(item.action == "collision" for item in plan)
         has_collision |= project_collision
         has_pending |= any(item.action in ("create", "update", "prune") for item in plan)

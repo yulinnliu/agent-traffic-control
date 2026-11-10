@@ -7,14 +7,15 @@
 # Lists every adapter under the repository's .claude/, .agents/ and .dsh/
 # skills directories that carries a `managed-by` marker, and says whether it
 # is current, drifted (differs from the rendered adapter here), or orphaned
-# (no canonical skill of that name here). Also checks the vendored governance
-# under .atc/governance/, its pinned revision, the AGENTS.md policy block
-# version, and CLAUDE.md. Exits 1 on any drift, orphan, stale block or a pin
-# whose revision is not in this checkout's history; `scripts/link-skills.sh`
-# repairs all of them.
+# (no canonical skill of that name here). Also checks .atc/README.md, the
+# vendored governance under .atc/governance/, the revision in .atc/atc.lock,
+# the AGENTS.md pointer line and CLAUDE.md, and reports any of those files
+# Git ignores. Exits 1 on any drift, orphan, stale or missing pointer line,
+# ignored file, or a lock whose revision is not in this checkout's history;
+# `scripts/link-skills.sh` repairs all of them but an ignored file.
 set -eu
 
-[ $# -eq 1 ] || { sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+[ $# -eq 1 ] || { sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 REPO=$(CDPATH= cd -- "$1" 2>/dev/null && pwd) || { echo "$1: no such directory" >&2; exit 1; }
 
@@ -57,17 +58,24 @@ for tool in .claude .agents .dsh; do
 done
 
 if [ -e "$REPO/.atc/governance.yaml" ]; then
-  if ! managed "$REPO/.atc/governance.yaml"; then
-    echo "differs    .atc/governance.yaml (no ownership marker)"; status=1
-  fi
-  # Same rule as validate_workspace.pin_state: the pinned revision must be in HEAD's history.
-  revision=$(tr -d '\r' < "$REPO/.atc/governance.yaml" | sed -n 's/^revision:[[:space:]]*//p' | sed 's/[[:space:]]*$//' | head -n 1)
-  if [ -z "$revision" ] || [ "$revision" = unknown ] || ! git -C "$ROOT" rev-parse --verify -q HEAD >/dev/null 2>&1; then
-    echo "unpinned   .atc/governance.yaml (revision ${revision:-missing})"
+  echo "stale      .atc/governance.yaml (older layout; run link-skills.sh to migrate it to .atc/atc.lock)"; status=1
+fi
+if [ -e "$REPO/.atc/atc.lock" ] || [ -d "$REPO/.atc/governance" ]; then
+  # Same rule as validate_workspace.lock_state: the locked revision must be in HEAD's history.
+  revision=$( [ -e "$REPO/.atc/atc.lock" ] && tr -d '\r' < "$REPO/.atc/atc.lock" | sed -n 's/^revision = "\(.*\)"$/\1/p' | head -n 1 || true)
+  if [ -z "$revision" ] || ! git -C "$ROOT" rev-parse --verify -q HEAD >/dev/null 2>&1; then
+    echo "unlocked   .atc/atc.lock (revision ${revision:-missing})"; status=1
   elif git -C "$ROOT" merge-base --is-ancestor "$revision" HEAD 2>/dev/null; then
-    echo "current    .atc/governance.yaml"
+    echo "current    .atc/atc.lock"
   else
-    echo "stale      .atc/governance.yaml (revision $revision not in history)"; status=1
+    echo "stale      .atc/atc.lock (revision $revision not in history)"; status=1
+  fi
+  if [ ! -e "$REPO/.atc/README.md" ]; then
+    echo "missing    .atc/README.md"; status=1
+  elif same "$ROOT/shared/templates/ATC_README.md" "$REPO/.atc/README.md"; then
+    echo "current    .atc/README.md"
+  else
+    echo "drifted    .atc/README.md"; status=1
   fi
   for src in "$ROOT"/shared/governance/*.md; do
     name=$(basename -- "$src")
@@ -80,18 +88,34 @@ if [ -e "$REPO/.atc/governance.yaml" ]; then
     fi
   done
 elif [ "$seen" -gt 0 ]; then
-  echo "missing    .atc/governance/ (run link-skills.sh)"; status=1
+  echo "missing    .atc/ (run link-skills.sh)"; status=1
 fi
 
 if [ -e "$REPO/AGENTS.md" ]; then
-  if grep -qF '<!-- atc:project-policy-reference begin -->' "$REPO/AGENTS.md"; then
-    echo "current    AGENTS.md policy block"
+  pointer=$(tr -d '\r' < "$ROOT/shared/templates/PROJECT_AGENTS.md")
+  if [ "$(tr -d '\r' < "$REPO/AGENTS.md" | grep '^<!-- atc:governance -->' | head -n 1)" = "$pointer" ]; then
+    echo "current    AGENTS.md pointer line"
+  elif grep -q '^<!-- atc:governance -->' "$REPO/AGENTS.md"; then
+    echo "drifted    AGENTS.md pointer line"; status=1
   elif grep -q 'atc:project-policy-reference begin' "$REPO/AGENTS.md"; then
     echo "stale      AGENTS.md policy block (older release; run link-skills.sh)"; status=1
   else
-    echo "missing    AGENTS.md policy block"; status=1
+    echo "missing    AGENTS.md pointer line"; status=1
   fi
 fi
+
+# Every file sync writes is committed, so none may be ignored or excluded.
+for path in AGENTS.md CLAUDE.md .atc/README.md .atc/atc.lock .atc/governance; do
+  [ -e "$REPO/$path" ] || continue
+  if git -C "$REPO" check-ignore -q "$path" 2>/dev/null; then echo "ignored    $path"; status=1; fi
+done
+for tool in .claude .agents .dsh; do
+  for path in "$REPO/$tool/skills"/*/SKILL.md; do
+    [ -f "$path" ] && managed "$path" || continue
+    rel=${path#"$REPO/"}
+    if git -C "$REPO" check-ignore -q "$rel" 2>/dev/null; then echo "ignored    ${rel%/SKILL.md}"; status=1; fi
+  done
+done
 
 if [ -e "$REPO/CLAUDE.md" ]; then
   if same "$ROOT/CLAUDE.md" "$REPO/CLAUDE.md"; then echo "current    CLAUDE.md"; else echo "differs    CLAUDE.md (project-owned)"; fi

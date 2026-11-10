@@ -93,9 +93,45 @@ def ws(tmp_path: Path) -> Workspace:
     workspace = Workspace(root)
     workspace.repo.mkdir(parents=True)
     run_git(workspace.repo, "init", "-q", "-b", "main")
-    commit(workspace.repo, {"AGENTS.md": agents("DEMO"),
-                            ".atc/governance.yaml": f"managed-by: agent-traffic-control\nsource: {GOVERNANCE_SOURCE}\nrevision: '{PINNED}'\n"})
+    commit(workspace.repo, {"AGENTS.md": agents("DEMO"), ".atc/atc.lock": LOCK})
     return workspace
+
+
+LOCK = f'version = 1\nsource = "{GOVERNANCE_SOURCE}"\nrevision = "{PINNED}"\n'
+LEGACY = f"managed-by: agent-traffic-control\nsource: {GOVERNANCE_SOURCE}\nrevision: '{'b' * 40}'\n"
+
+
+def bound(ws: Workspace, capsys: pytest.CaptureFixture[str], files: dict[str, str | None]) -> tuple[int, str]:
+    """`task new` in a topic whose `.atc/` holds ``files`` (``None`` deletes one); the revision it binds or the refusal."""
+    topic = ws.worktree(ws.repo, "claude+widget", "topic-widget")
+    for name, content in files.items():
+        if content is None:
+            (topic / name).unlink()
+        else:
+            (topic / name).parent.mkdir(parents=True, exist_ok=True)
+            (topic / name).write_text(content, encoding="utf-8")
+    status, out, err = ws.cli(capsys, "new", "--scope", "s", cwd=topic)
+    if status:
+        return status, err
+    return status, yaml.safe_load((topic / TASKS_DIR / "DEMO-0001.yaml").read_text(encoding="utf-8"))["governance_revision"]
+
+
+def test_new_binds_the_lock_over_the_previous_layouts_pin(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    assert bound(ws, capsys, {".atc/governance.yaml": LEGACY}) == (0, PINNED)
+
+
+def test_new_falls_back_to_a_marked_previous_layout_pin_without_a_lock(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    assert bound(ws, capsys, {".atc/atc.lock": None, ".atc/governance.yaml": LEGACY}) == (0, "b" * 40)
+
+
+@pytest.mark.parametrize("files, detail", [
+    ({".atc/atc.lock": None, ".atc/governance.yaml": LEGACY.replace("managed-by: agent-traffic-control\n", "")}, "atc.lock is missing"),
+    ({".atc/atc.lock": None}, "atc.lock is missing"),
+    ({".atc/atc.lock": 'version = 2\nsource = "a/b"\nrevision = "c"\n'}, "version 2 is not 1"),
+])
+def test_new_refuses_without_a_readable_binding(ws: Workspace, capsys: pytest.CaptureFixture[str], files: dict, detail: str) -> None:
+    status, err = bound(ws, capsys, files)
+    assert status == 2 and "NO_GOVERNANCE_BINDING" in err and detail in err
 
 
 # new

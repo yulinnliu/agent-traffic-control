@@ -120,12 +120,14 @@ def test_onboarding_reports_testkit_drift_without_rewriting_project_config(repos
     import onboard_project
     workspace=tmp_path/'workspace'
     (workspace/'shared/templates').mkdir(parents=True)
-    (workspace/'shared/templates/PROJECT_AGENTS.md').write_text('managed policy')
+    (workspace/'shared/templates/PROJECT_AGENTS.md').write_text('<!-- atc:governance -->pointer')
+    (workspace/'shared/templates/ATC_README.md').write_text('bootloader')
     (workspace/'CLAUDE.md').write_text('workspace entrypoint')
     (repository/'CLAUDE.md').write_text('project-owned guidance')
     monkeypatch.setattr(onboard_project,'canonical_skills',lambda root:{})
-    monkeypatch.setattr(onboard_project,'governance_plan',lambda project,root:[])
-    monkeypatch.setattr(onboard_project,'policy_plan',lambda project,template:onboard_project.PlanItem('skip',project/'AGENTS.md','policy current'))
+    monkeypatch.setattr(onboard_project,'atc_plan',lambda project,root:[])
+    monkeypatch.setattr(onboard_project,'lock_plan',lambda project,root,changed:onboard_project.PlanItem('skip',project/'.atc/atc.lock','lock current'))
+    monkeypatch.setattr(onboard_project,'pointer_plan',lambda project,line:onboard_project.PlanItem('skip',project/'AGENTS.md','pointer current'))
     before={str(p):p.read_bytes() for p in repository.rglob('*') if p.is_file()}
     plan=onboard_project.build_plan(repository,workspace)
     assert any('testkit contract current' in item.detail for item in plan)

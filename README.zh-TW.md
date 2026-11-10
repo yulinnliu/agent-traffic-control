@@ -58,9 +58,11 @@ atc/scripts/link-skills.sh path/to/your-repo atc-worktree hami-writing-for-agent
 
 `link-skills.sh` 把每個 skill 以完整受管副本複製進 `.claude/skills/`、
 `.agents/skills/`、`.dsh/skills/`，把 governance 規則 vendor 進
-`.atc/governance/` 並在 `.atc/governance.yaml` 釘住來源與 revision，
-repository 沒有 `CLAUDE.md` 時補上指標檔，並把 governance 區塊插進
-`AGENTS.md` 開頭。之後這個 repository 不依賴任何外部東西：沒有環境變數，
+`.atc/governance/`，在 `.atc/README.md` 寫入 bootloader，並在
+`.atc/atc.lock` 記錄來源與 revision；repository 沒有 `CLAUDE.md` 時補上，
+並在 `AGENTS.md` 第一個章節前插入指標行。`AGENTS.md` 沒有
+`## Integration verification` 章節，或 Git 忽略它要寫的檔案時，它在寫入任何
+東西之前就停下，因為它寫的每個檔案都要 commit。之後這個 repository 不依賴任何外部東西：沒有環境變數，
 也沒有指回本 checkout 的路徑。repository 自己的檔案只回報、不動。`--link`
 改用 symlink；`--prune` 移除正本已不存在的 adapter。Windows 請在 Git Bash 執行。
 
@@ -134,7 +136,7 @@ render 出來的內容相同就是最新，否則 sync 會直接換掉。`atc en
 存取模式產生 hard deny，拒絕無法解析的 token，`--check` 也能比對已安裝的
 設定；有 `workspace.yaml` 時另依各專案的 state root 產生本機 deny，不進
 `generated/enforcement/`。`atc validate --projects` 會檢查專案的 enforcement 產物，並在 `main`
-上確認 governance pin 仍在 `main` 的歷史裡。
+上確認 `.atc/atc.lock` 的 revision 仍在 `main` 的歷史裡。
 
 ## 授權
 

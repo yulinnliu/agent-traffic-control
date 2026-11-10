@@ -41,7 +41,7 @@ def test_sync_commits_on_main_and_records_it(tmp_path: Path, capsys: pytest.Capt
     assert head != before and git_out(project, "status", "--porcelain") == ""
     assert f"  commit: {head}" in capsys.readouterr().out
     assert git_out(project, "log", "-1", "--format=%s") == f"chore(governance): sync from unknown {revision[:7]}"
-    assert (project / ".atc/governance.yaml").read_text(encoding="utf-8").endswith(f"revision: {revision}\n")
+    assert (project / ".atc/atc.lock").read_text(encoding="utf-8").endswith(f'revision = "{revision}"\n')
     [record] = records(project)
     assert (record["kind"], record["candidate_sha"], record["main_before"], record["source_revision"]) == ("sync", head, before, revision)
     assert onboard_project.main(["--sync", "demo"], root=root) == 0
@@ -74,7 +74,7 @@ def test_project_precondition_stops_before_writing(tmp_path: Path, capsys: pytes
             slot.release()
     assert f"  stop: {expected} " in capsys.readouterr().out
     assert git_out(project, "rev-parse", "HEAD") == head
-    assert not (project / ".atc/governance.yaml").exists()
+    assert not (project / ".atc/atc.lock").exists()
     assert records(project) == []
 
 
@@ -90,20 +90,20 @@ def test_atc_checkout_precondition_stops_every_project(tmp_path: Path, capsys: p
         (root / ".agents/skills/demo-skill/SKILL.md").unlink()
     assert onboard_project.main(["--sync", "--all"], root=root) == 2
     assert f"  stop: {expected} " in capsys.readouterr().out
-    assert not (project / ".atc/governance.yaml").exists()
+    assert not (project / ".atc/atc.lock").exists()
     assert case != "adapter" or not (root / ".agents/skills/demo-skill/SKILL.md").exists()
 
 
-def test_ignored_synced_files_make_no_commit(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_ignored_synced_files_stop_before_writing(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     root, project = committed_workspace(tmp_path)
-    run_git(project, "rm", "-q", "--cached", "AGENTS.md")
-    write(project / ".git/info/exclude", "/.atc/\n/.agents/\n/.claude/\n/.dsh/\n/CLAUDE.md\n/AGENTS.md\n")
-    run_git(project, *COMMIT, "local-only governance")
+    write(project / ".git/info/exclude", "/.atc/\n/CLAUDE.md\n")
     head = git_out(project, "rev-parse", "HEAD")
-    assert onboard_project.main(["--sync", "demo"], root=root) == 0
-    assert "  commit: none (no tracked file changed)" in capsys.readouterr().out
+    assert onboard_project.main(["--sync", "demo"], root=root) == 2
+    out = capsys.readouterr().out
+    assert "  stop: IGNORED_OUTPUT every file sync writes is committed; Git ignores or excludes: .atc/README.md, .atc/atc.lock" in out
+    assert "CLAUDE.md" in out.split("IGNORED_OUTPUT")[1]
     assert git_out(project, "rev-parse", "HEAD") == head
-    assert (project / ".atc/governance.yaml").exists()
+    assert not (project / ".atc").exists() and git_out(project, "status", "--porcelain") == ""
     assert records(project) == []
 
 
@@ -169,7 +169,7 @@ def test_checkout_dirtied_before_the_slot_is_taken_stops_inside_it(
     assert onboard_project.main(["--sync", "demo"], root=root) == 2
     assert "  stop: CHECKOUT_DIRTY " in capsys.readouterr().out
     assert git_out(project, "rev-parse", "HEAD") == head
-    assert not (project / ".atc/governance.yaml").exists()
+    assert not (project / ".atc/atc.lock").exists()
 
 
 def test_project_that_is_not_its_own_repository_stops(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -181,7 +181,7 @@ def test_project_that_is_not_its_own_repository_stops(tmp_path: Path, capsys: py
     assert onboard_project.main(["--sync", "demo"], root=root) == 2
     assert "  stop: NOT_A_REPOSITORY " in capsys.readouterr().out
     assert git_out(root, "rev-parse", "HEAD") == head
-    assert not (project / ".atc/governance.yaml").exists()
+    assert not (project / ".atc/atc.lock").exists()
 
 
 def test_root_adapter_collision_stops_every_project(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -191,7 +191,7 @@ def test_root_adapter_collision_stops_every_project(tmp_path: Path, capsys: pyte
     run_git(root, *COMMIT, "unowned adapter")
     assert onboard_project.main(["--sync", "demo"], root=root) == 2
     assert "  stop: ROOT_ADAPTER_DRIFT " in capsys.readouterr().out
-    assert not (project / ".atc/governance.yaml").exists()
+    assert not (project / ".atc/atc.lock").exists()
 
 
 def test_ownership_stops_at_the_directory_boundary(tmp_path: Path) -> None:
@@ -212,3 +212,23 @@ def test_push_listing_names_the_sync_source(tmp_path: Path) -> None:
     record = git_preflight.read_integrations(project)[-1]
     assert (record["task"], record["authority"], record["records_only"]) == (revision, {"kind": "sync"}, False)
     assert "authority_reference" not in record
+
+
+def test_validate_fails_on_an_ignored_synced_file_and_notes_an_uncommitted_one(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import validate_workspace as validator
+    root, project = committed_workspace(tmp_path)
+    assert onboard_project.main(["--sync", "demo"], root=root) == 0
+    monkeypatch.setattr(validator, "ROOT", root)
+    canonical = onboard_project.canonical_skills(root)
+    validator.FAILURES.clear()
+    validator.check_tracked(project, "projects.demo", canonical)
+    assert validator.FAILURES == []
+    run_git(project, "rm", "-q", "--cached", ".atc/atc.lock", ".atc/README.md")
+    write(project / ".git/info/exclude", "/.atc/atc.lock\n")
+    capsys.readouterr()
+    validator.check_tracked(project, "projects.demo", canonical)
+    assert validator.FAILURES == ["projects.demo: .atc/atc.lock is written by sync but Git ignores or excludes it; every file sync writes is committed"]
+    assert "projects.demo: .atc/README.md is written by sync and not committed yet" in capsys.readouterr().out
+    validator.FAILURES.clear()

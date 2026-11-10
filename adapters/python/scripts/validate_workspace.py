@@ -17,9 +17,9 @@ By default only checks this repo's own `.claude/skills/`, `.agents/skills/`
 and `.dsh/skills/` — the ones CI can see. Pass --projects to also check each
 project listed in the real (gitignored, machine-local) workspace.yaml, for
 whichever of those projects actually exist on disk right now — each must
-carry adapters for every `adoption: baseline` skill, the current policy block in
-AGENTS.md and a current vendored governance copy under `.atc/governance/` —
-and to reject user-level duplicates of a canonical skill under
+carry adapters for every `adoption: baseline` skill, the pointer line in
+AGENTS.md and a current `.atc/` (lock, bootloader, vendored governance), all
+tracked — and to reject user-level duplicates of a canonical skill under
 ~/.claude/skills, ~/.agents/skills or ~/.dsh/skills. This only makes sense to
 run locally, not in CI, since projects/ isn't present in a fresh CI checkout.
 
@@ -56,19 +56,26 @@ FORBIDDEN_FALLBACK = re.compile(r"~[\\/]hami(?:[\\/]|\b)", re.IGNORECASE)
 SUPPORTING_PATH = re.compile(r"[A-Za-z0-9._/-]+")
 WORKSPACE_ENV_REFERENCE = re.compile(r"\$(?:\{)?ATC_ROOT\b|\$env:ATC_ROOT\b")
 HARDCODED_GOVERNANCE_SOURCE = re.compile(r"[A-Za-z0-9_.-]+/agent-traffic-control\b")
-POLICY_BEGIN = "<!-- atc:project-policy-reference begin -->"
-POLICY_END = "<!-- atc:project-policy-reference end -->"
-# Any block between our markers is ours to replace, whatever an older release
-# wrote after `begin`; the content comparison decides whether it is current.
-POLICY_BLOCK = re.compile(
+POINTER_MARKER = "<!-- atc:governance -->"
+# The policy block an older release wrote into AGENTS.md, whatever it wrote
+# after `begin`; sync replaces it with the pointer line.
+LEGACY_POLICY_BEGIN = "<!-- atc:project-policy-reference begin -->"
+LEGACY_POLICY_END = "<!-- atc:project-policy-reference end -->"
+LEGACY_POLICY_BLOCK = re.compile(
     r"<!-- atc:project-policy-reference begin[^>]*-->.*?<!-- atc:project-policy-reference end -->",
     re.DOTALL,
 )
 GOVERNANCE_INDEX_RELATIVE = Path("shared") / "governance" / "INDEX.md"
 POLICY_RELATIVE = GOVERNANCE_INDEX_RELATIVE
 GOVERNANCE_MODULES = ("CORE.md", "GIT_WORKFLOW.md", "VERIFICATION.md", "DELIVERY.md", "FAILURE_ESCALATION.md", "GOVERNANCE_CHANGES.md", "PROJECT_RUNTIME.md")
-VENDORED_GOVERNANCE = Path(".atc") / "governance"
-GOVERNANCE_MANIFEST = Path(".atc") / "governance.yaml"
+ATC_DIR = Path(".atc")
+VENDORED_GOVERNANCE = ATC_DIR / "governance"
+ATC_LOCK = ATC_DIR / "atc.lock"
+ATC_README = ATC_DIR / "README.md"
+TASKS_DIR = ATC_DIR / "tasks"
+# The pin file of the layout before atc.lock; sync migrates it.
+LEGACY_MANIFEST = ATC_DIR / "governance.yaml"
+LOCK_VERSION = 1
 VENDORED_INDEX_REFERENCE = ".atc/governance/INDEX.md"
 # GIT_WORKFLOW.md § Integration verifier source: the section every project's
 # AGENTS.md carries and the two fixed lines validate reads out of it.
@@ -80,8 +87,67 @@ TOOL_DIRS = (".claude", ".agents", ".dsh")
 TOOL_KEYS = {".claude": "claude", ".agents": "codex", ".dsh": "dsh"}
 
 
-def policy_template_path(root: Path | None = None) -> Path:
+def pointer_template_path(root: Path | None = None) -> Path:
     return (root or ROOT) / "shared" / "templates" / "PROJECT_AGENTS.md"
+
+
+def atc_readme_template_path(root: Path | None = None) -> Path:
+    return (root or ROOT) / "shared" / "templates" / "ATC_README.md"
+
+
+def pointer_line(root: Path | None = None) -> str:
+    """The one line sync places in a project's AGENTS.md."""
+    return normalise(pointer_template_path(root).read_text(encoding="utf-8")).strip()
+
+
+def render_lock(source: str, revision: str) -> str:
+    """`.atc/atc.lock`: three LF-terminated lines in this key order (docs/LAYOUT.md)."""
+    return f'version = {LOCK_VERSION}\nsource = "{source}"\nrevision = "{revision}"\n'
+
+
+def parse_lock(text: str) -> dict:
+    """The lock's fields; ValueError says what is wrong."""
+    import tomllib
+    try:
+        doc = tomllib.loads(normalise(text))
+    except tomllib.TOMLDecodeError as exc:
+        raise ValueError(f"not valid TOML ({exc})") from None
+    version = doc.get("version")
+    if isinstance(version, bool) or version != LOCK_VERSION:
+        raise ValueError(f"version {version!r} is not {LOCK_VERSION}")
+    for key in ("source", "revision"):
+        if not isinstance(doc.get(key), str) or not doc[key].strip():
+            raise ValueError(f"missing '{key}'")
+    return doc
+
+
+def read_lock(project_path: Path) -> dict | None:
+    """The project's lock, ``None`` when it has none; ValueError for a lock that does not parse."""
+    path = project_path / ATC_LOCK
+    if not path.is_file():
+        return None
+    return parse_lock(path.read_text(encoding="utf-8"))
+
+
+def atc_strays(repo: Path, sync_owned: bool = True) -> list[Path]:
+    """Files under ``repo``'s `.atc/` that neither sync nor the project owns, relative to ``repo``.
+
+    Sync owns `README.md`, `atc.lock` and the vendored modules under
+    `governance/`; `tasks/` is the project's. With ``sync_owned`` false (the
+    workspace root, which is the governance source) only `tasks/` belongs."""
+    atc = repo / ATC_DIR
+    if not atc.is_dir():
+        return []
+    allowed = {ATC_README, ATC_LOCK, *(VENDORED_GOVERNANCE / module for module in vendored_governance_modules())} if sync_owned else set()
+    strays = []
+    for path in sorted(atc.rglob("*")):
+        if path.is_dir() and not path.is_symlink():
+            continue
+        relative = path.relative_to(repo)
+        if relative.parts[:2] == TASKS_DIR.parts or Path(*relative.parts) in allowed:
+            continue
+        strays.append(relative)
+    return strays
 
 
 def fail(msg: str) -> None:
@@ -494,22 +560,28 @@ def check_adapter_tree(
                 check_supporting_files(adapter_file.parent, name)
 
 
-def check_policy_template() -> None:
-    template = policy_template_path()
-    if not template.exists():
-        fail(f"{template}: missing")
+def check_templates() -> None:
+    """The pointer line and the bootloader sync writes into every project."""
+    pointer = pointer_template_path()
+    if not pointer.exists():
+        fail(f"{pointer}: missing")
+    else:
+        lines = normalise(pointer.read_text(encoding="utf-8")).strip().splitlines()
+        if len(lines) != 1 or not lines[0].startswith(POINTER_MARKER) or ATC_README.as_posix() not in lines[0]:
+            fail(f"{pointer}: must be one line starting {POINTER_MARKER} and naming {ATC_README.as_posix()}")
+    readme = atc_readme_template_path()
+    if not readme.exists():
+        fail(f"{readme}: missing")
         return
-    text = template.read_text(encoding="utf-8")
-    if POLICY_BEGIN not in text or POLICY_END not in text:
-        fail(f"{template}: missing ownership markers {POLICY_BEGIN} ... {POLICY_END}")
+    text = readme.read_text(encoding="utf-8")
     if VENDORED_INDEX_REFERENCE not in text:
-        fail(f"{template}: missing the vendored governance index reference {VENDORED_INDEX_REFERENCE}")
-    if "governance revision" not in text.lower() or GOVERNANCE_MANIFEST.as_posix() not in text:
-        fail(f"{template}: missing the exact governance revision pin ({GOVERNANCE_MANIFEST.as_posix()})")
+        fail(f"{readme}: missing the vendored governance index reference {VENDORED_INDEX_REFERENCE}")
+    if "governance revision" not in text.lower() or ATC_LOCK.as_posix() not in text:
+        fail(f"{readme}: missing the exact governance revision lock ({ATC_LOCK.as_posix()})")
     if HARDCODED_GOVERNANCE_SOURCE.search(text):
-        fail(f"{template}: hard-codes a governance source instead of referring to the pinned one")
+        fail(f"{readme}: hard-codes a governance source instead of referring to the locked one")
     if FORBIDDEN_FALLBACK.search(text) or WORKSPACE_ENV_REFERENCE.search(text):
-        fail(f"{template}: locates governance through a machine-local path or environment variable")
+        fail(f"{readme}: locates governance through a machine-local path or environment variable")
 
 
 def check_no_hardcoded_governance_source() -> None:
@@ -518,24 +590,28 @@ def check_no_hardcoded_governance_source() -> None:
             fail(f"{path}: hard-codes a governance source instead of referring to governance_source")
 
 
-def check_project_policy_reference(project_path: Path, label: str) -> None:
+def check_project_pointer(project_path: Path, label: str) -> None:
+    """AGENTS.md carries the current pointer line before its first section."""
     agents_md = project_path / "AGENTS.md"
     if not agents_md.exists():
         fail(f"{label}: {agents_md} missing")
         return
-    text = agents_md.read_text(encoding="utf-8")
-    if POLICY_BEGIN not in text and POLICY_BLOCK.search(text):
-        fail(f"{label}: AGENTS.md policy block is from an older release — run sync to replace it")
+    text = normalise(agents_md.read_text(encoding="utf-8"))
+    if LEGACY_POLICY_BLOCK.search(text):
+        fail(f"{label}: AGENTS.md policy block is from an older release — run sync to replace it with the pointer line")
         return
-    if POLICY_BEGIN not in text or POLICY_END not in text:
-        fail(f"{label}: AGENTS.md missing canonical governance bootstrap")
+    lines = text.splitlines()
+    pointer = next((index for index, line in enumerate(lines) if line.startswith(POINTER_MARKER)), None)
+    if pointer is None:
+        fail(f"{label}: AGENTS.md has no {POINTER_MARKER} pointer line — run sync")
         return
-    if VENDORED_INDEX_REFERENCE not in text:
-        fail(f"{label}: canonical governance bootstrap does not read {VENDORED_INDEX_REFERENCE}")
-    if "governance revision" not in text.lower():
-        fail(f"{label}: canonical governance bootstrap does not bind an exact governance revision")
+    if lines[pointer] != pointer_line():
+        fail(f"{label}: AGENTS.md pointer line differs from shared/templates/PROJECT_AGENTS.md — run sync")
+    heading = next((index for index, line in enumerate(lines) if line.startswith("## ")), None)
+    if heading is not None and heading < pointer:
+        fail(f"{label}: AGENTS.md pointer line comes after its first section")
     if HARDCODED_GOVERNANCE_SOURCE.search(text):
-        fail(f"{label}: AGENTS.md hard-codes a governance source instead of referring to the pinned one")
+        fail(f"{label}: AGENTS.md hard-codes a governance source instead of referring to the locked one")
     if FORBIDDEN_FALLBACK.search(text):
         fail(f"{label}: AGENTS.md contains forbidden ~/Hami fallback")
 
@@ -596,11 +672,11 @@ def vendored_governance_modules() -> tuple[str, ...]:
     return ("INDEX.md", *GOVERNANCE_MODULES)
 
 
-def pin_state(root: Path, revision: str) -> str:
+def lock_state(root: Path, revision: str) -> str:
     """`current` when `revision` is in the history of `root`'s HEAD on `main`, else `stale`.
 
     `not-main` when the checkout is on another branch, whose history would
-    re-pin projects to a commit that disappears with the branch, and
+    re-lock projects to a commit that disappears with the branch, and
     `unverifiable` when `root` has no commits.
     """
     env = {k: v for k, v in os.environ.items() if not k.upper().startswith("GIT_")}
@@ -658,26 +734,28 @@ def report_machine_local(project_path: Path, label: str, workspace_yaml: Path) -
         print(f"--projects: {label}: machine-local state deny in .claude/settings.local.json differs from {workspace_yaml.name}; run atc enforce --local-out and merge")
 
 
-def check_vendored_governance(project_path: Path, label: str) -> None:
-    """The project's `.atc/governance/` equals this checkout's `shared/governance/`."""
-    manifest = project_path / GOVERNANCE_MANIFEST
-    if not manifest.is_file():
-        fail(f"{label}: {GOVERNANCE_MANIFEST.as_posix()} missing — run sync to vendor governance")
-        return
+def check_atc_dir(project_path: Path, label: str) -> None:
+    """The project's `.atc/`: a valid lock, the current bootloader and vendored governance, nothing else but `tasks/`."""
+    for stray in atc_strays(project_path):
+        if stray == LEGACY_MANIFEST:
+            fail(f"{label}: {LEGACY_MANIFEST.as_posix()} is from an older release — run sync to migrate it to {ATC_LOCK.as_posix()}")
+        else:
+            fail(f"{label}: {stray.as_posix()} is not a file sync writes; .atc/ holds README.md, atc.lock, governance/ and the project's tasks/")
     try:
-        doc = yaml.safe_load(manifest.read_text(encoding="utf-8")) or {}
-    except yaml.YAMLError as exc:
-        fail(f"{label}: {GOVERNANCE_MANIFEST.as_posix()} is not valid YAML ({exc})")
-        return
-    if not isinstance(doc, dict) or not is_managed(doc):
-        fail(f"{label}: {GOVERNANCE_MANIFEST.as_posix()} is not marked managed-by: {MANAGED_BY}")
-        return
-    for key in ("source", "revision"):
-        if not isinstance(doc.get(key), str) or not doc[key].strip():
-            fail(f"{label}: {GOVERNANCE_MANIFEST.as_posix()} missing '{key}'")
-    revision = doc.get("revision")
-    if isinstance(revision, str) and revision.strip() and pin_state(ROOT, revision) == "stale":
-        fail(f"{label}: {GOVERNANCE_MANIFEST.as_posix()} revision {revision} is not in the history of main — run sync")
+        lock = read_lock(project_path)
+    except ValueError as exc:
+        fail(f"{label}: {ATC_LOCK.as_posix()}: {exc}")
+        lock = None
+    else:
+        if lock is None:
+            fail(f"{label}: {ATC_LOCK.as_posix()} missing — run sync")
+    if lock is not None and lock_state(ROOT, lock["revision"]) == "stale":
+        fail(f"{label}: {ATC_LOCK.as_posix()} revision {lock['revision']} is not in the history of main — run sync")
+    readme = project_path / ATC_README
+    if not readme.is_file():
+        fail(f"{label}: {ATC_README.as_posix()} missing — run sync")
+    elif normalise(readme.read_text(encoding="utf-8")) != normalise(atc_readme_template_path().read_text(encoding="utf-8")):
+        fail(f"{label}: {ATC_README.as_posix()} differs from shared/templates/ATC_README.md — run sync")
     for module in vendored_governance_modules():
         source = ROOT / "shared" / "governance" / module
         target = project_path / VENDORED_GOVERNANCE / module
@@ -685,6 +763,51 @@ def check_vendored_governance(project_path: Path, label: str) -> None:
             fail(f"{label}: {(VENDORED_GOVERNANCE / module).as_posix()} missing — run sync")
         elif source.is_file() and normalise(target.read_text(encoding="utf-8")) != normalise(source.read_text(encoding="utf-8")):
             fail(f"{label}: {(VENDORED_GOVERNANCE / module).as_posix()} differs from shared/governance/{module} — run sync")
+
+
+def sync_written_paths(project_path: Path, canonical: dict[str, dict]) -> list[str]:
+    """The repository-relative paths sync writes that exist in ``project_path``."""
+    paths = ["AGENTS.md", ATC_README.as_posix(), ATC_LOCK.as_posix(), VENDORED_GOVERNANCE.as_posix()]
+    claude = project_path / "CLAUDE.md"
+    if claude.is_file() and normalise(claude.read_text(encoding="utf-8")) == normalise((ROOT / "CLAUDE.md").read_text(encoding="utf-8")):
+        paths.append("CLAUDE.md")
+    paths += [f"{tool_dir}/skills/{name}" for name in canonical for tool_dir in TOOL_DIRS]
+    return [path for path in paths if (project_path / path).exists()]
+
+
+def git_toplevel(path: Path) -> bool:
+    """Whether ``path`` is the top of its own Git working tree, as a project's checkout is."""
+    env = {k: v for k, v in os.environ.items() if not k.upper().startswith("GIT_")}
+    result = subprocess.run(["git", "-C", str(path), "rev-parse", "--show-toplevel"], capture_output=True, text=True, env=env)
+    return result.returncode == 0 and os.path.normcase(os.path.abspath(result.stdout.strip())) == os.path.normcase(os.path.abspath(path))
+
+
+def check_tracked(project_path: Path, label: str, canonical: dict[str, dict]) -> None:
+    """Every file sync writes is committed (GIT_WORKFLOW.md § Governance sync commits).
+
+    A file Git ignores or excludes can never be committed and fails; a file
+    not committed yet, as `atc bootstrap add` leaves its first onboarding, is
+    reported."""
+    paths = sync_written_paths(project_path, canonical)
+    if not paths or not git_toplevel(project_path):
+        return
+    env = {k: v for k, v in os.environ.items() if not k.upper().startswith("GIT_")}
+
+    def untracked(*options: str) -> list[str]:
+        result = subprocess.run(["git", "-C", str(project_path), "ls-files", "--others", *options, "-z", "--", *paths],
+                                capture_output=True, text=True, encoding="utf-8", env=env)
+        return [] if result.returncode else sorted(entry for entry in result.stdout.split("\0") if entry)
+
+    for path in untracked("--ignored", "--exclude-standard"):
+        fail(f"{label}: {path} is written by sync but Git ignores or excludes it; every file sync writes is committed")
+    for path in untracked("--exclude-standard"):
+        print(f"--projects: {label}: {path} is written by sync and not committed yet")
+
+
+def check_root_atc() -> None:
+    """The workspace root is the governance source: its `.atc/` holds `tasks/` alone."""
+    for stray in atc_strays(ROOT, sync_owned=False):
+        fail(f"workspace root: {stray.as_posix()}: the root's .atc/ holds only tasks/")
 
 
 def check_rules_referenced_in_agents_md() -> None:
@@ -803,8 +926,9 @@ def check_projects(canonical: dict[str, dict], project_checkouts: dict[str, Path
         import testkit_contract
         for problem in testkit_contract.problems(project_path):
             fail(f"projects.{name}.testkit: {problem}")
-        check_project_policy_reference(project_path, label=f"projects.{name}")
-        check_vendored_governance(project_path, label=f"projects.{name}")
+        check_project_pointer(project_path, label=f"projects.{name}")
+        check_atc_dir(project_path, label=f"projects.{name}")
+        check_tracked(project_path, f"projects.{name}", canonical)
         check_project_integration_verifier(project_path, label=f"projects.{name}")
         check_project_enforcement(project_path, label=f"projects.{name}.enforcement")
         report_machine_local(project_path, f"projects.{name}.machine-local", real_workspace_yaml)
@@ -843,7 +967,8 @@ def main(argv: list[str] | None = None) -> int:
     root_prefix = None
     if not args.adapters_only:
         root_prefix = check_task_records(ROOT, label="workspace root")
-        check_policy_template()
+        check_templates()
+        check_root_atc()
         check_no_hardcoded_governance_source()
         check_rules_referenced_in_agents_md()
         check_shipped_files_are_self_contained()

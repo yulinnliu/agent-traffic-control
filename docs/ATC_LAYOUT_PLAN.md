@@ -241,8 +241,11 @@ Side effects:
    `git check-ignore`; an ignored or excluded path stops the project with
    `IGNORED_OUTPUT` and the paths, nothing written. `.atc/tasks/` is not a
    path sync writes and is not checked.
-2. Validate reports a file sync writes that exists but is not tracked.
-3. `scripts/check-skills.sh` reports the same as `ignored`.
+2. Validate, in a project that is the top of its own Git checkout, fails on
+   a file sync writes that Git ignores or excludes, and lists one that is
+   not committed yet as a note: `atc bootstrap add` onboards with `--apply`,
+   which writes without committing, and validates right after.
+3. `scripts/check-skills.sh` reports an ignored one as `ignored`.
 
 Side effects:
 

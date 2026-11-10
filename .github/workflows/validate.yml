@@ -36,14 +36,16 @@ jobs:
           set -eu
           repo=$(mktemp -d)
           git -C "$repo" init -q -b main
-          printf '# AGENTS.md\n\nIntro.\n\n## Build\n\nmake.\n' > "$repo/AGENTS.md"
+          printf '# AGENTS.md\n\nIntro.\n\n## Integration verification\n\n- Verifier argv file: verify.json\n' > "$repo/AGENTS.md"
+          echo '["true"]' > "$repo/verify.json"
           sh scripts/link-skills.sh "$repo" atc-worktree
           sh scripts/check-skills.sh "$repo"
-          grep -qF '<!-- atc:project-policy-reference begin -->' "$repo/AGENTS.md"
+          grep -qx "$(cat shared/templates/PROJECT_AGENTS.md)" "$repo/AGENTS.md"
           test -f "$repo/.atc/governance/INDEX.md"
-          grep -q '^managed-by: agent-traffic-control$' "$repo/.atc/governance.yaml"
+          test -f "$repo/.atc/README.md"
+          grep -q "^revision = \"$(git rev-parse HEAD)\"\$" "$repo/.atc/atc.lock"
           grep -q '^managed-by: agent-traffic-control$' "$repo/.claude/skills/atc-worktree/SKILL.md"
-          if grep -q '\$ATC_ROOT\|\$env:ATC_ROOT' "$repo/.claude/skills/atc-worktree/SKILL.md" "$repo"/.atc/governance/*.md; then echo "installed files point back at the checkout" >&2; exit 1; fi
+          if grep -q '\$ATC_ROOT\|\$env:ATC_ROOT' "$repo/.claude/skills/atc-worktree/SKILL.md" "$repo"/.atc/governance/*.md "$repo/.atc/README.md"; then echo "installed files point back at the checkout" >&2; exit 1; fi
           echo '# edited' >> "$repo/.claude/skills/atc-worktree/SKILL.md"
           echo '# edited' >> "$repo/.atc/governance/CORE.md"
           mkdir -p "$repo/.agents/skills/gone"
@@ -51,20 +53,38 @@ jobs:
           if sh scripts/check-skills.sh "$repo"; then echo "check-skills missed drift" >&2; exit 1; fi
           sh scripts/link-skills.sh --prune "$repo" atc-worktree
           sh scripts/check-skills.sh "$repo"
-      - name: a pinned governance revision outside this checkout's history is stale, and link-skills re-pins it
+      - name: a locked revision outside this checkout's history is stale, and link-skills re-locks it
         shell: bash
         run: |
           set -eu
           repo=$(mktemp -d)
           git -C "$repo" init -q -b main
+          printf '# AGENTS.md\n\n## Integration verification\n\n- Verifier argv file: verify.json\n' > "$repo/AGENTS.md"
+          echo '["true"]' > "$repo/verify.json"
           sh scripts/link-skills.sh "$repo" atc-worktree
-          pin="$repo/.atc/governance.yaml"
-          sed 's/^revision: .*/revision: 0000000000000000000000000000000000000000/' "$pin" > "$pin.tmp" && mv "$pin.tmp" "$pin"
-          if out=$(sh scripts/check-skills.sh "$repo"); then echo "check-skills missed a stale pin" >&2; exit 1; fi
-          echo "$out" | grep -q '^stale      .atc/governance.yaml (revision 0\{40\} not in history)$'
+          lock="$repo/.atc/atc.lock"
+          sed 's/^revision = .*/revision = "0000000000000000000000000000000000000000"/' "$lock" > "$lock.tmp" && mv "$lock.tmp" "$lock"
+          if out=$(sh scripts/check-skills.sh "$repo"); then echo "check-skills missed a stale lock" >&2; exit 1; fi
+          echo "$out" | grep -q '^stale      .atc/atc.lock (revision 0\{40\} not in history)$'
           sh scripts/link-skills.sh "$repo" atc-worktree
           sh scripts/check-skills.sh "$repo"
-          grep -q "^revision: $(git rev-parse HEAD)\$" "$pin"
+          grep -q "^revision = \"$(git rev-parse HEAD)\"\$" "$lock"
+      - name: link-skills stops before writing without the verification section or with an ignored output
+        shell: bash
+        run: |
+          set -eu
+          repo=$(mktemp -d)
+          git -C "$repo" init -q -b main
+          printf '# AGENTS.md\n\n## Build\n\nmake.\n' > "$repo/AGENTS.md"
+          if out=$(sh scripts/link-skills.sh "$repo" atc-worktree); then echo "link-skills missed the missing section" >&2; exit 1; fi
+          echo "$out" | grep -q '^stop       VERIFICATION_SECTION_MISSING '
+          test ! -e "$repo/.atc"
+          printf '\n## Integration verification\n\n- Verifier argv file: verify.json\n' >> "$repo/AGENTS.md"
+          echo '["true"]' > "$repo/verify.json"
+          echo '/.atc/' > "$repo/.git/info/exclude"
+          if out=$(sh scripts/link-skills.sh "$repo" atc-worktree); then echo "link-skills missed an ignored output" >&2; exit 1; fi
+          echo "$out" | grep -q '^stop       IGNORED_OUTPUT '
+          test ! -e "$repo/.atc"
 
   python-adapter:
     strategy:
