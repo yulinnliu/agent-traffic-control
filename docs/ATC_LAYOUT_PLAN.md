@@ -102,7 +102,14 @@ Side effects:
    § Integration verifier source and the project's `AGENTS.md` has no
    `## Integration verification` section, or the argv file it names does not
    exist, sync stops the project with `VERIFICATION_SECTION_MISSING` before
-   writing anything, in onboard and in `link-skills.sh`. Files and lock
+   writing anything. Onboard parses the section with
+   `verification_section.declaration`, the parser `atc integrate` uses: the
+   section runs from the `## Integration verification` heading line to the
+   next `## ` heading or the end of the file, and the argv path is the first
+   line in it matching `Verifier argv file: <path>` (an optional `- ` or
+   `* ` bullet, optional backticks around the path), resolved against the
+   repository root. `link-skills.sh` runs the same check with `sed` on the
+   same lines, CRs stripped, and stops with the same code. Files and lock
    therefore always come from one revision (`CORE.md`: the copy is byte-equal
    to the bound revision). A test runs a sync against a project without the
    section and asserts the code, an unchanged tree and an unchanged lock.
@@ -111,9 +118,9 @@ Side effects:
    `.atc/atc.lock`. When no lock exists it reads `.atc/governance.yaml` that
    carries `managed-by: agent-traffic-control`, the Owner's ruling for the
    period before every project is migrated. The fallback and its test are
-   removed by the ATC root task opened for that purpose once § 9 item 4 holds
-   (`atc validate --projects` passes and every registered project has
-   `.atc/atc.lock`); that task is opened at the end of § 9.
+   removed by the final-sync task, the ATC root task opened once § 9 item 4
+   holds (`atc validate --projects` passes and every registered project has
+   `.atc/atc.lock`); it keeps that name until it has a task ID.
 5. `GOVERNANCE_MANIFEST` and `pin_state` in `validate_workspace.py`, and every
    `pin` name in onboard, the shell scripts and their output lines, become
    `ATC_LOCK`, `lock_state` and `lock`.
@@ -355,7 +362,12 @@ After the topic integrates:
       verifier files untracked, and `.agents/handoffs/` and
       `.claude/settings.local.json` newly ignored; any other ignored path
       that becomes untracked stops the bootstrap and goes to the Owner.
-      Then:
+      Then `git status --short` is read before anything is staged: every
+      untracked path under `.claude/` and `.agents/` must lie in
+      `.claude/skills/` or `.agents/skills/`, and every other untracked path
+      must be `AGENTS.md`, `CLAUDE.md`, a file under `.atc/` or one of the
+      verifier files; any other path stops the bootstrap and goes to the
+      Owner, because `git add .claude .agents` would publish it. Then:
 
       ```sh
       git switch -c atc-bootstrap
@@ -396,8 +408,8 @@ After the topic integrates:
 3. The root's own `atc onboard --sync --root-only` (§ 7) runs in its
    checkout's topic only; the root has no migration step.
 4. `atc validate --projects` passes with no problem, and every registered
-   project has `.atc/atc.lock`. This opens the ATC root task that removes
-   the fallback of § 2 item 4.
+   project has `.atc/atc.lock`. This opens the final-sync task, which
+   removes the fallback of § 2 item 4.
 5. The workspace handoff and agent memory describe the new layout.
 
 Side effects:
