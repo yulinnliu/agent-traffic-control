@@ -1,0 +1,14 @@
+task_id: ATC-0007
+repository: yulinnliu/agent-traffic-control
+base_sha: 5b03b146de06cffbe0483d40c28f9ca6d6906eff
+scope: Specify the .atc layout with atc.lock and plan its rollout (design gate)
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: 5b03b146de06cffbe0483d40c28f9ca6d6906eff
+branch: worktree-claude+atc-layout
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
