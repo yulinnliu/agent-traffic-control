@@ -14,8 +14,8 @@ root. Selection is by test file and reads the static structure of the code:
 - A guarded path (`GUARDED`: `shared/governance/`, `shared/skills/`, the
   rendered `.claude/skills/`, `.agents/skills/` and `.dsh/skills/`, the root
   `AGENTS.md` and `CLAUDE.md`) selects its declared readers. Markdown there
-  selects them only, never through names; another kind of file adds the test
-  files whose reach names its file name. With no test file, Markdown selects
+  selects them only, never through names, and so does a directory; a file of
+  another kind adds the test files whose reach names its file name. With no test file, Markdown selects
   nothing and another file the full suite.
   `validate_workspace.py`, not the selection, checks them.
 - `conftest.py`, the pytest plugin and everything they import at load time
@@ -275,7 +275,7 @@ def classify(path: str, selection: TestSelection, graph: Graph) -> None:
         return
     readers = {test for test, entries in DIRECTORY_READERS.items() if any(covers(e, path) for e in entries)}
     if any(covers(entry, path) for entry in GUARDED):
-        if pure.suffix.lower() != ".md":
+        if pure.suffix and pure.suffix.lower() != ".md" and not path.endswith("/"):
             readers |= graph.naming((pure.name,))
         if readers:
             selection.add(path, readers, "declared readers in this checkout; validate_workspace.py checks it")

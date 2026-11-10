@@ -117,6 +117,11 @@ def test_a_guarded_file_other_than_markdown_adds_the_tests_that_name_it(graph):
         test.removeprefix(f"{ADAPTER}/") for test in named} | {"tests/test_shell_install.py", "tests/test_tooling.py"}
 
 
+@pytest.mark.parametrize("path", ["shared/governance/", "shared/governance", ".claude/skills/atc-review/"])
+def test_a_guarded_directory_selects_its_declared_readers_only(graph, path):
+    assert chosen(graph, path) == ["tests/test_shell_install.py"]
+
+
 def test_a_guarded_path_no_declared_test_reads_selects_by_kind(graph, monkeypatch):
     monkeypatch.setattr(select_tests, "DIRECTORY_READERS", {})
     assert chosen(graph, "shared/skills/atc-review/SKILL.md") is None
