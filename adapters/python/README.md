@@ -63,12 +63,11 @@ stage's count for one run, and `test_workers = N` in `~/.atc/config.toml` for
 every run on this host outside CI (`docs/ATC_HOME.md` § Host settings). Each
 stage logs to `.tmp/ci-<stage>.log`.
 
-The `Verifier timeout` in the root `AGENTS.md` is the test budget, 1800 s,
-fixed rather than derived from a run and not scaled by the worker count. A
-verifier run that exceeds it stops with `VERIFICATION_TIMEOUT` and "test
-budget exceeded": the tests are optimised, or the Owner decides; nothing
-raises the budget on its own. The staged full suite takes about 232 s at 8
-workers on this repository's development host.
+The `Verifier timeout` in the root `AGENTS.md` is the test budget, 1800 s
+(governance `VERIFICATION.md` § Verifier test budget). A verifier run that
+exceeds it stops with `VERIFICATION_TIMEOUT` and "test budget exceeded". The
+staged full suite takes about 232 s at 8 workers on this repository's
+development host.
 
 ## Selected tests
 

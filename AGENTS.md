@@ -41,7 +41,7 @@ Tasks here are identified by record (governance `CORE.md` § Task identity).
 
 - Verifier argv file: adapters/python/scripts/integration-verify.json
 - Verifier timeout: 1800
-  (the test budget; `adapters/python/README.md` states its rule)
+  (the test budget, governance `VERIFICATION.md` § Verifier test budget)
 
 The argv runs `adapters/python/scripts/integration_verify.py` in the
 candidate's own `adapters/python/.venv/` built from `uv.lock`; that script

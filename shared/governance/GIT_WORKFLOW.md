@@ -490,7 +490,10 @@ Every registered project's `AGENTS.md` carries a section headed exactly
 - `Verifier argv file: <repo-relative path>` — the file holding the JSON
   string array `atc integrate` runs.
 - `Verifier timeout: <seconds>` — only when the verifier needs a bound other
-  than the default 300 seconds.
+  than the default 300 seconds; it is the test budget of `VERIFICATION.md`
+  § Verifier test budget.
+- `Verifier budget approval: ...` — only beside a `Verifier timeout` above
+  1800 seconds, in the form that section gives.
 - What the verification covers, by change class, including the project's
   required gates.
 - How the verifier itself applies `VERIFICATION.md` § Documentation-only

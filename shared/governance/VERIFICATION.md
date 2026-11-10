@@ -188,6 +188,25 @@ Changing an existing project rule that requires earlier or broader checks
 needs explicit approval from the responsible authority; apply this default
 under the authority precedence in `CORE.md`.
 
+### Verifier test budget
+
+A project's `Verifier timeout` (`GIT_WORKFLOW.md` § Project verification
+section) is its integration verifier's test budget: at most 1800 seconds. The
+budget is fixed; it is not derived from a measured run and not scaled by the
+worker count. A verifier run that exceeds it is a signal to optimise the tests
+or for the Owner to decide; a retry does not help, and nothing raises the
+budget automatically.
+
+A project needing a larger budget declares it in its `AGENTS.md` as its
+`Verifier timeout`, with this line beside it:
+
+```text
+Verifier budget approval: <the Owner's recorded words and date>; reason: <reason>
+```
+
+The breach signal then counts against that declared budget. A project that
+declares no timeout keeps the default `GIT_WORKFLOW.md` states.
+
 ### Testing
 
 Tests are one means of verification. Full-suite venue and timing follow the
