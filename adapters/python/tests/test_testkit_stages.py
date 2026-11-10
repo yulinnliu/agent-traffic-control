@@ -113,6 +113,26 @@ def test_a_flag_count_is_ascii_digits_from_one_to_the_cpu_count(monkeypatch: pyt
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(("text", "count"), [("2", 2), ("4", 4), ("8", 8), ("08", 8), ("9", None), ("16", None)])
+def test_a_flag_count_on_a_two_cpu_host_goes_to_eight(monkeypatch: pytest.MonkeyPatch, text: str,
+                                                      count: int | None) -> None:
+    monkeypatch.setattr(os, "cpu_count", lambda: 2)
+    assert stages.flag_count(text) == count
+    assert stages.default_workers() == 2
+    assert "1 to 8" in stages.flag_rule() and "1 to 2," in stages.host_rule()
+
+
+@pytest.mark.unit
+def test_a_host_file_count_above_the_cpu_count_is_refused_though_the_flag_takes_it(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(os, "cpu_count", lambda: 2)
+    assert stages.flag_count("4") == 4
+    with pytest.raises(stages.locations.Refusal) as refused:
+        stages.resolve_workers(None, {}, host_file(tmp_path, "test_workers = 4\n"))
+    assert refused.value.token == "ATC_CONFIG_INVALID" and "1 to 2, the logical CPU count" in str(refused.value)
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(("value", "count"), [(1, 1), (24, 24), (25, None), (0, None), ("8", None), (True, None),
                                               (2.0, None), (None, None)])
 def test_a_host_count_is_a_toml_integer_from_one_to_the_cpu_count(monkeypatch: pytest.MonkeyPatch, value: object,

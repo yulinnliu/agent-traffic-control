@@ -157,7 +157,7 @@ def main(args: Sequence[str] | None = None, *, context: Context | None = None, h
         if rest[:1] == ["--workers"]:
             workers = stages.flag_count(rest[1]) if len(rest) > 1 else None
             if workers is None:
-                print(f"{USAGE} --workers takes {stages.count_rule()}", file=sys.stderr, flush=True)
+                print(f"{USAGE} --workers takes {stages.flag_rule()}", file=sys.stderr, flush=True)
                 return USAGE_EXIT
             rest = rest[2:]
         return run_all_stages(rest, workers)

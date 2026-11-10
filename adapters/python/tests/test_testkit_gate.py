@@ -229,6 +229,25 @@ def test_the_worker_flag_sets_the_parallel_stage(repo: Path, capsys: pytest.Capt
 
 
 @pytest.mark.integration
+@pytest.mark.parametrize(("value", "accepted"), [("4", True), ("8", True), ("9", False)])
+def test_the_worker_flag_goes_to_eight_on_a_two_cpu_host(repo: Path, monkeypatch: pytest.MonkeyPatch,
+                                                         capsys: pytest.CaptureFixture[str], value: str,
+                                                         accepted: bool) -> None:
+    monkeypatch.setattr(os, "cpu_count", lambda: 2)
+    base = git(repo, "rev-parse", "HEAD")
+    sha = commit(repo, "a.py")
+    recorder = Recorder()
+    arguments = ["--run", "--workers", value]
+    if accepted:
+        assert gate.main(project(repo), arguments, [push_line(repo, base, sha)], recorder) == 0
+        assert f"workers: {value} (flag)" in capsys.readouterr().out
+    else:
+        with pytest.raises(SystemExit) as stopped:
+            gate.main(project(repo), arguments, [])
+        assert stopped.value.code == 2 and "takes an integer from 1 to 8," in capsys.readouterr().err
+
+
+@pytest.mark.integration
 @pytest.mark.parametrize("value", ["0", "100000", "9" * 5000, "\u0661\u0666"])
 def test_a_bad_worker_flag_is_a_usage_error(repo: Path, value: str) -> None:
     with pytest.raises(SystemExit) as stopped:

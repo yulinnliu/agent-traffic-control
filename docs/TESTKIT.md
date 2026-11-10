@@ -66,8 +66,10 @@ order. Each is one pytest invocation over the selected paths.
   stages (the CI runner's `--stages`, the gate's `--run`); `test_workers` in
   the host file `~/.atc/config.toml` (`ATC_HOME.md` § Host settings), read
   only when `CI` is not set; `min(8, cpu count)`. The verifier takes no flag,
-  so the host file is its override. A count is an integer from 1 to the
-  logical CPU count: ASCII digits on the flag, a TOML integer in the key. A
+  so the host file is its override. A count is an integer: ASCII digits on
+  the flag, from 1 to the larger of 8 and the logical CPU count (a runner of
+  fewer CPUs may oversubscribe up to 8); a TOML integer in the key, from 1 to
+  the logical CPU count. A
   bad flag stops with `USAGE`, a host file that cannot be read or decoded
   as UTF-8 or a bad key with `ATC_CONFIG_INVALID` (exit 9), before any check
   or stage runs; a count is never clamped. The

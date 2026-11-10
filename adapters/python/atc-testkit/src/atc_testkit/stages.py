@@ -74,33 +74,46 @@ def host_config() -> Path:
     return Path.home() / ".atc" / HOST_CONFIG_NAME
 
 
-def most_workers() -> int:
-    """The largest count a flag or the host file may give: the logical CPU count."""
+def most_host_workers() -> int:
+    """The largest ``test_workers`` the host file may give: the logical CPU count."""
     return os.cpu_count() or 1
 
 
-def _in_range(count: int) -> int | None:
-    return count if 1 <= count <= most_workers() else None
+def most_flag_workers() -> int:
+    """The largest ``--workers`` count: ``MAX_WORKERS``, or the logical CPU count when that is larger.
+
+    A flag may oversubscribe a small runner up to ``MAX_WORKERS``; the host file may not.
+    """
+    return max(MAX_WORKERS, most_host_workers())
 
 
 def flag_count(text: str) -> int | None:
-    """A ``--workers`` value: ASCII digits naming 1 to ``most_workers()``; ``None`` for anything else.
+    """A ``--workers`` value: ASCII digits naming 1 to ``most_flag_workers()``; ``None`` for anything else.
 
     Leading zeros go before the length check, so a value never reaches ``int`` longer than the bound's digits.
     """
     if not (text.isascii() and text.isdigit()):
         return None
     digits = text.lstrip("0") or "0"
-    return _in_range(int(digits)) if len(digits) <= len(str(most_workers())) else None
+    if len(digits) > len(str(most_flag_workers())):
+        return None
+    count = int(digits)
+    return count if 1 <= count <= most_flag_workers() else None
 
 
 def host_count(value: object) -> int | None:
-    """A ``test_workers`` value: a TOML integer from 1 to ``most_workers()``; ``None`` for anything else."""
-    return _in_range(value) if isinstance(value, int) and not isinstance(value, bool) else None
+    """A ``test_workers`` value: a TOML integer from 1 to ``most_host_workers()``; ``None`` for anything else."""
+    if not isinstance(value, int) or isinstance(value, bool):
+        return None
+    return value if 1 <= value <= most_host_workers() else None
 
 
-def count_rule() -> str:
-    return f"an integer from 1 to {most_workers()}, the logical CPU count"
+def flag_rule() -> str:
+    return f"an integer from 1 to {most_flag_workers()}, the larger of {MAX_WORKERS} and the logical CPU count"
+
+
+def host_rule() -> str:
+    return f"an integer from 1 to {most_host_workers()}, the logical CPU count"
 
 
 def resolve_workers(flag: int | None = None, environ: Mapping[str, str] | None = None,
@@ -108,7 +121,7 @@ def resolve_workers(flag: int | None = None, environ: Mapping[str, str] | None =
     """The flag, then ``test_workers`` in the host file unless ``CI`` is set, then ``default_workers()``.
 
     A host file that cannot be read, decoded or parsed, or a key that is not a TOML integer from 1 to
-    ``most_workers()``, raises ``locations.Refusal`` with ``ATC_CONFIG_INVALID``. The flag is checked where it is
+    ``most_host_workers()``, raises ``locations.Refusal`` with ``ATC_CONFIG_INVALID``. The flag is checked where it is
     parsed (``flag_count``).
     """
     if flag is not None:
@@ -127,7 +140,7 @@ def resolve_workers(flag: int | None = None, environ: Mapping[str, str] | None =
             count = host_count(table[WORKERS_KEY])
             if count is None:
                 raise locations.Refusal(CONFIG_INVALID, f"{path}: {WORKERS_KEY} = {table[WORKERS_KEY]!r} is not "
-                                                        f"{count_rule()}", CONFIG_EXIT)
+                                                        f"{host_rule()}", CONFIG_EXIT)
             return Workers(count, SOURCE_HOST)
     return Workers(default_workers(), SOURCE_DEFAULT)
 

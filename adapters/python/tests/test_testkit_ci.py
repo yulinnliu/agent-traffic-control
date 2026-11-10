@@ -5,6 +5,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -140,6 +141,23 @@ def test_a_bad_worker_flag_stops_before_any_stage(project: Path, monkeypatch: py
     monkeypatch.setattr(stages, "run_stages", lambda *args, **options: started.append(args))
     assert ci.main(["--stages", *workers]) == 2
     assert capsys.readouterr().err.startswith("USAGE --workers") and started == []
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(("flag", "code"), [("4", 0), ("8", 0), ("9", 2)])
+def test_the_worker_flag_goes_to_eight_on_a_two_cpu_host(project: Path, monkeypatch: pytest.MonkeyPatch,
+                                                         capsys: pytest.CaptureFixture[str], flag: str,
+                                                         code: int) -> None:
+    monkeypatch.chdir(project)
+    monkeypatch.setattr(os, "cpu_count", lambda: 2)
+    started = []
+    monkeypatch.setattr(stages, "run_stages", lambda *args, **options: started.append(options) or SimpleNamespace(token=None, code=0))
+    assert ci.main(["--stages", "--workers", flag]) == code
+    if code:
+        error = capsys.readouterr().err
+        assert error.startswith("USAGE --workers takes an integer from 1 to 8,") and started == []
+    else:
+        assert started[0]["workers"] == stages.Workers(int(flag), "flag")
 
 
 @pytest.mark.unit

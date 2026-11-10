@@ -20,7 +20,7 @@ SELECTION_FAILED_EXIT = 2
 def _count(value: str) -> int:
     count = stages.flag_count(value)
     if count is None:
-        raise argparse.ArgumentTypeError(f"takes {stages.count_rule()}")
+        raise argparse.ArgumentTypeError(f"takes {stages.flag_rule()}")
     return count
 
 
