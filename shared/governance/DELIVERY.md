@@ -266,10 +266,10 @@ the repository has no managed worktrees, its scratches and its report files
 in `~/.atc/reports/` (`<task>-*.md`, the writer's and the reviewer's; Git
 history keeps the change and `integrations.jsonl` the integration's task,
 authority and reviewed SHA), archives its sessions, then reports. Keep
-exceptions are written in the task record. Items outside the task, `REFUSED` and `ANOMALY`
-lines, refused archives and failed integrations go to the Owner. Every push
-still needs the Owner's word under § 10 and is not a precondition of
-close-out; a held or failed push is fixed from `main` in a new worktree.
+exceptions are written in the task record. Items outside the task,
+`REFUSED` and `ANOMALY` lines, refused archives and failed integrations go to
+the Owner. Push is not a precondition of close-out; push authority follows
+§ 10. A held or failed push is fixed from `main` in a new worktree.
 
 ## Background work
 
