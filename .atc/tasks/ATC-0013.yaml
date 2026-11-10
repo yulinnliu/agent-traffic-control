@@ -1,0 +1,17 @@
+task_id: ATC-0013
+repository: yulinnliu/agent-traffic-control
+base_sha: 6950ad49a1edafd9c60c9ef5d3cda91daa767819
+scope: 'CLI trim before the final project sync: drop flags only the root uses (--authority-reference,
+  --task optional, --repo vs --project, integrate --branch, --contract, onboard --apply,
+  tmp clean --tree-name) after inventorying callers of friction/classify/policies/enforce/bootstrap;
+  shared skills follow'
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: 6950ad49a1edafd9c60c9ef5d3cda91daa767819
+branch: worktree-claude+cli-trim
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
