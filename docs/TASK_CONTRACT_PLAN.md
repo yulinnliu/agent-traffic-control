@@ -1376,20 +1376,26 @@ review, one implementation review and one integration:
       `interactive_desktop` tests, printing one line that says so and names
       the opt-out. `0` runs on the interactive desktop with those tests
       included. Unset and `1` are private; any other value is refused with
-      `PRIVATE_DESKTOP_INVALID` (exit 9). The variable stays the one
+      `PRIVATE_DESKTOP_INVALID` (exit 9, the code every refusal before the
+      run shares; the token tells it apart). The variable stays the one
       switch: the positional form passes every argument after `<label>` to
       pytest, so it has no room for a flag, and D.12's flag form reads the
       same variable.
     - A guard in `atc_testkit.plugin`: on Windows, a session whose own
       desktop is the interactive one (`WinSta0\Default`, read through
       `GetThreadDesktop` and `GetUserObjectInformationW`) refuses a Tk root
-      created in a test not marked `interactive_desktop`, or outside any
-      test (collection, a session fixture). `tkinter.Tk.__init__` raises
-      `INTERACTIVE_DESKTOP_WINDOW` naming the test and the two ways out
-      (`atc test run`, or the marker) before Tcl creates the window, and
-      the test's report is failed at teardown as well, so product code that
-      swallows the exception does not hide it. `Toplevel` needs a root and
-      `tkinter.Tcl()` opens no window, so the root is the one place.
+      created for an item not marked `interactive_desktop`. A fixture's
+      setup and teardown count as part of the item being set up or torn
+      down, so a module- or session-scoped Tk fixture set up for a marked
+      test passes; a root created at collection, or at session start before
+      any item, is refused. `tkinter.Tk.__init__` with `useTk` true, and
+      `Tk.loadtk`, raise `INTERACTIVE_DESKTOP_WINDOW` naming the item and
+      the two ways out (`atc test run`, or the marker) before Tcl creates
+      the window, and the item's report is failed at teardown as well, so
+      product code that swallows the exception does not hide it.
+      `tkinter.Tcl()` (`useTk=False`) opens no window and passes;
+      `Toplevel` needs a root. The plugin imports `tkinter` only when the
+      guard is on, and a Python without it has nothing to guard.
       `ATC_DESKTOP_GUARD` overrides the detection: `0` off, `1` on, unset
       automatic; any other value is a usage error (exit 4). A failure, not
       a warning: only a refusal before the window exists keeps the desktop
@@ -1442,13 +1448,22 @@ review, one implementation review and one integration:
     which cost a second word.
     - `atc verify --repo <checkout> --reviewed <full sha>
       [--rebased <full sha>] [--branch <name>] [--json]`: the target
-      options of `atc integrate`, without authority. It fetches and
-      preflights as `atc integrate --check` does, builds the candidate
-      `atc integrate` would build (the reviewed commit on a fast-forward,
-      the merge on `NO_FF`) in a detached worktree under `<tmp>/candidates`,
-      runs the project's verifier from that candidate's own argv file and
-      timeout, and removes the candidate. It takes no slot, updates no ref,
-      writes no evidence or integration record and needs no Owner's word.
+      options of `atc integrate`, without authority. It resolves and
+      preflights as `atc integrate --check` does (its fetch updates
+      `origin/*`), and takes the verifier's argv file and timeout from
+      `AGENTS.md` at the `main` tip it integrates into, as `atc integrate`
+      does (`GIT_WORKFLOW.md` § Integration verifier source,
+      `declared_verifier`). The candidate build and verification move out
+      of `integrate()`'s Integration Slot into one slot-free function,
+      `build_and_verify(repo, main_before, reviewed, verdict, argv,
+      timeout)`, which builds the candidate (the reviewed commit on a
+      fast-forward, the merge on `NO_FF`) in a detached worktree under
+      `<tmp>/candidates`, runs the verifier, or the record check for a
+      records-only range as `atc integrate` does, and removes the
+      candidate. `atc integrate` calls it inside its slot as before;
+      `atc verify` calls it with no slot. `atc verify` creates no local
+      branch or candidate ref, writes no evidence or integration record,
+      and needs no Owner's word.
       Its last line is `VERIFY PASS <candidate sha>`, or the refusal
       `atc integrate` would give after the candidate
       (`VERIFICATION_FAILED`, `VERIFICATION_TIMEOUT`, `CANDIDATE_CHANGED`)
@@ -1458,18 +1473,27 @@ review, one implementation review and one integration:
       desktop) are the integration's own; a separate selection command
       would need each project's selector and its static checks restated.
     - A separate command, not `atc integrate --check --verify`:
-      `GIT_WORKFLOW.md` § Integrate says the check creates no candidate,
-      and changing that is a governance edit (batch 2). No governance text
-      has to change for `atc verify`.
-    - `atc-review` (a skill edit): before a PASS on a tests or behaviour
-      diff the reviewer runs `atc verify` with the integrate command's
-      target arguments and quotes its last line in the verified line; a
-      refusal is a blocker finding. Synced with
-      `atc onboard --sync --root-only`.
+      `GIT_WORKFLOW.md` § Integrate says the check creates no candidate.
+    - Governance, on the Owner's authorization (「現在授權，留第一批」,
+      for `VERIFICATION.md` § Independent review only): that section says a
+      reviewer does not rerun the writer's selection. It gains the rule
+      that before a PASS on a tests or behaviour diff the reviewer runs
+      `atc verify`, quotes its last line in the verified line, and treats a
+      refusal as a blocker; the "does not rerun" paragraph is reworded so
+      the targeted tests stay the reviewer's own choice and `atc verify` is
+      the one run of the writer's selection it makes.
+    - `atc-review` (a skill edit): step 4 and the verified line name
+      `atc verify` with the integrate command's target arguments. Synced
+      with `atc onboard --sync --root-only`.
     - Side effects:
       - About four minutes per review plus the candidate's environment
         (the root and hami-quant-trading build `.venv` from the lock), and
         integration runs the verifier again: no evidence carries over.
+      - Its fetch can meet a ref lock held by a concurrent
+        `atc integrate` fetch, and a verifier running beside an
+        integration's verifier shares the CPU, which slows both against the
+        1800-second budget; a reviewer runs it when no integration is
+        running, and a lock failure is retried by rerunning it.
       - A candidate worktree is registered in the checkout's `.git` while
         it runs; one left by a crash is pruned by `atc tmp prune` after
         seven days, and an `atc worktree audit` run meanwhile lists it as
