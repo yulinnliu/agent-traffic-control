@@ -92,10 +92,35 @@ def test_a_root_file_entry_selects_its_reader_and_nothing_beside_it(graph, monke
     assert select_tests.covers("AGENTS.md", "AGENTS.md") and not select_tests.covers("AGENTS.md", "AGENTS.mdx")
 
 
+@pytest.mark.parametrize(("entry", "path"), [
+    ("shared/skills", "Shared/Skills/atc-review/SKILL.md"),
+    ("shared/skills/", "shared/skills/atc-review/SKILL.md"),
+    (r"shared\skills", "shared/skills/atc-review/SKILL.md"),
+    ("AGENTS.md", "agents.md"),
+])
+def test_an_entry_matches_whatever_its_case_separators_and_trailing_slash(graph, monkeypatch, entry, path):
+    monkeypatch.setattr(select_tests, "DIRECTORY_READERS", {f"{ADAPTER}/tests/test_tooling.py": (entry,)})
+    assert chosen(graph, path) == ["tests/test_tooling.py"]
+
+
+def test_a_rename_selects_for_the_old_and_the_new_path(graph):
+    assert chosen(graph, "shared/skills/atc-review/SKILL.md", "docs/NO_TEST_NAMES_THIS.md") == [
+        "tests/test_shell_install.py", "tests/test_tooling.py"]
+    assert chosen(graph, "docs/NO_TEST_NAMES_THIS.md", "AGENTS.md") == [
+        "tests/test_integration_verify.py", "tests/test_shell_install.py"]
+
+
+def test_a_guarded_file_other_than_markdown_adds_the_tests_that_name_it(graph):
+    named = graph.naming(("validate_workspace.py",))
+    assert "tests/test_bootstrap.py" in {test.removeprefix(f"{ADAPTER}/") for test in named}
+    assert set(chosen(graph, "shared/skills/demo/validate_workspace.py")) == {
+        test.removeprefix(f"{ADAPTER}/") for test in named} | {"tests/test_shell_install.py", "tests/test_tooling.py"}
+
+
 def test_a_guarded_path_no_declared_test_reads_selects_by_kind(graph, monkeypatch):
     monkeypatch.setattr(select_tests, "DIRECTORY_READERS", {})
     assert chosen(graph, "shared/skills/atc-review/SKILL.md") is None
-    assert chosen(graph, ".agents/skills/atc-review/helper.py") == []
+    assert chosen(graph, ".agents/skills/atc-review/no_test_names_this.py") == []
 
 
 @pytest.mark.parametrize("path", [

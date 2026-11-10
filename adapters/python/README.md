@@ -87,10 +87,14 @@ in the script, and a new such test is added there.
 The root's guidance and skills (`shared/governance/`, `shared/skills/`, the
 rendered `.claude/skills/`, `.agents/skills/` and `.dsh/skills/`, the root
 `AGENTS.md` and `CLAUDE.md`) select only the tests declared in
-`DIRECTORY_READERS` as reading them in this checkout; their own check is
-`uv run --locked atc validate`, run after touching them. `tests/root_reads.py`
-records each test file's reads of those paths, and counts a run of this
+`DIRECTORY_READERS` as reading them in this checkout; a file there other
+than Markdown also selects the tests whose reach names it. Guarded Markdown
+no declared test reads selects nothing: its own check is
+`uv run --locked atc validate`, run after touching it. Markdown outside these
+paths that no test names selects nothing too. `tests/root_reads.py` records
+each test file's reads of the guarded paths, and counts a run of this
 checkout's `scripts/*.sh` as reading all of them; a session in which a test
 file reads one undeclared fails with `ROOT_READ_UNDECLARED`, naming the
-test and the paths. Existence checks and what a child Python process opens
-are not recorded.
+test and the paths, and under `-n` each worker hands its failures to the
+controller. Existence checks and what a child Python process opens are not
+recorded.

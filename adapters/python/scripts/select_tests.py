@@ -13,8 +13,10 @@ root. Selection is by test file and reads the static structure of the code:
   `DIRECTORY_READERS` and runs for a change to that entry or below it.
 - A guarded path (`GUARDED`: `shared/governance/`, `shared/skills/`, the
   rendered `.claude/skills/`, `.agents/skills/` and `.dsh/skills/`, the root
-  `AGENTS.md` and `CLAUDE.md`) selects its declared readers only, never through
-  names; with none, Markdown selects nothing and another file the full suite.
+  `AGENTS.md` and `CLAUDE.md`) selects its declared readers. Markdown there
+  selects them only, never through names; another kind of file adds the test
+  files whose reach names its file name. With no test file, Markdown selects
+  nothing and another file the full suite.
   `validate_workspace.py`, not the selection, checks them.
 - `conftest.py`, the pytest plugin and everything they import at load time
   (the reader guard `tests/root_reads.py` and this script among them),
@@ -97,7 +99,9 @@ DIRECTORY_READERS = {
 
 
 def covers(entry: str, path: str) -> bool:
-    """Whether ``path`` is the declared ``entry`` or lies below it."""
+    """Whether ``path`` is the declared ``entry`` or lies below it, whatever its separators and case."""
+    entry = entry.replace("\\", "/").rstrip("/").casefold()
+    path = path.replace("\\", "/").rstrip("/").casefold()
     return path == entry or path.startswith(f"{entry}/")
 
 
@@ -271,6 +275,8 @@ def classify(path: str, selection: TestSelection, graph: Graph) -> None:
         return
     readers = {test for test, entries in DIRECTORY_READERS.items() if any(covers(e, path) for e in entries)}
     if any(covers(entry, path) for entry in GUARDED):
+        if pure.suffix.lower() != ".md":
+            readers |= graph.naming((pure.name,))
         if readers:
             selection.add(path, readers, "declared readers in this checkout; validate_workspace.py checks it")
         elif pure.suffix.lower() == ".md":

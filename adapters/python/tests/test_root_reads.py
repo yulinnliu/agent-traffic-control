@@ -28,7 +28,10 @@ TEST_FILES = {
     "test_shell.py": "import subprocess, sys\nfrom pathlib import Path\n\ndef test_runs():\n"
                      "    stand_in = Path(__file__).parents[1] / 'scripts' / 'stand-in.sh'\n"
                      "    subprocess.run([sys.executable, '-c', 'pass', str(stand_in)], check=True)\n",
-    "test_declared.py": "from pathlib import Path\n\ndef test_reads():\n"
+    "test_relative_shell.py": "import subprocess, sys\nfrom pathlib import Path\n\ndef test_runs():\n"
+                              "    subprocess.run([sys.executable, '-c', 'pass', 'scripts/stand-in.sh'],\n"
+                              "                   cwd=Path(__file__).parents[1], check=True)\n",
+    "test_declared.py":"from pathlib import Path\n\ndef test_reads():\n"
                         "    Path(__file__).parents[1].joinpath('shared/skills/demo/skill.md').read_text()\n",
 }
 
@@ -44,23 +47,25 @@ def checkout(tmp_path: Path) -> Path:
     return root
 
 
-def run(root: Path, test: str) -> subprocess.CompletedProcess[str]:
+def run(root: Path, test: str, *args: str) -> subprocess.CompletedProcess[str]:
     environment = {key: value for key, value in os.environ.items() if not key.startswith("PYTEST_")}
     environment["PYTHONIOENCODING"] = "utf-8"
-    return subprocess.run([sys.executable, "-m", "pytest", "-p", "no:cacheprovider", f"tests/{test}"], cwd=root,
+    return subprocess.run([sys.executable, "-m", "pytest", "-p", "no:cacheprovider", *args, f"tests/{test}"], cwd=root,
                           env=environment, capture_output=True, text=True, encoding="utf-8", stdin=subprocess.DEVNULL)
 
 
-def test_an_undeclared_open_fails_the_session(checkout: Path) -> None:
-    result = run(checkout, "test_open.py")
+@pytest.mark.parametrize("workers", [(), ("-n", "2")], ids=["serial", "xdist"])
+def test_an_undeclared_open_fails_the_session(checkout: Path, workers: tuple[str, ...]) -> None:
+    result = run(checkout, "test_open.py", *workers)
     assert result.returncode == 1, result.stdout + result.stderr
     assert "ROOT_READ_UNDECLARED: tests/test_open.py reads shared/governance/core.md" in result.stdout
 
 
-def test_an_undeclared_shell_script_child_reads_every_guarded_path(checkout: Path) -> None:
-    result = run(checkout, "test_shell.py")
+@pytest.mark.parametrize("test", ["test_shell.py", "test_relative_shell.py"])
+def test_an_undeclared_shell_script_child_reads_every_guarded_path(checkout: Path, test: str) -> None:
+    result = run(checkout, test)
     assert result.returncode == 1, result.stdout + result.stderr
-    assert "ROOT_READ_UNDECLARED: tests/test_shell.py reads shared/governance, shared/skills" in result.stdout
+    assert f"ROOT_READ_UNDECLARED: tests/{test} reads shared/governance, shared/skills" in result.stdout
 
 
 def test_a_declared_reader_passes(checkout: Path) -> None:
