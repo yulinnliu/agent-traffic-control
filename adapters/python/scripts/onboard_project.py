@@ -418,12 +418,14 @@ def apply_plan(plan: list[PlanItem], mode: str, prune: bool = False) -> None:
                 item.path.write_text(item.content, encoding="utf-8", newline="\n")
 
 
-def print_plan(name: str, project_path: Path, plan: list[PlanItem], mode: str, prune: bool = False) -> None:
+def print_plan(name: str, project_path: Path, plan: list[PlanItem], mode: str, prune: bool = False, verbose: bool = False) -> None:
     applied = {"apply": ("create",), "sync": ("create", "update") + (("prune",) if prune else ())}.get(mode, ())
     print(f"\n=== {name} ({project_path}) [{mode}{' --prune' if prune else ''}] ===")
     for action in ("create", "update", "prune", "collision", "skip"):
         items = [item for item in plan if item.action == action]
         if not items:
+            continue
+        if action == "skip" and not verbose:
             continue
         if action in ("create", "update", "prune"):
             verb = action if action in applied else f"would {action}"
@@ -432,6 +434,9 @@ def print_plan(name: str, project_path: Path, plan: list[PlanItem], mode: str, p
         print(f"  {verb} ({len(items)}):")
         for item in items:
             print(f"    {item.path}: {item.detail}")
+    if not verbose:
+        counts = {action: sum(1 for item in plan if item.action == action) for action in ("skip", "update")}
+        print(f"  skip {counts['skip']}, update {counts['update']}")
 
 
 class SyncStop(Exception):
@@ -543,7 +548,7 @@ def sync_and_commit(project_path: Path, plan: list[PlanItem], prune: bool, sourc
         slot.release()
 
 
-def run(mode: str, targets: list[tuple[str, Path]], root: Path = ROOT, prune: bool = False, commit: bool = False) -> int:
+def run(mode: str, targets: list[tuple[str, Path]], root: Path = ROOT, prune: bool = False, commit: bool = False, verbose: bool = False) -> int:
     """``commit`` makes a sync commit on each project's main (GIT_WORKFLOW.md "Governance sync commits")."""
     has_collision = False
     has_pending = False
@@ -551,7 +556,7 @@ def run(mode: str, targets: list[tuple[str, Path]], root: Path = ROOT, prune: bo
     has_stop = False
     unpruned = False
     root_plan = root_adapter_plan(root)
-    print_plan("checkout-root adapters", root, root_plan, mode)
+    print_plan("checkout-root adapters", root, root_plan, mode, verbose=verbose)
     root_collision = any(item.action == "collision" for item in root_plan)
     has_collision |= root_collision
     has_pending |= any(item.action in ("create", "update") for item in root_plan)
@@ -573,7 +578,7 @@ def run(mode: str, targets: list[tuple[str, Path]], root: Path = ROOT, prune: bo
             print("  readiness: NOT_INITIALIZED (registered repo path is absent)")
             continue
         plan = build_plan(project_path, root, prune)
-        print_plan(name, project_path, plan, mode, prune)
+        print_plan(name, project_path, plan, mode, prune, verbose)
         gate = verification_gate(project_path, root)
         ignored = ignored_outputs(project_path, plan)
         if gate or ignored:
@@ -619,6 +624,7 @@ def build_parser() -> argparse.ArgumentParser:
     targets.add_argument("project", nargs="?")
     targets.add_argument("--all", action="store_true")
     targets.add_argument("--root-only", action="store_true", help="render only this checkout's own adapters; commits nothing")
+    parser.add_argument("--verbose", action="store_true", help="also list the items already current")
     parser.add_argument("--prune", action="store_true", help="with --sync: delete orphaned managed adapters (canonical skill renamed or removed)")
     return parser
 
@@ -630,7 +636,7 @@ def main(argv: list[str] | None = None, root: Path = ROOT) -> int:
         parser.error("--prune only applies with --sync")
     try:
         if args.root_only:
-            return run(args.mode, [], root, args.prune)
+            return run(args.mode, [], root, args.prune, verbose=args.verbose)
         projects = load_projects(root)
         if args.all:
             selected = projects.items()
@@ -640,7 +646,7 @@ def main(argv: list[str] | None = None, root: Path = ROOT) -> int:
         else:
             selected = [(args.project, projects[args.project])]
         targets = [(name, (root / entry["repo"]).resolve()) for name, entry in selected]
-        return run(args.mode, targets, root, args.prune, commit=args.mode == "sync")
+        return run(args.mode, targets, root, args.prune, commit=args.mode == "sync", verbose=args.verbose)
     except ValueError as exc:
         print(f"onboard: {exc}", file=sys.stderr)
         return 2

@@ -295,6 +295,18 @@ def test_list_human_line_and_all(ws: Workspace, capsys: pytest.CaptureFixture[st
     assert [line.split()[:2] for line in out.splitlines()] == [["root", "ATC-0001"], [PROJECT, "DEMO-0001"]]
 
 
+def test_list_folds_invalid_record_warnings_per_repository(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    commit(ws.repo, {".atc/tasks/DEMO-0001.yaml": record("DEMO-0001", "gone"),
+                     ".atc/tasks/DEMO-0002.yaml": "- not\n- a mapping\n",
+                     ".atc/tasks/DEMO-0003.yaml": "just a string\n"})
+    status, out, err = ws.cli(capsys, "list", "--all", cwd=ws.root)
+    assert status == 0
+    assert err.splitlines() == [f"WARNING INVALID_RECORD {PROJECT}: 2 record(s) are not a YAML mapping; atc task check {PROJECT}"]
+    status, out, err = ws.cli(capsys, "list", "--project", PROJECT, "--json", cwd=ws.root)
+    assert err.count("WARNING INVALID_RECORD main:.atc/tasks/DEMO-000") == 2
+    assert [row["task_id"] for row in json.loads(out)["tasks"]] == ["DEMO-0001"]
+
+
 def test_list_infers_the_project_from_a_worktree(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
     topic = ws.worktree(ws.repo, "claude+widget", "topic-widget")
     commit(topic, {".atc/tasks/DEMO-0001.yaml": record("DEMO-0001", "topic-widget")})

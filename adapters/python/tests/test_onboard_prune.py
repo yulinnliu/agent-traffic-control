@@ -78,3 +78,27 @@ def test_bootstrap_sync_converges_every_project(tmp_path: Path) -> None:
     assert bootstrap.sync(root, None, prune=True) == 0
     assert (project / ".claude/skills/demo-skill/SKILL.md").is_file()
     assert not (project / ".agents/skills/old-skill").exists()
+
+
+@pytest.mark.integration
+def test_default_output_lists_changes_and_counts_skips_verbose_lists_skips(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root, _ = _orphaned_project(tmp_path)
+    onboard_project.main(["--sync", "--prune", "demo"], root=root)
+    capsys.readouterr()
+    assert onboard_project.main(["--check", "demo"], root=root) == 0
+    quiet = capsys.readouterr().out
+    assert "is current" not in quiet and "skip (" not in quiet
+    counts = [line for line in quiet.splitlines() if line.startswith("  skip ")]
+    assert len(counts) == 2 and all(line.endswith(", update 0") and int(line.split()[1].rstrip(",")) > 0 for line in counts)
+    assert onboard_project.main(["--check", "demo", "--verbose"], root=root) == 0
+    loud = capsys.readouterr().out
+    assert "skip (" in loud and "is current" in loud and "  skip " not in loud.replace("  skip (", "")
+
+
+@pytest.mark.integration
+def test_default_output_still_prints_every_change(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root, _ = _orphaned_project(tmp_path)
+    assert onboard_project.main(["--check", "demo"], root=root) == 1
+    out = capsys.readouterr().out
+    assert "would prune (2)" in out and "would create" in out
+    assert any(line.startswith("  skip ") for line in out.splitlines())

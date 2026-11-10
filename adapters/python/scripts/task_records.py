@@ -299,8 +299,9 @@ def read_blobs(repo: Path, shas: list[str]) -> dict[str, str]:
     return blobs
 
 
-def ref_copies(repo: Path, branches: list[str]) -> dict[str, dict[str, dict]]:
-    """``{task_id: {branch: record}}`` for every record file on ``branches``; unparsable files are reported and skipped."""
+def ref_copies(repo: Path, branches: list[str], invalid: list[str] | None = None) -> dict[str, dict[str, dict]]:
+    """``{task_id: {branch: record}}`` for every record file on ``branches``; unparsable files are skipped and
+    reported: one warning each, or appended to ``invalid`` when the caller folds them."""
     entries = []
     for branch in branches:
         listing = git(repo, "ls-tree", f"refs/heads/{branch}", f"{TASKS_DIR}/", check=False).stdout
@@ -317,7 +318,10 @@ def ref_copies(repo: Path, branches: list[str]) -> dict[str, dict[str, dict]]:
         except yaml.YAMLError:
             data = None
         if not isinstance(data, dict):
-            print(f"WARNING INVALID_RECORD {branch}:{path} is not a YAML mapping; atc task check reports it", file=sys.stderr)
+            if invalid is not None:
+                invalid.append(f"{branch}:{path}")
+            else:
+                print(f"WARNING INVALID_RECORD {branch}:{path} is not a YAML mapping; atc task check reports it", file=sys.stderr)
             continue
         copies.setdefault(stem, {})[branch] = data
     return copies
@@ -349,14 +353,18 @@ def status(repo: Path, task_id: str, main_copy: dict | None, detail: dict, branc
     return "unknown"
 
 
-def tasks(name: str, repo: Path) -> list[dict]:
+def tasks(name: str, repo: Path, fold_warnings: bool = False) -> list[dict]:
     if git(repo, "rev-parse", "--verify", "--quiet", f"refs/heads/{MAIN}", check=False).returncode != 0:
         raise Refused("NO_MAIN", f"{repo} has no {MAIN} branch")
     branches = git(repo, "for-each-ref", "--format=%(refname:short)", "refs/heads").stdout.split()
     import git_preflight
     integrations = git_preflight.read_integrations(repo)
     rows = []
-    for task_id, copies in sorted(ref_copies(repo, branches).items()):
+    invalid: list[str] | None = [] if fold_warnings else None
+    copies_by_id = ref_copies(repo, branches, invalid)
+    if invalid:
+        print(f"WARNING INVALID_RECORD {name}: {len(invalid)} record(s) are not a YAML mapping; atc task check {name}", file=sys.stderr)
+    for task_id, copies in sorted(copies_by_id.items()):
         main_copy = copies.get(MAIN)
         bound = {c["branch"] for c in copies.values() if isinstance(c.get("branch"), str)}
         branch = (main_copy or {}).get("branch")
@@ -429,7 +437,7 @@ def main(argv: list[str] | None = None, root: Path = ROOT, environ: dict[str, st
             print(f"CREATED {path.stem} {path}")
             return 0
         targets = resolve(root, environ, cwd, args.project, args.repo, every=args.all)
-        rows = [row for name, repo in targets for row in tasks(name, repo)]
+        rows = [row for name, repo in targets for row in tasks(name, repo, fold_warnings=not args.json)]
         if args.status:
             rows = [row for row in rows if row["status"] == args.status]
         print(json.dumps({"tasks": rows}, indent=2) if args.json else render(rows, with_project=args.all))
