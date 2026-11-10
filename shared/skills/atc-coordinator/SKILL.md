@@ -126,9 +126,8 @@ own commits write; session names belong only in the hand-over.
    - After a successful `atc worktree cleanup`, archive the task's sessions.
      A refused archive is read through the session's state: a running
      session's writer ends its work; a pinned or idle one goes to the Owner.
-   - Skip the keep exceptions the task record lists. Items outside the
-     task, `REFUSED` and `ANOMALY` lines, refused archives and failed
-     integrations go to the Owner.
+   - Skip the keep exceptions the task record lists, and give the Owner
+     what `DELIVERY.md` § Close-out sends there.
    - Write the coordinator hand-over the project's handoff rules call for
      (`hami-handoff-reminder` `references/handoff-document.md` § The handoff
      document): one file, final state, what waits on the Owner.

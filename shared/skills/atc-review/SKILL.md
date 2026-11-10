@@ -175,11 +175,11 @@ carries the verdict token and that path.
 - The verified line: test counts, mutant results, read-only host evidence.
 - On a PASS, when the project's adopted process lets a PASS carry an
   integration instruction, the integration instruction. The Owner's word on
-  the exact reviewed SHA approves integration. The holder of that word (the user pasting the instruction into
-  the writer, or a coordinator that has the Owner's word for that SHA) runs
-  or forwards the instruction. Before writing it, run
-  `atc integrate --check --json` with the same arguments as the integrate
-  command below; it runs `git fetch origin` and otherwise only reads. The
+  the exact reviewed SHA approves integration. The holder of that word (the
+  user pasting the instruction into the writer, or a coordinator that has
+  the Owner's word for that SHA) runs or forwards the instruction. Before
+  writing it, run `atc integrate --check --json` with the same arguments as
+  the integrate command below; it runs `git fetch origin` and otherwise only reads. The
   PASS carries the instruction only when the result has no `refusal` and its
   `preflight.verdict` is `FF` or `NO_FF`; quote that verdict with
   `preflight.reason` and every entry of `resolved.warnings` in the verified
@@ -194,16 +194,9 @@ carries the verdict token and that path.
   of `resolved.warnings`, and the writer's run after `switch main` assesses a
   dirty checkout and `FF` or `NO_FF`.
 
-  When `main` has moved, the topic follows `GIT_WORKFLOW.md` § Integrate.
-  An unpublished topic stops on a stop whose `next:` names a rebase
-  (`REBASE_REQUIRED`, or `OVERLAP` or `CONFLICT`), is rebased onto `main`
-  and integrates with `--reviewed <reviewed SHA> --rebased <rebased tip>`,
-  which carries the review over when its check passes and otherwise stops
-  as `CARRY_OVER_REFUSED`, needing a fresh review. A published topic
-  integrates as `NO_FF` when it is compatible; on `CONFLICT` it stops for a
-  reconcile commit on the topic and a review of that commit; on `OVERLAP` a
-  reviewer first judges the overlap. Either way the word is asked for again
-  on the SHA being integrated: the rebased tip, or for `NO_FF` the reviewed
+  When `main` has moved, the topic follows governance `GIT_WORKFLOW.md`
+  § Integrate and § After formal review, and the word is asked for again on
+  the SHA being integrated: the rebased tip, or for `NO_FF` the reviewed
   SHA.
 
   The instruction is the verdict's last line, every value filled in:
@@ -224,7 +217,6 @@ carries the verdict token and that path.
   instruction.
 - Anything needing the Owner's decision (version numbers, spec semantics,
   risk limits, remote deletes) stops for the Owner.
-- Then the next step's scope and the conditions this step carries into it.
 
 ## Writer: after integration
 
@@ -241,8 +233,8 @@ other action need their own instruction.
      is asked for on it, and on that word run the same command with
      `--rebased <rebased tip>` added. `FF` then matches when `main_after`
      equals the rebased tip and `carried_over.carried_over_from` is the
-     reviewed SHA. `CARRY_OVER_REFUSED` sends the rebased tip to the reviewer for a
-     fresh review.
+     reviewed SHA. `CARRY_OVER_REFUSED` sends the rebased tip to the
+     reviewer for a fresh review.
    - `push.commits` lists every commit a push of `main` would carry; give
      the holder each entry whose `push_approval` is `false`, with its `sha`,
      `task` and `authority`, with any push request.
@@ -260,8 +252,8 @@ check ran, or the stop is with the holder.
 
 ## Reviewer: after integration
 
-The task's scratches are removed at close-out (governance `DELIVERY.md`
-§ Close-out), not by the reviewer.
+The coordinator removes the task's scratches at close-out (governance
+`DELIVERY.md` § Close-out).
 
 A failing verifier or gate run leaves its working directory under
 `<tmp>/systmp` for inspection; it stays until `atc tmp prune` deletes it,

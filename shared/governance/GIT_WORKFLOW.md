@@ -222,6 +222,15 @@ local `main` ahead of `origin/main` proceeds. A topic is published when an
 `origin` branch tip equals the reviewed SHA as fetched; in a repository
 without an `origin` remote, which fetches nothing, every topic is unpublished.
 
+`atc integrate --check` checks review binding and integration topology,
+takes no slot, creates no candidate and prints the verdict, a reason code
+and the evidence. Its verdict is a topology decision; integration still
+requires the authority and verification steps of this section:
+
+```text
+atc integrate --check --repo <integration-checkout> --reviewed <sha> --task <task>
+```
+
 The Python integration adapter acquires the repository Integration Slot before
 preflight, prepares the integration revision in an isolated candidate worktree,
 and requires a passing verification command before updating `main`. Name the
@@ -368,15 +377,6 @@ squashed Hami Managed Worktree is cleaned up with `cleanup --squash-integrated`
 (see its skill), which verifies the recorded SHAs, tree and retained ref; the
 caller checks the squash commit message and the integration record. The worktree
 is never removed by hand.
-
-`atc integrate --check` checks review binding and integration topology after
-`git fetch origin`, takes no slot, creates no candidate and prints the
-verdict, a reason code and the evidence. Its verdict is a topology decision;
-integration still requires the authority and verification steps above:
-
-```text
-atc integrate --check --repo <integration-checkout> --reviewed <sha> --task <task>
-```
 
 ## Git environment in hooks and tests
 
