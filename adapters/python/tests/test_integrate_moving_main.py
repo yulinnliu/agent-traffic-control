@@ -15,8 +15,8 @@ import pytest
 import git_integrate as gi
 import git_preflight as gp
 from test_git_integrate import (  # noqa: F401  (repo is a fixture)
-    REPORT, add_origin, commit, evidence_dir, integrate, main_tip, publish, refusal, repo, report_command,
-    run_git, topic, verify_command,
+    REPORT, add_origin, commit, declare_verifier, evidence_dir, integrate, main_tip, publish, refusal, repo,
+    report_command, run_git, topic,
 )
 
 pytestmark = pytest.mark.integration
@@ -69,14 +69,15 @@ def rebase(repo: Path, branch: str, onto: str = "main") -> str:
 
 
 def test_main_behind_origin_stops_before_the_verifier(repo: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    marker = tmp_path / "ran"
+    declare_verifier(repo, marker_verifier(marker))
     publish(repo, "main")
     tip = topic(repo, {"a.txt": "a2\n"})
     remote = push_from_other(repo, "c.txt", "c\n")
     before = main_tip(repo)
-    marker = tmp_path / "ran"
     assert run(repo, tip, "--check") == 1
     assert refusal(capsys.readouterr().err)[0].startswith("STOP MAIN_BEHIND_ORIGIN: ")
-    assert run(repo, tip, "--verify-command", marker_verifier(marker)) == 1
+    assert run(repo, tip) == 1
     err = capsys.readouterr().err
     first, after = refusal(err)
     assert first == f"STOP MAIN_BEHIND_ORIGIN: local main {short(before)} is 1 commits behind origin/main {short(remote)}"
@@ -125,10 +126,11 @@ def test_local_main_ahead_of_origin_integrates(repo: Path, capsys: pytest.Captur
 
 
 def test_an_unpublished_compatible_topic_requires_a_rebase(repo: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    marker = tmp_path / "ran"
+    declare_verifier(repo, marker_verifier(marker))
     tip = topic(repo, {"a.txt": "a2\n"})
     base = commit(repo, "c.txt", "c\n")
-    marker = tmp_path / "ran"
-    assert run(repo, tip, "--verify-command", marker_verifier(marker)) == 1
+    assert run(repo, tip) == 1
     first, after = refusal(capsys.readouterr().err)
     assert first.startswith("STOP REBASE_REQUIRED: main advanced by 1 commits since the topic's base ")
     assert f"rebase the topic onto main {short(base)}" in first
@@ -165,12 +167,13 @@ def stale_two_commit_topic(repo: Path) -> tuple[str, str]:
 
 
 def test_a_clean_rebase_carries_the_approval_over(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    declare_verifier(repo, report_command(json.dumps(REPORT)))
     reviewed, between = stale_two_commit_topic(repo)
     rebased = rebase(repo, "topic")
     assert run(repo, reviewed, "--rebased", rebased, "--check") == 0
     assert (f"carried over: the approval for reviewed {short(reviewed)} applies to rebased {short(rebased)}"
             in capsys.readouterr().out)
-    assert run(repo, reviewed, "--rebased", rebased, "--verify-command", report_command(json.dumps(REPORT))) == 0
+    assert run(repo, reviewed, "--rebased", rebased) == 0
     captured = capsys.readouterr()
     lines = captured.out.splitlines()
     assert lines[0].startswith(f"FF repo main {short(between)} -> {short(rebased)} candidate {short(rebased)} verification=PASS")
@@ -188,10 +191,10 @@ def test_a_clean_rebase_carries_the_approval_over(repo: Path, capsys: pytest.Cap
 
 
 def test_a_carried_over_rebase_still_runs_the_verifier(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    declare_verifier(repo, json.dumps([sys.executable, "-c", "import sys; sys.exit(5)"]))
     reviewed, between = stale_two_commit_topic(repo)
     rebased = rebase(repo, "topic")
-    failing = json.dumps([sys.executable, "-c", "import sys; sys.exit(5)"])
-    assert run(repo, reviewed, "--rebased", rebased, "--verify-command", failing) == 3
+    assert run(repo, reviewed, "--rebased", rebased) == 3
     assert refusal(capsys.readouterr().err)[0].startswith(f"STOP VERIFICATION_FAILED: candidate verification failed for {short(rebased)}")
     assert main_tip(repo) == between
 
@@ -249,10 +252,11 @@ def published_reviewed(repo: Path) -> tuple[str, str]:
 def test_a_rebase_that_is_not_equivalent_is_refused(
     repo: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str], setup, detail: str,
 ) -> None:
+    marker = tmp_path / "ran"
+    declare_verifier(repo, marker_verifier(marker))
     reviewed, rebased = setup(repo)
     before = main_tip(repo)
-    marker = tmp_path / "ran"
-    assert run(repo, reviewed, "--rebased", rebased, "--verify-command", marker_verifier(marker)) == 1
+    assert run(repo, reviewed, "--rebased", rebased) == 1
     first, after = refusal(capsys.readouterr().err)
     assert first.startswith("STOP CARRY_OVER_REFUSED: ")
     assert detail in first

@@ -538,8 +538,7 @@ def integration_repo(tmp_path: Path, atc_tmp: Path, monkeypatch: pytest.MonkeyPa
 def integrate(root: Path) -> int:
     tip = (root / ".git/atc-test-tip").read_text(encoding="utf-8")
     return gi.main(["--repo", str(root), "--branch", "topic", "--reviewed", tip,
-                    "--authority-reference", "test-owner-authorization",
-                    "--verify-command", json.dumps([sys.executable, "verify.py"])])
+                    "--authority-reference", "test-owner-authorization"])
 
 
 def test_atc_integrate_runs_the_skeleton_to_a_pass(integration_repo: Path, atc_tmp: Path, capsys: pytest.CaptureFixture[str]) -> None:

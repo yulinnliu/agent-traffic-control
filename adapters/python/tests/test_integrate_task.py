@@ -15,7 +15,7 @@ import git_integrate as gi
 import git_preflight as gp
 import task_records
 from test_git_integrate import (  # noqa: F401  (repo is a fixture)
-    commit, main_tip, publish, refusal, repo, run_git, verify_command,
+    commit, main_tip, publish, refusal, repo, run_git,
 )
 
 pytestmark = pytest.mark.integration
@@ -77,7 +77,7 @@ def tasks_repo(repo: Path) -> Path:
 
 
 def run(repo: Path, reviewed: str, *extra: str) -> int:
-    return gi.main(["--repo", str(repo), "--reviewed", reviewed, "--verify-command", verify_command(), *extra])
+    return gi.main(["--repo", str(repo), "--reviewed", reviewed, *extra])
 
 
 def run_json(repo: Path, capsys: pytest.CaptureFixture[str], reviewed: str, *extra: str) -> tuple[int, dict, str]:
@@ -157,10 +157,11 @@ def test_a_records_only_binding_of_several_tasks_writes_a_line_per_task(
 def test_a_records_only_range_runs_the_record_check_not_the_verifier(
     tasks_repo: Path, capsys: pytest.CaptureFixture[str],
 ) -> None:
+    put(tasks_repo, {"verify.json": '["no-such-verifier"]'}, "declare a verifier that cannot start")
     broken = record("DEMO-0001", "work").replace("scope: plan § 1\n", "")
     tip = on_branch(tasks_repo, "work", {".atc/tasks/DEMO-0001.yaml": broken})
     before = main_tip(tasks_repo)
-    status, data, err = run_json(tasks_repo, capsys, tip, "--owner-words", WORDS, "--verify-command", '["no-such-verifier"]')
+    status, data, err = run_json(tasks_repo, capsys, tip, "--owner-words", WORDS)
     assert status == 3
     assert data["refusal"]["reason"] == "VERIFICATION_FAILED"
     assert "schema-violation: DEMO-0001.yaml" in data["refusal"]["detail"]

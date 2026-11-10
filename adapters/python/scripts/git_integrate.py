@@ -331,9 +331,9 @@ def parse_verify_command(command: str) -> list[str]:
     try:
         argv = json.loads(command)
     except json.JSONDecodeError as exc:
-        raise Refused("VERIFIER_ARGV_INVALID", "the verifier argv (--verify-command or --verify-command-file) must be a JSON array of executable and arguments") from exc
+        raise Refused("VERIFIER_ARGV_INVALID", "the verifier argv must be a JSON array of executable and arguments") from exc
     if not isinstance(argv, list) or not argv or not all(isinstance(item, str) and item for item in argv):
-        raise Refused("VERIFIER_ARGV_INVALID", "the verifier argv (--verify-command or --verify-command-file) must be a non-empty JSON array of strings")
+        raise Refused("VERIFIER_ARGV_INVALID", "the verifier argv must be a non-empty JSON array of strings")
     return argv
 
 
@@ -475,9 +475,12 @@ def _binding_keys(binding: Binding) -> dict:
 
 def _note_integration(
     repo: Path, result: dict, candidate_sha: str, reviewed: str, binding: Binding,
-    carried_from: str | None = None, main_before: str | None = None,
+    carried_from: str | None = None, main_before: str | None = None, verifier: dict | None = None,
 ) -> None:
-    """One line per task; `main_before` is present on every line, `None` only after a recovery."""
+    """One line per task; `main_before` is present on every line, `None` only after a recovery.
+
+    `verifier` names the source the candidate was verified with (`None` for a range of task records only).
+    """
     at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     try:
         result["integration_record"] = str(_record_integration(repo, [{
@@ -488,6 +491,7 @@ def _note_integration(
             "task": task,
             "authority": binding.authority,
             "records_only": binding.records_only,
+            "verifier": verifier,
             "integrated_at": at,
         } for task in binding.tasks]))
     except (OSError, GitError) as exc:
@@ -726,6 +730,7 @@ class Target:
     carried_from: str | None = None
     fetched: str = "none"
     project: str = ""
+    verifier: dict | None = None
 
     def line(self) -> str:
         carried = f" carried_from={self.carried_from}" if self.carried_from else ""
@@ -891,7 +896,7 @@ def integrate(t: Target) -> tuple[int, dict]:
             if main_after == candidate_sha:
                 # main holds the candidate, so the integration happened even
                 # when its checkout needs recovery below.
-                _note_integration(repo, result, candidate_sha, reviewed, t.binding, t.carried_from, main_before)
+                _note_integration(repo, result, candidate_sha, reviewed, t.binding, t.carried_from, main_before, t.verifier)
             if main_after != candidate_sha or rev(repo, "HEAD") != candidate_sha:
                 raise stop(
                     "RECOVERY_REQUIRED",
@@ -1224,33 +1229,9 @@ def resolve(args: argparse.Namespace, root: Path, root_given: bool, cwd: str) ->
         )
 
     declared, declared_argv, problem = declared_verifier(repo, main, main_tip)
-    explicit = None
-    if args.verify_command is not None:
-        explicit, argv_source = args.verify_command, "--verify-command"
-    elif args.verify_command_file is not None:
-        path = args.verify_command_file if args.verify_command_file.is_absolute() else repo / args.verify_command_file
-        try:
-            explicit = path.read_text(encoding="utf-8-sig")
-        except OSError as exc:
-            raise Refused("VERIFIER_ARGV_UNREADABLE", f"could not read --verify-command-file: {exc}") from exc
-        argv_source = f"--verify-command-file {path}"
-    if explicit is not None:
-        if not explicit.strip():
-            raise Refused(
-                "VERIFIER_ARGV_MISSING",
-                "a verifier argv (--verify-command or --verify-command-file) is required; "
-                "main cannot advance without candidate verification",
-            )
-        argv = parse_verify_command(explicit)
-        if argv != declared_argv:
-            warnings.append(
-                f"the verifier argv from {argv_source} differs from {declared.argv_file} that AGENTS.md declares at {main}: "
-                f"{json.dumps(declared_argv) if declared_argv else problem}"
-            )
-    elif declared_argv is None:
+    if declared_argv is None:
         raise Refused("VERIFIER_ARGV_INVALID", f"AGENTS.md declares the verifier argv file {declared.argv_file}, but {problem}")
-    else:
-        argv, argv_source = declared_argv, f"AGENTS.md {declared.argv_file}"
+    argv, argv_source = declared_argv, f"AGENTS.md {declared.argv_file}"
 
     declared_timeout = verification_section.DEFAULT_TIMEOUT if declared.timeout is None else declared.timeout
     declared_from = "the default" if declared.timeout is None else f"AGENTS.md at {main}"
@@ -1268,9 +1249,12 @@ def resolve(args: argparse.Namespace, root: Path, root_given: bool, cwd: str) ->
     check_executable(argv[0])
     if warning := tool_checkout_warning():
         warnings.append(warning)
+    verifier = {
+        "argv_file": declared.argv_file, "timeout": timeout, "timeout_overridden": timeout_source == "--verify-timeout",
+    }
     return Target(
         repo, main, main_tip, branch, branch_source, reviewed, binding,
-        argv, argv_source, timeout, timeout_source, warnings, carried_from, fetched, project,
+        argv, argv_source, timeout, timeout_source, warnings, carried_from, fetched, project, verifier,
     )
 
 
@@ -1337,12 +1321,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--authority-reference",
         help="deprecated: a task identity string recorded with authority unclassified; refused for a range "
         "that touches .atc/tasks/",
-    )
-    verifier = parser.add_mutually_exclusive_group()
-    verifier.add_argument("--verify-command", help="verification argv as a JSON string array, in place of the declared one")
-    verifier.add_argument(
-        "--verify-command-file", type=Path,
-        help="file holding the verification argv as a JSON string array; a relative path is under the repository",
     )
     parser.add_argument(
         "--verify-timeout", type=float,

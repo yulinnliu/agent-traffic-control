@@ -104,7 +104,7 @@ def refusal(err: str) -> tuple[str, str]:
 def integrate(repo: Path, branch: str, reviewed: str, *extra: str) -> int:
     return gi.main([
         "--repo", str(repo), "--branch", branch, "--reviewed", reviewed,
-        "--authority-reference", "test-owner-authorization", "--verify-command", verify_command(), *extra
+        "--authority-reference", "test-owner-authorization", *extra
     ])
 
 
@@ -369,10 +369,10 @@ def test_untracked_file_does_not_make_checkout_dirty_for_integration(
 def test_verifier_timeout_is_reported_and_main_stays_unchanged(
     repo: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    declare_verifier(repo, json.dumps([sys.executable, "-c", "import time; time.sleep(2)"]))
     tip = topic(repo, {"a.txt": "a2\n"})
     before = main_tip(repo)
-    slow = json.dumps([sys.executable, "-c", "import time; time.sleep(2)"])
-    assert integrate(repo, "topic", tip, "--verify-command", slow, "--verify-timeout", "0.05") == 3
+    assert integrate(repo, "topic", tip, "--verify-timeout", "0.05") == 3
     err = capsys.readouterr().err
     assert "candidate verification timed out" in err and "test budget exceeded" in err
     assert main_tip(repo) == before
@@ -381,10 +381,10 @@ def test_verifier_timeout_is_reported_and_main_stays_unchanged(
 def test_missing_verifier_is_reported_without_traceback(
     repo: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    declare_verifier(repo, json.dumps(["atc-verifier-command-that-does-not-exist"]))
     tip = topic(repo, {"a.txt": "a2\n"})
     before = main_tip(repo)
-    missing = json.dumps(["atc-verifier-command-that-does-not-exist"])
-    assert integrate(repo, "topic", tip, "--verify-command", missing) == 2
+    assert integrate(repo, "topic", tip) == 2
     error = capsys.readouterr().err
     assert refusal(error)[0] == "ERROR VERIFIER_NOT_FOUND the verifier executable atc-verifier-command-that-does-not-exist is not on PATH"
     assert "Traceback" not in error
@@ -444,12 +444,12 @@ def assert_pid_ends(pid: int) -> None:
 def test_verifier_timeout_kills_descendant_processes(
     repo: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str], reparent: bool
 ) -> None:
+    pid_file = tmp_path / "sleeper.pid"
+    declare_verifier(repo, descendant_verifier(pid_file, reparent=reparent, wrapper_exits=False))
     tip = topic(repo, {"a.txt": "a2\n"})
     before = main_tip(repo)
-    pid_file = tmp_path / "sleeper.pid"
-    verifier = descendant_verifier(pid_file, reparent=reparent, wrapper_exits=False)
     started = time.monotonic()
-    assert integrate(repo, "topic", tip, "--verify-command", verifier, "--verify-timeout", "1") == 3
+    assert integrate(repo, "topic", tip, "--verify-timeout", "1") == 3
     elapsed = time.monotonic() - started
     assert "candidate verification timed out" in capsys.readouterr().err
     assert elapsed < 20, f"timeout was not enforced while a descendant held the verifier open ({elapsed:.1f}s)"
@@ -460,10 +460,10 @@ def test_verifier_timeout_kills_descendant_processes(
 def test_verifier_descendants_end_when_verifier_returns(
     repo: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    tip = topic(repo, {"a.txt": "a2\n"})
     pid_file = tmp_path / "sleeper.pid"
-    verifier = descendant_verifier(pid_file, reparent=True, wrapper_exits=True)
-    assert integrate(repo, "topic", tip, "--verify-command", verifier) == 0
+    declare_verifier(repo, descendant_verifier(pid_file, reparent=True, wrapper_exits=True))
+    tip = topic(repo, {"a.txt": "a2\n"})
+    assert integrate(repo, "topic", tip) == 0
     assert main_tip(repo) == tip
     assert_pid_ends(wait_for_pid(pid_file))
     assert "candidate worktree retained" not in capsys.readouterr().err
@@ -478,8 +478,9 @@ SEEN_BY_THE_VERIFIER = (
 
 def verifier_view(repo: Path, capsys: pytest.CaptureFixture[str]) -> dict:
     """What a verifier that prints its locations and refuses saw of an integration of a new topic."""
+    declare_verifier(repo, json.dumps([sys.executable, "-c", SEEN_BY_THE_VERIFIER]))
     tip = topic(repo, {"a.txt": "a2\n"})
-    assert integrate_with(repo, "topic", tip, json.dumps([sys.executable, "-c", SEEN_BY_THE_VERIFIER])) == 3
+    assert integrate_with(repo, "topic", tip) == 3
     err = capsys.readouterr().err
     return json.loads(next(line.strip() for line in err.splitlines() if line.strip().startswith('{"cwd"')))
 
@@ -622,71 +623,52 @@ def test_job_object_fallback_is_reported(
     assert "WARNING verifier process tree is not isolated by a Job Object" in capsys.readouterr().err
 
 
-def test_verify_command_file_with_bom_is_accepted(repo: Path, tmp_path: Path) -> None:
+@pytest.mark.integration
+def test_declared_argv_file_with_bom_is_accepted(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     # PowerShell 5.1's Set-Content -Encoding utf8 and Out-File write a BOM.
+    (repo / "verify.json").write_bytes(b"\xef\xbb\xbf" + verify_command().encode("utf-8"))
+    run_git(repo, "add", "--", "verify.json")
+    run_git(repo, "commit", "-q", "-m", "argv with a BOM")
     tip = topic(repo, {"a.txt": "a2\n"})
-    argv_file = tmp_path / "verify.json"
-    argv_file.write_bytes(b"\xef\xbb\xbf" + verify_command().encode("utf-8"))
-    assert gi.main([
-        "--repo", str(repo), "--branch", "topic", "--reviewed", tip,
-        "--authority-reference", "test-owner-authorization", "--verify-command-file", str(argv_file),
-    ]) == 0
+    assert integrate(repo, "topic", tip) == 0
     assert main_tip(repo) == tip
 
 
-def test_empty_verify_command_file_is_refused(repo: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    tip = topic(repo, {"a.txt": "a2\n"})
-    argv_file = tmp_path / "verify.json"
-    argv_file.write_text("\n", encoding="utf-8")
-    assert gi.main([
-        "--repo", str(repo), "--branch", "topic", "--reviewed", tip,
-        "--authority-reference", "test-owner-authorization", "--verify-command-file", str(argv_file),
-    ]) == 2
-    assert "--verify-command-file) is required" in capsys.readouterr().err
-    assert main_tip(repo) != tip
-
-
-def test_verify_command_file_supplies_argv(repo: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    tip = topic(repo, {"a.txt": "a2\n"})
-    argv_file = tmp_path / "verify.json"
-    argv_file.write_text(verify_command(), encoding="utf-8")
-    assert gi.main([
-        "--repo", str(repo), "--branch", "topic", "--reviewed", tip,
-        "--authority-reference", "test-owner-authorization", "--verify-command-file", str(argv_file),
-    ]) == 0
-    assert main_tip(repo) == tip
-
-
-def test_missing_verify_command_file_is_refused(repo: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+@pytest.mark.integration
+def test_empty_declared_argv_file_is_refused(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    declare_verifier(repo, "\n")
     tip = topic(repo, {"a.txt": "a2\n"})
     before = main_tip(repo)
-    assert gi.main([
-        "--repo", str(repo), "--branch", "topic", "--reviewed", tip,
-        "--authority-reference", "test-owner-authorization",
-        "--verify-command-file", str(tmp_path / "absent.json"),
-    ]) == 2
-    assert "could not read --verify-command-file" in capsys.readouterr().err
+    assert integrate(repo, "topic", tip) == 2
+    first, _ = refusal(capsys.readouterr().err)
+    assert first.startswith("ERROR VERIFIER_ARGV_INVALID AGENTS.md declares the verifier argv file verify.json")
     assert main_tip(repo) == before
 
 
-def test_malformed_verify_command_is_refused_before_any_candidate_work(
+@pytest.mark.integration
+def test_malformed_declared_argv_is_refused_before_any_candidate_work(
     repo: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    # PowerShell 5.1 hands a native command '[python,-c,pass]' for '["python","-c","pass"]'.
+    declare_verifier(repo, "[python,-c,pass]")
     tip = topic(repo, {"a.txt": "a2\n"})
     before = main_tip(repo)
-    # PowerShell 5.1 hands a native command '[python,-c,pass]' for '["python","-c","pass"]'.
-    assert integrate(repo, "topic", tip, "--verify-command", "[python,-c,pass]") == 2
-    assert "--verify-command-file) must be a JSON array" in capsys.readouterr().err
+    assert integrate(repo, "topic", tip) == 2
+    assert "must be a JSON array" in capsys.readouterr().err
     assert main_tip(repo) == before
     assert run_git(repo, "worktree", "list").count("\n") == 0
 
 
 @pytest.mark.integration
-def test_verify_command_sources_are_exclusive_and_default_to_the_declaration(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+@pytest.mark.parametrize("flag", ["--verify-command", "--verify-command-file"])
+def test_the_verifier_flags_are_unknown_options(repo: Path, capsys: pytest.CaptureFixture[str], flag: str) -> None:
     tip = topic(repo, {"a.txt": "a2\n"})
     base = ["--repo", str(repo), "--branch", "topic", "--reviewed", tip, "--authority-reference", "x"]
-    assert gi.main([*base, "--verify-command", verify_command(), "--verify-command-file", "v.json"]) == 2
-    assert capsys.readouterr().err.startswith("ERROR USAGE argument --verify-command-file: not allowed with argument --verify-command")
+    assert gi.main([*base, flag, verify_command()]) == 2
+    err = capsys.readouterr().err
+    assert err.startswith("ERROR USAGE ")
+    assert len(err.splitlines()) == 1 and flag in err
+    assert main_tip(repo) != tip
     assert gi.main(base) == 0
     assert main_tip(repo) == tip
 
@@ -719,10 +701,10 @@ def test_other_request_keeps_recovery_ref_while_checkout_needs_reconciliation(
 
 
 def test_candidate_verification_failure_leaves_main_unchanged(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    declare_verifier(repo, json.dumps([sys.executable, "-c", "import sys; print('verifier diagnostic: 3 failed', file=sys.stderr); raise SystemExit(9)"]))
     tip = topic(repo, {"a.txt": "a2\n"})
     before = main_tip(repo)
-    fail_command = json.dumps([sys.executable, "-c", "import sys; print('verifier diagnostic: 3 failed', file=sys.stderr); raise SystemExit(9)"])
-    assert integrate(repo, "topic", tip, "--verify-command", fail_command) == 3
+    assert integrate(repo, "topic", tip) == 3
     error = capsys.readouterr().err
     assert "candidate verification failed" in error
     assert "(exit 9): verifier diagnostic: 3 failed" in error
@@ -856,10 +838,11 @@ def report_command(text: str | None, *, fail: bool = False) -> str:
     return json.dumps([sys.executable, "-c", script])
 
 
-def integrate_with(repo: Path, branch: str, reviewed: str, command: str, *extra: str) -> int:
+def integrate_with(repo: Path, branch: str, reviewed: str, *extra: str) -> int:
+    """Integrate with the verifier main declares; callers declare a report command before topic branches."""
     return gi.main([
         "--repo", str(repo), "--branch", branch, "--reviewed", reviewed,
-        "--authority-reference", "test-owner-authorization", "--verify-command", command, *extra,
+        "--authority-reference", "test-owner-authorization", *extra,
     ])
 
 
@@ -878,10 +861,11 @@ def leftover_reports() -> list[Path]:
 def test_valid_report_writes_evidence_record(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     import platform
 
+    command = report_command(json.dumps(REPORT))
+    declare_verifier(repo, command)
     before = main_tip(repo)
     tip = topic(repo, {"a.txt": "a2\n"})
-    command = report_command(json.dumps(REPORT))
-    assert integrate_with(repo, "topic", tip, command) == 0
+    assert integrate_with(repo, "topic", tip) == 0
     path = evidence_dir(repo) / f"{tip}.json"
     line = capsys.readouterr().out.strip()
     assert line.startswith(f"FF repo main {before[:12]} -> {tip[:12]} candidate {tip[:12]} verification=PASS evidence=recorded ")
@@ -903,10 +887,11 @@ def test_valid_report_writes_evidence_record(repo: Path, capsys: pytest.CaptureF
 
 
 def test_no_ff_record_names_the_merge_commit_only(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    declare_verifier(repo, report_command(json.dumps(REPORT)))
     tip = topic(repo, {"a.txt": "a2\n"})
     publish(repo, "topic")
     base = commit(repo, "c.txt", "c\n")
-    assert integrate_with(repo, "topic", tip, report_command(json.dumps(REPORT)), "--json") == 0
+    assert integrate_with(repo, "topic", tip, "--json") == 0
     data = json.loads(capsys.readouterr().out)
     merged = main_tip(repo)
     assert merged not in (tip, base)
@@ -923,8 +908,9 @@ def test_no_ff_record_names_the_merge_commit_only(repo: Path, capsys: pytest.Cap
 def test_verifier_without_report_integrates_and_writes_no_record(
     repo: Path, capsys: pytest.CaptureFixture[str],
 ) -> None:
+    declare_verifier(repo, report_command(None))
     tip = topic(repo, {"a.txt": "a2\n"})
-    assert integrate_with(repo, "topic", tip, report_command(None)) == 0
+    assert integrate_with(repo, "topic", tip) == 0
     assert "verification=PASS evidence=NONE(NO_REPORT) " in capsys.readouterr().out
     assert main_tip(repo) == tip
     assert records(repo) == []
@@ -947,8 +933,9 @@ def test_verifier_without_report_integrates_and_writes_no_record(
 def test_invalid_report_integrates_and_writes_no_record(
     repo: Path, capsys: pytest.CaptureFixture[str], text: str,
 ) -> None:
+    declare_verifier(repo, report_command(text))
     tip = topic(repo, {"a.txt": "a2\n"})
-    assert integrate_with(repo, "topic", tip, report_command(text), "--json") == 0
+    assert integrate_with(repo, "topic", tip, "--json") == 0
     data = json.loads(capsys.readouterr().out)
     assert (data["verification"], data["evidence"], data["evidence_reason"]) == ("PASS", None, "INVALID_REPORT")
     assert main_tip(repo) == tip
@@ -956,9 +943,10 @@ def test_invalid_report_integrates_and_writes_no_record(
 
 
 def test_failed_verification_writes_no_record(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    declare_verifier(repo, report_command(json.dumps(REPORT), fail=True))
     before = main_tip(repo)
     tip = topic(repo, {"a.txt": "a2\n"})
-    assert integrate_with(repo, "topic", tip, report_command(json.dumps(REPORT), fail=True), "--json") == 3
+    assert integrate_with(repo, "topic", tip, "--json") == 3
     data = json.loads(capsys.readouterr().out)
     assert (data["verification"], data["evidence"], data["evidence_reason"]) == ("NOT_RUN", None, None)
     assert main_tip(repo) == before
@@ -972,8 +960,9 @@ def test_record_write_failure_keeps_the_integration(
     def refuse(*_args):
         raise OSError("read-only")
     monkeypatch.setattr(gi, "_write_evidence", refuse)
+    declare_verifier(repo, report_command(json.dumps(REPORT)))
     tip = topic(repo, {"a.txt": "a2\n"})
-    assert integrate_with(repo, "topic", tip, report_command(json.dumps(REPORT))) == 0
+    assert integrate_with(repo, "topic", tip) == 0
     assert "verification=PASS evidence=NONE(WRITE_FAILED) " in capsys.readouterr().out
     assert main_tip(repo) == tip
 
@@ -986,8 +975,9 @@ def test_expired_records_are_removed_after_a_write(repo: Path) -> None:
     for path, age in ((expired, 15 * day), (recent, 13 * day), (foreign, 15 * day)):
         path.write_text("{}", encoding="utf-8")
         os.utime(path, (time.time() - age,) * 2)
+    declare_verifier(repo, report_command(json.dumps(REPORT)))
     tip = topic(repo, {"a.txt": "a2\n"})
-    assert integrate_with(repo, "topic", tip, report_command(json.dumps(REPORT))) == 0
+    assert integrate_with(repo, "topic", tip) == 0
     assert records(repo) == sorted([recent.name, foreign.name, f"{tip}.json"])
 
 
@@ -1011,7 +1001,7 @@ def test_the_resolved_values_are_the_first_stderr_line(repo: Path, capsys: pytes
     assert lines[0].startswith("resolved: repo main=main@")
     assert f"branch=topic (--branch) reviewed={tip[:12]} " in lines[0]
     assert 'task="test-owner-authorization" authority=unclassified ' in lines[0]
-    assert lines[0].endswith("(--verify-command) timeout=300s (default)")
+    assert lines[0].endswith("(AGENTS.md verify.json) timeout=300s (default)")
     assert f"verify: candidate {tip[:12]} timeout 300s (default)" in lines
     assert f"WARNING {gi.ALIAS_NOTICE}" in lines
 
@@ -1029,28 +1019,12 @@ def test_the_declared_argv_and_timeout_are_the_defaults(repo: Path, capsys: pyte
 
 
 @pytest.mark.integration
-def test_an_explicit_argv_or_timeout_that_differs_is_a_warning(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_an_explicit_timeout_that_differs_is_a_warning(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     declare_verifier(repo, verify_command(), timeout="1234")
     tip = topic(repo, {"a.txt": "a2\n"})
-    other = json.dumps([sys.executable, "-c", "pass"])
-    assert integrate(repo, "topic", tip, "--verify-command", other, "--verify-timeout", "60") == 0
+    assert integrate(repo, "topic", tip, "--verify-timeout", "60") == 0
     warnings = [line for line in stderr_lines(capsys) if line.startswith("WARNING")]
-    assert any(line.startswith("WARNING the verifier argv from --verify-command differs from verify.json") for line in warnings)
     assert "WARNING --verify-timeout 60 differs from the 1234 seconds of AGENTS.md at main" in warnings
-
-
-@pytest.mark.integration
-def test_a_relative_argv_file_is_resolved_under_the_repository(
-    repo: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str],
-) -> None:
-    tip = topic(repo, {"a.txt": "a2\n"})
-    elsewhere = tmp_path / "elsewhere"
-    elsewhere.mkdir()
-    assert run(
-        repo, "--repo", str(repo), "--reviewed", tip, "--authority-reference", "x",
-        "--verify-command-file", "verify.json", cwd=elsewhere,
-    ) == 0
-    assert f"(--verify-command-file {Path('root') / 'verify.json'})" in stderr_lines(capsys)[0]
 
 
 @pytest.mark.integration
@@ -1178,7 +1152,9 @@ def test_every_integration_appends_its_record(repo: Path) -> None:
     lines = (repo / ".git" / "atc" / "integrations.jsonl").read_text(encoding="utf-8").splitlines()
     records = [json.loads(line) for line in lines]
     assert [set(record) for record in records] == [
-        {"candidate_sha", "reviewed", "main_before", "task", "authority", "records_only", "integrated_at"}] * 2
+        {"candidate_sha", "reviewed", "main_before", "task", "authority", "records_only", "verifier", "integrated_at"}] * 2
+    assert [record["verifier"] for record in records] == [
+        {"argv_file": "verify.json", "timeout": 300, "timeout_overridden": False}] * 2
     assert records[1]["main_before"] == run_git(repo, "rev-parse", "main^1")
     assert (records[0]["candidate_sha"], records[0]["reviewed"]) == (first, first)
     assert (records[1]["candidate_sha"], records[1]["reviewed"]) == (main_tip(repo), second)
@@ -1190,9 +1166,9 @@ def test_every_integration_appends_its_record(repo: Path) -> None:
 def test_a_failed_verification_records_no_integration_and_keeps_both_tails(
     repo: Path, capsys: pytest.CaptureFixture[str],
 ) -> None:
+    declare_verifier(repo, json.dumps([sys.executable, "-c", "import sys; print('out line'); print('err line', file=sys.stderr); sys.exit(4)"]))
     tip = topic(repo, {"a.txt": "a2\n"})
-    failing = json.dumps([sys.executable, "-c", "import sys; print('out line'); print('err line', file=sys.stderr); sys.exit(4)"])
-    assert integrate(repo, "topic", tip, "--verify-command", failing) == 3
+    assert integrate(repo, "topic", tip) == 3
     lines = stderr_lines(capsys)
     first, after = refusal("\n".join(lines))
     assert first == f"STOP VERIFICATION_FAILED: candidate verification failed for {tip[:12]} (exit 4): err line"
@@ -1299,10 +1275,10 @@ def test_the_declaration_comes_from_main_not_the_topic(repo: Path, capsys: pytes
 
 @pytest.mark.integration
 def test_a_verifier_that_cannot_start_is_an_error(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    declare_verifier(repo, json.dumps(["missing/atc-verifier-that-does-not-exist"]))
     tip = topic(repo, {"a.txt": "a2\n"})
     before = main_tip(repo)
-    missing = json.dumps(["missing/atc-verifier-that-does-not-exist"])
-    assert integrate(repo, "topic", tip, "--verify-command", missing) == 2
+    assert integrate(repo, "topic", tip) == 2
     error = capsys.readouterr().err
     assert refusal(error)[0].startswith("ERROR VERIFIER_NOT_STARTED could not start candidate verifier: ")
     assert "Traceback" not in error
@@ -1313,7 +1289,7 @@ def test_a_verifier_that_cannot_start_is_an_error(repo: Path, capsys: pytest.Cap
 @pytest.mark.integration
 @pytest.mark.parametrize("args", [
     ["--authority-reference", "x"],
-    ["--reviewed", "0" * 40, "--authority-reference", "x", "--verify-command", "[]", "--verify-command-file", "v.json"],
+    ["--reviewed", "0" * 40, "--authority-reference", "x", "--verify-command", "[]"],
 ])
 def test_argument_errors_take_the_error_form(repo: Path, capsys: pytest.CaptureFixture[str], args: list[str]) -> None:
     assert gi.main(["--repo", str(repo), *args]) == 2

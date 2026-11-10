@@ -89,10 +89,9 @@ def topic(repo: Path, edits: dict[str, str], branch: str) -> str:
     return tip
 
 
-def integrate(repo: Path, branch: str, reviewed: str, argv: list[str] | None = None) -> None:
+def integrate(repo: Path, branch: str, reviewed: str) -> None:
     assert gi.main([
         "--repo", str(repo), "--branch", branch, "--reviewed", reviewed, "--authority-reference", "test",
-        "--verify-command", json.dumps(argv or verifier_argv()),
     ]) == 0
 
 
@@ -210,8 +209,9 @@ def test_record_without_dependency_inputs_does_not_reuse(repo: Path, verified: s
 
 def test_inline_verifier_other_than_the_argv_file_does_not_reuse(repo: Path) -> None:
     tip = topic(repo, {"packages/a/src/x.py": "x = 1\n"}, "first")
-    integrate(repo, "first", tip, [*verifier_argv(), "extra"])
+    integrate(repo, "first", tip)
     assert record_path(repo, tip).is_file()
+    rewrite(repo, tip, lambda record: record.__setitem__("verify_argv", [*verifier_argv(), "extra"]))
     assert decide(repo, tip, [A]).reason == "ARGV_MISMATCH"
 
 
@@ -283,8 +283,9 @@ def test_record_of_another_shape_does_not_reuse(repo: Path, verified: str, chang
 
 
 def test_verifier_without_report_leaves_no_record(repo: Path) -> None:
+    commit(repo, ARGV_FILE, json.dumps([sys.executable, "-c", "pass"]))
     tip = topic(repo, {"packages/a/src/x.py": "x = 1\n"}, "first")
-    integrate(repo, "first", tip, [sys.executable, "-c", "pass"])
+    integrate(repo, "first", tip)
     assert run_git(repo, "rev-parse", "main") == tip
     decision = decide(repo, tip, [A])
     assert (decision.reuse, decision.reason) == (False, "NO_RECORD")
