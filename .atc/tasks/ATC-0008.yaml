@@ -1,0 +1,14 @@
+task_id: ATC-0008
+repository: yulinnliu/agent-traffic-control
+base_sha: 438280a9ade07f84f12bbee782a992abdb338c4a
+scope: 'Plan D: CLI changes and the D additions, test speed (pytest-xdist) first'
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: 438280a9ade07f84f12bbee782a992abdb338c4a
+branch: worktree-claude+cli-d
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
