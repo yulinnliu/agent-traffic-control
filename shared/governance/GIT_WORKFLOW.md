@@ -425,11 +425,12 @@ exactly one source.
 - `--task` is required. `<prefix>-<four digits>`, with a prefix declared
   under `## Task records` in `AGENTS.md`, names a task record and derives the
   repository from the prefix. The record must exist in the reviewed commit's
-  tree (`TASK_NOT_FOUND`), and for a range beyond `.atc/tasks/` its `branch`
-  is the integrated branch, which must hold the reviewed SHA as its tip. Any
-  other value is a task identity string (`CORE.md` § Task identity) and needs
-  `--project` (`root` for the workspace root). A task identity string and a
-  records-only range integrate the one local branch at the reviewed SHA.
+  tree (`TASK_NOT_FOUND`), and its `branch` is the integrated branch, which
+  must hold the reviewed SHA as its tip; for a records-only range that branch
+  is already at the reviewed SHA (`NO_BRANCH_AT_REVIEWED`). Any other value is
+  a task identity string (`CORE.md` § Task identity) and needs `--project`
+  (`root` for the workspace root); it integrates the one local branch at the
+  reviewed SHA.
 - The authority is either the record on `main` with `integrate_main: true`,
   or `--owner-words <quote>`, the Owner's words quoted.
 - A range whose changed paths all lie under `.atc/tasks/` is records-only: the

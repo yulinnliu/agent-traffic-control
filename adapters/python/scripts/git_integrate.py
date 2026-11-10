@@ -1131,19 +1131,20 @@ def infer_branch(repo: Path, reviewed: str, main: str, main_tip: str) -> tuple[s
 
 def record_branch(repo: Path, reviewed: str, main_tip: str, record_task: str | None) -> tuple[str | None, str]:
     """The integrated branch: the `branch` of the record ``record_task`` in the reviewed tree, which the
-    preflight then checks against the reviewed SHA. ``(None, "")`` sends the caller to `infer_branch`: no record,
-    a reviewed SHA already on main (a recovery or `ALREADY_MERGED`), or a records-only range, whose binding
-    branch may carry the records of several tasks."""
+    preflight then checks against the reviewed SHA; for a records-only range it must already be at the reviewed
+    SHA. ``(None, "")`` sends the caller to `infer_branch`: no record, or a reviewed SHA already on main (a
+    recovery or `ALREADY_MERGED`)."""
     record = ta.parse(ta.show(repo, reviewed, ta.record_path(record_task))) if record_task is not None else None
     if record is None or is_ancestor(repo, reviewed, main_tip):
         return None, ""
-    if ta.scan(repo, git(repo, "merge-base", main_tip, reviewed).stdout.strip(), reviewed).records_only:
-        return None, ""
     branch = record.get("branch")
-    if isinstance(branch, str) and branch and rev(repo, f"refs/heads/{branch}") is not None:
-        return branch, "record"
-    raise stop("NO_BRANCH_AT_REVIEWED", f"{gp.REASONS['NO_BRANCH_AT_REVIEWED']}: {reviewed}; "
-                                        f"{ta.record_path(record_task)} names branch {branch}, which is no local branch")
+    tip = rev(repo, f"refs/heads/{branch}") if isinstance(branch, str) and branch else None
+    where = f"{gp.REASONS['NO_BRANCH_AT_REVIEWED']}: {reviewed}; {ta.record_path(record_task)} names branch {branch}"
+    if tip is None:
+        raise stop("NO_BRANCH_AT_REVIEWED", f"{where}, which is no local branch")
+    if tip != reviewed and ta.scan(repo, git(repo, "merge-base", main_tip, reviewed).stdout.strip(), reviewed).records_only:
+        raise stop("NO_BRANCH_AT_REVIEWED", f"{where}, which is not at the reviewed SHA of this records-only range")
+    return branch, "record"
 
 
 def declared_verifier(repo: Path, main: str, main_tip: str) -> tuple[verification_section.Declaration, list[str] | None, str | None]:
@@ -1364,7 +1365,7 @@ class _Parser(argparse.ArgumentParser):
 def build_parser() -> argparse.ArgumentParser:
     parser = _Parser(allow_abbrev=False, description=__doc__.splitlines()[0])
     parser.add_argument("--project", help="registered project name from workspace.yaml; root names the workspace "
-                        "root (default: the task's declared prefix, else the working directory's project)")
+                        "root (default: the task's declared prefix)")
     parser.add_argument("--reviewed", required=True, help="SHA named by the review: " + SHA_FORM)
     parser.add_argument(
         "--rebased",
