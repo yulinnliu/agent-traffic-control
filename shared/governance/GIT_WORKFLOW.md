@@ -432,9 +432,11 @@ exactly one source.
 A record grants nothing by itself; the Owner's words do. A record on `main`
 with `integrate_main: true` is the Owner's integration authority for `FF`
 after an unconditional PASS on the exact SHA, never for `NO_FF`
-(`AUTHORITY_NOT_FF`), a push or a deploy. Only the coordinator writes a record's
-`authority` and passes `--owner-words`, from the Owner's quoted words; the
-writer keeps the record's `delivery.status`. A grant ends the moment the
+(`AUTHORITY_NOT_FF`), a push or a deploy. Anyone the project's rules let
+integrate may run `atc integrate --task <ID>` on the record's authority. Only
+the coordinator, who hears the Owner, writes a record's `authority` and
+passes `--owner-words`, from the Owner's quoted words. The writer keeps the
+record's `delivery.status`. A grant ends the moment the
 Owner narrows or revokes it, whatever the record on `main` still reads. A
 grant counts only when it entered `main` through this machine's records-only
 `--owner-words` integration. `docs/TASKS.md` § Authority on `main` states how

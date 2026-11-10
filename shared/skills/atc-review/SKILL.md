@@ -177,9 +177,10 @@ carries the verdict token and that path.
   integration instruction, the integration instruction. The Owner's word on
   the exact reviewed SHA approves integration. The holder of that word (the
   user pasting the instruction into the writer, or a coordinator that has
-  the Owner's word for that SHA) runs or forwards the instruction. Before
-  writing it, run `atc integrate --check --json` with the same arguments as
-  the integrate command below; it runs `git fetch origin` and otherwise only reads. The
+  the Owner's word for that SHA) runs or forwards the instruction, within
+  governance `GIT_WORKFLOW.md` § Task and authority on who runs which form.
+  Before writing it, run `atc integrate --check --json` with the same
+  arguments as the integrate command below; it runs `git fetch origin` and otherwise only reads. The
   PASS carries the instruction only when the result has no `refusal` and its
   `preflight.verdict` is `FF` or `NO_FF`; quote that verdict with
   `preflight.reason` and every entry of `resolved.warnings` in the verified
@@ -221,7 +222,8 @@ carries the verdict token and that path.
 ## Writer: after integration
 
 A PASS authorizes only the commands it carries; build, install, push and any
-other action need their own instruction.
+other action need their own instruction. Who may run which form of
+`atc integrate` is governance `GIT_WORKFLOW.md` § Task and authority.
 
 1. Run the `atc integrate` command with `--json` added (after
    `switch main`, when the block carries it) and check its result. `FF`
