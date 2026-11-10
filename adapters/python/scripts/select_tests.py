@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import json
 import subprocess
 import sys
 from collections.abc import Iterable
@@ -368,7 +369,8 @@ def pytest_args(selection: TestSelection) -> list[str] | None:
     return [path.removeprefix(f"{ADAPTER}/") for path in paths]
 
 
-def describe(selection: TestSelection) -> str:
+def describe(selection: TestSelection, explain: bool = False) -> str:
+    """The count and one reason line per changed path; with ``explain``, each selected test file and its cause too."""
     args = pytest_args(selection)
     total = len(selection.test_order)
     if args is None:
@@ -378,12 +380,20 @@ def describe(selection: TestSelection) -> str:
     else:
         head = f"{len(args)} of {total} test files"
     lines = [f"test selection: {head}"]
-    if args:
+    if args and explain:
         lines.append("tests:")
         lines += [f"  {arg}  <- {', '.join(selection.causes[f'{ADAPTER}/{arg}'])}" for arg in args]
     lines.append("paths:")
     lines += [f"  {reason}" for reason in selection.reasons] or ["  (no changed path)"]
     return "\n".join(lines)
+
+
+def selected_files(selection: TestSelection) -> list[str]:
+    """Every test file to run, relative to the adapter: the whole suite spelled out, ``[]`` for none."""
+    args = pytest_args(selection)
+    if args is None:
+        return []
+    return args or [order.removeprefix(f"{ADAPTER}/") for order in selection.test_order]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -395,14 +405,23 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     source = parser.add_mutually_exclusive_group()
     source.add_argument("--base", default="main", help="compare HEAD and the working tree with this base (default main)")
-    source.add_argument("--paths", nargs="+", help="explain these workspace-relative paths instead")
+    source.add_argument("--paths", nargs="+", help="select for these workspace-relative paths instead")
     parser.add_argument("--run", action="store_true",
                         help="run the testkit's stages on the selection; arguments after -- go to pytest")
     parser.add_argument("--workers", help="worker count for --run, checked by the stage runner")
+    shown = parser.add_mutually_exclusive_group()
+    shown.add_argument("--explain", action="store_true", help="also list each selected test file with its cause")
+    shown.add_argument("--json", action="store_true",
+                       help="print only the test files to run, relative to adapters/python, as a JSON array")
     args = parser.parse_args(argv)
+    if args.json and (args.run or extra):
+        parser.error("--json prints the selection; it takes no --run and no pytest arguments")
     paths = args.paths if args.paths else changed_paths(args.base)
     selection = select(paths)
-    print(describe(selection), flush=True)
+    if args.json:
+        print(json.dumps(selected_files(selection)), flush=True)
+        return 0
+    print(describe(selection, args.explain), flush=True)
     if not args.run:
         return 0
     targets = pytest_args(selection)

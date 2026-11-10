@@ -1,6 +1,8 @@
 """`scripts/select_tests.py`: this adapter's test selection, read from this checkout's code."""
 from __future__ import annotations
 
+import json
+
 import pytest
 
 import select_tests
@@ -208,9 +210,29 @@ def test_markdown_no_test_names_selects_nothing(graph):
     assert chosen(graph, "docs/NO_TEST_NAMES_THIS.md") is None
 
 
-def test_the_command_prints_each_selected_test_with_its_cause(capsys):
-    assert select_tests.main(["--paths", f"{ADAPTER}/scripts/worktree_cd_guard.py", "docs/NO_TEST_NAMES_THIS.md"]) == 0
+def test_the_command_prints_a_summary_and_explains_on_request(capsys):
+    paths = ["--paths", f"{ADAPTER}/scripts/worktree_cd_guard.py", "docs/NO_TEST_NAMES_THIS.md"]
+    assert select_tests.main(paths) == 0
     out = capsys.readouterr().out.splitlines()
     assert out[0].startswith("test selection: 2 of ")
-    assert f"  tests/test_worktree_cd_guard.py  <- {ADAPTER}/scripts/worktree_cd_guard.py" in out
+    assert "tests:" not in out and not any("  <- " in line for line in out)
     assert "  docs/NO_TEST_NAMES_THIS.md: Markdown no test file names" in out
+    assert select_tests.main([*paths, "--explain"]) == 0
+    out = capsys.readouterr().out.splitlines()
+    assert f"  tests/test_worktree_cd_guard.py  <- {ADAPTER}/scripts/worktree_cd_guard.py" in out
+
+
+def test_the_json_form_prints_the_files_to_run(capsys):
+    guard = f"{ADAPTER}/scripts/worktree_cd_guard.py"
+    assert select_tests.main(["--json", "--paths", guard]) == 0
+    files = json.loads(capsys.readouterr().out)
+    assert "tests/test_worktree_cd_guard.py" in files and all(not f.startswith(ADAPTER) for f in files)
+    assert select_tests.main(["--json", "--paths", "docs/NO_TEST_NAMES_THIS.md"]) == 0
+    assert json.loads(capsys.readouterr().out) == []
+    assert select_tests.main(["--json", "--paths", f"{ADAPTER}/tests/root_reads.py"]) == 0
+    whole = json.loads(capsys.readouterr().out)
+    assert len(whole) > 30 and "tests/test_select_tests.py" in whole
+    for extra in (["--run"], ["--", "-x"], ["--explain"]):
+        with pytest.raises(SystemExit) as stopped:
+            select_tests.main(["--json", "--paths", guard, *extra])
+        assert stopped.value.code == 2

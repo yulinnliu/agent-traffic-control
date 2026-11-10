@@ -31,7 +31,7 @@ location, in that order.
 | | `check_workspace.py` | runs the validator and records a failure as friction evidence |
 | | `integration_verify.py` | the verifier `atc integrate` runs in a candidate of this checkout (root `AGENTS.md` § Integration verification) |
 | | `build_testkit_release.py` | builds the `atc-testkit` wheel and digest record for consuming projects |
-| | `select_tests.py` | the test files a change can affect, each with its cause (§ Selected tests) |
+| | `select_tests.py` | the test files a change can affect: a count and one reason per path, each file's cause with `--explain`, a JSON array with `--json` (§ Selected tests) |
 
 `src/atc_cli/` is the dispatcher; the scripts stay runnable directly with
 `uv run python scripts/<name>.py`.
@@ -80,8 +80,10 @@ misses.
 
 ```powershell
 uv run --locked python scripts/select_tests.py --run               # select against main, then run the stages on it
-uv run --locked python scripts/select_tests.py                     # print the selection only
-uv run --locked python scripts/select_tests.py --paths A B         # explain workspace-relative paths
+uv run --locked python scripts/select_tests.py                     # print the selection only: the count and one reason per path
+uv run --locked python scripts/select_tests.py --explain           # also each selected test file with its cause
+uv run --locked python scripts/select_tests.py --json --paths A B  # the test files to run as a JSON array, the whole suite spelled out
+uv run --locked python scripts/select_tests.py --paths A B         # select for workspace-relative paths
 uv run --locked python scripts/select_tests.py --base REF --run -- -x   # another base; pytest arguments after --
 ```
 

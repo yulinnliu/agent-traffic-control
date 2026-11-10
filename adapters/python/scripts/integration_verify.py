@@ -58,7 +58,7 @@ def documentation_predicate(root: Path) -> Callable[[Sequence[str]], bool]:
 def selected_tests(paths: Sequence[str], root: Path = ROOT) -> list[str] | None:
     """The selection's test files relative to the adapter, ``[]`` for the full suite, ``None`` for none."""
     selection = select_tests.select(list(paths), graph(root))
-    print(select_tests.describe(selection), flush=True)
+    print(select_tests.describe(selection, explain=True), flush=True)
     return select_tests.pytest_args(selection)
 
 

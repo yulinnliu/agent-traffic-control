@@ -300,6 +300,7 @@ def test_ci_runs_the_full_suite_through_the_stages_and_the_verifiers_static_chec
 def test_the_selection_gives_the_stages_adapter_paths_the_full_suite_or_none(capsys: pytest.CaptureFixture[str]) -> None:
     test_file = f"{iv.ADAPTER_DIR}/tests/{select_tests.SELF_TEST}"
     assert iv.selected_tests([test_file], WORKSPACE) == [f"tests/{select_tests.SELF_TEST}"]
+    assert f"  tests/{select_tests.SELF_TEST}  <- {test_file}" in capsys.readouterr().out
     assert iv.selected_tests([f"{iv.ADAPTER_DIR}/pyproject.toml"], WORKSPACE) == []
     unnamed = "docs/" + "NO_TEST_NAMES" + "_THIS.md"  # built at run time, so no test file names it
     assert iv.selected_tests([unnamed], WORKSPACE) is None
