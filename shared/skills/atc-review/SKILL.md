@@ -177,26 +177,25 @@ file is `~/.atc/reports/<task>-<short sha>-review.md`.
 - On a PASS, when the project's adopted process lets a PASS carry an
   integration instruction, the integration instruction. The Owner's word on
   the exact reviewed SHA approves integration. The holder of that word, a
-  coordinator or, in a paste-only setup with no coordinator session, the
-  user who counts as one, runs the instruction or forwards it to the writer as governance `GIT_WORKFLOW.md`
-  § Task and authority splits the forms by flag. Before writing it, run
-  `atc integrate --check --json` (governance `GIT_WORKFLOW.md` § Integrate)
-  with the same arguments as the integrate command below. The PASS carries
-  the instruction only when the result has no `refusal` and its
-  `preflight.verdict` is `FF` or `NO_FF`; quote that verdict with
-  `preflight.reason` and every entry of `resolved.warnings` in the verified
-  line. A `refusal`, such as a missing `## Integration verification`
+  coordinator or, in a paste-only setup with no coordinator session, the user
+  who counts as one, runs the instruction or forwards it to the writer as
+  governance `GIT_WORKFLOW.md` § Task and authority splits the forms by flag.
+  Before writing it, run `atc integrate --check --json` (governance
+  `GIT_WORKFLOW.md` § Integrate) with the same arguments as the integrate
+  command below. The PASS carries the instruction only when the result has no
+  `refusal` and its `preflight.verdict` is `FF` or `NO_FF`; quote that verdict
+  with `preflight.reason` and every entry of `resolved.warnings` in the
+  verified line. A `refusal`, such as a missing `## Integration verification`
   section, leaves the PASS without an instruction: give the holder its
-  `reason`, `detail` and `next`. `AUTHORITY_MISSING` is pending authority
-  (§ Integrate): the PASS still carries the instruction with it quoted. A
+  `reason`, `detail` and `next`. `AUTHORITY_MISSING` is pending authority (§
+  Integrate): the PASS still carries the instruction with it quoted. A
   `refusal` whose `next` names a rebase (`REBASE_REQUIRED`, or `OVERLAP` or
-  `CONFLICT` of an unpublished topic) still carries the instruction, with
-  that refusal quoted. In a repository without managed worktrees, a
-  `CHECKOUT_NOT_ON_MAIN` refusal naming the topic branch is the expected
-  check result: the PASS still carries the instruction, the verified line
-  quotes that refusal and every entry of `resolved.warnings`, and the
-  writer's run after `switch main` assesses a dirty checkout and `FF` or
-  `NO_FF`.
+  `CONFLICT` of an unpublished topic) still carries the instruction, with that
+  refusal quoted. In a repository without managed worktrees, a
+  `CHECKOUT_NOT_ON_MAIN` refusal naming the topic branch is the expected check
+  result: the PASS still carries the instruction, the verified line quotes
+  that refusal and every entry of `resolved.warnings`, and the writer's run
+  after `switch main` assesses a dirty checkout and `FF` or `NO_FF`.
 
   When `main` has moved, the topic follows governance `GIT_WORKFLOW.md`
   § Integrate and § After formal review, and the word is asked for again on
