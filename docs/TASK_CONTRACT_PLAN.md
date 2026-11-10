@@ -471,6 +471,8 @@ review, one implementation review and one integration:
      coordinator; `atc-review` "Writer: after integration" and
      `atc-coordinator` step 6 name the command once it lands.
 4. Drop `--main` from `atc integrate` and `atc preflight push`.
+   `git_preflight.py` adds `--main` to `merge`, `cleanup` and `push` in one
+   loop; `merge` and `cleanup` keep it until D.7 retires them (batch 2).
    - Side effects: none found (0 references, 0 calls).
    - Mitigations: argparse's unknown-flag error.
 5. Relay-first integration. The writer integrates its own reviewed
@@ -600,15 +602,22 @@ review, one implementation review and one integration:
    - Mitigations: no skill or transcript call uses the old form; the stderr
      line names the new command; `atc worktree audit` gains each worktree's
      removability verdict; `preflight cleanup` goes outright.
-8. Drop `--verify-command` and `--verify-command-file`; the four test files
-   that pass them declare a verifier in their fixture repository;
-   `integrations.jsonl` records the verifier's source (argv file, timeout,
-   whether `--verify-timeout` overrode it).
+8. Drop `--verify-command` and `--verify-command-file`; the five test files
+   that pass them (`test_git_integrate.py`, `test_integrate_task.py`,
+   `test_integrate_moving_main.py`, `test_testkit_evidence.py`,
+   `test_testkit_verifier.py`) declare a verifier in their fixture
+   repository; `integrations.jsonl` records the verifier's source (argv
+   file, timeout, whether `--verify-timeout` overrode it).
+   `test_inline_verifier_other_than_the_argv_file_does_not_reuse` keeps its
+   case by rewriting the record's argv instead of passing an inline one.
+   D.8 lands before D.21's evidence template, which then integrates
+   through the argv file.
    - Side effects: the vendored `GIT_WORKFLOW.md` names the flags until the
      final sync; slower fixtures; a new key in the record.
-   - Mitigations: C.1 already forbids the flags; fixtures commit the
-     `## Integration verification` section once per module; readers of
-     `integrations.jsonl` ignore unknown keys.
+   - Mitigations: C.1 already forbids the flags; the function-scoped
+     repository builder commits the `## Integration verification` section,
+     so no module-scoped fixture regroups a module under D.23 (re-measured
+     after); readers of `integrations.jsonl` ignore unknown keys.
 9. `atc` sets UTF-8 for every child it starts (Owner's ruling A). Its
    console entry (`atc_cli.main` called with no `argv`, the `atc` script
    and `python -m atc_cli`) sets `PYTHONIOENCODING=utf-8` in its own
@@ -739,7 +748,9 @@ review, one implementation review and one integration:
       which moves to `--explain` and `--json`.
 16. The output proposals 2, 3, 5, 9, 12 and 13 of Tool output, with the
     side effects and mitigations listed there.
-17. D.9 and D.12 change atc-testkit source, so D bumps
+17. D.9, D.12, D.20, D.21 (the `atc_testkit_reap_seconds` ini option) and
+    D.23 (the stages' scheduler and the plugin's grouping) change
+    atc-testkit source, so D bumps
     `atc_testkit.__version__`, updates `adapters/python/atc-testkit/README.md`
     to the new version and builds the release wheel, as that README
     requires for every source change.
@@ -1198,9 +1209,13 @@ review, one implementation review and one integration:
     - `test_testkit_evidence.py`: its `verified` fixture runs one real
       `atc integrate` per test, 3.6-3.9 s of setup each, 131 s in all. A
       module-scoped fixture builds that repository once under
-      `tmp_path_factory`, and each test gets a `shutil.copytree` copy of
-      it; the evidence record lives under the copy's `.git/atc/` and holds
-      digests and SHAs, no path.
+      `tmp_path_factory`, inside `pytest.MonkeyPatch.context()` with the
+      `GIT_*` environment and `tempfile.tempdir` the function-scoped `repo`
+      fixture sets, since a module fixture builds before the conftest's
+      autouse fixtures and cannot take function-scoped ones. `verified`
+      copies it with `shutil.copytree` to the exact path `repo` returns, so
+      `record_path(repo, ...)` holds; the evidence record lives under the
+      copy's `.git/atc/` and holds digests and SHAs, no path.
       - Side effects: tests share one integration's history; a test that
         changed the template would leak into the next; the module now has
         a module-scoped fixture, so D.23 keeps its tests on one worker.
@@ -1210,10 +1225,10 @@ review, one implementation review and one integration:
     - `test_testkit_plugin.py::test_a_surviving_child_fails_the_run_with_its_token`,
       two cases of 10.8-11.7 s: the plugin waits its whole 10 s window
       (`children.REAP_SECONDS`) for a child meant to outlive it. The
-      plugin reads the window from the ini option
-      `atc_testkit_reap_seconds`, taking a value below the default and
-      refusing a larger one at startup; the test passes `-o
-      atc_testkit_reap_seconds=1`.
+      plugin reads the window of `lasting_survivors` (not `_end`'s) from
+      the ini option `atc_testkit_reap_seconds`, a number above 0 and up to
+      the default, refusing any other value at startup; the test passes
+      `-o atc_testkit_reap_seconds=1`.
       - Side effects: a project can set the option.
       - Mitigations: a shorter window only fails a lasting child sooner,
         so it never weakens the check; a larger value is refused.
@@ -1251,36 +1266,42 @@ review, one implementation review and one integration:
     module on one worker; the root's 228 s parallel stage is exactly its
     longest module (D.21), against 174 s under `load` (D.20). What
     `loadscope` protects is a module-, class- or package-scoped fixture,
-    built once per module instead of once per worker that runs a test of
-    the module: the root has one (`test_select_tests.py`'s `graph`),
+    built once per module (per class for a class's tests) instead of once
+    per worker that runs a test of it: the root has one (`test_select_tests.py`'s `graph`),
     hami-quant 40 in 24 files, hami-quant-trading 10 in 9, ria-project and
     my-heartopia-tools none.
     - Change: the parallel stage runs `--dist loadgroup`, and the testkit
       plugin, at collection, marks every test that uses a fixture of
       module, class or package scope with `xdist_group` named after its
-      module (its package for a package-scoped fixture). Those modules
-      stay on one worker as under `loadscope`; every other test spreads as
-      under `load`. A test that already carries `xdist_group` keeps its
-      own group.
+      module, its `module::Class` for a class-scoped fixture, or its
+      package for a package-scoped one. Its `pytest_collection_modifyitems`
+      runs with `tryfirst=True`, before xdist's worker hook
+      (`xdist/remote.py`), which reads `xdist_group` and adds the
+      `@<group>` suffix the scheduler groups by. Those tests stay on one
+      worker as under `loadscope`; every other test spreads as under
+      `load`. A test that already carries `xdist_group` keeps its own
+      group.
     - Side effects:
       - The plugin reads each item's fixture definitions through pytest's
         `_fixtureinfo`, a private attribute.
       - A fixture of function scope that still shares a resource across a
         module (a fixed path, a port) runs on several workers at once.
-      - Projects get the change with their testkit upgrade; their
-        `xdist_group` marks (hami-quant and hami-quant-trading use
-        `--dist=loadgroup` in places) meet the plugin's marks.
+      - Projects get the change with their testkit upgrade;
+        hami-quant-trading's `docs/plans` name `-n 8 --dist loadscope`.
       - `--dist loadgroup` names grouped tests with an `@<group>` suffix in
         xdist's output.
     - Mitigations:
-      - A unit test pins the grouping on pytest's current fixture API, and
-        a missing attribute stops collection with the testkit's token
-        rather than ungrouping silently.
+      - An end-to-end test in `test_testkit_plugin.py` runs a child
+        project at `-n 2 --dist loadgroup` and asserts that a
+        module-scoped fixture is built once and that the node IDs carry
+        `@<group>`; a missing attribute stops collection with the
+        testkit's token rather than ungrouping silently.
       - The marker contract already places shared-resource tests in
         `serial`, which runs `-n 0`; the root's run under `load` (D.20)
         passed; each project's upgrade task (D.17) runs its suite under
         the new scheduler before it lands.
-      - An explicit mark wins, and the plugin adds none beside it.
+      - An explicit mark wins, and the plugin adds none beside it; D.17
+        updates hami-quant-trading's plan text with its upgrade.
       - The evidence record names no scheduler, so reuse is unchanged;
         the suffix is display only.
 24. `atc integrate --repo .` prints every `.` in its human output as the
