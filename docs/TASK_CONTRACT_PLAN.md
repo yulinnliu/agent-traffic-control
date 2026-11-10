@@ -350,8 +350,9 @@ the last lines of its log, never a pass.
 12. `--help`: covered by the principle's usage-error line; no command change
     beyond argparse's usage line plus one `next:` line on a usage error.
 13. `atc task list --all`: 6,969 characters today; 9 of its 53 lines are
-    `INVALID_RECORD` warnings, one per bad ria record. The warnings fold into one
-    line per repository with the count and `atc task check <repo>`.
+    `INVALID_RECORD` warnings, one per bad ria record. The warnings fold
+    into one line per repository with the count and
+    `atc task check <repo>`.
 
 Proposals 2, 3, 5, 6, 9, 12 and 13 are built in D with the side effects
 below; they share one risk, a reader that parses the human output, mitigated
@@ -410,9 +411,9 @@ and by a test per command that pins its default output.
    module through imports. Narrowing that rule saves one test file, so it
    stays as it is.
 7. Callers of `friction`, `classify`, `policies`, `enforce` and `bootstrap`,
-   as files that name `atc <command>` and as transcript calls: `friction` 0 files, 2
-   calls; `classify` 0, 0; `policies` 0, 7; `enforce` 2 root and 4 project,
-   18; `bootstrap` 4 root and 4 project, 8.
+   as files that name `atc <command>` and as transcript calls: `friction`
+   0 files, 2 calls; `classify` 0, 0; `policies` 0, 7; `enforce` 2 root
+   and 4 project, 18; `bootstrap` 4 root and 4 project, 8.
 
 ## D. CLI changes
 
@@ -460,10 +461,12 @@ their mitigations.
 6. `--contract` becomes optional with default 1.
    - Side effects: none for callers; 17 call sites keep passing 1.
    - Mitigations: a value other than 1 still stops with
-     `CONTRACT_INCOMPATIBLE`; removal waits for the CLI trim after the final sync.
+     `CONTRACT_INCOMPATIBLE`; removal waits for the CLI trim after the
+     final sync.
 7. Retire `atc preflight merge` and `atc preflight cleanup`.
-   `preflight merge` stays, until the CLI trim after the final sync, as an alias that runs
-   `atc integrate --check` and prints one stderr line naming it; its
+   `preflight merge` stays, until the CLI trim after the final sync, as an
+   alias that runs `atc integrate --check` and prints one stderr line
+   naming it; its
    differences from `integrate --check`, each mapped or refused:
    - `--main`: accepted only as `main`; any other value stops with `USAGE`
      naming `atc integrate --check` (D.4 drops `--main` from integrate).
@@ -512,8 +515,8 @@ their mitigations.
       (`projects/hami-quant/.claude/skills/atc-review/SKILL.md:166-175` and
       the same lines in each project); readers of the evidence block.
     - Mitigations: the `CHECK ` prefix, the verdict word right after it and
-      the `WARNING` lines keep their form until the CLI trim after the final sync; readers of the
-      evidence use `--json` (B.3).
+      the `WARNING` lines keep their form until the CLI trim after the
+      final sync; readers of the evidence use `--json` (B.3).
 11. `atc worktree cleanup` given `--expected-head` outside its modes names
     the modes that take it (`--abandon`, `--squash-integrated`).
     - Side effects: error text changes.
@@ -548,9 +551,10 @@ their mitigations.
       count, run in the tree, or, for a scratch export, in the source
       worktree and commit its registry entry records (D.13). It prints the
       base and the count.
-    - The console prints the log path at start, then one summary line (counts, failed
-      test names, log path); the full log, pytest's dots and the summary
-      line `-q` hides stay in the log in the run directory, written live
+    - The console prints the log path at start, then one summary line
+      (counts, failed test names, log path); the full log, pytest's dots
+      and the summary line `-q` hides stay in the log in the run directory,
+      written live
       with `PYTHONUNBUFFERED=1`. `--progress` streams for humans. An
       incomplete run reports `TIMEOUT` or `INTERRUPTED` with the last lines
       and never a pass. A log held open blocks cleanup with a one-line
