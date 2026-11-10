@@ -125,7 +125,10 @@ reads `integrated` for its integrated part until its `closure` says
 
 `atc close-out --task <ID> [--project P | --repo ROOT] [--skip ITEM]...` carries out governance
 `DELIVERY.md` § Close-out for one task, the project named as `atc task` names
-it.
+it. Without `--project` or `--repo` the project is the one repository, the
+workspace root or a registered project, whose `AGENTS.md` on `main` declares
+the task's prefix, as `atc integrate --task` resolves it; with none or
+several, the working directory's.
 
 1. It runs only when `integrations.jsonl` names an integration of the task
    that is not records-only and whose candidate local `main` contains, and

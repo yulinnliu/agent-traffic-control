@@ -28,7 +28,7 @@ from atc_testkit import locations, stages
 import git_preflight as gp
 import hami_worktree as hw
 import task_authority as ta
-import task_section
+import task_records
 import verification_section
 from git_preflight import GitError, git, is_ancestor, merge_preflight, render, rev, same_path
 from integration_slot import IntegrationSlot
@@ -764,7 +764,6 @@ def authority_verdict_stop(binding: Binding, verdict: str) -> Refused | None:
 
 def _check_records(candidate_dir: Path, candidate_sha: str) -> None:
     """The record check in place of the verifier, for a range that changes only `.atc/tasks/`."""
-    import task_records
     problems = task_records.problems(candidate_dir)
     if problems:
         raise stop(
@@ -1083,12 +1082,6 @@ def _project_name(repo: Path, root: Path) -> str:
     return hw.validator.ROOT_TOPICS_NAME if same_path(repo, root) else repo.name
 
 
-def declared_prefix(repo: Path, main: str = "main") -> str | None:
-    """The task prefix `AGENTS.md` on ``main`` declares, if any."""
-    shown = git(repo, "show", f"refs/heads/{main}:AGENTS.md", check=False)
-    return task_section.prefix(shown.stdout) or None if shown.returncode == 0 else None
-
-
 def resolve_repo(args: argparse.Namespace, root: Path, root_given: bool, cwd: str) -> tuple[str, Path]:
     """The project name and main checkout: `--repo`, `--project` through workspace.yaml (`root` names the
     workspace root), the repository whose declared prefix a record `--task` carries, or the project holding ``cwd``."""
@@ -1111,12 +1104,9 @@ def resolve_repo(args: argparse.Namespace, root: Path, root_given: bool, cwd: st
         if project is None:
             raise Refused("UNKNOWN_PROJECT", f"{args.project} is not in {root / 'workspace.yaml'}; {registered}")
         return project.name, Path(project.repo)
-    record = ta.RECORD_ID.fullmatch(args.task or "")
-    if record:
-        declaring = [p for p in [root_project, *ws.projects.values()]
-                     if Path(p.repo).is_dir() and declared_prefix(Path(p.repo)) == record["prefix"]]
-        if len(declaring) == 1:
-            return declaring[0].name, Path(declaring[0].repo)
+    declaring = task_records.declaring(ws, args.task)
+    if len(declaring) == 1:
+        return declaring[0].name, Path(declaring[0].repo)
     if args.task is not None:
         raise Refused(
             "USAGE",
@@ -1232,7 +1222,7 @@ def resolve_binding(
     """The tasks and authority of the run (`docs/TASK_CONTRACT_PLAN.md` § B), or the stop that refuses them."""
     words = {"kind": "owner_words", "quote": args.owner_words} if args.owner_words is not None else None
     match = ta.RECORD_ID.fullmatch(args.task or "")
-    record_task = args.task if match and declared_prefix(repo, main) == match["prefix"] else None
+    record_task = args.task if match and task_records.main_prefix(repo, main) == match["prefix"] else None
     if branch is None or branch_source == "recovery":
         # A recovered candidate is already on main; its range was checked by the run that made it,
         # and its authority is resolved here as for any other run.

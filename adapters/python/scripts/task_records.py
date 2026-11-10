@@ -92,6 +92,24 @@ def declared_prefix(repo: Path) -> str | None:
     return task_section.prefix(agents.read_text(encoding="utf-8")) if agents.is_file() else None
 
 
+def main_prefix(repo: Path, main: str = "main") -> str | None:
+    """The prefix `AGENTS.md` on ``main`` of ``repo`` declares, if any."""
+    shown = git(repo, "show", f"refs/heads/{main}:AGENTS.md", check=False)
+    return task_section.prefix(shown.stdout) or None if shown.returncode == 0 else None
+
+
+def declaring(ws, task: str | None) -> list:
+    """The repositories, the workspace root and the registered projects, whose `AGENTS.md` on ``main`` declares
+    the prefix of the record ID ``task``."""
+    import hami_worktree as hw
+    import task_authority as ta
+    record = ta.RECORD_ID.fullmatch(task or "")
+    if not record:
+        return []
+    return [p for p in [hw.root_project(ws), *ws.projects.values()]
+            if Path(p.repo).is_dir() and main_prefix(Path(p.repo)) == record["prefix"]]
+
+
 def prefix_problem(declared: str | None) -> str | None:
     if declared == "":
         return f"no-prefix-line: AGENTS.md '{task_section.HEADING}' has no 'Task prefix: <PREFIX>' line"
@@ -134,8 +152,13 @@ def common_dir(repo: Path) -> str:
     return os.path.normcase(os.path.realpath(out))
 
 
-def resolve(root: Path, environ: dict[str, str], cwd: str, project: str | None, repo: str | None, every: bool = False):
-    """The targets as (name, main checkout) pairs, named as `atc worktree` names them."""
+def resolve(root: Path, environ: dict[str, str], cwd: str, project: str | None, repo: str | None, every: bool = False,
+            task: str | None = None):
+    """The targets as (name, main checkout) pairs, named as `atc worktree` names them.
+
+    Without ``repo`` and ``project``, a record ID ``task`` names the one repository declaring its prefix; with none
+    or several, the working directory's project.
+    """
     import hami_worktree as hw
     try:
         ws = hw.load_workspace(root, environ)
@@ -158,6 +181,9 @@ def resolve(root: Path, environ: dict[str, str], cwd: str, project: str | None, 
         if found is None:
             raise Refused("UNKNOWN_PROJECT", f"{project}; {registered}")
         return [(found.name, Path(found.repo))]
+    declared = declaring(ws, task) if task is not None else []
+    if len(declared) == 1:
+        return [(declared[0].name, Path(declared[0].repo))]
     found = hw.infer_project(ws, cwd)
     if found is None:
         raise Refused("UNKNOWN_PROJECT", f"no --project and {cwd} is in no registered project; {registered}")

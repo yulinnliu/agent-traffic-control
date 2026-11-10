@@ -129,7 +129,8 @@ def main(argv: list[str] | None = None, root: Path = task_records.ROOT, environ:
                "removed.")
     parser.add_argument("--task", required=True, help="the integrated task, for example ATC-0008")
     target = parser.add_mutually_exclusive_group()
-    target.add_argument("--project", help="the task's project (default: the working directory's)")
+    target.add_argument("--project", help="the task's project (default: the repository declaring the task's prefix, else the "
+                                             "working directory's)")
     target.add_argument("--repo", help="the workspace root, for one of its own tasks")
     parser.add_argument("--skip", action="append", choices=ITEMS, default=[], metavar="ITEM",
                         help=f"leave this item for this run only, nothing written ({', '.join(ITEMS)}; repeatable; "
@@ -139,7 +140,7 @@ def main(argv: list[str] | None = None, root: Path = task_records.ROOT, environ:
     cwd = cwd or os.getcwd()
     lines: list[str] = []
     try:
-        [(name, checkout)] = task_records.resolve(root, environ, cwd, args.project, args.repo)
+        [(name, checkout)] = task_records.resolve(root, environ, cwd, args.project, args.repo, task=args.task)
         integrated(checkout, args.task)
         data = record(checkout, args.task)
     except (Stop, task_records.Refused) as stop:

@@ -143,3 +143,21 @@ def test_a_worktree_cleanup_refuses_is_reported(done, capsys: pytest.CaptureFixt
     code, lines, _err = close(ws, environ, capsys, ws.root)
     assert code == 1 and lines[0].startswith(f"REFUSED {topic} (") and topic.is_dir()
     assert lines[-1].endswith(", 1 refused")
+
+
+def test_without_a_target_the_task_prefix_names_its_repository(ws: Workspace, atc_tmp: Path, tmp_path: Path,
+                                                                capsys: pytest.CaptureFixture[str]) -> None:
+    rooted = "ATC-0001"
+    topic = ws.worktree(ws.root, "claude+rooted", "worktree-claude+rooted")
+    tip = commit(topic, {f".atc/tasks/{rooted}.yaml": record(rooted, "worktree-claude+rooted")})
+    run_git(ws.root, "merge", "-q", "--ff-only", "worktree-claude+rooted")
+    ws.integrate(ws.root, task=rooted, candidate_sha=tip, records_only=False)
+    environ = {"ATC_TMP": str(atc_tmp), "USERPROFILE": str(tmp_path / "home"), "HOME": str(tmp_path / "home")}
+    code = close_out.main(["--task", rooted, "--skip", "worktree"], root=ws.root, environ=environ, cwd=str(ws.repo))
+    captured = capsys.readouterr()
+    assert code == 0, captured.err
+    assert captured.out.splitlines() == [f"SKIPPED {topic} (--skip)",
+                                         f"close-out {rooted}: 0 deleted, 1 skipped, 0 refused"]
+    for cwd, token in ((ws.repo, "NOT_INTEGRATED"), (ws.root, "UNKNOWN_PROJECT")):
+        code = close_out.main(["--task", "ZZZ-0001"], root=ws.root, environ=environ, cwd=str(cwd))
+        assert (code, capsys.readouterr().err.split(" ", 2)[1]) == (2, token)
