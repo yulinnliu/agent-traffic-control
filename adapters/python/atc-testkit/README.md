@@ -1,6 +1,6 @@
 # atc-testkit
 
-This document describes `atc-testkit` 0.8.2; update it with every version bump.
+This document describes `atc-testkit` 0.9.0; update it with every version bump.
 
 Development-only Python package shared by the projects of a workspace. It holds
 the pytest plugin and marker contract, policy-driven test selection, Git gate
@@ -128,7 +128,7 @@ against that snapshot. It refuses to replace changed release content. Use a fres
 `src/atc_testkit/__init__.py` is the one place that sets the version.
 
 Each consumer commits the exact wheel under `vendor/`, pins
-`atc-testkit==0.8.2` in its development dependencies and records the local
+`atc-testkit==0.9.0` in its development dependencies and records the local
 artifact in `uv.lock`. Standalone clones and CI install their committed artifact
 without a workspace checkout or credentials. Released versions are immutable;
 source changes require a new version and explicit consumer upgrades.
