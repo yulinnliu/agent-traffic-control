@@ -137,10 +137,11 @@ missing lock and `PATH_UNSAFE` are findings.
   and `cleanup` returns `PERMISSION_DENIED`. Leave the directory and run the
   same `cleanup` again. It finishes the removal and reports `RECOVERED` only
   when the path is not registered as a worktree, the directory is empty (no
-  files, no reparse points) and the topic branch is merged into `main`; it
-  removes the empty directory and compare-and-deletes the branch. If any of the
-  three fails it refuses with `PATH_UNSAFE` `unregistered`, `evidence`
-  `recovery_refused` names the failing condition, and nothing is deleted.
+  files, no reparse points) and the topic branch is merged into `main` or
+  already gone; it removes the empty directory and compare-and-deletes a
+  branch still there. Otherwise it refuses with `PATH_UNSAFE` `unregistered`,
+  `evidence` `recovery_refused` names the failing condition, and nothing is
+  deleted.
   Abandoned and squash cleanup never recover this way.
 - The lock stays from `create` until `cleanup`. It guards against removal and
   records identity; it is not an edit lock. Never lock, unlock, move, prune or

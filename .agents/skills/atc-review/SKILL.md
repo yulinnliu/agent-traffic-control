@@ -271,9 +271,10 @@ other action need their own instruction. Who may run which form of
    `atc close-out --task <task>`, run from outside the task's worktree when
    you can: it removes the task's worktree through `atc worktree cleanup`'s
    checks, its scratches with their dependent runs, and its report files
-   `~/.atc/reports/<task>-*.md` (the writer's and the reviewer's), skips
-   the keep exceptions the record lists, and reports the worktree that holds
-   your working directory as `SKIPPED`. A repository without managed
+   `~/.atc/reports/<task>-*.md` (the writer's and the reviewer's), leaves
+   what the record's `keep` lists and what `--skip <item>` names for an
+   intermediate batch, and reports the worktree that holds your working
+   directory as `SKIPPED (working directory)`. A repository without managed
    worktrees keeps the topic branch for the holder.
 3. Run the hami-handoff-reminder check and report the integration result,
    every close-out line and the check's result lines to the holder only; the

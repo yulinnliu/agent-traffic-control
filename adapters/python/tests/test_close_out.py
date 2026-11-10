@@ -57,7 +57,7 @@ def test_an_integrated_task_loses_its_worktree_scratches_and_reports(done, atc_t
 def test_the_working_directorys_worktree_is_skipped(done, capsys: pytest.CaptureFixture[str]) -> None:
     ws, topic, environ = done
     code, lines, _err = close(ws, environ, capsys, topic)
-    assert code == 0 and lines[0].startswith(f"SKIPPED {topic} (holds the working directory")
+    assert code == 0 and lines[0] == f"SKIPPED {topic} (working directory)"
     assert topic.is_dir()
 
 
@@ -71,10 +71,45 @@ def test_keep_exceptions_in_the_record_are_skipped(ws: Workspace, atc_tmp: Path,
     reports.mkdir(parents=True)
     (reports / f"{TASK}-x.md").write_text("r", encoding="utf-8")
     environ = {"ATC_TMP": str(atc_tmp), "USERPROFILE": str(tmp_path / "home"), "HOME": str(tmp_path / "home")}
-    code, lines, _err = close(ws, environ, capsys, ws.root)
+    code, lines, _err = close(ws, environ, capsys, ws.root, "--skip", "worktree")
     assert code == 0
-    assert lines == [f"SKIPPED {topic} (kept by the record)", f"SKIPPED {reports / f'{TASK}-x.md'} (kept by the record)",
+    assert lines == [f"SKIPPED {topic} (keep)", f"SKIPPED {reports / f'{TASK}-x.md'} (keep)",
                      f"close-out {TASK}: 0 deleted, 2 skipped, 0 refused"]
+
+
+def test_skip_leaves_its_items_for_this_run_only_and_writes_nothing(done, atc_tmp: Path,
+                                                                    capsys: pytest.CaptureFixture[str]) -> None:
+    ws, topic, environ = done
+    recorded = run_git(ws.repo, "show", f"main:.atc/tasks/{TASK}.yaml")
+    code, lines, err = close(ws, environ, capsys, ws.root, "--skip", "worktree", "--skip", "reports")
+    assert code == 0, (lines, err)
+    reports = Path(environ["HOME"]) / ".atc" / "reports"
+    assert lines[0] == f"SKIPPED {topic} (--skip)" and topic.is_dir()
+    assert f"DELETED {atc_tmp / 'mine'}" in lines
+    assert [line for line in lines if "reports" in line] == [
+        f"SKIPPED {reports / name} (--skip)" for name in (f"{TASK}-abc-review.md", f"{TASK}-abc.md")]
+    assert lines[-1] == f"close-out {TASK}: 1 deleted, 3 skipped, 0 refused"
+    assert run_git(ws.repo, "show", f"main:.atc/tasks/{TASK}.yaml") == recorded
+    code, lines, err = close(ws, environ, capsys, ws.root)
+    assert code == 0 and lines[0] == f"DELETED {topic}", (lines, err)
+
+
+def test_a_leftover_directory_of_the_unregistered_worktree_is_removed(done, capsys: pytest.CaptureFixture[str]) -> None:
+    ws, topic, environ = done
+    run_git(ws.repo, "worktree", "unlock", str(topic))
+    run_git(ws.repo, "worktree", "remove", "--force", str(topic))
+    run_git(ws.repo, "branch", "-D", "worktree-claude+widget")
+    topic.mkdir()
+    code, lines, err = close(ws, environ, capsys, ws.root, "--skip", "scratches", "--skip", "reports")
+    assert (code, lines[0]) == (0, f"DELETED {topic}"), (lines, err)
+    assert not topic.exists()
+
+
+def test_skip_names_only_the_close_out_items(done, capsys: pytest.CaptureFixture[str]) -> None:
+    ws, _topic, environ = done
+    with pytest.raises(SystemExit) as stop:
+        close(ws, environ, capsys, ws.root, "--skip", "branch")
+    assert stop.value.code == 2
 
 
 @pytest.mark.parametrize("case", ["no line", "records only", "not on main"])

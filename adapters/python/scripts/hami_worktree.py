@@ -758,8 +758,8 @@ def remove_empty_directory(path: str) -> None:
 def recover_cleanup(ctx: Context, owner: str, topic: str, refusal: Result) -> Result:
     """Finish a cleanup Git half-completed, or return ``refusal`` naming the condition that does not hold.
 
-    All three hold: the path is not registered as a worktree (``refusal`` establishes it), the
-    directory is empty with no reparse point, and the topic branch is merged into ``main``.
+    The path is not registered as a worktree (``refusal`` establishes it) and the directory is empty with no
+    reparse point; the topic branch is merged into ``main`` or already gone.
     """
     repo, target = ctx.project.repo, refusal.target
     branch = durable(owner, topic)[1]
@@ -774,13 +774,12 @@ def recover_cleanup(ctx: Context, owner: str, topic: str, refusal: Result) -> Re
         if next(entries, None) is not None:
             return refuse("directory not empty")
     tip = commit_of(repo, "refs/heads/" + branch)
-    if tip is None:
-        return refuse(f"branch {branch} missing")
-    main_tip = commit_of(repo, "main")
-    if main_tip is None:
-        return Result("UNSUPPORTED_ENVIRONMENT", target, "cannot resolve main")
-    if not is_ancestor(repo, tip, main_tip):
-        return refuse(f"branch {branch} not merged into main")
+    if tip is not None:
+        main_tip = commit_of(repo, "main")
+        if main_tip is None:
+            return Result("UNSUPPORTED_ENVIRONMENT", target, "cannot resolve main")
+        if not is_ancestor(repo, tip, main_tip):
+            return refuse(f"branch {branch} not merged into main")
     require_writable(repo, target)
     if any(key(e["worktree"]) == key(target) for e in list_worktrees(repo)[1:]):
         return refuse("registered")
@@ -788,7 +787,11 @@ def recover_cleanup(ctx: Context, owner: str, topic: str, refusal: Result) -> Re
         remove_empty_directory(target)
     except OSError as exc:
         return Result("PERMISSION_DENIED", target, f"cannot remove the empty directory ({exc.strerror or exc})",
-                      {"branch": branch, "branch_kept": True})
+                      {"branch": branch, "branch_kept": tip is not None})
+    if tip is None:
+        evidence = {"branch": branch, "branch_missing": True, "branch_kept": False}
+        evidence.update(completion_evidence(repo, target, branch, False))
+        return Result("RECOVERED", target, "removed the empty directory; the branch was already gone", evidence)
     # Compare-and-delete: a branch that moved since the merge check is kept.
     deleted = git(repo, "update-ref", "-d", "refs/heads/" + branch, tip)
     kept = deleted.returncode != 0

@@ -1566,7 +1566,7 @@ def test_cleanup_recovers_an_unregistered_empty_directory_with_a_merged_branch(w
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("fault", ["file", "hidden-dir", "reparse-child", "unmerged", "branch-missing", "abandon-mode"])
+@pytest.mark.parametrize("fault", ["file", "hidden-dir", "reparse-child", "unmerged", "abandon-mode"])
 def test_cleanup_refuses_recovery_unless_all_three_conditions_hold(ws: Workspace, tmp_path: Path, fault: str, capsys: pytest.CaptureFixture[str]) -> None:
     path = half_cleaned(ws, capsys, merged=fault != "unmerged")
     if fault == "file":
@@ -1576,8 +1576,6 @@ def test_cleanup_refuses_recovery_unless_all_three_conditions_hold(ws: Workspace
     elif fault == "reparse-child":
         (tmp_path / "elsewhere").mkdir()
         make_link(path / "link", tmp_path / "elsewhere")
-    elif fault == "branch-missing":
-        run_git(ws.repo, "branch", "-D", "worktree-claude+topic")
     before = run_git(ws.repo, "for-each-ref", "refs/heads")
     extra = ("--abandon", "--archive-tag", "archive/x", "--expected-head", "a" * 40) if fault == "abandon-mode" else ()
     status, results = ws.run(capsys, "cleanup", "claude", "topic", *extra)
@@ -1587,6 +1585,17 @@ def test_cleanup_refuses_recovery_unless_all_three_conditions_hold(ws: Workspace
     assert run_git(ws.repo, "for-each-ref", "refs/heads") == before
     if fault == "reparse-child":
         assert (tmp_path / "elsewhere").is_dir()
+
+
+@pytest.mark.integration
+def test_cleanup_recovers_an_unregistered_empty_directory_whose_branch_is_gone(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    path = half_cleaned(ws, capsys, merged=False)
+    run_git(ws.repo, "branch", "-D", "worktree-claude+topic")
+    status, results = ws.run(capsys, "cleanup")
+    result = single(results)
+    assert (status, result["reason"], result["target"]) == (0, "RECOVERED", str(path))
+    assert (result["evidence"]["branch_missing"], result["evidence"]["cleanup_complete"]) == (True, True)
+    assert not path.exists()
 
 
 @pytest.mark.integration

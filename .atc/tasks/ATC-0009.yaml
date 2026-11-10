@@ -1,0 +1,14 @@
+task_id: ATC-0009
+repository: yulinnliu/agent-traffic-control
+base_sha: 665f6ac0f33fefc847c86823ce25463814a4de04
+scope: 'close-out --skip: one-run skip separate from the record''s permanent keep'
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: 665f6ac0f33fefc847c86823ce25463814a4de04
+branch: worktree-claude+closeout-skip
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false

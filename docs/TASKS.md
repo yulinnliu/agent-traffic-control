@@ -38,7 +38,7 @@ The section may carry prose after the line; tools read only the line.
 | `authority` | yes | the six booleans `edit`, `commit`, `push_topic`, `integrate_main`, `push_main`, `deploy`, and no other key |
 | `authority_basis` | when any of `push_topic`, `integrate_main`, `push_main`, `deploy` is `true` | the Owner's words granting it, quoted |
 | `closure` | no | `{state: closed \| abandoned, note: text}`, written in the commit that ends a task without integrating it |
-| `keep` | no | the close-out keep exceptions, a list of `worktree`, `scratches` and `reports` (§ Close-out) |
+| `keep` | no | what close-out keeps permanently, a list of `worktree`, `scratches` and `reports` (§ Close-out) |
 
 Other keys (`repository_identity_status`, `writer`,
 `verification_requirements`, `execution_context`, `delivery`, `decisions`)
@@ -123,7 +123,7 @@ reads `integrated` for its integrated part until its `closure` says
 
 ## Close-out
 
-`atc close-out --task <ID> [--project P | --repo ROOT]` carries out governance
+`atc close-out --task <ID> [--project P | --repo ROOT] [--skip ITEM]...` carries out governance
 `DELIVERY.md` § Close-out for one task, the project named as `atc task` names
 it.
 
@@ -133,13 +133,18 @@ it.
    with `NOT_INTEGRATED`, `RECORD_MISSING` or `RECORD_INVALID` (exit 2)
    before anything is removed.
 2. The worktree whose branch is the record's `branch` goes through
-   `atc worktree cleanup` and its checks. A worktree that holds the
-   working directory ends `SKIPPED`, for the coordinator to remove.
+   `atc worktree cleanup` and its checks, and so does an empty directory
+   left at that branch's managed path after Git unregistered the worktree.
+   A worktree that holds the working directory ends
+   `SKIPPED (working directory)`, for the coordinator to remove.
 3. The scratches whose registry line names the task, with their dependent
    runs (`ATC_HOME.md` § Deleting), go through `atc tmp clean`.
 4. The report files `~/.atc/reports/<ID>-*.md` are deleted.
 
-An item the record's `keep` names ends `SKIPPED`. Every item ends on one line,
+An item the record's `keep` names ends `SKIPPED (keep)` on every run; `keep`
+is permanent. An item a `--skip` names (`worktree`, `scratches` or
+`reports`, repeatable) ends `SKIPPED (--skip)` on this run only, and nothing
+is written; a `--skip` of an absent item does nothing. Every item ends on one line,
 `DELETED`, `SKIPPED` or `REFUSED` with the reason, and a last line counts
 them; the exit code is 1 when one is `REFUSED`, else 0.
 

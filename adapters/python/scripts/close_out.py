@@ -21,7 +21,7 @@ import hami_worktree as hw
 import task_records
 
 INTEGRATIONS = ("atc", "integrations.jsonl")
-KEEPABLE = ("worktree", "scratches", "reports")
+ITEMS = ("worktree", "scratches", "reports")
 REPORTS = "reports"
 REFUSED_EXIT = 1
 STOP_EXIT = 2
@@ -70,8 +70,8 @@ def record(repo: Path, task: str) -> dict:
     except yaml.YAMLError as error:
         raise Stop("RECORD_INVALID", f"{task}: {error}") from None
     keep = data.get("keep", []) if isinstance(data, dict) else None
-    if not isinstance(keep, list) or not set(keep) <= set(KEEPABLE):
-        raise Stop("RECORD_INVALID", f"{task}: keep is a list of {', '.join(KEEPABLE)}")
+    if not isinstance(keep, list) or not set(keep) <= set(ITEMS):
+        raise Stop("RECORD_INVALID", f"{task}: keep is a list of {', '.join(ITEMS)}")
     return data
 
 
@@ -84,10 +84,24 @@ def task_worktree(repo: Path, branch: str) -> Path | None:
     return None
 
 
+def leftover_directory(root: Path, name: str, branch: str, environ: dict[str, str]) -> Path | None:
+    """The managed path of ``worktree-<owner>+<topic>`` when Git no longer lists it but a directory is still there."""
+    owner, plus, topic = branch.removeprefix(hw.BRANCH_PREFIX).partition("+")
+    if not branch.startswith(hw.BRANCH_PREFIX) or not plus or owner not in hw.OWNERS or not hw.TOPIC.fullmatch(topic):
+        return None
+    try:
+        ws = hw.load_workspace(root, environ)
+    except hw.Stop:
+        return None
+    project = hw.root_project(ws) if name == hw.root_project(ws).name else ws.projects.get(name)
+    path = Path(project.worktrees) / hw.durable(owner, topic)[0] if project is not None else None
+    return path if path is not None and os.path.lexists(path) else None
+
+
 def remove_worktree(root: Path, name: str, worktree: Path, cwd: str, environ: dict[str, str]) -> str:
     """One report line for the task's worktree, removed through `atc worktree cleanup` and its checks."""
     if Path(os.path.normcase(os.path.realpath(cwd))).is_relative_to(os.path.normcase(os.path.realpath(worktree))):
-        return f"SKIPPED {worktree} (holds the working directory; the coordinator removes it)"
+        return f"SKIPPED {worktree} (working directory)"
     owner, plus, topic = worktree.name.partition("+")
     if not plus or owner not in hw.OWNERS:
         return f"REFUSED {worktree} (not a managed worktree <owner>+<topic>)"
@@ -117,6 +131,9 @@ def main(argv: list[str] | None = None, root: Path = task_records.ROOT, environ:
     target = parser.add_mutually_exclusive_group()
     target.add_argument("--project", help="the task's project (default: the working directory's)")
     target.add_argument("--repo", help="the workspace root, for one of its own tasks")
+    parser.add_argument("--skip", action="append", choices=ITEMS, default=[], metavar="ITEM",
+                        help=f"leave this item for this run only, nothing written ({', '.join(ITEMS)}; repeatable; "
+                             "an absent item is a no-op); the record's keep is permanent")
     args = parser.parse_args(argv)
     environ = dict(os.environ) if environ is None else environ
     cwd = cwd or os.getcwd()
@@ -128,27 +145,32 @@ def main(argv: list[str] | None = None, root: Path = task_records.ROOT, environ:
     except (Stop, task_records.Refused) as stop:
         print(f"ERROR {stop.token} {stop.detail}", file=sys.stderr)
         return STOP_EXIT
-    keep = set(data.get("keep", []))
+    keep, skip = set(data.get("keep", [])), set(args.skip)
 
-    worktree = task_worktree(checkout, str(data.get("branch", "")))
+    def skipped(item: str) -> str | None:
+        """The source that leaves ``item`` this run: the record's permanent ``keep`` first, then ``--skip``."""
+        return "keep" if item in keep else "--skip" if item in skip else None
+
+    branch = str(data.get("branch", ""))
+    worktree = task_worktree(checkout, branch) or leftover_directory(root, name, branch, environ)
     if worktree is None:
         pass
-    elif "worktree" in keep:
-        lines.append(f"SKIPPED {worktree} (kept by the record)")
+    elif skipped("worktree"):
+        lines.append(f"SKIPPED {worktree} ({skipped('worktree')})")
     else:
         lines.append(remove_worktree(root, name, worktree, cwd, environ))
 
     tmp = locations.locate(environ).tmp
     scratches = [row.scratch for row in scratch.registered(tmp) if row.task == args.task]
-    if "scratches" in keep:
-        lines += [f"SKIPPED {item} (kept by the record)" for item in scratches]
+    if skipped("scratches"):
+        lines += [f"SKIPPED {item} ({skipped('scratches')})" for item in scratches]
     elif scratches:
         scratch.clean(scratches, say=lines.append, environ=environ, with_runs=True)
 
     reports = sorted((locations.atc_home(environ) / REPORTS).glob(f"{args.task}-*.md"))
     for report in reports:
-        if "reports" in keep:
-            lines.append(f"SKIPPED {report} (kept by the record)")
+        if skipped("reports"):
+            lines.append(f"SKIPPED {report} ({skipped('reports')})")
             continue
         try:
             report.unlink()

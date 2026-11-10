@@ -38,8 +38,8 @@ atc task new --project <project> --scope "<plan section>"
 ```
 
 It writes `.atc/tasks/<ID>.yaml` granting `edit` and `commit`; commit it on
-the topic branch. A record's `keep` list names what close-out leaves
-(`docs/TASKS.md` § Record).
+the topic branch. A record's `keep` list names what close-out keeps
+permanently (`docs/TASKS.md` § Record).
 
 - `CHECKOUT_CANONICAL` or `UNKNOWN_PROJECT` with a relative `--repo`: run it
   inside the new worktree with the absolute root path, as the refusal says.
@@ -115,9 +115,16 @@ atc close-out --task <ID> --repo "<root>"
 ```
 
 Use `--project <project>` in place of `--repo "<root>"` for a project task.
-`atc close-out` removes the worktree, the task's scratches and its reports,
-skips what the record keeps, and leaves the worktree that holds the session's
-working directory as `SKIPPED` (`docs/TASKS.md` § Close-out).
+`atc close-out` removes the worktree, the task's scratches and its reports
+(`docs/TASKS.md` § Close-out):
+
+- An intermediate batch of a multi-batch topic runs it with `--skip` for
+  each item the next batch needs, for example `--skip worktree`; it writes
+  nothing. The final batch runs it without `--skip`. The record's `keep` is
+  for items kept permanently.
+- The worktree that holds the session's working directory ends
+  `SKIPPED (working directory)`. The writer leaves its working directory as
+  it is; the coordinator removes the worktree after that session ends.
 
 - `VERIFICATION_FAILED`: the verifier's log names the failing tests; fix,
   and the change goes back to review.

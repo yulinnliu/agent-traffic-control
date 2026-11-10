@@ -149,7 +149,9 @@ own commits write; session names belong only in the hand-over.
      post-integration state.
    - Archive the task's sessions.
    - Remove what the writer's close-out skipped: run
-     `atc close-out --task <task>` from outside the task's worktree, or in a
+     `atc close-out --task <task>` from outside the task's worktree, with
+     the same `--skip` items on an intermediate batch of a multi-batch
+     topic, or in a
      repository without managed worktrees remove the topic branch with
      `git -C <main checkout> branch -d <topic branch>`; `-d` deletes only a
      branch `main` already contains.
@@ -158,13 +160,14 @@ own commits write; session names belong only in the hand-over.
      `~/.atc/reports/<task>-*.md` is gone; remove what is.
      A refused archive is read through the session's state: a running
      session's writer ends its work; a pinned or idle one goes to the Owner.
-   - Skip the keep exceptions the task record lists, and give the Owner
+   - Leave the items the task record's `keep` lists, and give the Owner
      what `DELIVERY.md` § Close-out sends there.
    - Write the coordinator hand-over the project's handoff rules call for
      (`hami-handoff-reminder` `references/handoff-document.md` § The handoff
      document): one file, final state, what waits on the Owner.
 
-   Done when each item is removed, kept by the record or reported to the
+   Done when each item is removed, kept by the record's `keep`, left by
+   `--skip` for a later batch or reported to the
    Owner, and the hand-over is written.
 
 For a status question, read `atc task list --all`.

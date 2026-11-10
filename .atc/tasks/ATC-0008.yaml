@@ -12,5 +12,3 @@ authority:
   integrate_main: false
   push_main: false
   deploy: false
-keep:
-- worktree
