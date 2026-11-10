@@ -623,47 +623,80 @@ change, its side effects, their mitigations.
     paths are `shared/governance/`, `shared/skills/`, the rendered copies
     `.claude/skills/`, `.agents/skills/` and `.dsh/skills/`, and the root
     `AGENTS.md` and `CLAUDE.md`. Each reader is declared in
-    `DIRECTORY_READERS` with the guarded directories or files it reads in
-    this checkout. A guarded path selects its declared readers and nothing
-    through the import reach: neither the area name (`shared/governance`,
-    `shared/skills`) nor the bare name (`SKILL.md`, `AGENTS.md`,
-    `CLAUDE.md`) matches through it. A guarded Markdown path with no
-    declared reader selects nothing; a guarded path of another kind with no
-    declared reader selects the full suite. Every other copy of those bare
-    names lies under `shared/conformance/` and keeps the area rule; every
-    other path keeps its rule.
-    - Readers, measured by tracing every file open, directory listing, copy
-      and child command of a full run: `test_tooling.py` reads
-      `shared/skills/` and `.dsh/skills/`; `test_shell_install.py` runs
-      `scripts/link-skills.sh` and `scripts/check-skills.sh`, which read
-      `shared/skills/` and the three rendered copies of this checkout;
-      `test_integration_verify.py` reads `AGENTS.md`. No test reads
-      `shared/governance/` or `CLAUDE.md` of this checkout; every other
-      test builds them in a fixture, and every child `validate_workspace.py`
-      gets `--root` of a fixture.
+    `DIRECTORY_READERS` with the directories and files it reads in this
+    checkout; an entry matches a path equal to it or below it, so a root
+    file such as `AGENTS.md` selects its reader. A guarded path selects its
+    declared readers and nothing through the import reach: neither the
+    area name (`shared/governance`, `shared/skills`) nor the bare name
+    (`SKILL.md`, `AGENTS.md`, `CLAUDE.md`) matches through it. A guarded
+    Markdown path with no declared reader selects nothing; a guarded path
+    of another kind with no declared reader selects the full suite. Every
+    other copy of those bare names lies under `shared/conformance/` and
+    keeps the area rule; every other path keeps its rule.
+    - Readers. A full run traced every file open, directory listing, copy
+      and child command; the scripts that tests run as children were read
+      for the paths they derive from their own location.
+      - `test_tooling.py` reads `shared/skills/` and `.dsh/skills/` in
+        process.
+      - `test_integration_verify.py` reads `AGENTS.md` in process.
+      - `test_shell_install.py` runs `scripts/link-skills.sh` and
+        `scripts/check-skills.sh`. Both set `ROOT` from their own location
+        and read this checkout's `shared/skills/`, the three rendered
+        copies, `shared/governance/*.md` and `CLAUDE.md`; `link-skills.sh`
+        also reads `shared/templates/PROJECT_AGENTS.md`. It is declared for
+        every guarded path and for that template.
+      - The other scripts that tests run as children read nothing guarded
+        in this checkout: each child `validate_workspace.py` gets `--root`
+        of a fixture, the conformance tools read `{input}` and
+        `shared/policies/schemas/`, `worktree_cd_guard.py` reads
+        `worktrees/`, and `check.ps1` runs a fake `uv`.
     - Selection, before → after, of 37 test files:
-      `shared/governance/VERIFICATION.md` 21 → 0;
+      `shared/governance/VERIFICATION.md` 21 → 1;
       `shared/skills/atc-review/SKILL.md` 21 → 2;
-      `.claude/skills/atc-review/SKILL.md` 21 → 1; `AGENTS.md` 22 → 1;
-      `CLAUDE.md` 21 → 0.
-    - Side effects: a test that starts reading a guarded path without a
-      declaration is missed by the selection; the root's real check of
-      governance, rendered copies and `AGENTS.md` is `validate_workspace.py`,
-      which the integration verifier and CI run and the selection does not;
-      the guard below makes `conftest.py` import `select_tests.py`, so a
-      change to the selector selects the full suite (today 1 test file).
-    - Mitigations: `conftest.py` records, through an audit hook, every file
-      open, directory listing and copy under a guarded path of this
-      checkout and every child command that runs this checkout's
-      `scripts/*.sh`, by test file; at the session's end a reader missing
-      from `DIRECTORY_READERS` fails the run and is named, so the full
-      suite of the integration verifier stops a missed reader before
-      `main`. A child Python process is not traced; the measured run shows
-      each passes `--root` of a fixture. A selection reason for a guarded
-      path names `validate_workspace.py`, which a writer runs as
-      `uv run --locked atc validate` after touching it. The selector runs
-      the full suite on its own edits, which is the strongest check of a
-      selection change.
+      `.claude/skills/atc-review/SKILL.md` 21 → 1; `AGENTS.md` 22 → 2;
+      `CLAUDE.md` 21 → 1; `adapters/python/scripts/select_tests.py` 1 → 37.
+    - Side effects:
+      - A test that starts reading a guarded path without a declaration is
+        missed by the selection.
+      - The selection is what writers run (`VERIFICATION.md` § Testing,
+        `adapters/python/README.md` § Selected tests) and what a local
+        pre-push gate runs. This repository wires no pre-push gate to
+        `select_tests.py`, and projects run their own selections, so the
+        effect is the writer's and reviewer's run of a guarded path; the
+        integration verifier still runs the full suite.
+      - The root's own check of governance, rendered copies and `AGENTS.md`
+        is `validate_workspace.py`, which the integration verifier and CI
+        run and the selection does not.
+      - The guard below makes `conftest.py` import `select_tests.py` when it
+        loads, which loads `atc_testkit.selection` and `atc_testkit.git` in
+        every session. Those three join the modules every session loads, so
+        a change to any of them selects the full suite.
+    - Mitigations:
+      - Guard. `conftest.py` records, through an audit hook and by test
+        file, every file open, directory listing and copy under a guarded
+        path of this checkout. It counts any child command that runs this
+        checkout's `scripts/*.sh` as a read of every guarded path, since
+        the hook cannot see what a shell script opens. At the session's end
+        a read missing from `DIRECTORY_READERS` fails the run and is named.
+        It checks the test files of the session, so a selected run that
+        includes a reader checks it and the integration verifier's full
+        suite checks them all before `main`.
+      - A guard self-test runs a test that starts an undeclared child of a
+        `scripts/*.sh` stand-in and one that opens an undeclared guarded
+        file in process, and proves each fails the run.
+      - A selector test proves a root file entry in `DIRECTORY_READERS`
+        (`AGENTS.md`) selects its reader.
+      - Not traced: existence checks (`os.stat`, `Path.exists`,
+        `Path.is_file`) raise no audit event, and a child Python process
+        is not followed. An existence check sees only a file added or
+        removed, never its content, so it misses no edit of a guarded
+        file; each child Python run measured passes a fixture root.
+      - A selection reason for a guarded path names `validate_workspace.py`,
+        which a writer runs as `uv run --locked atc validate` after touching
+        it.
+      - The selector, `atc_testkit.selection` and `atc_testkit.git` run the
+        full suite on their own edits, which is the strongest check of a
+        selection change.
 
 ## After D
 
