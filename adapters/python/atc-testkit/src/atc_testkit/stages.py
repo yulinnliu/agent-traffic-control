@@ -84,8 +84,14 @@ def _in_range(count: int) -> int | None:
 
 
 def flag_count(text: str) -> int | None:
-    """A ``--workers`` value: ASCII digits naming 1 to ``most_workers()``; ``None`` for anything else."""
-    return _in_range(int(text)) if text.isascii() and text.isdigit() else None
+    """A ``--workers`` value: ASCII digits naming 1 to ``most_workers()``; ``None`` for anything else.
+
+    Leading zeros go before the length check, so a value never reaches ``int`` longer than the bound's digits.
+    """
+    if not (text.isascii() and text.isdigit()):
+        return None
+    digits = text.lstrip("0") or "0"
+    return _in_range(int(digits)) if len(digits) <= len(str(most_workers())) else None
 
 
 def host_count(value: object) -> int | None:

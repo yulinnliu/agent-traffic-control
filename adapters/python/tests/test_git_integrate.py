@@ -1424,3 +1424,14 @@ def test_the_tool_checkout_warning_names_its_branch_and_sha(repo: Path) -> None:
     assert gi.tool_checkout_warning(repo) == f"the atc tool checkout {repo} is on elsewhere at {head}; this run uses its code"
     (repo / "a.txt").write_text("changed\n", encoding="utf-8")
     assert gi.tool_checkout_warning(repo).endswith(f"at {head} with uncommitted changes; this run uses its code")
+
+
+@pytest.mark.integration
+def test_a_relative_repo_keeps_every_dot_in_the_output(repo: Path, capsys: pytest.CaptureFixture[str],
+                                                       monkeypatch: pytest.MonkeyPatch) -> None:
+    declare_verifier(repo, verify_command(), timeout="1234")
+    tip = topic(repo, {"a.txt": "a2\n"})
+    monkeypatch.chdir(repo)
+    assert run(repo, "--repo", ".", "--reviewed", tip, "--authority-reference", "x", "--check", cwd=repo) == 0
+    lines = stderr_lines(capsys)
+    assert lines[0].endswith("(AGENTS.md verify.json) timeout=1234s (AGENTS.md)")

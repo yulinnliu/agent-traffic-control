@@ -103,7 +103,9 @@ def test_an_unreadable_host_file_is_refused(tmp_path: Path) -> None:
 @pytest.mark.unit
 @pytest.mark.parametrize(("text", "count"), [("1", 1), ("16", 16), ("24", 24), ("25", None), ("100000", None),
                                              ("0", None), ("-1", None), ("x", None), ("", None), (" 8", None),
-                                             ("+8", None), ("\u0661\u0666", None), ("\uff18", None)])
+                                             ("+8", None), ("\u0661\u0666", None), ("\uff18", None),
+                                             ("08", 8), ("0016", 16), ("000", None), ("0" * 5000 + "8", 8),
+                                             ("9" * 5000, None)])
 def test_a_flag_count_is_ascii_digits_from_one_to_the_cpu_count(monkeypatch: pytest.MonkeyPatch, text: str,
                                                                 count: int | None) -> None:
     monkeypatch.setattr(os, "cpu_count", lambda: 24)

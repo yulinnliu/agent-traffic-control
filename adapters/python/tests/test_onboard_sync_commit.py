@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -250,3 +251,24 @@ def test_validate_fails_on_an_ignored_synced_file_and_notes_an_uncommitted_one(
     assert validator.FAILURES == ["projects.demo: .atc/atc.lock is written by sync but Git ignores or excludes it; every file sync writes is committed"]
     assert "projects.demo: .atc/README.md is written by sync and not committed yet" in capsys.readouterr().out
     validator.FAILURES.clear()
+
+
+def short_name(path: Path) -> str | None:
+    """The Windows 8.3 form of ``path``; ``None`` where the volume keeps no short names."""
+    if os.name != "nt":
+        return None
+    import ctypes
+    buffer = ctypes.create_unicode_buffer(1024)
+    size = ctypes.windll.kernel32.GetShortPathNameW(str(path), buffer, len(buffer))
+    return buffer.value if size and buffer.value.lower() != str(path).lower() else None
+
+
+def test_a_project_named_by_its_short_path_is_its_checkout(tmp_path: Path) -> None:
+    long_project = tmp_path / "project with a long name"
+    long_project.mkdir()
+    run_git(long_project, "init", "-q", "-b", "main")
+    run_git(long_project, *COMMIT, "start", "--allow-empty")
+    short = short_name(long_project)
+    if short is None:
+        pytest.skip("this volume keeps no 8.3 names")
+    onboard_project.check_project_checkout(Path(short))

@@ -106,6 +106,10 @@ environment built from the caller's by these rules:
   and safe to share.
 - `TEMP`, `TMP`, `TMPDIR` and `ATC_TMP` carry the values the entry point
   resolved before it redirected the profile.
+- Set: `PYTHONIOENCODING=utf-8`, whatever the caller's value, so a Python
+  child writes UTF-8 to its pipes and files; output read back is decoded
+  as UTF-8 with replacement. `atc` sets the same value for every child it
+  starts.
 - Written into the directory `HOME` and `USERPROFILE` name: a `.gitconfig`
   with a test identity (`user.name`, `user.email`) and
   `core.longpaths=true`. Git finds it through the profile, so it also holds

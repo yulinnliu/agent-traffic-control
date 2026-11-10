@@ -229,7 +229,7 @@ def test_the_worker_flag_sets_the_parallel_stage(repo: Path, capsys: pytest.Capt
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("value", ["0", "100000", "\u0661\u0666"])
+@pytest.mark.parametrize("value", ["0", "100000", "9" * 5000, "\u0661\u0666"])
 def test_a_bad_worker_flag_is_a_usage_error(repo: Path, value: str) -> None:
     with pytest.raises(SystemExit) as stopped:
         gate.main(project(repo), ["--run", "--workers", value], [])

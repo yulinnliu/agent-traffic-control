@@ -452,6 +452,9 @@ def _record_integration(repo: Path, records: list[dict]) -> Path:
     return path
 
 
+NOT_CHECKED = {"kind": "not_checked"}
+
+
 @dataclass
 class Binding:
     """The tasks an integration names, its authority, and whether its range changes only task records."""
@@ -1115,7 +1118,7 @@ def resolve_binding(
             raise Refused("USAGE", "the reviewed SHA is already on main; name the integration's task with --task")
         if record_task is not None and branch is not None:
             ta.check_record(repo, record_task, reviewed, branch)
-        return Binding([args.task], resolve_authority_of(repo, main, main_tip, args.task, record_task, [args.task], words))
+        return Binding([args.task], _authority(args, repo, main, main_tip, record_task, [args.task], words))
     rng = ta.scan(repo, git(repo, "merge-base", main_tip, reviewed).stdout.strip(), reviewed)
     if alias is not None:
         if rng.touches_tasks:
@@ -1128,13 +1131,25 @@ def resolve_binding(
         tasks = rng.task_ids
         if args.task is not None and args.task not in tasks:
             raise Refused("USAGE", f"--task {args.task} names no record this records-only range changes: {', '.join(tasks)}")
-    elif args.task is None:
+    elif args.task is None and not args.check:
         raise Refused("USAGE", "a range that changes more than .atc/tasks/ needs --task")
     else:
-        tasks = [args.task]
+        tasks = [] if args.task is None else [args.task]
     ta.check_range(repo, rng, main_tip, reviewed, may_change=rng.records_only and words is not None)
-    return Binding(tasks, resolve_authority_of(repo, main, main_tip, args.task, record_task, tasks, words),
-                   rng.records_only)
+    if args.check and args.task is None and words is None:
+        return Binding(tasks, dict(NOT_CHECKED), rng.records_only)
+    return Binding(tasks, _authority(args, repo, main, main_tip, record_task, tasks, words), rng.records_only)
+
+
+def _authority(args: argparse.Namespace, repo: Path, main: str, main_tip: str, record_task: str | None,
+               tasks: list[str], words: dict | None) -> dict:
+    """The run's authority; under `--check` a missing grant is reported as `missing`, not a stop (plan D.5)."""
+    try:
+        return resolve_authority_of(repo, main, main_tip, args.task, record_task, tasks, words)
+    except ta.Stop as missing:
+        if not args.check or missing.token != "AUTHORITY_MISSING":
+            raise
+        return {"kind": "missing", "detail": missing.detail}
 
 
 def resolve_authority_of(
@@ -1159,7 +1174,7 @@ def resolve(args: argparse.Namespace, root: Path, root_given: bool, cwd: str) ->
     if args.authority_reference is not None and (args.task is not None or args.owner_words is not None):
         raise Refused("USAGE", "--authority-reference is the deprecated form of --task with an authority; "
                                "give --task and --owner-words, or --authority-reference alone")
-    if args.authority_reference is None and args.task is None and args.owner_words is None:
+    if args.authority_reference is None and args.task is None and args.owner_words is None and not args.check:
         raise Refused("USAGE", "name the task with --task and the authority with --owner-words or the record's "
                                "integrate_main on main")
     if args.owner_words is not None and not args.owner_words.strip():
@@ -1426,8 +1441,8 @@ def _main(args: argparse.Namespace, root: Path, root_given: bool, cwd: str | Non
         target = resolve(args, root, root_given, cwd or os.getcwd())
         for stream in (sys.stdout, sys.stderr):
             if isinstance(stream, _Human):
-                stream.paths.update({str(target.repo): target.project,
-                                     str(target.repo.resolve()): target.project})
+                stream.paths.update({str(path): target.project for path in (target.repo, target.repo.resolve())
+                                     if path.is_absolute()})
         print(target.line(), file=sys.stderr)
         for warning in target.warnings:
             print(f"WARNING {warning}", file=sys.stderr)

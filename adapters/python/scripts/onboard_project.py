@@ -485,7 +485,7 @@ def root_commit_revision(root: Path) -> str:
 def check_project_checkout(project_path: Path) -> None:
     """Stop unless the project checkout is the top of its repository, on a clean main, not behind origin/main."""
     top = _git(project_path, "rev-parse", "--show-toplevel", check=False)
-    if top.returncode or os.path.normcase(os.path.abspath(top.stdout.strip())) != os.path.normcase(os.path.abspath(project_path)):
+    if top.returncode or os.path.normcase(os.path.realpath(top.stdout.strip())) != os.path.normcase(os.path.realpath(project_path)):
         raise SyncStop("NOT_A_REPOSITORY", f"{project_path} is not the top of a Git checkout")
     branch = _git(project_path, "symbolic-ref", "-q", "--short", "HEAD", check=False).stdout.strip()
     if branch != "main":

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import io
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -249,3 +250,18 @@ def test_an_inherited_git_dir_does_not_redirect_the_guard(
     git(other, "init", "-q", "-b", "topic")
     monkeypatch.setenv("GIT_DIR", str(other / ".git"))
     assert atc_cli._guard("validate", [], canonical) is None
+
+
+def test_the_console_entry_sets_utf8_for_every_child(monkeypatch: pytest.MonkeyPatch,
+                                                    capsys: pytest.CaptureFixture[str]) -> None:
+    monkeypatch.setenv("PYTHONIOENCODING", "utf-8:surrogateescape")
+    monkeypatch.setattr(atc_cli.sys, "argv", ["atc", "--help"])
+    assert atc_cli.main() == 0
+    capsys.readouterr()
+    assert os.environ["PYTHONIOENCODING"] == "utf-8"
+
+
+def test_a_call_with_arguments_leaves_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PYTHONIOENCODING", "utf-8:surrogateescape")
+    assert atc_cli.main(["--help"]) == 0
+    assert os.environ["PYTHONIOENCODING"] == "utf-8:surrogateescape"

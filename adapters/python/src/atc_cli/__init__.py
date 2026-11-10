@@ -102,6 +102,12 @@ def _escape_unencodable_output() -> None:
             stream.reconfigure(errors="backslashreplace")
 
 
+def _child_encoding() -> None:
+    """Every child `atc` starts writes UTF-8 to its pipes (docs/TASK_CONTRACT_PLAN.md D.9); tests pass `argv`."""
+    from atc_testkit.isolation import CHILD_ENCODING
+    os.environ[CHILD_ENCODING[0]] = CHILD_ENCODING[1]
+
+
 def _scripts_on_path() -> None:
     if str(SCRIPTS) not in sys.path:
         sys.path.insert(0, str(SCRIPTS))
@@ -131,6 +137,8 @@ def _guard(command: str, rest: list[str], checkout: Path) -> int | None:
 def main(argv: list[str] | None = None, checkout: Path | None = None) -> int:
     """``checkout`` is the checkout serving this `atc` for the guard; tests name one."""
     _escape_unencodable_output()
+    if argv is None:
+        _child_encoding()
     args = list(sys.argv[1:] if argv is None else argv)
     explicit_root = None
     if args[:1] == ["--root"]:

@@ -469,3 +469,27 @@ def test_a_legacy_line_without_a_task_shows_none_as_a_dash(tasks_repo: Path, cap
     rendered = gp.render_push(listing)
     assert rendered[1] == f"  integration {tip[:12]} task=- authority=unclassified"
     assert "None" not in "\n".join(rendered)
+
+
+def test_a_check_needs_no_authority(tasks_repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    work = on_branch(tasks_repo, "work", {"a.txt": "work\n"})
+    before = main_tip(tasks_repo)
+    assert run(tasks_repo, work, "--check") == 0
+    captured = capsys.readouterr()
+    assert 'task="" authority=not_checked' in captured.err.splitlines()[0]
+    assert captured.out.startswith("CHECK FF ")
+    assert run(tasks_repo, work) == 2
+    assert main_tip(tasks_repo) == before
+
+
+def test_a_check_reports_a_missing_grant_and_the_run_still_stops(tasks_repo: Path,
+                                                                capsys: pytest.CaptureFixture[str]) -> None:
+    tip = on_branch(tasks_repo, "work", {".atc/tasks/DEMO-0001.yaml": record("DEMO-0001", "work")})
+    assert run_json(tasks_repo, capsys, tip, "--owner-words", WORDS)[0] == 0
+    work = on_branch(tasks_repo, "work", {"a.txt": "work\n"})
+    assert run(tasks_repo, work, "--task", "DEMO-0001", "--check") == 0
+    captured = capsys.readouterr()
+    assert 'task="DEMO-0001" authority=missing' in captured.err.splitlines()[0]
+    assert captured.out.startswith("CHECK FF ")
+    status, data, _ = run_json(tasks_repo, capsys, work, "--task", "DEMO-0001")
+    assert (status, data["refusal"]["reason"]) == (1, "AUTHORITY_MISSING")

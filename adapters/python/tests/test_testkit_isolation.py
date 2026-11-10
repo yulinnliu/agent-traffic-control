@@ -92,3 +92,9 @@ def test_the_bound_of_a_working_directory_is_fifty_six_characters(atc_tmp: Path)
     name = "a" * (locations.TMP_NAME_BOUND - len(str(atc_tmp)) - 1)
     os.environ["ATC_TMP"] = str(atc_tmp / name)
     assert len(str(isolation.create_working_directory())) <= 56
+
+
+@pytest.mark.unit
+def test_every_child_writes_utf8_whatever_the_caller_set(tmp_path: Path) -> None:
+    run = isolation.IsolatedRun(tmp_path, environ={"PYTHONIOENCODING": "utf-8:surrogateescape", "PATH": "p"})
+    assert run.environment("parallel")["PYTHONIOENCODING"] == "utf-8"

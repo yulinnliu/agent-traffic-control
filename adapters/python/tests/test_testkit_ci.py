@@ -131,7 +131,8 @@ def test_the_stages_run_through_the_runner_with_its_worker_count(project: Path) 
 
 @pytest.mark.unit
 @pytest.mark.parametrize("workers", [["--workers", "0"], ["--workers", "two"], ["--workers"],
-                                     ["--workers", "100000"], ["--workers", "\u0661\u0666"]])
+                                     ["--workers", "100000"], ["--workers", "9" * 5000],
+                                     ["--workers", "\u0661\u0666"]])
 def test_a_bad_worker_flag_stops_before_any_stage(project: Path, monkeypatch: pytest.MonkeyPatch,
                                                   capsys: pytest.CaptureFixture[str], workers: list[str]) -> None:
     monkeypatch.chdir(project)
