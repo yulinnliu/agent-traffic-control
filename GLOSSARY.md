@@ -89,12 +89,23 @@ never points back at the checkout. **Adapter** (language). A tool
 implementation such as `adapters/python/`.
 
 **Vendored governance.** A repository's own copy of `shared/governance/`
-under `.atc/governance/`, byte-equal to the pinned revision recorded in
-`.atc/governance.yaml`. The copy is the project's governance pin.
+under `.atc/governance/`, byte-equal to the revision recorded in
+`.atc/atc.lock`.
 
-**managed-by.** The frontmatter marker proving a file was installed by this
-layer and may be re-synchronised. A file without it is project-owned and
-never rewritten. The value is `agent-traffic-control`. There is no per-file
+**ATC lock.** `.atc/atc.lock`, the TOML record of which ATC revision a
+repository's synced files come from: `version`, `source` and `revision`. Its
+source and revision are the repository's governance identity.
+
+**Bootloader.** `.atc/README.md`, the entry a project's `AGENTS.md` pointer
+line sends every session to: how the governance revision is resolved and
+which modules to read first.
+
+**managed-by.** The frontmatter marker proving a rendered skill copy was
+installed by this layer and may be re-synchronised. It is needed where a
+directory also holds project-owned files: the skill directories under
+`.claude/`, `.agents/` and `.dsh/`. A file there without it is project-owned
+and never rewritten. The files sync writes under `.atc/` are sync output by
+their path and carry no marker. The value is `agent-traffic-control`. There is no per-file
 format version: a managed file is either byte-equal to the current render or
 stale, and sync re-renders it.
 

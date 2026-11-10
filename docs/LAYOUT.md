@@ -19,9 +19,10 @@ Operational description of the tree; governance semantics live under
   as the files the shell installer copies into other repositories. Each
   carries the canonical body, `managed-by` and `canonical`; nothing in them
   refers back to this checkout.
-- `shared/templates/PROJECT_AGENTS.md` — the policy block onboarding inserts
-  at the top of a project's `AGENTS.md`, between ownership markers. It points
-  at the project's own `.atc/governance/`.
+- `shared/templates/PROJECT_AGENTS.md` — the pointer line onboarding inserts
+  into a project's `AGENTS.md`, sending every session to `.atc/README.md`.
+  `shared/templates/ATC_README.md` — the content sync writes to a project's
+  `.atc/README.md`: the governance bootloader.
 - `shared/conformance/<tool>/<case>/` — language-neutral fixtures: `input/`,
   `args.json`, `expected/`.
 - `scripts/` — POSIX sh entry points with no language runtime:
@@ -38,25 +39,37 @@ Operational description of the tree; governance semantics live under
 
 ## Inside a consuming repository
 
-- `.claude/skills/<name>/`, `.agents/skills/<name>/`, `.dsh/skills/<name>/` —
-  the rendered skill copies.
-- `.atc/governance/*.md` — the vendored governance modules, byte-equal to
-  `shared/governance/` at the pinned revision.
-- `.atc/governance.yaml` — `managed-by`, `source` and `revision` of that copy.
+```text
+.atc/
+├── README.md          sync: the governance bootloader, the entry every session reads first
+├── atc.lock           sync: TOML version, source, revision
+├── governance/        sync: shared/governance/ byte-equal at the locked revision
+└── tasks/             the project's: its task records (docs/TASKS.md)
+```
+
+- `.atc/` is split by path. Sync writes `README.md`, `atc.lock` and
+  `governance/` and nothing else; `tasks/` belongs to the project, and sync
+  never reads or writes it. Validation reports any other file under `.atc/`.
+- `.atc/atc.lock` — `version` (the lock format, `1`), `source` (the governance
+  repository, `owner/name`) and `revision` (the full ATC SHA of the last sync
+  that changed a file sync writes into the repository), as TOML strings
+  except `version`.
 - `.atc/tasks/<task_id>.yaml` — the repository's own task records, declared by
-  `## Task records` in its `AGENTS.md` (`docs/TASKS.md`); sync never writes them.
-- The policy block in `AGENTS.md` and, when the repository had none, `CLAUDE.md`.
+  `## Task records` in its `AGENTS.md` (`docs/TASKS.md`).
+- `.claude/skills/<name>/`, `.agents/skills/<name>/`, `.dsh/skills/<name>/` —
+  the rendered skill copies. These directories also hold the project's own
+  skills, so each rendered copy carries `managed-by`.
+- One marked pointer line in `AGENTS.md`, placed before its first section;
+  the rest of `AGENTS.md` is the project's. `CLAUDE.md`, when the repository
+  had none, imports `AGENTS.md`.
 
-All of them are ordinary tracked files; sync rewrites them, people review the
-diff. The repository needs no environment variable and no other checkout.
-The pin advances to a revision that requires `## Integration verification`
-in `AGENTS.md` only after that section and its argv file exist
-(`GIT_WORKFLOW.md` § Integration verifier source).
-
-A public repository with infrequent development may instead keep them
-machine-local: `.git/info/exclude` lists `AGENTS.md`, `CLAUDE.md`, `.atc/` and
-the skill directories, governance applies on this machine only, and sync
-rewrites the files in place without a commit.
+All of them are ordinary tracked files; sync commits its own on `main`
+(`GIT_WORKFLOW.md` § Governance sync commits), and people review the diff. A
+per-topic worktree holds only committed files, so a session in any worktree
+reads the same governance and skills. The repository needs no environment
+variable and no other checkout. The lock advances to a revision that requires
+`## Integration verification` in `AGENTS.md` only after that section and its
+argv file exist (`GIT_WORKFLOW.md` § Lock advancement).
 
 ## Machine-local, never committed
 

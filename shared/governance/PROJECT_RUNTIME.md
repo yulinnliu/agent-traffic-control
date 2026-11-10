@@ -12,7 +12,7 @@ The product — its applications, CLIs, scheduled tasks and the child processes 
 
 - the workspace map (`workspace.yaml`) or any other file of the ATC checkout;
 - `ATC_ROOT` or any other environment variable ATC defines;
-- the vendored `.atc/` directory, rendered skill copies, or the ATC policy block of `AGENTS.md`;
+- the `.atc/` directory, rendered skill copies, or the ATC pointer line of `AGENTS.md`;
 - the workspace layout (`projects/`, `worktrees/`, `state/`) as a way to derive a path.
 
 Those artifacts serve development sessions only.

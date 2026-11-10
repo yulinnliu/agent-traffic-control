@@ -529,10 +529,10 @@ The verifier therefore:
   stages and the digests of its dependency inputs;
 - exits nonzero on any failure; its stderr becomes the refusal detail.
 
-### Pin advancement
+### Lock advancement
 
-A project's governance pin in `.atc/governance.yaml` advances to a revision
-carrying this section only when the project's `AGENTS.md` already has its
+A project's `.atc/atc.lock` advances to a revision carrying this section only
+when the project's `AGENTS.md` already has its
 `## Integration verification` section and the named argv file exists. Add
 the section and the file in the project first, then sync.
 
@@ -554,8 +554,9 @@ it takes the Integration Slot and writes nothing when the checkout is not on
 `origin/main`. A changed path outside the files sync owns stops the project
 with the change left uncommitted; a failed `git commit`, such as a hook
 refusal, stops it with the rendered files written and staged. Either way the
-next sync stops as dirty until the Owner resolves the checkout. Files a
-project keeps out of Git (ignored or excluded) are written and not committed.
+next sync stops as dirty until the Owner resolves the checkout. Every file
+sync writes is committed: a project that ignores or excludes one stops before
+anything is written, and `atc validate --projects` reports it.
 `atc preflight push` shows a sync commit as `sync from <ATC revision>`.
 
 A change sync does not render, such as a project file that cites a renamed

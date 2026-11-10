@@ -57,8 +57,8 @@ its own repository, so another project's numbering never labels the work.
 A change carried from the governance source into several repositories, such
 as a governance or skill sync, is identified by its source revision: each
 repository's sync commit subject names that revision and the reason for the
-sync. A repository that keeps its ATC files machine-local records the sync
-without a commit.
+sync. Every repository commits the files sync writes, so every sync is such
+a commit.
 
 ### Effective authority and revocation
 
@@ -111,10 +111,10 @@ more permissive rules.
 
 How the content is read is separate from how the revision is chosen. A
 repository that carries a vendored copy under `.atc/governance/` reads that
-copy, whose source and exact revision are pinned beside it in
-`.atc/governance.yaml`; a session inside the governance checkout reads
-`shared/governance/`; an executor with neither reads the same files from the
-exact Git revision of the governance source. In every case, the policy content
+copy, whose source and exact revision are recorded in `.atc/atc.lock`; a
+session inside the governance checkout reads `shared/governance/`; an
+executor with neither reads the same files from the exact Git revision of the
+governance source. In every case, the policy content
 used as evidence must correspond to the bound exact revision. A dirty or
 advanced working tree must not be read while claiming that an older bound SHA
 governs the task; either verify the relevant policy files are clean at that
