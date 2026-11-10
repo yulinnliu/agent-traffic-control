@@ -92,6 +92,8 @@ def test_skip_leaves_its_items_for_this_run_only_and_writes_nothing(done, atc_tm
     assert run_git(ws.repo, "show", f"main:.atc/tasks/{TASK}.yaml") == recorded
     code, lines, err = close(ws, environ, capsys, ws.root)
     assert code == 0 and lines[0] == f"DELETED {topic}", (lines, err)
+    code, lines, err = close(ws, environ, capsys, ws.root)
+    assert (code, lines) == (0, [f"close-out {TASK}: 0 deleted, 0 skipped, 0 refused"]), err
 
 
 def test_a_leftover_directory_of_the_unregistered_worktree_is_removed(done, capsys: pytest.CaptureFixture[str]) -> None:
