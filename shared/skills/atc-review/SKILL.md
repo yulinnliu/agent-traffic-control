@@ -36,9 +36,11 @@ the `atc-coordinator` skill's `references/briefs.md`.
 - A report or verdict is saved as a file under `~/.atc/reports/` and its
   path travels in the message. A notification that truncates (a short note,
   a preview) is a pointer, never the report.
-- On the paste carrier, the block is inline in the reply as one code block
-  the user pastes whole. Use a file only for a prompt that is long and
-  revised repeatedly, or a lasting template.
+- On the paste carrier the report or verdict is saved the same way, and the
+  reply gives its path (with a verdict's token) as one code block the user
+  pastes whole. Any other block, such as a prompt, is inline in that code
+  block; a prompt that is long and revised repeatedly, or a lasting
+  template, goes in a file.
 - A block the user pastes must not contain nested code fences: internal
   triple backticks prematurely close the outer block. Put commands, scripts
   and quoted output on plain text lines or use indentation instead.
@@ -61,7 +63,8 @@ End every completed step with a step report in the shape governance
    mutants, one per guard, launchers and scripts included; the report gives
    each command with its summary line and every surviving mutant.
 2. Run `atc integrate --check` on the tip (governance `GIT_WORKFLOW.md`
-   § Mainline check before final self-verification). On `REBASE_REQUIRED` or
+   § Mainline check before final self-verification) and report the token it
+   gives, `AUTHORITY_MISSING` included (§ Integrate). On `REBASE_REQUIRED` or
    `OVERLAP`, rebase onto `main`, rerun the selection and report only the
    new tip.
 3. Stop every background job (governance `DELIVERY.md` § Background work).
@@ -116,11 +119,9 @@ file in the scratch directory and read its summary lines; run all mutants in
 one `atc test mutants` call. Tests and mutants run in the foreground
 (governance `DELIVERY.md` § Background work).
 
-A SHA's first review is yours only when you have not seen the writer's
-conversation. When you are continued for a re-review that only fixes your
-last round's findings, review the fix diff against those findings; new design
-or new files go to a fresh reviewer (governance `VERIFICATION.md`
-§ Independent review).
+Whether you review fresh or as a continued re-review is governance
+`VERIFICATION.md` § Independent review; a continued re-review reads the fix
+diff against your last round's findings.
 
 1. **Pin the revision.** First confirm the previous topic's closure read-only:
    the `main` position and `atc worktree audit`. Then review exactly the tip
@@ -146,8 +147,8 @@ or new files go to a fresh reviewer (governance `VERIFICATION.md`
    blocker to tell the holder now.
 4. **Run tests and mutants.** Tests only: that file plus mutants. Behaviour:
    the selection (governance `VERIFICATION.md` § Testing) plus every project
-   gate the change touches. One
-   single-string mutant per guard, one at a time, restored after each run.
+   gate the change touches. One single-string mutant per guard, one at a
+   time, restored after each run.
    Done when every file in the copy is proven equal to its Git object again
    and every surviving mutant is listed as a test gap or argued equivalent.
    Where the project runs its tests through `atc-testkit`,
@@ -176,19 +177,23 @@ carries the verdict token and that path.
 - On a PASS, when the project's adopted process lets a PASS carry an
   integration instruction, the integration instruction. The Owner's word on
   the exact reviewed SHA approves integration. The holder of that word (the
-  user pasting the instruction into the writer, or a coordinator that has
-  the Owner's word for that SHA) runs or forwards the instruction, within
-  governance `GIT_WORKFLOW.md` § Task and authority on who runs which form.
-  Before writing it, run `atc integrate --check --json` with the same
-  arguments as the integrate command below; it runs `git fetch origin` and
-  otherwise only reads. The PASS carries the instruction only when the
-  result has no `refusal` and its `preflight.verdict` is `FF` or `NO_FF`;
-  quote that verdict with `preflight.reason` and every entry of
-  `resolved.warnings` in the verified line. A `refusal`, such as a missing `## Integration verification`
+  user, or a coordinator that has the Owner's word for that SHA) runs the
+  instruction or forwards it to the writer as governance `GIT_WORKFLOW.md`
+  § Task and authority splits the forms by flag. Before writing it, run
+  `atc integrate --check --json` (governance `GIT_WORKFLOW.md` § Integrate)
+  with the same arguments as the integrate command below. The PASS carries
+  the instruction only when the result has no `refusal` and its
+  `preflight.verdict` is `FF` or `NO_FF`; quote that verdict with
+  `preflight.reason` and every entry of `resolved.warnings` in the verified
+  line. A `refusal`, such as a missing `## Integration verification`
   section, leaves the PASS without an instruction: give the holder its
-  `reason`, `detail` and `next`. A `refusal` whose `next` names a rebase
-  (`REBASE_REQUIRED`, or `OVERLAP` or `CONFLICT` of an unpublished topic)
-  still carries the instruction, with that refusal quoted. In a repository
+  `reason`, `detail` and `next`. An `AUTHORITY_MISSING` refusal is a missing
+  authority, not a topology verdict (§ Integrate): the PASS still carries
+  the instruction with that refusal quoted, and the coordinator checks again
+  with the authority the integration will use. A `refusal` whose `next`
+  names a rebase (`REBASE_REQUIRED`, or `OVERLAP` or `CONFLICT` of an
+  unpublished topic) still carries the instruction, with that refusal
+  quoted. In a repository
   without managed worktrees, a `CHECKOUT_NOT_ON_MAIN` refusal naming the
   topic branch is the expected check result: the PASS still carries the
   instruction, the verified line quotes that refusal and every entry
@@ -202,13 +207,13 @@ carries the verdict token and that path.
 
   The instruction is the verdict's last line, every value filled in:
   `atc integrate --task <task> --reviewed <SHA>`, with the task record ID,
-  which names the repository, and the full reviewed SHA or a unique prefix of
-  at least 12 characters. A task identity string in place of a record ID adds
-  `--project <name>`, or `--repo <root checkout>` for the workspace root. The
-  coordinator adds `--owner-words` when the record on `main` does not grant
-  the integration (governance `GIT_WORKFLOW.md` § Task and authority). The
-  command names no branch, verifier or timeout: the tool finds the branch
-  from the reviewed SHA and reads the verifier from the
+  which names the repository, and the full 40-character reviewed SHA
+  (governance `GIT_WORKFLOW.md` § Integrate). A task identity string in place
+  of a record ID adds `--project <name>`, or `--repo <root checkout>` for the
+  workspace root. The coordinator adds `--owner-words` when the record on
+  `main` does not grant the integration (governance `GIT_WORKFLOW.md` § Task
+  and authority). The command names no branch, verifier or timeout: the tool
+  finds the branch from the reviewed SHA and reads the verifier from the
   `## Integration verification` section of `AGENTS.md` at `main`. In a
   repository without managed worktrees, where the topic branch lives in the
   main checkout, `git -C <main checkout> switch main` comes before it.
@@ -226,14 +231,17 @@ other action need their own instruction. Who may run which form of
 `atc integrate` is governance `GIT_WORKFLOW.md` § Task and authority.
 
 1. Run the `atc integrate` command with `--json` added (after
-   `switch main`, when the block carries it) and check its result. `FF`
+   `switch main`, when the block carries it), when governance
+   `GIT_WORKFLOW.md` § Task and authority lets you run its form; an
+   instruction carrying `--owner-words` stays with the coordinator, who runs
+   it and gives you the result. Check the result. `FF`
    matches when `main_after` equals the reviewed SHA; `NO_FF` matches when
    `second_parent` equals the reviewed SHA and `first_parent` equals
    `main_before`.
    - When it stops with a `next` that names a rebase, rebase the topic
-     branch onto `main`, give the holder the rebased tip so the Owner's word
-     is asked for on it, and on that word run the same command with
-     `--rebased <rebased tip>` added. `FF` then matches when `main_after`
+     branch onto `main` and give the holder the rebased tip, so the word is
+     asked for on it; the same command with `--rebased <rebased tip>` added
+     is then run as step 1 says. `FF` then matches when `main_after`
      equals the rebased tip and `carried_over.carried_over_from` is the
      reviewed SHA. `CARRY_OVER_REFUSED` sends the rebased tip to the
      reviewer for a fresh review.

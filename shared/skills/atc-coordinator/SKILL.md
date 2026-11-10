@@ -31,8 +31,9 @@ Owner with what was observed:
   reviewed SHA; the `--json` check or result must show the full SHA the word
   names. Any other difference stops the task.
 - **Incomplete verdict.** A verdict without its verdict token, its verified
-  line or the integration instruction it says it carries stops the task. A truncated notification (a short note, a preview) is a pointer:
-  obtain the full content from its sender before acting on it.
+  line or the integration instruction it says it carries stops the task. A
+  truncated notification (a short note, a preview) is a pointer: obtain the
+  full content from its sender before acting on it.
 - **Task ID collision.** A given task ID or branch name already in use.
 
 ## Recovery
@@ -76,17 +77,16 @@ own commits write; session names belong only in the hand-over.
    step report's path to the coordinator only (governance `DELIVERY.md`
    § 8.1). Done when the session is started and the brief delivered.
 4. **Start the reviewer session** with the reviewer brief of
-   `references/briefs.md`, relaying the step report verbatim as its path. A
-   SHA's first review is a fresh session that never saw the writer's
-   conversation; a re-review that only fixes the last round's findings
-   continues the same reviewer with the findings and the fix diff; new
-   design or new files get a fresh reviewer (governance `VERIFICATION.md`
-   § Independent review). Relay findings to the writer verbatim as the
-   verdict's path; never review the work yourself. Done when the verdict is
+   `references/briefs.md`, relaying the step report verbatim as its path.
+   Start it fresh or continue the last reviewer as governance
+   `VERIFICATION.md` § Independent review states. Relay findings to the
+   writer verbatim as the verdict's path; never review the work yourself. Done when the verdict is
    received whole.
 5. **Carry the Owner's word.** A PASS does not by itself trigger an
    integration. On a PASS that carries an integration instruction, run
-   `atc integrate --check --json` with the instruction's arguments.
+   `atc integrate --check --json` with the instruction's arguments plus the
+   authority the integration will use: `--owner-words` when the record on
+   `main` does not grant it (governance `GIT_WORKFLOW.md` § Integrate).
    - On `preflight.verdict` `FF` or `NO_FF` with no `refusal`, or a
      `CHECKOUT_NOT_ON_MAIN` refusal for a root checkout, give the Owner the
      reviewed SHA, that verdict and the instruction, and ask for the word on
@@ -95,10 +95,10 @@ own commits write; session names belong only in the hand-over.
      `GIT_WORKFLOW.md` § Task and authority).
    - On a `refusal` whose `next` names a rebase (`REBASE_REQUIRED`, or
      `OVERLAP` or `CONFLICT` of an unpublished topic), the writer rebases
-     onto `main` and reports only the new tip; run
+     and reports the new tip; run
      `atc integrate --check --json --reviewed <reviewed SHA> --rebased <rebased tip>`
-     and no range-diff or file diff by hand (governance `GIT_WORKFLOW.md`
-     § After formal review). When the carry-over holds, ask the Owner for
+     as governance `GIT_WORKFLOW.md` § After formal review states. When the
+     carry-over holds, ask the Owner for
      the word on the rebased tip, naming the carried-from SHA and the `main`
      commits in between; on `CARRY_OVER_REFUSED`, the reviewer re-reviews
      the rebased tip first.
@@ -120,10 +120,13 @@ own commits write; session names belong only in the hand-over.
    - Confirm `main` at the integrated SHA and the task record at its
      post-integration state.
    - Remove the task's worktree with `atc worktree cleanup` under the
-     `atc-worktree` skill.
+     `atc-worktree` skill. In a repository without managed worktrees, delete
+     the topic branch with `git -C <main checkout> branch -d <topic branch>`
+     instead; `-d` deletes only a branch `main` already contains.
    - List the task's scratches with `atc tmp list`, each with its dependent
      runs (a `tree` inside it), and remove them with `atc tmp clean`.
-   - After a successful `atc worktree cleanup`, archive the task's sessions.
+   - After a successful `atc worktree cleanup` or `branch -d`, archive the
+     task's sessions.
      A refused archive is read through the session's state: a running
      session's writer ends its work; a pinned or idle one goes to the Owner.
    - Skip the keep exceptions the task record lists, and give the Owner
