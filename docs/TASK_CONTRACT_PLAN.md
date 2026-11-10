@@ -421,7 +421,7 @@ Code, tests, `shared/conformance/`, `docs/TESTKIT.md`, `docs/ATC_HOME.md` and
 `adapters/python/README.md`. Order: D.5 before D.7 (the alias needs a
 `--check` without authority), D.9 before D.12 (the child encoding), D.13
 before D.12's scratch-name form, D.15 before D.12 (the `--json` form
-`--select` runs). Each entry: the change, its side effects,
+`--select` runs), D.17 last. Each entry: the change, its side effects,
 their mitigations.
 
 1. `atc worktree create --scope <text>` writes the task record in the new
@@ -534,23 +534,25 @@ their mitigations.
     - Ruling on the selector: `--select <base>` lives in atc-testkit and
       runs the argv of a new optional `[tool.atc-testkit]` key `selector`,
       a command that takes the changed paths as arguments and prints the
-      selected test paths as JSON. The root adapter declares
+      selected test paths as JSON. The testkit runs that argv with the
+      tree's `.venv` Python as its interpreter and the tree as its working
+      directory, so the argv starts with the script path relative to the
+      tree. The root adapter declares
       `selector = ["scripts/select_tests.py", "--json", "--paths"]` (D.15).
-      A tree without the key stops with `SELECTION_UNDECLARED` (exit 9,
-      added to `TESTKIT.md`'s token table beside the other pre-run
-      refusals) and runs nothing. The gate stays untouched. The other
-      design, a default to the gate's `--paths` mode, needs a `--json`
-      form in the gate, a testkit release re-vendored in every project,
-      a re-run of each project's stages after re-vendoring (evidence
-      records the testkit version), and detection of an old gate that
-      rejects `--json`; the declared key needs none of these, since the
-      root's `atc` reads the key and nothing in the testkit rejects an
-      unknown `[tool.atc-testkit]` key.
+      A tree without the key stops with `SELECTION_UNDECLARED` and runs
+      nothing; it is one of the pre-run refusals, exit 9, listed in
+      `TESTKIT.md` § Commands `atc test run` step 1. The gate stays
+      untouched. The other design, a default to the gate's `--paths` mode,
+      adds a `--json` form to the gate, a re-vendored release whose first
+      push re-runs each project's stages, and detection of an old gate that
+      rejects `--json`; the declared key needs no gate change, and nothing
+      in the testkit rejects an unknown `[tool.atc-testkit]` key.
     - The changed paths are `git diff --name-only <base>` plus
-      `git ls-files --others --exclude-standard`, so new untracked files
-      count, run in the tree, or, for a scratch export, in the source
-      worktree and commit its registry entry records (D.13). It prints the
-      base and the count.
+      `git ls-files --others --exclude-standard --full-name`, both relative
+      to the repository's top level as `select_tests.py` expects, so new
+      untracked files count. They run in the tree, or, for a scratch export,
+      in the source worktree and commit its registry entry records (D.13).
+      It prints the base and the count.
     - The console prints the log path at start, then one summary line
       (counts, failed test names, log path); the full log, pytest's dots
       and the summary line `-q` hides stay in the log in the run directory,
@@ -601,6 +603,21 @@ their mitigations.
       which moves to `--explain` and `--json`.
 16. The output proposals 2, 3, 5, 9, 12 and 13 of Tool output, with the
     side effects and mitigations listed there.
+17. D.9 and D.12 change atc-testkit source, so D bumps
+    `atc_testkit.__version__`, updates `adapters/python/atc-testkit/README.md`
+    to the new version and builds the release wheel, as that README
+    requires for every source change.
+    - Side effects: projects run two testkit versions for a while; a
+      project's evidence records the testkit version, and a record from
+      another version covers nothing (`TESTKIT.md` § Pre-push gate, the
+      testkit README's reuse rules), so the upgrade re-runs each project's
+      stages once.
+    - Mitigations: projects stay on their vendored 0.8.1 until an explicit
+      upgrade, which is their own task at the final sync; the root's `atc`
+      runs `atc test run` from source, so projects get the flag form,
+      `--select` and the log without re-vendoring; the one re-run of the
+      stages is the upgrade's expected cost and is named in each project's
+      upgrade task.
 
 ## After D
 
