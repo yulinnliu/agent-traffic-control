@@ -424,8 +424,10 @@ before D.12's scratch-name form, D.15 before D.12 (the `--json` form
 `--select` runs), D.17 last; D.18 and D.19 are done ahead of the rest, D.20
 first of the rest, D.21 after D.20, D.22 only on the Owner's
 governance authorization, D.23 after D.20; D.5's governance and skill
-part only on the Owner's governance authorization, D.24 and D.25 at any
-point. Each entry: the change, its side effects, their mitigations.
+part on the Owner's governance authorization (given for
+`GIT_WORKFLOW.md` § Task and authority, `DELIVERY.md` § Close-out,
+`FAILURE_ESCALATION.md`, `atc-review` with its Codex overlay and
+`atc-coordinator`), D.24 and D.25 at any point. Each entry: the change, its side effects, their mitigations.
 
 1. `atc worktree create --scope <text>` writes the task record in the new
    worktree through `task_records.new`.
@@ -461,17 +463,25 @@ point. Each entry: the change, its side effects, their mitigations.
 5. Relay-first integration. The writer integrates its own reviewed
    tip and cleans its own items; the coordinator keeps the Owner's
    words, the push and the session archive.
-   - `atc integrate --check` needs no authority.
+   - `atc integrate --check` needs no authority: without `--task` and
+     `--owner-words` the resolved line says `authority=not_checked`;
+     with `--task` it evaluates the grant and says `authority=missing`
+     where `integrate_main` is absent, in place of `AUTHORITY_MISSING`.
+     Every other refusal of the grant still stops the check.
      - Side effects: a check that passes says nothing about authority.
-     - Mitigations: with `--task` it still evaluates the grant; without
-       one its line says `authority: not checked`.
+     - Mitigations: the resolved line names the authority kind, and the
+       integration run without `--check` still stops with
+       `AUTHORITY_MISSING`.
+   - Relayed words, not record authority: granting `integrate_main` at
+     the Owner's word is a records-only commit on `main`, which puts
+     `main` ahead of the topic and forces a rebase that voids the
+     reviewed SHA.
    - The flow, per task:
      1. The Owner says start. The coordinator creates the worktree, runs
         `atc task new` there (a record granting `edit` and `commit`
-        only), commits it, and integrates that records-only commit with
-        `--owner-words` quoting the start word; the record check runs in
-        place of the verifier, so this takes seconds. The topic branch
-        already contains the record, so it stays a fast-forward.
+        only) and commits it on the topic branch; the record reaches
+        `main` with the topic's first integration (Owner's ruling: the
+        record travels with the topic).
      2. The coordinator starts the writer with its working directory at
         the task's place: a project task at the project's checkout
         folder, a root task at its root worktree (the canonical root
@@ -486,9 +496,10 @@ point. Each entry: the change, its side effects, their mitigations.
         and the reviewed full SHA to the writer.
      5. The writer runs `atc integrate --task <ID> --reviewed <sha>
         --owner-words "<the relayed words>"` against the integration
-        checkout by absolute path, then `atc close-out --task <ID>`
-        (D.3): its scratches and `~/.atc/reports/<ID>-*.md`, and its
-        worktree unless the session's working directory is inside it.
+        checkout by absolute path, then closes out: its scratches
+        (`atc tmp clean`), `~/.atc/reports/<ID>-*.md`, and its worktree
+        unless the session's working directory is inside it; D.3's
+        `atc close-out --task <ID>` replaces these steps once it lands.
         It reports the integrated SHA and every close-out line.
      6. The coordinator asks the Owner for the push word once for
         whatever is integrated, pushes, archives the task's sessions,
@@ -496,18 +507,23 @@ point. Each entry: the change, its side effects, their mitigations.
         `atc tmp list` and `atc worktree list`.
    - Governance and skills, on the Owner's authorization for these
      files:
-     - `GIT_WORKFLOW.md` § Integrate: `--owner-words` is passed by the
-       coordinator or by the writer it relays the Owner's exact words to,
-       for the reviewed SHA the relay names; this revises the ATC-0004
-       ruling "`--owner-words`: coordinator only". Record authority
-       (`integrate_main`) stays as it is.
+     - `GIT_WORKFLOW.md` § Task and authority: `--owner-words` is passed
+       by the coordinator or by the writer it relays the Owner's exact
+       words to, for the reviewed SHA the relay names; the paste-only
+       paragraph keeps the user who pastes as the coordinator. This
+       revises the ATC-0004 ruling "`--owner-words`: coordinator only".
+       Record authority (`integrate_main`) stays as it is. § Integrate's
+       note that a check without authority arrives with D.5 becomes the
+       present rule.
      - `DELIVERY.md` § Close-out: the integrating session removes the
        task's items; the coordinator archives the sessions and removes
        what the integrating session could not.
      - `FAILURE_ESCALATION.md`: a port or service the Owner's steps
        expect is taken: stop and ask the Owner, never switch ports or end
        the process holding it.
-     - `atc-review` skill: the writer's integration and close-out step;
+     - `atc-review` skill and its Codex overlay (`adapters/codex.md`,
+       whose "never pasted to a writer" line goes): the writer's
+       integration and close-out step;
        on a takeover of a published topic, fetch and confirm the remote
        tip before committing; Owner-facing text in the Owner's language
        with the fixed English role terms (writer, reviewer, coordinator,
@@ -526,8 +542,6 @@ point. Each entry: the change, its side effects, their mitigations.
      - A root writer cannot remove the worktree its session runs in.
      - Projects carry vendored governance and skills that say the
        coordinator integrates and never forwards `--owner-words`.
-     - Every task adds a records-only commit to `main` at its start; an
-       abandoned task leaves its record there.
      - A relayed quote is the coordinator's copy of the Owner's words.
    - Mitigations:
      - A refused writer stops and reports `BLOCKED`; the Owner then
@@ -539,8 +553,6 @@ point. Each entry: the change, its side effects, their mitigations.
      - Relay-first applies to root tasks once D.5 lands, and to a project
        once the final sync carries the new governance and skills; until
        then project tasks keep coordinator integration.
-     - The record's `delivery.status` closes the task, abandoned or
-       done; `atc task list` reads it.
      - The coordinator relays the words verbatim with the SHA, and
        `integrations.jsonl` records the quote and the reviewed SHA as
        for any `--owner-words` run.
@@ -593,7 +605,10 @@ point. Each entry: the change, its side effects, their mitigations.
    check, so the pre-push gate's stages get it too; `ci --stages`, which
    builds no isolated environment, keeps the caller's (CI sets none). The
    display-only decoders `testrun.py:118` and `git_integrate.py:312-313`
-   stay `utf-8` with `errors="replace"`. `PYTHONUTF8` stays unset.
+   stay `utf-8` with `errors="replace"`. `PYTHONUTF8` stays unset, so a
+   text-mode `input=` to a Python child is still encoded in the locale
+   while its output is decoded as UTF-8: a caller that sends text passes
+   `encoding="utf-8"` explicitly.
    - Side effects:
      - Non-Python children (`git`, `uv`, `sh`, `pwsh`) ignore the
        variable.
@@ -959,8 +974,8 @@ point. Each entry: the change, its side effects, their mitigations.
         - The time it would save is bounded by D.22's budget; D.21 and
           D.23 cut the same time with no trust cost.
         - It returns only if a project's verifier stays over budget after
-          D.21 and D.23, as part of D.22's exception path. The Owner
-          agreed to the addition, so dropping it needs the Owner's word.
+          D.21 and D.23, as part of D.22's exception path. The Owner ruled
+          it dropped.
       - Markdown that the selection maps to tests by a bare name stays not
         documentation-only (`adapters/python/README.md` selects the five
         tests that name some `README.md`); this errs toward running tests.
@@ -1223,11 +1238,14 @@ point. Each entry: the change, its side effects, their mitigations.
         skips on a volume without 8.3 names.
     - `stages.flag_count` passes a digit string of more than 4300 digits
       to `int`, which raises `ValueError` (Python's integer-string limit)
-      as a traceback. A string longer than `str(most_workers())` is
-      refused before `int`.
-      - Side effects: none; a leading-zero value within that length
-        (`08`) still parses.
-      - Mitigations: a test passes 5000 digits and expects `None`.
+      as a traceback. Leading zeros are stripped, and digits longer
+      than `str(most_workers())` are refused before `int`, so `08` and
+      `0016` parse on any host. A bad flag stays a usage error of its
+      caller: `ci --stages` prints `USAGE` and exits 2, the gate exits 2
+      through argparse; `ATC_CONFIG_INVALID` (exit 9) is the host file's.
+      - Side effects: none.
+      - Mitigations: tests pass 5000 digits and leading zeros to
+        `flag_count`, and a 5000-digit flag to `ci --stages` and the gate.
 
 ## After D
 
