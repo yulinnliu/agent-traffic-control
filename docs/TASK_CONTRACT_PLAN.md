@@ -932,10 +932,12 @@ change, its side effects, their mitigations.
         read in the entry process before the stage environments point
         `HOME` into the run directory, so a test's child runner never sees
         it.
-      - Validation: an integer of 1 or more, from the flag or the key; a
-        bad flag stops with `USAGE`, an unreadable file or a bad key with
-        `ATC_CONFIG_INVALID` naming the file and key, both before any stage
-        or static check runs. A missing file or key is the default.
+      - Validation: an integer from 1 to the logical CPU count, never
+        clamped; the flag takes ASCII digits only, the key a TOML integer
+        only (a TOML string is refused). A bad flag stops with `USAGE`; a
+        file that cannot be read or decoded as UTF-8, or a bad key, stops
+        with `ATC_CONFIG_INVALID` naming the file and key; both before any
+        stage or static check runs. A missing file or key is the default.
       - Output: the parallel stage's first console line is
         `workers: <n> (<flag|~/.atc/config.toml|default>)`; each stage log's
         header already carries the command with `-n`. The evidence record
