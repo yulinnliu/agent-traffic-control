@@ -197,6 +197,19 @@ def test_new_refuses_in_the_canonical_checkout_on_any_branch(ws: Workspace, caps
     status, _, err = ws.cli(capsys, "new", "--scope", "s", "--repo", str(ws.root), cwd=ws.root)
     assert status == 2
     assert err.startswith("ERROR CHECKOUT_CANONICAL ")
+    assert f'Run it inside the new worktree with an absolute --repo: atc task new --repo "{ws.root}"' in err
+
+
+def test_new_given_a_relative_repo_names_the_absolute_form(
+        ws: Workspace, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
+    topic = ws.worktree(ws.root, "claude+relative", "topic-relative")
+    monkeypatch.chdir(topic)
+    status, _, err = ws.cli(capsys, "new", "--scope", "s", "--repo", ".", cwd=topic)
+    assert status == 2
+    assert err.startswith("ERROR UNKNOWN_PROJECT --repo takes the workspace root ")
+    assert f'Run it inside the new worktree with an absolute --repo: atc task new --repo "{ws.root}"' in err
+    status, _, err = ws.cli(capsys, "new", "--scope", "s", "--project", "nope", cwd=topic)
+    assert status == 2 and "Run it inside" not in err
 
 
 def test_new_in_a_root_worktree_binds_the_root_main(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:

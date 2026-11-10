@@ -219,14 +219,25 @@ def bound_governance(name: str, root: Path, worktree: Path) -> tuple[str, str]:
     return source, revision
 
 
+def new_hint(root: Path) -> str:
+    """What `atc task new` refused for its place or `--repo` says to do instead."""
+    return f"Run it inside the new worktree with an absolute --repo: atc task new --repo \"{root}\" --scope <text>"
+
+
 def new(root: Path, environ: dict[str, str], cwd: str, scope: str, project: str | None, repo: str | None) -> Path:
     worktree = toplevel(Path(cwd))
     if worktree is None:
         raise Refused("NOT_IN_REPOSITORY", f"{cwd} is in no Git working tree")
     if os.path.normcase(os.path.realpath(worktree)) == os.path.normcase(os.path.realpath(root)):
         raise Refused("CHECKOUT_CANONICAL", f"{worktree} is the workspace root's canonical checkout; "
-                                            "write the record in the topic's worktree under worktrees/root")
-    [(name, main_checkout)] = resolve(root, environ, cwd, project, repo)
+                                            "write the record in the topic's worktree under worktrees/root. "
+                                            f"{new_hint(root)}")
+    try:
+        [(name, main_checkout)] = resolve(root, environ, cwd, project, repo)
+    except Refused as refused:
+        if refused.token != "UNKNOWN_PROJECT" or repo is None:
+            raise
+        raise Refused(refused.token, f"{refused.detail}. {new_hint(root)}") from None
     if common_dir(worktree) != common_dir(main_checkout):
         raise Refused("WRONG_REPOSITORY", f"{worktree} is not a worktree of {name} ({main_checkout})")
     branch = git(worktree, "branch", "--show-current").stdout.strip()
