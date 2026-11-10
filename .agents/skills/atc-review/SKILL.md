@@ -72,11 +72,13 @@ End every completed step with a step report in the shape governance
 3. Stop every background job (governance `DELIVERY.md` § Background work).
 4. Deliver the report to the coordinator as "Every block you write" says;
    on session messaging its file is `~/.atc/reports/<task>-<short sha>.md`.
-5. End your own session with one line for the Owner, in plain Chinese with
-   no tokens, for example
+5. Your session's final message to the Owner is that one line and nothing
+   else: no summary before or after it. Write it in plain Chinese with no
+   tokens, for example
    「報告已送 coordinator（tip <sha>），等審查與你核准；尚未整合、未 push。」.
    When there is a problem the line names it plainly instead (for example,
-   a rebase is needed). Tokens stay in the step report.
+   a rebase is needed). Every detail and token stays in the step report and
+   the coordinator message.
 
 When taking over a topic from another session, fetch first and commit
 only on the fetched tip; never continue from a stale base.

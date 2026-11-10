@@ -52,6 +52,18 @@ does not record is asked for again after recovery.
 The task record receives only what the project's `AGENTS.md` lets a topic's
 own commits write; session names belong only in the hand-over.
 
+## Briefs and proposals
+
+- A brief asks only for verification or measurements that answer an open
+  question; a result the design or a review already settled goes into the
+  plan as the expected result, not into a run.
+- A process or workflow proposal names the governance section it relies on
+  and how each approval reaches the session that acts on it; a peer
+  session's relay is not the Owner's approval. Re-read the decisions already
+  made before summarizing a plan.
+- Name work by its task ID, or by its title before it has one, never by a
+  list position.
+
 ## Steps
 
 1. **Before opening.** Read the project's `AGENTS.md`, the task identity form
