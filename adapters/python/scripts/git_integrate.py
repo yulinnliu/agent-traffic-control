@@ -1186,7 +1186,7 @@ def resolve(args: argparse.Namespace, root: Path, root_given: bool, cwd: str) ->
         if error := gp.fetch_origin(repo):
             raise stop("FETCH_FAILED", f"{gp.REASONS['FETCH_FAILED']}: {error}")
         fetched = gp.REMOTE
-    main = args.main
+    main = "main"
     main_tip = rev(repo, main)
     if main_tip is None:
         raise Refused("GIT", f"cannot resolve {main} in {repo}")
@@ -1324,7 +1324,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="full SHA of the unpublished topic rebased onto main; integrates it carrying over the approval "
         "of --reviewed when the rebase is clean and every patch-id matches",
     )
-    parser.add_argument("--main", default="main", help="integration branch (default: main)")
     parser.add_argument(
         "--task",
         help="the task: a record ID with a declared prefix (it names the repository), or a task identity string",

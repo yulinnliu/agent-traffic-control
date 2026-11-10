@@ -1585,3 +1585,20 @@ def test_recovery_of_a_busy_directory_keeps_the_branch(ws: Workspace, monkeypatc
     assert (status, single(results)["reason"]) == (2, "PERMISSION_DENIED")
     assert path.is_dir()
     assert run_git(ws.repo, "branch", "--list", "worktree-claude+topic") != ""
+
+
+@pytest.mark.integration
+def test_the_contract_flag_defaults_to_the_current_contract(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    status, _ = ws.cli(capsys, "audit", "--project", PROJECT)
+    assert status == 0
+    status, results = ws.cli(capsys, "audit", "--project", PROJECT, "--contract", "2")
+    assert (status, single(results)["reason"]) == (2, "CONTRACT_INCOMPATIBLE")
+
+
+@pytest.mark.integration
+def test_an_expected_head_without_its_mode_names_the_modes(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as exc:
+        ws.run(capsys, "cleanup", "claude", "topic", "--expected-head", "0" * 40)
+    assert exc.value.code == 2
+    error = capsys.readouterr().err
+    assert "--abandon" in error and "--squash-integrated" in error

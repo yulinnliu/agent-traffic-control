@@ -552,8 +552,9 @@ def build_parser() -> argparse.ArgumentParser:
     push.add_argument(
         "--integration", help="candidate SHA whose commits carry push approval; every other commit is flagged",
     )
-    for p in (merge, cleanup, push):
+    for p in (merge, cleanup):  # `--main` goes with these commands in D.7
         p.add_argument("--main", default="main", help="integration branch (default: main)")
+    for p in (merge, cleanup, push):
         p.add_argument("--json", action="store_true", help="print the report as JSON")
     return parser
 
@@ -568,7 +569,7 @@ def main(argv: list[str] | None = None) -> int:
             own = rev(args.repo, args.integration) if args.integration else None
             if args.integration and own is None:
                 raise GitError(f"cannot resolve --integration {args.integration}")
-            report, listing = push_preflight(args.repo, args.main, own)
+            report, listing = push_preflight(args.repo, "main", own)
         else:
             report = cleanup_preflight(args.repo, args.worktree, args.main)
     except GitError as exc:

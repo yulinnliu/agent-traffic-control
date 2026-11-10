@@ -354,3 +354,11 @@ def test_preflight_push_fetches_and_groups_by_integration(repo: Path, capsys: py
     push_from_other(repo, "c.txt", "c\n")
     assert gp.main(["push", "--repo", str(repo)]) == 1
     assert capsys.readouterr().out.startswith("STOP MAIN_DIVERGED_FROM_ORIGIN: ")
+
+
+def test_push_and_integrate_take_no_main_flag(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as exc:
+        gp.main(["push", "--repo", ".", "--main", "main"])
+    assert exc.value.code == 2
+    assert gi.main(["--repo", ".", "--reviewed", "0" * 40, "--main", "main"]) == 2
+    assert "--main" in capsys.readouterr().err

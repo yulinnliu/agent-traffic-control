@@ -1012,7 +1012,7 @@ def build_parser() -> argparse.ArgumentParser:
         target.add_argument("--repo", help="the workspace root itself, whose worktrees live under worktrees/root")
         p.add_argument("--owner", choices=OWNERS, required=identity_required)
         p.add_argument("--topic", type=topic_arg, required=identity_required)
-        p.add_argument("--contract", type=int, required=True)
+        p.add_argument("--contract", type=int, default=CONTRACT)
         p.add_argument("--json", action="store_true")
     for name in ("create", "resume"):
         commands[name].add_argument("--session", type=session_arg, default=NO_SESSION)
@@ -1045,6 +1045,8 @@ def cleanup_mode(parser: argparse.ArgumentParser, args: argparse.Namespace) -> N
             parser.error(f"squash cleanup requires {', '.join(missing)}")
     elif any(squash_fields.values()):
         parser.error("--reviewed, --expected-main, --integrated-as and --retained-ref require --squash-integrated")
+    elif args.expected_head and not (args.abandon or args.archive_tag):
+        parser.error("--expected-head is taken by --abandon (with --archive-tag) or --squash-integrated")
     elif any((args.abandon, args.archive_tag, args.expected_head)) and not all((args.abandon, args.archive_tag, args.expected_head)):
         parser.error("abandoned cleanup requires --abandon, --archive-tag and --expected-head together")
 
