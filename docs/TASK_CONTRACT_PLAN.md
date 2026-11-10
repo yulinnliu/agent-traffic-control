@@ -710,7 +710,12 @@ change, its side effects, their mitigations.
     dispatched CI run. `atc_testkit` stays as it is; the root's
     `integration_verify.py`, `select_tests.py`, `tests/root_reads.py` and
     their tests change, and since `conftest.py` loads the selector and the
-    guard (D.18), that range itself verifies with the full suite.
+    guard (D.18), that range itself verifies with the full suite. A later
+    range that changes only `scripts/integration_verify.py` runs the three
+    test files that reach it (`test_integration_verify.py`,
+    `test_select_tests.py`, `test_testkit_gate.py`), since that script is
+    outside the load set; `test_integration_verify.py`'s classification
+    tables pin the predicate.
     - Mechanism:
       - The skeleton's root form (`docs/TESTKIT.md` § Integration verifier,
         a `Project` with no `select`) takes the test command and the
@@ -819,7 +824,9 @@ change, its side effects, their mitigations.
         local integration runs impact-selected checks unless a project
         requires a local full regression, and the full suite, by default
         the project's manually dispatched remote CI, is the safety net.
-        Projects receive the wording at the final sync.
+        The root's verifier does not read the projects' vendored copies
+        (`validate_workspace.py` runs without `--projects`), and those 29
+        copies keep the old wording until the final sync.
       - `integrations.jsonl`: the root's line records task, authority,
         candidate, `main_before`, `records_only` and the reviewed SHA, with
         no verification field, and the root writes no verification report,
