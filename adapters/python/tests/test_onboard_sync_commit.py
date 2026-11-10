@@ -107,6 +107,24 @@ def test_ignored_synced_files_stop_before_writing(tmp_path: Path, capsys: pytest
     assert records(project) == []
 
 
+@pytest.mark.integration
+def test_a_short_windows_path_still_counts_as_the_top_of_its_checkout(tmp_path: Path) -> None:
+    """Git prints the long form; an 8.3 path must not switch off the IGNORED_OUTPUT and tracked checks."""
+    ctypes = pytest.importorskip("ctypes")
+    if not hasattr(ctypes, "windll"):
+        pytest.skip("8.3 short paths exist on Windows only")
+    repo = tmp_path / "long name repo"
+    repo.mkdir()
+    run_git(repo, "init", "-q", "-b", "main")
+    buffer = ctypes.create_unicode_buffer(1024)
+    if not ctypes.windll.kernel32.GetShortPathNameW(str(repo), buffer, 1024) or buffer.value == str(repo):
+        pytest.skip("this volume makes no 8.3 short names")
+    validator = onboard_project.validator
+    assert validator.git_toplevel(Path(buffer.value)) and validator.git_toplevel(repo)
+    (repo / "sub").mkdir()
+    assert not validator.git_toplevel(repo / "sub")
+
+
 def test_change_outside_the_synced_files_is_left_uncommitted(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
 ) -> None:

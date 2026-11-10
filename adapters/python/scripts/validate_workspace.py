@@ -779,7 +779,8 @@ def git_toplevel(path: Path) -> bool:
     """Whether ``path`` is the top of its own Git working tree, as a project's checkout is."""
     env = {k: v for k, v in os.environ.items() if not k.upper().startswith("GIT_")}
     result = subprocess.run(["git", "-C", str(path), "rev-parse", "--show-toplevel"], capture_output=True, text=True, env=env)
-    return result.returncode == 0 and os.path.normcase(os.path.abspath(result.stdout.strip())) == os.path.normcase(os.path.abspath(path))
+    # realpath on both sides: Git prints the long form of a Windows 8.3 short path.
+    return result.returncode == 0 and os.path.normcase(os.path.realpath(result.stdout.strip())) == os.path.normcase(os.path.realpath(path))
 
 
 def check_tracked(project_path: Path, label: str, canonical: dict[str, dict]) -> None:
