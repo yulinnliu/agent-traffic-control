@@ -688,9 +688,11 @@ change, its side effects, their mitigations.
         (`AGENTS.md`) selects its reader.
       - Not traced: existence checks (`os.stat`, `Path.exists`,
         `Path.is_file`) raise no audit event, and a child Python process
-        is not followed. An existence check sees only a file added or
-        removed, never its content, so it misses no edit of a guarded
-        file; each child Python run measured passes a fixture root.
+        is not followed. An existence check on a guarded path is not
+        traced; a change that only adds or removes such a file can break it
+        unselected, and none exists in this checkout; the guard self-test
+        does not cover it. Each child Python run measured passes a fixture
+        root.
       - A selection reason for a guarded path names `validate_workspace.py`,
         which a writer runs as `uv run --locked atc validate` after touching
         it.
