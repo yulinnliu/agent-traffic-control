@@ -228,13 +228,11 @@ without an `origin` remote, which fetches nothing, every topic is unpublished.
 takes no slot, creates no candidate and prints the verdict, a reason code
 and the evidence. Its verdict is a topology decision; integration still
 requires the authority and verification steps of this section. The check
-resolves the task's authority as the integration does; a check without
-authority arrives with topic D of `docs/TASK_CONTRACT_PLAN.md` (D.5). Until
-then `AUTHORITY_MISSING` from `--check` means the authority is pending, not
-a refusal: after the reviewer's PASS the coordinator asks the Owner for the
-word without a pre-word `--check`, and the integration run checks the
-topology itself and stops safely (`REBASE_REQUIRED`, `OVERLAP`). After D.5
-the check runs before the Owner is asked:
+resolves the task's authority as the integration does, but needs none:
+without `--task` and `--owner-words` it reports `authority=not_checked`, and
+a task whose record grants no `integrate_main` reports `authority=missing`
+where the integration stops with `AUTHORITY_MISSING`. After the reviewer's
+PASS the check runs before the Owner is asked:
 
 ```text
 atc integrate --check --repo <integration-checkout> --reviewed <full sha> --task <task> [--owner-words <quote>]
@@ -448,10 +446,12 @@ Who runs which form is split by flag:
 
 - whoever the project's rules let integrate runs `atc integrate --task <ID>`
   on the record's authority;
-- only the coordinator, who hears the Owner, writes a record's `authority`
-  and passes `--owner-words`, from the Owner's quoted words; an instruction
-  carrying `--owner-words` is run by the coordinator itself and never
-  forwarded to a writer.
+- only the coordinator, who hears the Owner, writes a record's `authority`;
+- `--owner-words` carries the Owner's words quoted exactly: the coordinator
+  passes the words it heard, or relays them with the reviewed full SHA to the
+  task's writer, who passes them for that SHA only. A writer whose session
+  refuses the relayed words stops and reports `BLOCKED`; the Owner then
+  approves in the writer's session.
 
 In a paste-only setup with no coordinator session, the user who runs the
 instruction with their own words counts as the coordinator for

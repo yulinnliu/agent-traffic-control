@@ -261,11 +261,13 @@ grants publication authority; local commits are not publication.
 ## Close-out
 
 Close-out is a standing rule of every task. After a task is integrated into
-`main`, the coordinator removes that task's worktree, its topic branch where
-the repository has no managed worktrees, its scratches and its report files
-in `~/.atc/reports/` (`<task>-*.md`, the writer's and the reviewer's; Git
-history keeps the change and `integrations.jsonl` the integration's task,
-authority and reviewed SHA), archives its sessions, then reports. Keep
+`main`, the session that integrated it removes that task's worktree, its
+topic branch where the repository has no managed worktrees, its scratches
+and its report files in `~/.atc/reports/` (`<task>-*.md`, the writer's and
+the reviewer's; Git history keeps the change and `integrations.jsonl` the
+integration's task, authority and reviewed SHA), then reports. The
+coordinator archives the task's sessions and removes what the integrating
+session could not, such as the worktree its own working directory is in. Keep
 exceptions are written in the task record. Items outside the task,
 `REFUSED` and `ANOMALY` lines, refused archives and failed integrations go to
 the Owner. Push is not a precondition of close-out; push authority follows

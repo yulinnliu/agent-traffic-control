@@ -23,7 +23,9 @@ deciding what to do next, classify *why*:
   silently starting from a stale base instead of true current HEAD. Split by
   whether the cause is deterministic (repair it, then retry) or transient
   (rate limit, timeout, a flaky external call — bounded retry is fine even
-  with nothing changed).
+  with nothing changed). One exception: a port or service the Owner's steps
+  expect is already taken. Stop and ask the Owner; never switch to another
+  port or end the process holding it.
 - **Assumption failure** — the mental model of how the pieces fit together
   is wrong (fixing A breaks B, fixing B breaks A; an error that doesn't
   change across several edits despite real changes). **Stop editing.**

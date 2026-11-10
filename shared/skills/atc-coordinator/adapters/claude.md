@@ -1,7 +1,7 @@
 ## Claude Code constants
 
 - A session the coordinator starts starts fresh, without the inherited
-  conversation, in the checkout the repository's `AGENTS.md` prescribes.
+  conversation, with its working directory at the task's place (step 3).
 - Model: Opus 5.5 or Sonnet 5.5, chosen per task (Sonnet for mechanical or
   well-briefed work, Opus for design-heavy writing or a review of a
   behaviour change); Fable only after the Owner agreed for that session.

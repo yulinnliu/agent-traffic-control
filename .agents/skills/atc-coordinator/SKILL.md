@@ -62,6 +62,11 @@ own commits write; session names belong only in the hand-over.
   made before summarizing a plan.
 - Name work by its task ID, or by its title before it has one, never by a
   list position.
+- Findings and small follow-ups fold into the task in progress; a new task
+  is for new mainline work only. A LOW that needs no test change is fixed at
+  once, others in the next round.
+- Text for the Owner is in the Owner's language, with the role terms
+  writer, reviewer, coordinator and Owner kept in English.
 
 ## Steps
 
@@ -79,14 +84,17 @@ own commits write; session names belong only in the hand-over.
    given task ID and the branch name are shown free.
 2. **Open the task record** in the project's form (`atc task new --scope`
    where the project declares `## Task records`); its scope and authority
-   are the writer's contract. A task the Owner pre-authorizes is bound on
-   `main` before its work: commit the record alone as the topic's first
+   are the writer's contract. Commit it on the topic branch; it reaches
+   `main` with the topic's first integration. A task the Owner
+   pre-authorizes is bound on `main` before its work: commit the record alone as the topic's first
    commit and integrate that commit with `--owner-words` quoting the grant.
    Such a records-only range needs no review (governance `VERIFICATION.md`
    § Documentation-only verification). Done when the record is written, and
    bound on `main` when the Owner pre-authorized the task.
 3. **Start the writer session** with the writer brief of
-   [`references/briefs.md`](references/briefs.md). The writer sends its
+   [`references/briefs.md`](references/briefs.md), its working directory
+   at the task's place: a project task at the project's checkout folder, a
+   root task at its root worktree. The writer sends its
    step report's path to the coordinator only (governance `DELIVERY.md`
    § 8.1). Done when the session is started and the brief delivered.
 4. **Start the reviewer session** with the reviewer brief of
@@ -97,11 +105,9 @@ own commits write; session names belong only in the hand-over.
    Done when the verdict is received whole.
 5. **Carry the Owner's word.** A PASS does not by itself trigger an
    integration. On a PASS that carries an integration instruction, run
-   `atc integrate --check --json` with the instruction's arguments when the
-   record on `main` grants the integration. When it does not, the authority
-   is pending: ask the Owner for the word on the reviewed SHA without a
-   pre-word `--check`, as governance `GIT_WORKFLOW.md` § Integrate states
-   until D.5, and handle the integration run's own stops below.
+   `atc integrate --check --json` with the instruction's arguments; it
+   needs no authority, and an authority of kind `missing` means the word is
+   still to be asked (governance `GIT_WORKFLOW.md` § Integrate).
    - On `preflight.verdict` `FF` or `NO_FF` with no `refusal`, or a
      `CHECKOUT_NOT_ON_MAIN` refusal for a root checkout, give the Owner the
      reviewed SHA, that verdict and the instruction, and ask for the word on
@@ -111,17 +117,12 @@ own commits write; session names belong only in the hand-over.
    - On a `refusal` whose `next` names a rebase (`REBASE_REQUIRED`, or
      `OVERLAP` or `CONFLICT` of an unpublished topic), the writer rebases
      and reports the new tip.
-     - When the record grants the integration, run
-       `atc integrate --check --json --reviewed <reviewed SHA> --rebased <rebased tip>`
-       as governance `GIT_WORKFLOW.md` § After formal review states. When
-       the carry-over holds, ask the Owner for the word on the rebased tip,
-       naming the carried-from SHA and the `main` commits in between; on
-       `CARRY_OVER_REFUSED`, the reviewer re-reviews the rebased tip first.
-     - While the authority is pending, ask the Owner for the word on the
-       rebased tip first, naming the carried-from SHA and the `main` commits
-       in between; the integration run then checks the carry-over. On
-       `CARRY_OVER_REFUSED`, the rebased tip goes to re-review and needs a
-       new word.
+     Run
+     `atc integrate --check --json --reviewed <reviewed SHA> --rebased <rebased tip>`
+     as governance `GIT_WORKFLOW.md` § After formal review states. When the
+     carry-over holds, ask the Owner for the word on the rebased tip, naming
+     the carried-from SHA and the `main` commits in between; on
+     `CARRY_OVER_REFUSED`, the reviewer re-reviews the rebased tip first.
    - On any other `refusal`, follow its `next` (`GIT_WORKFLOW.md`
      § Command results); a `next` that names a re-review goes back to the
      reviewer before any word is asked for.
@@ -129,27 +130,31 @@ own commits write; session names belong only in the hand-over.
    The Owner's word is an explicit integration instruction given against
    the exact SHA. A vague reply ("looks fine", "go on") is not the word, and
    the coordinator asks again; the word for one SHA never extends to
-   another. Run the instruction, adding `--owner-words` with the Owner's
-   words quoted unless the record on `main` grants the integration;
+   another. Relay the instruction to the writer with the Owner's exact
+   words as `--owner-words`, unless the record on `main` grants the
+   integration, and the full SHA the word names; the writer integrates and
+   closes out as `atc-review` "Writer: after integration" says.
    `atc integrate` records the task, its authority, the reviewed SHA and any
-   `carried_over_from` in `<git common dir>/atc/integrations.jsonl`. Check
-   the result as `atc-review` "Writer: after integration" says. Done when
-   the result matches.
-6. **Close** under governance `DELIVERY.md` § Close-out, right after the
-   integration into `main`; the push waits for the Owner's word
-   (`DELIVERY.md` § 10) and is not a precondition:
+   `carried_over_from` in `<git common dir>/atc/integrations.jsonl`. A
+   writer that reports `BLOCKED` waits for the Owner to approve in its
+   session; when the writer's session is gone, run the instruction
+   yourself. Check the result the writer reports as that section says.
+   Done when the result matches.
+6. **Close** under governance `DELIVERY.md` § Close-out, after the writer's
+   close-out; the push waits for the Owner's word (`DELIVERY.md` § 10) and is
+   not a precondition. Ask that word once for whatever is integrated and
+   unpushed, then push:
    - Confirm `main` at the integrated SHA and the task record at its
      post-integration state.
-   - Remove the task's worktree with `atc worktree cleanup` under the
-     `atc-worktree` skill. In a repository without managed worktrees, delete
-     the topic branch with `git -C <main checkout> branch -d <topic branch>`
-     instead; `-d` deletes only a branch `main` already contains.
-   - List the task's scratches with `atc tmp list`, each with its dependent
-     runs (a `tree` inside it), and remove them with `atc tmp clean`.
-   - Delete the task's report files, `~/.atc/reports/<task>-*.md` (the
-     writer's and the reviewer's).
-   - After a successful `atc worktree cleanup` or `branch -d`, archive the
-     task's sessions.
+   - Archive the task's sessions.
+   - Remove what the writer's close-out skipped: its worktree with
+     `atc worktree cleanup` under the `atc-worktree` skill, or in a
+     repository without managed worktrees the topic branch with
+     `git -C <main checkout> branch -d <topic branch>`; `-d` deletes only a
+     branch `main` already contains.
+   - Check with `atc tmp list` and `atc worktree list` that no scratch,
+     dependent run or worktree of the task is left, and that
+     `~/.atc/reports/<task>-*.md` is gone; remove what is.
      A refused archive is read through the session's state: a running
      session's writer ends its work; a pinned or idle one goes to the Owner.
    - Skip the keep exceptions the task record lists, and give the Owner

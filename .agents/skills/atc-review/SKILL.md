@@ -36,8 +36,8 @@ the `atc-coordinator` skill's `references/briefs.md`.
   report gives results rather than narrating the implementation.
 - On session messaging, a report or verdict is saved as a file under
   `~/.atc/reports/`, and the message's first line is its conclusion plus
-  that path. The coordinator deletes a task's report files at close-out
-  (governance `DELIVERY.md` § Close-out). A notification that truncates (a
+  that path. The session that integrates the task deletes its report files
+  at close-out (governance `DELIVERY.md` § Close-out). A notification that truncates (a
   short note, a preview) is a pointer, never the report.
 - On the paste carrier, the report or verdict goes inline, in full, in the
   one code block the user pastes whole; the file and path are for session
@@ -65,23 +65,27 @@ End every completed step with a step report in the shape governance
    mutants, one per guard, launchers and scripts included; the report gives
    each command with its summary line and every surviving mutant.
 2. Run `atc integrate --check` on the tip (governance `GIT_WORKFLOW.md`
-   § Mainline check before final self-verification) and report the token it
-   gives, `AUTHORITY_MISSING` included (§ Integrate). On `REBASE_REQUIRED` or
+   § Mainline check before final self-verification) and report the verdict
+   it gives; `authority=missing` or `authority=not_checked` on its resolved
+   line is pending authority (§ Integrate). On `REBASE_REQUIRED` or
    `OVERLAP`, rebase onto `main`, rerun the selection and report only the
    new tip.
 3. Stop every background job (governance `DELIVERY.md` § Background work).
 4. Deliver the report to the coordinator as "Every block you write" says;
    on session messaging its file is `~/.atc/reports/<task>-<short sha>.md`.
 5. Your session's final message to the Owner is that one line and nothing
-   else: no summary before or after it. Write it in plain Chinese with no
-   tokens, for example
+   else: no summary before or after it. Write it plainly in the Owner's
+   language with no tokens, the role terms writer, reviewer, coordinator and
+   Owner kept in English, for example
    「報告已送 coordinator（tip <sha>），等審查與你核准；尚未整合、未 push。」.
    When there is a problem the line names it plainly instead (for example,
    a rebase is needed). Every detail and token stays in the step report and
    the coordinator message.
 
 When taking over a topic from another session, fetch first and commit
-only on the fetched tip; never continue from a stale base.
+only on the fetched tip; never continue from a stale base. For a published
+topic, confirm that the remote branch tip equals the tip you continue from
+before the first commit.
 
 After a PASS the reviewed SHA is frozen; fixes go in new commits.
 
@@ -191,8 +195,9 @@ file is `~/.atc/reports/<task>-<short sha>-review.md`.
   with `preflight.reason` and every entry of `resolved.warnings` in the
   verified line. A `refusal`, such as a missing `## Integration verification`
   section, leaves the PASS without an instruction: give the holder its
-  `reason`, `detail` and `next`. `AUTHORITY_MISSING` is pending authority (§
-  Integrate): the PASS still carries the instruction with it quoted. A
+  `reason`, `detail` and `next`. An authority of kind `missing` or
+  `not_checked` is pending authority (§ Integrate): the PASS still carries
+  the instruction. A
   `refusal` whose `next` names a rebase (`REBASE_REQUIRED`, or `OVERLAP` or
   `CONFLICT` of an unpublished topic) still carries the instruction, with that
   refusal quoted. In a repository without managed worktrees, a
@@ -211,9 +216,10 @@ file is `~/.atc/reports/<task>-<short sha>-review.md`.
   which names the repository, and the full 40-character reviewed SHA
   (governance `GIT_WORKFLOW.md` § Integrate). A task identity string in place
   of a record ID adds `--project <name>`, or `--repo <root checkout>` for the
-  workspace root. The coordinator adds `--owner-words` when the record on
-  `main` does not grant the integration (governance `GIT_WORKFLOW.md` § Task
-  and authority). The command names no branch, verifier or timeout: the tool
+  workspace root. When the record on `main` does not grant the integration,
+  the holder adds `--owner-words` with the Owner's words quoted exactly and
+  relays the filled instruction to the writer with the reviewed full SHA
+  (governance `GIT_WORKFLOW.md` § Task and authority). The command names no branch, verifier or timeout: the tool
   finds the branch from the reviewed SHA and reads the verifier from the
   `## Integration verification` section of `AGENTS.md` at `main`. In a
   repository without managed worktrees, where the topic branch lives in the
@@ -231,11 +237,13 @@ A PASS authorizes only the commands it carries; build, install, push and any
 other action need their own instruction. Who may run which form of
 `atc integrate` is governance `GIT_WORKFLOW.md` § Task and authority.
 
-1. Run the `atc integrate` command with `--json` added (after
-   `switch main`, when the block carries it), when governance
-   `GIT_WORKFLOW.md` § Task and authority lets you run its form; an
-   instruction carrying `--owner-words` stays with the coordinator, who runs
-   it and gives you the result. Check the result. `FF`
+1. Run the `atc integrate` command the holder relayed, with `--json` added
+   (after `switch main`, when the block carries it), against the
+   integration checkout by absolute path. Run `--owner-words` only with the
+   Owner's exact words and the reviewed full SHA the holder relayed, for
+   that SHA. When your session refuses to run it on relayed words, stop and
+   report `BLOCKED` to the holder; the Owner then approves in your session.
+   Check the result. `FF`
    matches when `main_after` equals the reviewed SHA; `NO_FF` matches when
    `second_parent` equals the reviewed SHA and `first_parent` equals
    `main_before`.
@@ -251,20 +259,26 @@ other action need their own instruction. Who may run which form of
      `task` and `authority`, with any push request.
      `atc preflight push --repo <main checkout> --json` gives the same list
      before a later push.
-2. Run the hami-handoff-reminder check and report the result lines to the
-   holder only; the reviewer gets no relay.
+2. Close out (governance `DELIVERY.md` § Close-out): remove the task's
+   scratches with `atc tmp clean`, its report files
+   `~/.atc/reports/<task>-*.md` (the writer's and the reviewer's), and its
+   worktree with `atc worktree cleanup` under the `atc-worktree` skill,
+   unless your session's working directory is inside it; report that
+   worktree as skipped.
+3. Run the hami-handoff-reminder check and report the integration result,
+   every close-out line and the check's result lines to the holder only; the
+   reviewer gets no relay.
 
 Stop on a `switch` failure or a result mismatch: leave `main` and the branch
 as they are and hand the result lines to the holder for the reviewer.
 
-The worktree, branch, scratches and report files are removed at close-out
-(governance `DELIVERY.md` § Close-out). Done when the result matches and the
-handoff check ran, or the stop is with the holder.
+Done when the result matches, close-out ran and the handoff check ran, or
+the stop is with the holder.
 
 ## Reviewer: after integration
 
-The coordinator removes the task's scratches and report files at close-out
-(governance `DELIVERY.md` § Close-out).
+The session that integrates the task removes its scratches and report files
+at close-out (governance `DELIVERY.md` § Close-out).
 
 A failing verifier or gate run leaves its working directory under
 `<tmp>/systmp` for inspection; it stays until `atc tmp prune` deletes it,
@@ -277,7 +291,7 @@ seven days after its last change.
   user is to paste; a notes file's content is written as it is.
 - The report or verdict is written inline in the reply, in full, in the
   one code block the user pastes ("Every block you write").
-- In a paste-only setup with no coordinator session, an instruction carrying
-  `--owner-words` is run by the user, who counts as the coordinator, and is
-  never pasted to a writer (governance `GIT_WORKFLOW.md` § Task and
-  authority).
+- In a paste-only setup with no coordinator session, the user counts as the
+  coordinator: an instruction carrying `--owner-words` is run by the user,
+  or pasted to the writer with the Owner's exact words and the reviewed full
+  SHA (governance `GIT_WORKFLOW.md` § Task and authority).
