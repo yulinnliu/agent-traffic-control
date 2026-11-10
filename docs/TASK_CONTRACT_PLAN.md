@@ -636,7 +636,9 @@ review, one implementation review and one integration:
        stderr line: `NOTE atc preflight merge is retired; this ran atc
        integrate --check --repo <repo> --reviewed <sha>`. Its exit code is
        integrate's: 0 for `CHECK FF`/`CHECK NO_FF`, 1 for a stop, 2 for an
-       error.
+       error, 3 for a required recovery found by the check. Its `--json`
+       is integrate's payload (`command`, `check`, `preflight`), not the
+       old top-level `verdict`/`reason`.
      - Refused before integrate runs, `ERROR USAGE <detail>` and exit 2, each
        naming `atc integrate --check`: `--main` other than `main`; no
        `--reviewed`.
@@ -645,11 +647,14 @@ review, one implementation review and one integration:
        `cleanup_preflight()` stays: `atc worktree cleanup` runs it.
        `merge_preflight()` stays: `atc integrate` runs it.
      - `atc worktree audit`: `state_evidence()` adds `removable`, true when
-       the worktree is present, clean and merged into `main` (the
-       `REMOVABLE` condition of `cleanup_preflight()`), and the human line
-       of an `OK` or `LEGACY_TARGET` result gains the detail `removable` or
-       `not removable: <unmerged, uncommitted changes or missing>`. Exit
-       codes do not change: removability is evidence, not a finding.
+       the worktree is present, `main` resolves, and it is clean and merged
+       into `main`. That repeats the `REMOVABLE` condition of
+       `cleanup_preflight()` over the evidence audit already gathers rather
+       than calling it. `cmd_audit` sets the `Result.detail` of an `OK` or
+       `LEGACY_TARGET` result with no detail of its own to `removable` or
+       `not removable: <unmerged, uncommitted changes or missing>`, which
+       `render` prints. Exit codes do not change: removability is
+       evidence, not a finding.
      - `GIT_WORKFLOW.md` § Command results: exit 0 reads "Integrated, a
        `CHECK FF` or `CHECK NO_FF` verdict, or a preflight `PUSH`"; exit 1
        reads "a `CHECK STOP` or preflight `STOP` verdict" in place of "a
@@ -660,7 +665,12 @@ review, one implementation review and one integration:
      - Tests: the alias's `--check` line and exit code for an `FF` topic,
        its `--json`, the NOTE line, each `USAGE` refusal, `preflight
        cleanup` refused as a usage error, and `audit`'s `removable` for a
-       merged clean, an unmerged and a dirty worktree.
+       merged clean, an unmerged and a dirty worktree. Existing tests that
+       change: `test_git_preflight.py`'s two `merge` CLI tests (the old
+       JSON keys, `NO_REVIEWED_SHA` at exit 1, the stop on stdout) move to
+       the alias's forms; `test_atc_cli.py`'s subcommand list drops
+       `preflight cleanup`; `test_hami_worktree.py`'s exact audit evidence
+       gains `removable`.
      - Side effects (beyond the entry's): a script that parsed `FF
        FAST_FORWARD` from `preflight merge` now reads a `CHECK` line; none
        in this repository or the skills does. `--check` takes no slot and
@@ -814,11 +824,20 @@ review, one implementation review and one integration:
         `resolve_commit(repo, value, flag)` runs `git rev-parse --verify
         --quiet <value>^{commit}`. A result that does not start with the
         value (a ref whose name is hex wins over an abbreviated ID, as in
-        `merge_preflight()`) or no result is `REVIEWED_SHA_UNKNOWN`, unless
-        `git rev-parse --disambiguate=<value>` lists two or more commits or
-        tags, which is the new stop `AMBIGUOUS_SHA` listing them as 12-character
-        IDs. Exit 1, before any candidate; `gp.REASONS` and `gp.NEXT` gain
-        it ("run again with the full SHA the formal review named").
+        `merge_preflight()`; also an annotated tag's prefix, which peels to
+        its commit: the flag names a commit) or no result is
+        `REVIEWED_SHA_UNKNOWN`, unless `git rev-parse
+        --disambiguate=<value>`, which lists objects of every type, holds
+        two or more that `git cat-file -t` calls `commit` or `tag`: that is
+        the new stop `AMBIGUOUS_SHA`. Its detail lists them at their
+        shortest distinguishing length, longer than the value and below 40
+        characters so the human output's 12-character rewrite leaves them
+        whole; its `--json` evidence lists them in full. Exit 1, before any
+        candidate; `gp.REASONS` and `gp.NEXT` gain it ("run again with a
+        longer prefix or the full SHA the formal review named").
+      - `gp.REVIEWED_SHA` (7-40) and its `REVIEWED_SHA_INVALID` reason text
+        become 12-40, the one form both commands state; `merge_preflight()`
+        receives integrate's resolved full SHA.
       - `--rebased` resolves through the same helper. From there on
         `reviewed` and `carried_from` hold the full SHA, so the record, the
         authority check, the candidate and `--json` carry it.
@@ -834,8 +853,13 @@ review, one implementation review and one integration:
       - Tests: a 12-character prefix integrates and its record holds the
         full SHA; `--rebased` by prefix; 11 characters is
         `REVIEWED_SHA_INVALID`; an unknown prefix is `REVIEWED_SHA_UNKNOWN`;
-        `AMBIGUOUS_SHA` with the minimum length patched to 1 over 17 commits
-        (two share a first character); `atc verify` by prefix.
+        `AMBIGUOUS_SHA` against real Git with the minimum length patched to
+        4 (Git's own floor for an abbreviation), over two commit objects
+        whose IDs share four characters, found by hashing candidate commit
+        bodies in Python and written with `git hash-object -t commit -w`;
+        `atc verify` by prefix. `test_git_integrate.py`'s test that a
+        12-character prefix is `REVIEWED_SHA_INVALID` ("must be the full
+        40-character SHA") becomes the 11-character case.
       - Side effects: none beyond the entry's; a full SHA behaves as now.
 15. `select_tests.py` prints a summary by default (selected n of m, one
     reason line per changed path); the per-test list only with `--explain`;
@@ -1384,10 +1408,17 @@ review, one implementation review and one integration:
         exceeded" against the timeout in force. A check that refuses a
         declaration over 1800 s without the approval line would reach
         hami-quant through the installed `atc` before its `AGENTS.md`
-        carries the line, so it is not built.
+        carries the line, so it is not built; the 1800 s cap is a
+        governance rule the reviewer checks, not a refusal.
+      - `GIT_WORKFLOW.md` § Project verification section, the list of what
+        a project's `AGENTS.md` carries, gains the approval line as an
+        optional item pointing to the new section (design review finding;
+        the `GIT_WORKFLOW.md` edit outside D.14 and D.7's passages is
+        reported to the coordinator for confirmation).
       - Root `AGENTS.md`'s `Verifier timeout` note points to the new
-        section; `adapters/python/README.md` keeps its root-specific text
-        and points to it too.
+        section. `VERIFICATION.md` is canonical for the rule;
+        `adapters/python/README.md` drops its restatement and keeps the
+        root's facts (1800 s, the 232 s staged run) with a pointer.
       - After D: hami-quant's `AGENTS.md` gains the approval line for its
         3600 s with the final sync, on the Owner's recorded word.
       - Tests: none new; the root's guidance change selects its readers.
