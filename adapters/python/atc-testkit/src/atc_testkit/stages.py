@@ -135,7 +135,7 @@ def resolve_workers(flag: int | None = None, environ: Mapping[str, str] | None =
 def pytest_arguments(stage: Stage, workers: int | None = None) -> list[str]:
     """The options of one invocation; each stage passes its worker option explicitly."""
     if stage.name == PARALLEL.name:
-        selected = ["-n", str(default_workers() if workers is None else workers), "--dist", "loadscope"]
+        selected = ["-n", str(default_workers() if workers is None else workers), "--dist", "loadgroup"]
     else:
         selected = ["-n", "0"]
     return ["-q", "-m", stage.marker, *selected, *(f"--ignore={path}" for path in stage.ignore)]

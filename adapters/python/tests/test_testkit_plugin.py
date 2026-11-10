@@ -163,7 +163,7 @@ def test_a_surviving_child_fails_the_run_with_its_token(project: Path, tmp_path:
                                                         workers: tuple[str, ...]) -> None:
     (project / "tests/test_a.py").write_text(ESCAPED_TEST, encoding="utf-8")
     base = tmp_path / "base"
-    run = pytest_in(project, "--basetemp", str(base), *workers)
+    run = pytest_in(project, "--basetemp", str(base), "-o", "atc_testkit_reap_seconds=1", *workers)
     pid = int((tmp_path / "pid.txt").read_text())
     try:
         assert run.returncode == 1, run.stdout + run.stderr
@@ -182,3 +182,62 @@ def test_sessions_with_other_base_directories_do_not_fail_one_another(project: P
     finally:
         other.kill()
         other.wait()
+
+
+GROUPED_TEST = """import os, pathlib
+import pytest
+
+pytestmark = pytest.mark.unit
+BUILT = pathlib.Path(__file__).parent / "built.txt"
+
+
+@pytest.fixture(scope="module")
+def shared():
+    with BUILT.open("a", encoding="utf-8") as sink:
+        sink.write(f"{os.getpid()}\\n")
+    return 1
+
+
+@pytest.mark.parametrize("n", range(8))
+def test_shared(shared, n):
+    assert shared == 1
+
+
+@pytest.mark.parametrize("n", range(8))
+def test_alone(n):
+    pass
+
+
+@pytest.mark.xdist_group("mine")
+def test_marked():
+    pass
+
+
+class TestKind:
+    @pytest.fixture(scope="class")
+    def kind(self):
+        return 2
+
+    def test_kind(self, kind):
+        assert kind == 2
+"""
+
+
+@pytest.mark.integration
+def test_tests_sharing_a_wider_fixture_run_on_one_worker(project: Path, atc_tmp: Path) -> None:
+    (project / "tests/test_g.py").write_text(GROUPED_TEST, encoding="utf-8")
+    run = pytest_in(project, "-n", "2", "--dist", "loadgroup", "-v", "tests/test_g.py")
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert len((project / "tests/built.txt").read_text(encoding="utf-8").splitlines()) == 1
+    assert "tests/test_g.py::test_shared[0]@tests/test_g.py" in run.stdout
+    assert "tests/test_g.py::test_marked@mine" in run.stdout
+    assert "tests/test_g.py::TestKind::test_kind@tests/test_g.py::TestKind" in run.stdout
+    assert "tests/test_g.py::test_alone[0] " in run.stdout or "tests/test_g.py::test_alone[0]\n" in run.stdout
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("value", ["0", "-1", "11", "soon"])
+def test_a_bad_reap_window_is_a_usage_error(project: Path, atc_tmp: Path, value: str) -> None:
+    run = pytest_in(project, "-o", f"atc_testkit_reap_seconds={value}")
+    assert run.returncode == 4, run.stdout + run.stderr
+    assert "REAP_SECONDS_INVALID" in run.stdout + run.stderr

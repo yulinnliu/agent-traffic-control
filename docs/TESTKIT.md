@@ -50,12 +50,18 @@ order. Each is one pytest invocation over the selected paths.
 
 | Stage | Marker expression | Workers | Desktop |
 | --- | --- | --- | --- |
-| `parallel` | `not slow and not serial and not interactive_desktop` | `-n <workers> --dist loadscope` | private |
+| `parallel` | `not slow and not serial and not interactive_desktop` | `-n <workers> --dist loadgroup` | private |
 | `serial` | `serial and not slow and not interactive_desktop` | `-n 0` | private |
 | `interactive` | `interactive_desktop and not slow` | `-n 0` | interactive |
 
 - Every stage passes its worker option explicitly, so a project's `addopts`
   cannot change it.
+- Under `loadgroup` a test spreads to any worker unless it carries
+  `xdist_group`. The plugin marks, at collection, every test that uses a
+  fixture of wider scope with a group: its module for a module-scoped
+  fixture, its `module::Class` for a class-scoped one, its package for a
+  package-scoped one, so such a fixture is built once as under
+  `loadscope`. A test that already carries `xdist_group` keeps its own.
 - `<workers>` is, in order: the `--workers N` of the command that starts the
   stages (the CI runner's `--stages`, the gate's `--run`); `test_workers` in
   the host file `~/.atc/config.toml` (`ATC_HOME.md` § Host settings), read
@@ -238,7 +244,9 @@ A test starts a child process through the testkit's `start` or `run`.
 - At the end of a session the controlling process lists every live process
   whose command line names that session's pytest base directory, excluding
   itself and its ancestors, and fails the run with `CHILD_PROCESSES_ALIVE`
-  when one is still listed after up to 10 seconds. A process that a test ended
+  when one is still listed after up to 10 seconds, or the shorter window the
+  ini option `atc_testkit_reap_seconds` gives (above 0 and up to 10; any other
+  value stops the run as a usage error, `REAP_SECONDS_INVALID`). A process that a test ended
   itself, for example through a kill-on-close Job of its own, leaves the
   testkit's Job before its teardown finishes, and that wait covers the rest of
   it. Sessions with different base directories never fail one

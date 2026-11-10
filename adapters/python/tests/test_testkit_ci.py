@@ -125,7 +125,7 @@ def test_the_stages_run_through_the_runner_with_its_worker_count(project: Path) 
     run = runner(project, "--stages", "--workers", "2")
     assert run.returncode == 0, run.stdout + run.stderr
     text = (project / ".tmp/ci-parallel.log").read_text(encoding="utf-8")
-    assert "-n 2 --dist loadscope" in text and "workers: 2 (flag)" in run.stdout
+    assert "-n 2 --dist loadgroup" in text and "workers: 2 (flag)" in run.stdout
     assert (project / ".tmp/ci-serial.log").is_file() and (project / ".tmp/ci-interactive.log").is_file()
 
 

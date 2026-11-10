@@ -137,7 +137,7 @@ def test_the_parallel_stage_prints_its_count_before_it_starts(tmp_path: Path,
 
 def test_every_stage_passes_its_worker_option_explicitly() -> None:
     parallel, serial, interactive = stages.stages(("tests/x.py",))
-    assert stages.pytest_arguments(parallel, 3) == ["-q", "-m", parallel.marker, "-n", "3", "--dist", "loadscope",
+    assert stages.pytest_arguments(parallel, 3) == ["-q", "-m", parallel.marker, "-n", "3", "--dist", "loadgroup",
                                                     "--ignore=tests/x.py"]
     assert stages.pytest_arguments(serial) == ["-q", "-m", serial.marker, "-n", "0", "--ignore=tests/x.py"]
     assert stages.pytest_arguments(interactive) == ["-q", "-m", interactive.marker, "-n", "0", "--ignore=tests/x.py"]
@@ -169,7 +169,7 @@ def test_stages_run_in_order_with_their_own_data_log_and_desktop(tmp_path: Path)
     assert [call[1]["DATA"] for call in fake.calls] == ["parallel", "serial", "interactive"]
     assert [call[2].name for call in fake.calls] == ["parallel.log", "serial.log", "interactive.log"]
     assert [call[3] for call in fake.calls] == [True, True, False]
-    assert fake.calls[0][0] == ["runner", "-q", "-m", stages.PARALLEL.marker, "-n", "2", "--dist", "loadscope",
+    assert fake.calls[0][0] == ["runner", "-q", "-m", stages.PARALLEL.marker, "-n", "2", "--dist", "loadgroup",
                                 "--opt", "parallel", "tests"]
 
 
