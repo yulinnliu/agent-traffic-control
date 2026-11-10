@@ -1131,7 +1131,7 @@ def resolve_binding(
         tasks = rng.task_ids
         if args.task is not None and args.task not in tasks:
             raise Refused("USAGE", f"--task {args.task} names no record this records-only range changes: {', '.join(tasks)}")
-    elif args.task is None and not args.check:
+    elif args.task is None and not (args.check and words is None):
         raise Refused("USAGE", "a range that changes more than .atc/tasks/ needs --task")
     else:
         tasks = [] if args.task is None else [args.task]

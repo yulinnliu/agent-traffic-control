@@ -493,3 +493,9 @@ def test_a_check_reports_a_missing_grant_and_the_run_still_stops(tasks_repo: Pat
     assert captured.out.startswith("CHECK FF ")
     status, data, _ = run_json(tasks_repo, capsys, work, "--task", "DEMO-0001")
     assert (status, data["refusal"]["reason"]) == (1, "AUTHORITY_MISSING")
+
+
+def test_a_check_with_owner_words_still_needs_a_task(tasks_repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    work = on_branch(tasks_repo, "work", {"a.txt": "work\n"})
+    status, data, _ = run_json(tasks_repo, capsys, work, "--check", "--owner-words", WORDS)
+    assert (status, data["refusal"]["reason"]) == (2, "USAGE")
