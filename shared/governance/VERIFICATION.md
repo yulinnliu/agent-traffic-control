@@ -197,8 +197,11 @@ section above; this section covers the rest of the test workflow.
 - Before a commit or push, run the project's impact-selected `not slow` tests
   (its pre-push gate, where it has one).
 - Writers run the selection (`select_tests.py`, or the project's own
-  selection); reviewers run tests as § Independent review states; only the
-  integration verifier runs the full suite.
+  selection); reviewers run tests as § Independent review states; local
+  integration runs the impact-selected checks unless the project requires a
+  local full regression, and the full suite runs where § Full regression
+  timing and evidence reuse places it, by default the project's remote CI
+  started by manual dispatch.
 
 A project's local pre-push gate, where it has one, runs the impact-selected
 `not slow` tests for the pushed paths. Unknown paths select the project's
@@ -288,7 +291,8 @@ final round to be fresh.
 A reviewer does not rerun the selection the writer ran at the reviewed SHA.
 It runs only the tests that settle its own doubts, such as a finding, a
 suspected gap or a test it adds in its scratch, and names those tests in its
-verdict. The integration verifier's full suite is the safety net.
+verdict. The full regression of § Full regression timing and evidence reuse,
+by default the project's manually dispatched remote CI, is the safety net.
 
 A verdict's first line is the verdict token, then one line per finding
 (severity, `file:line`, required fix), the verified items as one line, and no
