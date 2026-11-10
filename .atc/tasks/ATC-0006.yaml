@@ -1,0 +1,14 @@
+task_id: ATC-0006
+repository: yulinnliu/agent-traffic-control
+base_sha: d0d86e7ec40608d7bd40e062170fb268ea648046
+scope: 'README: name every shared skill that runs atc'
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: d0d86e7ec40608d7bd40e062170fb268ea648046
+branch: worktree-claude+readme-tool-skills
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
