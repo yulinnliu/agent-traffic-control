@@ -1,10 +1,11 @@
 task_id: ATC-0005
 repository: yulinnliu/agent-traffic-control
 base_sha: d0d86e7ec40608d7bd40e062170fb268ea648046
-scope: 'Selection precision ahead of D: Markdown under shared/governance and shared/skills
-  (and common names like SKILL.md, AGENTS.md) selects only declared readers, not every
-  test whose transitive import reach names it; design and side effects reviewed before
-  implementation'
+scope: 'Plan D.18 and D.19 ahead of D: the root''s guidance, skills and rendered copies
+  select only their declared readers, guarded by a session check; the root''s integration
+  verifier runs the impact selection and classifies documentation-only ranges by consumers,
+  the full suite moving to a dispatched CI run; close-out deletes the task''s report files
+  (DELIVERY.md, Owner-authorized); design and side effects reviewed before implementation'
 governance_source: yulinnliu/agent-traffic-control
 governance_revision: d0d86e7ec40608d7bd40e062170fb268ea648046
 branch: worktree-claude+select-markdown-readers
