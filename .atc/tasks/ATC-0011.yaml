@@ -1,0 +1,16 @@
+task_id: ATC-0011
+repository: yulinnliu/agent-traffic-control
+base_sha: fac330c33f3bece10872d6ac3a871548cf536843
+scope: 'group 2: Linux CI fix for test_select_runs_what_the_declared_selector_prints;
+  ATC-0010 review nits; close-out infers the root for a root task; retro skill fixes;
+  final sync to projects'
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: fac330c33f3bece10872d6ac3a871548cf536843
+branch: worktree-claude+ci-fix-and-sync
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
