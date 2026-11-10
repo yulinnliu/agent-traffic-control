@@ -143,7 +143,7 @@ def test_an_ignored_synced_path_stops_link_skills_before_writing(tmp_path: Path)
 def test_a_file_sync_does_not_write_under_atc_stops_link_skills_before_writing(tmp_path: Path, path: str, content: str) -> None:
     repo = make_repo(tmp_path)
     write(repo / path, content)
-    write(repo / ".atc/tasks/X-0001.yaml", "id: X-0001\n")
+    write(repo / onboard_project.validator.TASKS_DIR / "X-0001.yaml", "id: X-0001\n")
     before = tree(repo)
     run = sh("link-skills.sh", repo.as_posix(), "atc-review")
     assert run.returncode == 1 and f"collision  {path} (" in run.stdout
@@ -153,7 +153,7 @@ def test_a_file_sync_does_not_write_under_atc_stops_link_skills_before_writing(t
 @pytest.mark.integration
 def test_link_skills_writes_the_lock_and_pointer_line_then_stays_current(tmp_path: Path) -> None:
     repo = make_repo(tmp_path)
-    write(repo / ".atc/tasks/X-0001.yaml", "id: X-0001\n")
+    write(repo / onboard_project.validator.TASKS_DIR / "X-0001.yaml", "id: X-0001\n")
     run = sh("link-skills.sh", repo.as_posix(), "atc-review")
     assert run.returncode == 0, run.stdout
     lock = (repo / ".atc/atc.lock").read_bytes()
@@ -162,7 +162,7 @@ def test_link_skills_writes_the_lock_and_pointer_line_then_stays_current(tmp_pat
     assert agents.index(POINTER) < agents.index("## Integration verification") and agents.count(POINTER) == 1
     assert "updated    AGENTS.md (pointer line inserted before the first section)" in run.stdout
     assert (repo / ".atc/README.md").is_file() and (repo / ".atc/governance/INDEX.md").is_file()
-    assert (repo / ".atc/tasks/X-0001.yaml").read_text(encoding="utf-8") == "id: X-0001\n"
+    assert (repo / onboard_project.validator.TASKS_DIR / "X-0001.yaml").read_text(encoding="utf-8") == "id: X-0001\n"
     before = tree(repo)
     again = sh("link-skills.sh", repo.as_posix(), "atc-review")
     assert again.returncode == 0 and "current    AGENTS.md pointer line" in again.stdout and "current    .atc/" in again.stdout
