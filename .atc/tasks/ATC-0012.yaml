@@ -1,0 +1,16 @@
+task_id: ATC-0012
+repository: yulinnliu/agent-traffic-control
+base_sha: 6be71b86649c949c7ba0378ef4a362dea17f0fda
+scope: 'atc-testkit 0.9.1: an explicit --workers flag may exceed the logical CPU count,
+  up to max(MAX_WORKERS, cpu_count); host test_workers stays capped at cpu_count;
+  TESTKIT.md and release record'
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: 6be71b86649c949c7ba0378ef4a362dea17f0fda
+branch: worktree-claude+testkit-flag-workers
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
