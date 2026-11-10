@@ -18,8 +18,9 @@ sys.path[:0] = [{str(TESTS)!r}, {str(SCRIPTS)!r}]
 import root_reads
 
 def pytest_configure(config):
-    guard = root_reads.RootReads(Path(__file__).parent, ("shared/governance", "shared/skills"),
-                                 {{"tests/test_declared.py": ("shared/skills",)}})
+    guard = root_reads.RootReads(Path(__file__).parent, ("shared/governance", "shared/skills", "**/*.md"),
+                                 {{"tests/test_declared.py": ("shared/skills",)}},
+                                 ("shared/governance", "shared/skills"))
     config.pluginmanager.register(guard, "root_reads")
 """
 TEST_FILES = {
@@ -33,6 +34,10 @@ TEST_FILES = {
                               "                   cwd=Path(__file__).parents[1], check=True)\n",
     "test_declared.py":"from pathlib import Path\n\ndef test_reads():\n"
                         "    Path(__file__).parents[1].joinpath('shared/skills/demo/skill.md').read_text()\n",
+    "test_docs.py": "from pathlib import Path\n\ndef test_reads():\n"
+                    "    Path(__file__).parents[1].joinpath('docs/note.md').read_text()\n",
+    "test_environment.py": "from pathlib import Path\n\ndef test_reads():\n"
+                           "    Path(__file__).parents[1].joinpath('.venv/lib/note.md').read_text()\n",
 }
 
 
@@ -41,6 +46,7 @@ def checkout(tmp_path: Path) -> Path:
     root = tmp_path / "checkout"
     for rel, text in {"pytest.ini": "[pytest]\n", "conftest.py": CONFTEST, "shared/governance/core.md": "# core\n",
                       "shared/skills/demo/skill.md": "# demo\n", "scripts/stand-in.sh": "exit 0\n",
+                      "docs/note.md": "# note\n", ".venv/lib/note.md": "# note\n",
                       **{f"tests/{name}": body for name, body in TEST_FILES.items()}}.items():
         (root / rel).parent.mkdir(parents=True, exist_ok=True)
         (root / rel).write_text(text, encoding="utf-8")
@@ -68,7 +74,14 @@ def test_an_undeclared_shell_script_child_reads_every_guarded_path(checkout: Pat
     assert f"ROOT_READ_UNDECLARED: tests/{test} reads shared/governance, shared/skills" in result.stdout
 
 
-def test_a_declared_reader_passes(checkout: Path) -> None:
-    result = run(checkout, "test_declared.py")
+def test_an_undeclared_read_of_markdown_outside_shared_fails_the_session(checkout: Path) -> None:
+    result = run(checkout, "test_docs.py")
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "ROOT_READ_UNDECLARED: tests/test_docs.py reads docs/note.md" in result.stdout
+
+
+@pytest.mark.parametrize("test", ["test_declared.py", "test_environment.py"])
+def test_a_declared_reader_and_a_read_of_an_environment_pass(checkout: Path, test: str) -> None:
+    result = run(checkout, test)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "ROOT_READ_UNDECLARED" not in result.stdout

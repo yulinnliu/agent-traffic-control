@@ -4,8 +4,8 @@
 `DIRECTORY_READERS` declares, so an undeclared reader would be missed; this
 plugin records, through one audit hook per process and by test file, every
 file open, directory listing, glob and copy under a guarded path, and counts a
-child command that runs the checkout's `scripts/*.sh` as a read of every
-guarded path. Under pytest-xdist each worker hands its failures to the
+child command that runs the checkout's `scripts/*.sh` as a read of every path
+`select_tests.SCRIPT_READS` names. Under pytest-xdist each worker hands its failures to the
 controller. Existence checks and what a child Python process opens are not
 traced.
 """
@@ -50,14 +50,19 @@ def _arguments(argv, cwd) -> list[str]:
 
 
 class RootReads:
-    """Records which guarded paths of ``root`` each test file reads, and fails the session on an undeclared one."""
+    """Records which guarded paths of ``root`` each test file reads, and fails the session on an undeclared one.
 
-    def __init__(self, root: Path, guarded: Iterable[str], readers: Mapping[str, Iterable[str]]):
+    A child running the checkout's ``scripts/*.sh`` reads ``script_reads``, by default every guarded path.
+    """
+
+    def __init__(self, root: Path, guarded: Iterable[str], readers: Mapping[str, Iterable[str]],
+                 script_reads: Iterable[str] | None = None):
         global _HOOKED
         self.root = Path(os.path.realpath(root))
         self._prefix = os.path.normcase(str(self.root)) + os.sep
         self._scripts = os.path.normcase(str(self.root / "scripts"))
         self.guarded = tuple(_key(entry) for entry in guarded)
+        self.script_reads = self.guarded if script_reads is None else tuple(_key(entry) for entry in script_reads)
         self.readers = {_key(test): tuple(_key(entry) for entry in entries) for test, entries in readers.items()}
         self.current: str | None = None
         self.reads: dict[str, set[str]] = {}
@@ -69,7 +74,8 @@ class RootReads:
 
     @classmethod
     def for_checkout(cls) -> RootReads:
-        return cls(select_tests.WORKSPACE, select_tests.GUARDED, select_tests.DIRECTORY_READERS)
+        return cls(select_tests.WORKSPACE, select_tests.GUARDED, select_tests.DIRECTORY_READERS,
+                   select_tests.SCRIPT_READS)
 
     def audit(self, event: str, args: tuple) -> None:
         if self.current is None or self._busy:
@@ -97,7 +103,7 @@ class RootReads:
         for argument in _arguments(argv, cwd):
             if argument.endswith(".sh") and \
                     os.path.normcase(os.path.dirname(os.path.realpath(argument))) == self._scripts:
-                self.reads.setdefault(self.current, set()).update(self.guarded)
+                self.reads.setdefault(self.current, set()).update(self.script_reads)
                 return
 
     def _test_file(self, path: Path) -> str | None:

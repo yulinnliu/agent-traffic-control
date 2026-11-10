@@ -168,7 +168,8 @@ def test_documentation_only_range_skips_the_tests_only(candidate: Candidate, cap
     (["shared/templates/PROJECT_AGENTS.md"], False),
     ([".dsh/skills/x/SKILL.md"], False),
     (["shared/skills/x.md"], False),
-    (["adapters/python/README.md"], False),
+    (["adapters/python/README.md"], True),
+    (["adapters/python/atc-testkit/README.md"], False),
     (["shared/docs/x.md"], False),
 ])
 def test_documentation_only_classification(paths: list[str], expected: bool) -> None:

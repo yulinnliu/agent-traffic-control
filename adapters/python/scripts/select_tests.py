@@ -12,12 +12,12 @@ root. Selection is by test file and reads the static structure of the code:
   see (a glob, a copy, a script reading its own checkout) is declared in
   `DIRECTORY_READERS` and runs for a change to that entry or below it.
 - A guarded path (`GUARDED`: `shared/governance/`, `shared/skills/`, the
-  rendered `.claude/skills/`, `.agents/skills/` and `.dsh/skills/`, and the
-  root's top-level Markdown, `*.md`) selects its declared readers. Markdown
-  there selects them only, never through names, and so does a directory; a
-  file of another kind adds the test files whose reach names its file name.
-  With no test file, Markdown selects nothing and another file the full
-  suite. `validate_workspace.py`, not the selection, checks them.
+  rendered `.claude/skills/`, `.agents/skills/` and `.dsh/skills/`, and every
+  Markdown file outside `shared/` and outside a `.venv` environment) selects
+  its declared readers. Markdown there selects them only, never through names,
+  and so does a directory; a file of another kind adds the test files whose
+  reach names its file name. With no test file, Markdown selects nothing and
+  another file the full suite.
 - `conftest.py`, the pytest plugin and everything they import at load time
   (the reader guard `tests/root_reads.py` and this script among them),
   `pyproject.toml`, `uv.lock` and the unmarked baseline select the full suite.
@@ -28,8 +28,7 @@ root. Selection is by test file and reads the static structure of the code:
 - A path no rule maps selects the full suite: a module no test reaches, a
   removed module, a removed test file another module still names, a `shared/`
   area no test reads, task records when no test names `.atc/tasks`, and a
-  non-Markdown file no test names. Markdown no test
-  names selects nothing.
+  non-Markdown file no test names. Markdown no test names selects nothing.
 
 Usage, from `adapters/python`::
 
@@ -80,11 +79,18 @@ TASK_RECORDS = ".atc/tasks"
 SCRIPTS = f"{ADAPTER}/scripts"
 CLI_SRC = f"{ADAPTER}/src/atc_cli"
 TESTKIT_SRC = f"{ADAPTER}/atc-testkit/src/atc_testkit"
-# The root's own guidance, skills and rendered copies: only their declared readers select for them.
+TESTKIT_README = f"{ADAPTER}/atc-testkit/README.md"
+# The root's own guidance, skills and rendered copies, and Markdown outside `shared/`: only their
+# declared readers select for them. Markdown under another `shared/<area>/` keeps its area's rule.
 TOP_MARKDOWN = "*.md"  # every Markdown file at the workspace root
+MARKDOWN = "**/*.md"  # every Markdown file outside `shared/` and outside a `.venv` environment
 GUARDED = (
-    "shared/governance", "shared/skills", ".claude/skills", ".agents/skills", ".dsh/skills",
-    TOP_MARKDOWN,
+    "shared/governance", "shared/skills", ".claude/skills", ".agents/skills", ".dsh/skills", MARKDOWN,
+)
+# What `scripts/link-skills.sh` and `check-skills.sh` read of their own checkout.
+SCRIPT_READS = (
+    "shared/governance", "shared/skills", ".claude/skills", ".agents/skills", ".dsh/skills", TOP_MARKDOWN,
+    "shared/templates",
 )
 # Test files that read a directory or file of this checkout the graph cannot
 # see: a glob, a copy, a digest, a guarded path, or a script that reads them.
@@ -92,24 +98,28 @@ GUARDED = (
 # a session whose test files read a guarded path undeclared.
 DIRECTORY_READERS = {
     f"{TESTS}/test_testkit_tmp.py": (TESTKIT_SRC,),
-    f"{TESTS}/test_testkit_release.py": (TESTKIT_SRC,),
+    f"{TESTS}/test_testkit_release.py": (TESTKIT_SRC, TESTKIT_README),
+    f"{TESTS}/test_testkit_evidence.py": (TESTKIT_README,),
     f"{TESTS}/test_select_tests.py": (SCRIPTS, CLI_SRC, TESTKIT_SRC, TESTS),
     f"{TESTS}/test_tooling.py": ("shared/skills", ".dsh/skills"),
     f"{TESTS}/test_integration_verify.py": ("AGENTS.md",),
-    # scripts/link-skills.sh and check-skills.sh read their own checkout.
-    f"{TESTS}/test_shell_install.py": (*GUARDED, "shared/templates/PROJECT_AGENTS.md"),
+    f"{TESTS}/test_shell_install.py": SCRIPT_READS,
 }
 
 
 def covers(entry: str, path: str) -> bool:
     """Whether ``path`` is the declared ``entry`` or lies below it, whatever its separators and case.
 
-    ``TOP_MARKDOWN`` covers itself and every Markdown file at the workspace root.
+    ``TOP_MARKDOWN`` covers itself and every Markdown file at the workspace root; ``MARKDOWN`` covers
+    itself and every Markdown file outside ``shared/`` and outside a ``.venv`` environment.
     """
     entry = entry.replace("\\", "/").rstrip("/").casefold()
     path = path.replace("\\", "/").rstrip("/").casefold()
     if entry == TOP_MARKDOWN:
         return path == entry or ("/" not in path and path.endswith(".md"))
+    if entry == MARKDOWN:
+        parts = path.split("/")
+        return path == entry or (path.endswith(".md") and parts[0] != SHARED and ".venv" not in parts)
     return path == entry or path.startswith(f"{entry}/")
 
 
@@ -288,7 +298,7 @@ def classify(path: str, selection: TestSelection, graph: Graph) -> None:
         if readers:
             selection.add(path, readers, "declared readers in this checkout; validate_workspace.py checks it")
         elif pure.suffix.lower() == ".md":
-            selection.add(path, (), "guarded Markdown no declared test reads; validate_workspace.py checks it")
+            selection.add(path, (), "Markdown no declared test reads")
         else:
             selection.widen(path, "guarded path no declared test reads")
         return

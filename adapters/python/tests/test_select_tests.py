@@ -136,6 +136,33 @@ def test_top_level_markdown_is_guarded(graph, path, readers):
     assert not select_tests.covers(select_tests.TOP_MARKDOWN, f"docs/{path}")
 
 
+@pytest.mark.parametrize(("path", "readers"), [
+    (f"{ADAPTER}/README.md", None),
+    ("docs/WORKFLOW.md", None),
+    ("docs/TESTKIT.md", None),
+    (".out-of-scope/README.md", None),
+    (f"{ADAPTER}/atc-testkit/README.md", ["tests/test_testkit_evidence.py", "tests/test_testkit_release.py"]),
+])
+def test_markdown_outside_shared_selects_its_declared_readers_only(graph, path, readers):
+    assert chosen(graph, path) == readers
+
+
+@pytest.mark.parametrize(("path", "covered"), [
+    ("docs/x.md", True),
+    ("Docs/Sub/X.MD", True),
+    ("README.md", True),
+    ("shared/templates/ATC_README.md", False),
+    (f"{ADAPTER}/.venv/Lib/site-packages/pkg/README.md", False),
+    ("docs/x.txt", False),
+])
+def test_the_markdown_entry_covers_markdown_outside_shared_and_environments(path, covered):
+    assert select_tests.covers(select_tests.MARKDOWN, path) is covered
+
+
+def test_markdown_under_a_shared_area_keeps_the_area_rule(graph):
+    assert "tests/test_conformance.py" in chosen(graph, "shared/conformance/README.md")
+
+
 def test_the_run_starts_no_stage_for_an_empty_selection_and_the_full_suite_for_a_widened_one(monkeypatch):
     started = []
     monkeypatch.setattr(select_tests.subprocess, "run",
@@ -217,7 +244,7 @@ def test_the_command_prints_a_summary_and_explains_on_request(capsys):
     out = capsys.readouterr().out.splitlines()
     assert out[0].startswith("test selection: 2 of ")
     assert "tests:" not in out and not any("  <- " in line for line in out)
-    assert "  docs/NO_TEST_NAMES_THIS.md: Markdown no test file names" in out
+    assert "  docs/NO_TEST_NAMES_THIS.md: Markdown no declared test reads" in out
     assert select_tests.main([*paths, "--explain"]) == 0
     out = capsys.readouterr().out.splitlines()
     assert f"  tests/test_worktree_cd_guard.py  <- {ADAPTER}/scripts/worktree_cd_guard.py" in out
