@@ -16,7 +16,9 @@ HELP_OPTIONS = ("-h", "--help")
 TREE_NAME_OPTION = "--tree-name"
 
 USAGES = {
-    ("test", "run"): "usage: atc test run <tree> <scratch> <python> <label> <pytest args...>",
+    ("test", "run"): "usage: atc test run <tree> <scratch> <python> <label> <pytest args...>\n"
+                     "       atc test run --scratch <name> [--tree <tree>] [--python <py>] [--select <base>] "
+                     "[--label <label>] [--timeout <s>] [--progress] [-- <pytest args...>]",
     ("test", "mutants"): "usage: atc test mutants <scratch> <sha> <worktree> <mutants.json> --python <py> "
                          "--tests <path>...",
     ("tmp", "checkout"): "usage: atc tmp checkout <sha> --task <ID> [--worktree <path>] [--scratch <name>] "
@@ -33,6 +35,9 @@ DESCRIPTIONS = {
   <python>        interpreter that runs pytest: a path, or a name on PATH
   <label>         name printed as `== <label> ==` before the run
   <pytest args>   passed to pytest after the isolation options
+
+The flag form keeps pytest's output in <scratch>/runs/ and prints the log
+path and one summary line; `atc test run --scratch x --help` lists its options.
 
 Exit: pytest's code, 8 for a guard refusal, 9 for a location refusal.""",
     ("tmp", "list"): """Print the scratch registry with each scratch's size; delete nothing

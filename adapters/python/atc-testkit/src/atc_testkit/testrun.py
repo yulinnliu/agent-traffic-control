@@ -9,12 +9,14 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
 import threading
+import time
 
-from . import config, desktop, locations, scratch
+from . import config, desktop, locations, scratch, stages
 from .git import git_env
 from .isolation import drop_hami_variables
 from .locations import Refusal
@@ -138,15 +140,8 @@ def _with_exclusion(arguments: Sequence[str]) -> list[str]:
     return ["-m", combined, *result]
 
 
-def execute(tree_argument: str, scratch_argument: str, python_argument: str, label: str,
-            pytest_arguments: Sequence[str], environ: MutableMapping[str, str], *, quiet: bool = False,
-            timeout: float | None = None) -> Result:
-    """Steps 1 to 5 of the section; a refusal raises ``Refusal`` with its token and exit code."""
-    tree = resolve_tree(tree_argument)
-    python = resolve_python(python_argument)
-    root, place = prepare_scratch(scratch_argument, environ)
-    scratch.register(root, place, tree)
-
+def isolate(tree: Path, place: Path, python: str, environ: MutableMapping[str, str]) -> bool:
+    """Steps 2 to 4 of the section; whether the run goes to a private desktop."""
     drop_hami_variables(environ)
     for name in config.data_root_variables(tree) or (config.DEFAULT_DATA_ROOT,):
         environ[name] = str(place / "qdr")
@@ -159,20 +154,36 @@ def execute(tree_argument: str, scratch_argument: str, python_argument: str, lab
         if not os.path.isdir(directory):
             raise Refusal("PYTHONPATH_MISSING", directory, GUARD_EXIT)
 
-    private = environ.get(PRIVATE_DESKTOP_VARIABLE) == "1"
     guard = _capture([python, "-c", IMPORT_GUARD, str(tree)], tree, environ, False, None)
     if guard.code != 0:
         raise Refusal("COPY_IMPORT_MISMATCH", "\n".join(guard.lines), GUARD_EXIT)
+    return environ.get(PRIVATE_DESKTOP_VARIABLE) == "1"
+
+
+def _pytest_command(python: str, tree: Path, place: Path, environ: Mapping[str, str], private: bool,
+                    pytest_arguments: Sequence[str]) -> list[str]:
+    has_xdist = _capture([python, "-c", "import xdist"], tree, environ, False, None).code == 0
+    arguments = _with_exclusion(pytest_arguments) if private else list(pytest_arguments)
+    return [python, "-m", "pytest", "-p", "no:cacheprovider", *(["-n", "0"] if has_xdist else []), "-q",
+            "--basetemp", str(place / "bt"), *arguments]
+
+
+def execute(tree_argument: str, scratch_argument: str, python_argument: str, label: str,
+            pytest_arguments: Sequence[str], environ: MutableMapping[str, str], *, quiet: bool = False,
+            timeout: float | None = None) -> Result:
+    """Steps 1 to 5 of the section; a refusal raises ``Refusal`` with its token and exit code."""
+    tree = resolve_tree(tree_argument)
+    python = resolve_python(python_argument)
+    root, place = prepare_scratch(scratch_argument, environ)
+    scratch.register(root, place, tree)
+    private = isolate(tree, place, python, environ)
 
     if not quiet:
         if not (tree / ".venv").exists():
             print(f"NOTE no .venv in {tree}: tests that launch source children need one; "
                   "prepare it as the project's AGENTS.md says.", flush=True)
         print(f"== {label} ==", flush=True)
-    has_xdist = _capture([python, "-c", "import xdist"], tree, environ, False, None).code == 0
-    arguments = _with_exclusion(pytest_arguments) if private else list(pytest_arguments)
-    command = [python, "-m", "pytest", "-p", "no:cacheprovider", *(["-n", "0"] if has_xdist else []), "-q",
-               "--basetemp", str(place / "bt"), *arguments]
+    command = _pytest_command(python, tree, place, environ, private, pytest_arguments)
     result = _capture(command, tree, environ, private, timeout)
     if not quiet:
         for line in result.lines[-TAIL_LINES:]:
@@ -181,7 +192,9 @@ def execute(tree_argument: str, scratch_argument: str, python_argument: str, lab
 
 
 def run(argv: Sequence[str], environ: MutableMapping[str, str] | None = None) -> int:
-    """``atc test run <tree> <scratch> <python> <label> <pytest args...>``: pytest's exit code, or the refusal's."""
+    """``atc test run``: the flag form when the first argument is an option, else the positional form."""
+    if argv and argv[0].startswith("--"):
+        return run_flags(argv, environ)
     if len(argv) < 4:
         print("usage: atc test run <tree> <scratch> <python> <label> <pytest args...>", file=sys.stderr)
         return 2
@@ -327,3 +340,181 @@ def mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None = None
     counted = f"{finished} of {len(entries)}" if aborted else finished
     print(f"done: {counted} mutants, {len(survivors)} survived", *survivors, flush=True)
     return aborted or (1 if mismatched else 0)
+
+
+# The flag form (docs/TESTKIT.md § `atc test run --tree`)
+
+TIMEOUT_EXIT = 124
+INTERRUPTED_EXIT = 130
+PYTEST_INTERRUPTED = 2
+PYTEST_NO_TESTS = 5
+RUNS = "runs"
+LABEL_CHARACTERS = re.compile(r"[^A-Za-z0-9._-]+")
+COUNTS = re.compile(r"\b\d+ (?:passed|failed|errors?|skipped|deselected|xfailed|xpassed|warnings?)\b")
+SELECTOR_KEY = "selector"
+
+
+def venv_python(tree: Path) -> str:
+    """The tree's ``.venv`` interpreter; ``VENV_MISSING`` names how to make one."""
+    python = tree / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    if not python.is_file():
+        raise Refusal("VENV_MISSING", f"{tree} has no .venv; make the scratch with `atc tmp checkout`, prepare the "
+                                      "environment as the project's AGENTS.md says, or name one with --python")
+    return str(python)
+
+
+def _registered_row(root: Path, place: Path) -> scratch.Row | None:
+    return next((row for row in scratch.registered(root) if locations.same_path(row.scratch, place)), None)
+
+
+def _git_lines(directory: Path | str, *args: str) -> list[str] | None:
+    done = subprocess.run(["git", "-C", str(directory), *args], capture_output=True, text=True, encoding="utf-8",
+                          env=git_env(), stdin=subprocess.DEVNULL, creationflags=scratch.WINDOW_HIDDEN)
+    return None if done.returncode else [line for line in done.stdout.splitlines() if line]
+
+
+def changed_paths(tree: Path, base: str, row: scratch.Row | None) -> list[str]:
+    """Paths relative to the repository top that differ from ``base``: the tree's own, or its export's source."""
+    if _git_lines(tree, "rev-parse", "--show-toplevel") is not None:
+        tracked = _git_lines(tree, "diff", "--name-only", base)
+        if tracked is None:
+            raise Refusal("SELECTION_BASE_UNKNOWN", f"{base} names no commit in {tree}")
+        untracked = _git_lines(tree, "ls-files", "--others", "--exclude-standard", "--full-name") or []
+        return sorted({*tracked, *untracked})
+    if row is None or not row.source or not row.commit:
+        raise Refusal("SELECTION_SOURCE_UNKNOWN", f"{tree} is no Git working tree and its scratch names no source "
+                                                  "commit; make it with `atc tmp checkout`")
+    paths = _git_lines(row.source, "diff", "--name-only", base, row.commit)
+    if paths is None:
+        raise Refusal("SELECTION_BASE_UNKNOWN", f"{base} or {row.commit} names no commit in {row.source}")
+    return paths
+
+
+def select(tree: Path, python: str, paths: Sequence[str], environ: Mapping[str, str]) -> list[str]:
+    """The test paths the tree's declared ``selector`` prints as JSON for ``paths``."""
+    selector = config.tool_table(tree).get(SELECTOR_KEY)
+    if not (isinstance(selector, list) and selector and all(isinstance(item, str) for item in selector)):
+        raise Refusal("SELECTION_UNDECLARED", f"{tree}/pyproject.toml declares no [tool.atc-testkit] {SELECTOR_KEY}, "
+                                              "a list of strings; run without --select")
+    if not paths:
+        return []
+    done = _capture([python, *selector, *paths], tree, environ, False, None)
+    try:
+        chosen = json.loads(done.lines[-1]) if done.code == 0 and done.lines else None
+    except ValueError:
+        chosen = None
+    if not (isinstance(chosen, list) and all(isinstance(item, str) for item in chosen)):
+        raise Refusal("SELECTOR_FAILED", "\n".join([f"exit {done.code}", *done.lines[-TAIL_LINES:]]))
+    return chosen
+
+
+def _logged(command: Sequence[str], cwd: Path, env: Mapping[str, str], private: bool, timeout: float | None,
+            log: Path, progress: bool) -> Result:
+    """Run ``command`` with every line written to ``log`` as it arrives; code ``None`` after a timeout."""
+    process, kind = desktop.start(command, cwd=cwd, env=env, private=private, new_session=True)
+    lines: list[str] = []
+
+    def pump() -> None:
+        with log.open("ab") as sink:
+            for chunk in iter(process.stdout.readline, b""):
+                sink.write(chunk)
+                sink.flush()
+                lines.append(chunk.decode("utf-8", errors="replace").rstrip("\r\n"))
+                if progress:
+                    sys.stdout.buffer.write(chunk)
+                    sys.stdout.buffer.flush()
+
+    with log.open("wb") as sink:
+        sink.write(stages.log_header(command, cwd, kind).encode("utf-8"))
+    reader = threading.Thread(target=pump, daemon=True)
+    reader.start()
+    try:
+        reader.join(timeout)
+    except KeyboardInterrupt:
+        desktop.kill_tree(process.pid)
+        reader.join(10.0)
+        process.wait()
+        raise
+    timed_out = reader.is_alive()
+    if timed_out:
+        desktop.kill_tree(process.pid)
+        reader.join(10.0)
+    code = process.wait()
+    return Result(None if timed_out else code, lines)
+
+
+def summary(result: Result | None, log: Path) -> tuple[str, int]:
+    """The one console line after a run and the command's exit code; ``None`` is an interrupted wait."""
+    if result is None:
+        return f"INTERRUPTED log: {log}", INTERRUPTED_EXIT
+    if result.code is None:
+        return f"TIMEOUT log: {log}", TIMEOUT_EXIT
+    status = {0: "PASS", 1: "FAIL", PYTEST_INTERRUPTED: "INTERRUPTED", PYTEST_NO_TESTS: "NO_TESTS"}.get(
+        result.code, f"ERROR exit {result.code}")
+    counts = next((", ".join(COUNTS.findall(line)) for line in reversed(result.lines) if COUNTS.search(line)), "")
+    failed = [line.split(" ", 1)[1].split(" - ", 1)[0] for line in result.lines
+              if line.startswith(("FAILED ", "ERROR ")) and " " in line]
+    parts = [status, *([counts] if counts else [])]
+    tail = [*([f"failed: {', '.join(failed)}"] if failed else []), f"log: {log}"]
+    return f"{' '.join(parts)}; {'; '.join(tail)}", result.code
+
+
+def run_flags(argv: Sequence[str], environ: MutableMapping[str, str] | None = None) -> int:
+    """``atc test run --scratch <name> [--tree <tree>] [--python <py>] [--select <base>] [-- <pytest args>]``."""
+    argv = list(argv)
+    pytest_arguments: list[str] = []
+    if "--" in argv:
+        at = argv.index("--")
+        argv, pytest_arguments = argv[:at], argv[at + 1:]
+    parser = argparse.ArgumentParser(
+        prog="atc test run", allow_abbrev=False,
+        description="One isolated pytest run in a scratch, its output kept in a log (docs/TESTKIT.md § Commands).",
+        epilog="Exit: pytest's code; 124 after --timeout, 130 when interrupted; 8 for a guard refusal, "
+               "9 for a refusal before the run.")
+    parser.add_argument("--scratch", required=True, help="scratch name, a direct child of the ATC temporary root")
+    parser.add_argument("--tree", help="the tree the tests run in (default: the tree the scratch's registry line "
+                                       "names, as `atc tmp checkout` records it)")
+    parser.add_argument("--python", help="interpreter that runs pytest (default: the tree's .venv)")
+    parser.add_argument("--select", metavar="BASE",
+                        help="run only the tests the tree's declared selector picks for the paths changed since BASE")
+    parser.add_argument("--label", default="run", help="name of the run, in its log's file name")
+    parser.add_argument("--timeout", type=float, help="seconds before the run is ended and reported as TIMEOUT")
+    parser.add_argument("--progress", action="store_true", help="also stream pytest's output to the console")
+    args = parser.parse_args(argv)
+    environ = os.environ if environ is None else environ
+    root, place = prepare_scratch(args.scratch, environ)
+    row = _registered_row(root, place)
+    if args.tree is not None:
+        tree = resolve_tree(args.tree)
+    elif row is not None and row.tree and os.path.isdir(row.tree):
+        tree = Path(os.path.realpath(row.tree))
+    else:
+        raise Refusal("TREE_NOT_FOUND", f"the scratch {place.name} names no tree; pass --tree")
+    python = resolve_python(args.python) if args.python else venv_python(tree)
+    scratch.register(root, place, tree)
+    paths = changed_paths(tree, args.select, row) if args.select else None
+    environ["PYTHONUNBUFFERED"] = "1"
+    private = isolate(tree, place, python, environ)
+    if paths is not None:
+        chosen = select(tree, python, paths, environ)
+        print(f"SELECT {args.select}: {len(paths)} changed paths, {len(chosen)} test paths", flush=True)
+        if not chosen:
+            print("NO_TESTS no test selected", flush=True)
+            return 0
+        pytest_arguments = [*chosen, *pytest_arguments]
+    (place / RUNS).mkdir(exist_ok=True)
+    label = LABEL_CHARACTERS.sub("_", args.label)[:40] or "run"
+    log = place / RUNS / f"{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}-{label}.log"
+    print(f"LOG {log}", flush=True)
+    command = _pytest_command(python, tree, place, environ, private, pytest_arguments)
+    try:
+        result: Result | None = _logged(command, tree, environ, private, args.timeout, log, args.progress)
+    except KeyboardInterrupt:
+        result = None
+    if result is None or result.code is None or result.code == PYTEST_INTERRUPTED:
+        lines = log.read_text(encoding="utf-8", errors="replace").splitlines()
+        for line in lines[-TAIL_LINES:]:
+            print(line, flush=True)
+    line, code = summary(result, log)
+    print(line, flush=True)
+    return code

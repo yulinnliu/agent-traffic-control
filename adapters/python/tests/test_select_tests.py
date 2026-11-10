@@ -236,3 +236,18 @@ def test_the_json_form_prints_the_files_to_run(capsys):
         with pytest.raises(SystemExit) as stopped:
             select_tests.main(["--json", "--paths", guard, *extra])
         assert stopped.value.code == 2
+
+
+@pytest.mark.integration
+def test_the_declared_selector_prints_the_json_form():
+    """`atc test run --select` runs the adapter's `[tool.atc-testkit]` selector with the tree's Python, in the tree."""
+    import subprocess
+    import sys
+    import tomllib
+    from pathlib import Path
+
+    adapter = Path(select_tests.__file__).resolve().parents[1]
+    selector = tomllib.loads((adapter / "pyproject.toml").read_text(encoding="utf-8"))["tool"]["atc-testkit"]["selector"]
+    done = subprocess.run([sys.executable, *selector, f"{ADAPTER}/scripts/worktree_cd_guard.py"], cwd=adapter,
+                          capture_output=True, text=True, check=True)
+    assert "tests/test_worktree_cd_guard.py" in json.loads(done.stdout)

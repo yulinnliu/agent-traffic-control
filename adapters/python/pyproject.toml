@@ -30,6 +30,7 @@ packages = ["src/atc_cli"]
 
 [tool.atc-testkit]
 unmarked_baseline = "tests/unmarked_baseline.txt"
+selector = ["scripts/select_tests.py", "--json", "--paths"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
