@@ -19,6 +19,7 @@ pytestmark = pytest.mark.integration
 PROJECT = "demo"
 GOVERNANCE_SOURCE = "example/governance"
 PINNED = "a" * 40
+TASKS_DIR = ".atc/tasks"  # the record directory; select_tests.py selects this file by it
 
 
 def run_git(repo: Path, *args: str) -> str:
@@ -104,7 +105,7 @@ def test_new_writes_a_valid_record_bound_to_the_topic(ws: Workspace, capsys: pyt
     status, out, err = ws.cli(capsys, "new", "--scope", "plan § 2: the widget", cwd=topic)
     assert status == 0, err
     assert out.startswith("CREATED DEMO-0001 ")
-    path = topic / ".atc" / "tasks" / "DEMO-0001.yaml"
+    path = topic / TASKS_DIR / "DEMO-0001.yaml"
     data = yaml.safe_load(path.read_text(encoding="utf-8"))
     assert data == {
         "task_id": "DEMO-0001", "repository": PROJECT,
@@ -121,7 +122,7 @@ def test_new_takes_the_repository_from_origin(ws: Workspace, capsys: pytest.Capt
     run_git(ws.repo, "remote", "add", "origin", "git@github.com:example/demo.git")
     topic = ws.worktree(ws.repo, "claude+widget", "topic-widget")
     assert ws.cli(capsys, "new", "--scope", "s", "--project", PROJECT, cwd=topic)[0] == 0
-    data = yaml.safe_load((topic / ".atc" / "tasks" / "DEMO-0001.yaml").read_text(encoding="utf-8"))
+    data = yaml.safe_load((topic / TASKS_DIR / "DEMO-0001.yaml").read_text(encoding="utf-8"))
     assert data["repository"] == "example/demo"
     assert "repository_identity_status" not in data
 
@@ -152,7 +153,7 @@ def test_new_refuses_on_main(ws: Workspace, capsys: pytest.CaptureFixture[str]) 
     status, _, err = ws.cli(capsys, "new", "--scope", "s", cwd=ws.repo)
     assert status == 2
     assert err.startswith("ERROR ON_MAIN ")
-    assert not (ws.repo / ".atc" / "tasks").exists()
+    assert not (ws.repo / TASKS_DIR).exists()
 
 
 def test_new_refuses_in_the_canonical_checkout_on_any_branch(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
@@ -166,7 +167,7 @@ def test_new_in_a_root_worktree_binds_the_root_main(ws: Workspace, capsys: pytes
     topic = ws.worktree(ws.root, "claude+contract", "topic-contract")
     status, _, err = ws.cli(capsys, "new", "--scope", "s", cwd=topic)
     assert status == 0, err
-    data = yaml.safe_load((topic / ".atc" / "tasks" / "ATC-0001.yaml").read_text(encoding="utf-8"))
+    data = yaml.safe_load((topic / TASKS_DIR / "ATC-0001.yaml").read_text(encoding="utf-8"))
     assert (data["governance_source"], data["governance_revision"]) == (GOVERNANCE_SOURCE, run_git(ws.root, "rev-parse", "main"))
 
 
@@ -258,7 +259,7 @@ def test_new_takes_base_sha_from_the_merge_base_not_the_main_tip(ws: Workspace, 
     topic = ws.worktree(ws.repo, "claude+widget", "topic-widget")
     moved = commit(ws.repo, {"later.txt": "later\n"})
     assert ws.cli(capsys, "new", "--scope", "s", cwd=topic)[0] == 0
-    data = yaml.safe_load((topic / ".atc" / "tasks" / "DEMO-0001.yaml").read_text(encoding="utf-8"))
+    data = yaml.safe_load((topic / TASKS_DIR / "DEMO-0001.yaml").read_text(encoding="utf-8"))
     assert (data["base_sha"], moved != fork) == (fork, True)
 
 
@@ -278,8 +279,8 @@ def test_a_broken_schema_fails_the_check(tmp_path: Path, monkeypatch: pytest.Mon
     broken.write_text(json.dumps({"$schema": "https://json-schema.org/draft/2020-12/schema", "type": 5}), encoding="utf-8")
     monkeypatch.setattr(task_records, "SCHEMA", broken)
     (tmp_path / "AGENTS.md").write_text(agents("DEMO"), encoding="utf-8")
-    (tmp_path / ".atc" / "tasks").mkdir(parents=True)
-    (tmp_path / ".atc" / "tasks" / "DEMO-0001.yaml").write_text(record("DEMO-0001", "b"), encoding="utf-8")
+    (tmp_path / TASKS_DIR).mkdir(parents=True)
+    (tmp_path / TASKS_DIR / "DEMO-0001.yaml").write_text(record("DEMO-0001", "b"), encoding="utf-8")
     with pytest.raises(SchemaError):
         task_records.problems(tmp_path)
 

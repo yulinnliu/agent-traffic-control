@@ -101,9 +101,18 @@ def test_shared_paths_select_the_tests_that_read_their_area(graph):
     assert "tests/test_worktree_cd_guard.py" not in selected
 
 
-def test_a_task_record_selects_the_tests_that_name_the_record_directory(graph):
-    assert chosen(graph, ".atc/tasks/ATC-0004.yaml") == [
-        "tests/test_integrate_task.py", "tests/test_task_records.py"]
+@pytest.mark.parametrize("path", [
+    ".atc/tasks/ATC-0004.yaml",
+    r".atc\tasks\ATC-0004.yaml",
+    ".atc/tasks/ATC-9999.yaml",
+])
+def test_a_task_record_selects_the_tests_that_name_the_record_directory(graph, path):
+    assert chosen(graph, path) == ["tests/test_integrate_task.py", "tests/test_task_records.py"]
+
+
+def test_a_task_record_no_test_names_falls_back_to_the_full_suite(graph, monkeypatch):
+    monkeypatch.setattr(select_tests, "TASK_RECORDS", ".atc/no-test-names-this")
+    assert chosen(graph, ".atc/no-test-names-this/ATC-0004.yaml") == []
 
 
 def test_markdown_no_test_names_selects_nothing(graph):
