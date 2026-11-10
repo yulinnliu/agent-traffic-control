@@ -23,7 +23,8 @@ Integration runs through `atc integrate` in every project. Project specifics
 (the checkout a session works in, stricter integration gates, required
 gates, frozen snapshot files, build steps) live in that project's
 `AGENTS.md`, its runbooks and its current session handoff; read them before
-the first report or review.
+the first report or review. The coordinator's briefs to both sessions follow
+the `atc-coordinator` skill's `references/briefs.md`.
 
 ## Every block you write
 
@@ -32,9 +33,9 @@ the first report or review.
   are already known to both sessions and stay out of the block, and so does
   what the receiver can read: a reviewer reads the code at the named SHA, so a
   report gives results rather than narrating the implementation.
-- A report or verdict travels whole in one message to its receiver. A
-  notification that truncates (a short note, a preview) is a pointer, never
-  the report.
+- A report or verdict is saved as a file under `~/.atc/reports/` and its
+  path travels in the message. A notification that truncates (a short note,
+  a preview) is a pointer, never the report.
 - On the paste carrier, the block is inline in the reply as one code block
   the user pastes whole. Use a file only for a prompt that is long and
   revised repeatedly, or a lasting template.
@@ -53,19 +54,24 @@ the first report or review.
 
 ## Writer: the step report
 
-End every completed step with a review request carrying:
+End every completed step with a step report in the shape governance
+`DELIVERY.md` § 8.1 gives, sent to the coordinator only:
 
-- the checkout, of the kind the repository's `AGENTS.md` prescribes for the
-  session (a managed worktree path, a topic branch in the main checkout, or
-  `independent clone` plus its host kind, such as `cloud VM`), branch, tip
-  SHA and its base SHA;
-- spec/plan sections in scope and the contract sections the step rewrote;
-- changed-file map;
-- targeted test commands with their exact summary lines;
-- mutants run, one per guard, launchers and scripts included, and every
-  survivor;
-- deviations, open points, known failures you do not own, deferred items;
-- the specific questions for the reviewer, including the real path to walk.
+1. Run the selection (governance `VERIFICATION.md` § Testing) and the
+   mutants, one per guard, launchers and scripts included; the report gives
+   each command with its summary line and every surviving mutant.
+2. Run `atc integrate --check` on the tip (governance `GIT_WORKFLOW.md`
+   § Mainline check before final self-verification). On `REBASE_REQUIRED` or
+   `OVERLAP`, rebase onto `main`, rerun the selection and report only the
+   new tip.
+3. Stop every background job (governance `DELIVERY.md` § Background work).
+4. Save the report to `~/.atc/reports/<task>-<short sha>.md` and send that
+   path to the coordinator.
+5. End your own session with one line for the Owner, in plain Chinese with
+   no tokens, for example
+   「報告已送 coordinator（tip <sha>），等審查與你核准；尚未整合、未 push。」.
+   When there is a problem the line names it plainly instead (for example,
+   a rebase is needed). Tokens stay in the step report.
 
 When taking over a topic from another session, fetch first and commit
 only on the fetched tip; never continue from a stale base.
@@ -88,8 +94,8 @@ A tree that runs source child processes needs a `.venv`:
 
 - Prepare it as the project's `AGENTS.md` says; never with Git Bash `ln -s`,
   which copies the whole venv here.
-- `atc tmp clean` takes a scratch's `.venv` and `tree\.venv` out as links
-  ("Reviewer: after integration").
+- `atc tmp clean` takes every `.venv` beside a `pyproject.toml` in the
+  scratch out as a link.
 - A worktree's `.venv` junction comes out as the link alone, with
   `cmd //c rmdir` on its literal path, before the worktree's own cleanup.
 
@@ -107,7 +113,14 @@ its stated criterion:
 Read the diff at the reviewed SHA (`git diff <base>..<tip>`), and a whole
 file only for what the diff cannot settle. Send test and mutant output to a
 file in the scratch directory and read its summary lines; run all mutants in
-one `atc test mutants` call.
+one `atc test mutants` call. Tests and mutants run in the foreground
+(governance `DELIVERY.md` § Background work).
+
+A SHA's first review is yours only when you have not seen the writer's
+conversation. When you are continued for a re-review that only fixes your
+last round's findings, review the fix diff against those findings; new design
+or new files go to a fresh reviewer (governance `VERIFICATION.md`
+§ Independent review).
 
 1. **Pin the revision.** First confirm the previous topic's closure read-only:
    the `main` position and `atc worktree audit`. Then review exactly the tip
@@ -132,7 +145,8 @@ one `atc test mutants` call.
    such as "pending wiring" or "awaiting acceptance" in a delivery is a
    blocker to tell the holder now.
 4. **Run tests and mutants.** Tests only: that file plus mutants. Behaviour:
-   the targeted set plus every project gate the change touches. One
+   the selection (governance `VERIFICATION.md` § Testing) plus every project
+   gate the change touches. One
    single-string mutant per guard, one at a time, restored after each run.
    Done when every file in the copy is proven equal to its Git object again
    and every surviving mutant is listed as a test gap or argued equivalent.
@@ -154,28 +168,29 @@ one `atc test mutants` call.
 
 ## Reviewer: the verdict block
 
-- First line: `<step> review: PASS.`, conditional PASS or FAIL.
-- A "verified" paragraph: test counts, mutant results, read-only host
-  evidence.
+The verdict takes the shape governance `VERIFICATION.md` § Independent review
+gives. Save it to `~/.atc/reports/<task>-<short sha>-review.md`; the message
+carries the verdict token and that path.
+
+- The verified line: test counts, mutant results, read-only host evidence.
 - On a PASS, when the project's adopted process lets a PASS carry an
   integration instruction, the integration instruction. The Owner's word on
-  the exact reviewed SHA approves integration and then default cleanup of
-  the topic. The holder of that word (the user pasting the instruction into
+  the exact reviewed SHA approves integration. The holder of that word (the user pasting the instruction into
   the writer, or a coordinator that has the Owner's word for that SHA) runs
   or forwards the instruction. Before writing it, run
   `atc integrate --check --json` with the same arguments as the integrate
   command below; it runs `git fetch origin` and otherwise only reads. The
   PASS carries the instruction only when the result has no `refusal` and its
   `preflight.verdict` is `FF` or `NO_FF`; quote that verdict with
-  `preflight.reason` and every entry of `resolved.warnings` in the "verified"
-  paragraph. A `refusal`, such as a missing `## Integration verification`
+  `preflight.reason` and every entry of `resolved.warnings` in the verified
+  line. A `refusal`, such as a missing `## Integration verification`
   section, leaves the PASS without an instruction: give the holder its
   `reason`, `detail` and `next`. A `refusal` whose `next` names a rebase
   (`REBASE_REQUIRED`, or `OVERLAP` or `CONFLICT` of an unpublished topic)
   still carries the instruction, with that refusal quoted. In a repository
   without managed worktrees, a `CHECKOUT_NOT_ON_MAIN` refusal naming the
   topic branch is the expected check result: the PASS still carries the
-  instruction, the "verified" paragraph quotes that refusal and every entry
+  instruction, the verified line quotes that refusal and every entry
   of `resolved.warnings`, and the writer's run after `switch main` assesses a
   dirty checkout and `FF` or `NO_FF`.
 
@@ -191,29 +206,21 @@ one `atc test mutants` call.
   on the SHA being integrated: the rebased tip, or for `NO_FF` the reviewed
   SHA.
 
-  The instruction carries, with every value filled in:
-  - `atc integrate --project <name> --reviewed <full SHA> --authority-reference "<record>"`,
-    with the project's `workspace.yaml` name and the exact 40-character
-    reviewed SHA. The workspace root takes `--repo <root checkout>` in place
-    of `--project`. The command names
-    no branch, verifier or timeout: the tool finds the branch from the
-    reviewed SHA and reads the verifier argv file and timeout from the
-    `## Integration verification` section of `AGENTS.md` at `main`.
-    `<record>` takes a form of `GIT_WORKFLOW.md` § Authority reference: the
-    plan path, section and step (`<plan path> §<section> step <n>`), the
-    project's task record, or
-    `<owner>/<repo> <branch> per <file> § <section>`; the tool appends
-    ` @ <reviewed SHA>`;
-  - for a topic with a managed worktree, the default cleanup command in the
-    atc-worktree skill's command form; load that skill before writing any
-    worktree command;
-  - for a repository without managed worktrees, where the topic branch lives
-    in the main checkout, `git -C <main checkout> switch main` before the
-    integrate command and `git -C <main checkout> branch -d <topic branch>`
-    after it. `-d` deletes only a branch `main` already contains.
+  The instruction is the verdict's last line, every value filled in:
+  `atc integrate --task <task> --reviewed <SHA>`, with the task record ID,
+  which names the repository, and the full reviewed SHA or a unique prefix of
+  at least 12 characters. A task identity string in place of a record ID adds
+  `--project <name>`, or `--repo <root checkout>` for the workspace root. The
+  coordinator adds `--owner-words` when the record on `main` does not grant
+  the integration (governance `GIT_WORKFLOW.md` § Task and authority). The
+  command names no branch, verifier or timeout: the tool finds the branch
+  from the reviewed SHA and reads the verifier from the
+  `## Integration verification` section of `AGENTS.md` at `main`. In a
+  repository without managed worktrees, where the topic branch lives in the
+  main checkout, `git -C <main checkout> switch main` comes before it.
 
-  Squash-integrated and abandon cleanups never ride on a PASS; atc-worktree
-  states their authority. A conditional PASS or FAIL carries no integration
+  Cleanup never rides on a PASS: it follows governance `DELIVERY.md`
+  § Close-out. A conditional PASS or FAIL carries no integration
   instruction.
 - Anything needing the Owner's decision (version numbers, spec semantics,
   risk limits, remote deletes) stops for the Owner.
@@ -241,29 +248,20 @@ other action need their own instruction.
      `task` and `authority`, with any push request.
      `atc preflight push --repo <main checkout> --json` gives the same list
      before a later push.
-2. On a match, run the cleanup command: the worktree cleanup under
-   atc-worktree's run rules, or the `branch -d`.
-3. Run the hami-handoff-reminder check and report the result lines to the
+2. Run the hami-handoff-reminder check and report the result lines to the
    holder only; the reviewer gets no relay.
 
-Stop on a `switch` failure, a result mismatch, a cleanup verdict other than
-`OK`, `cleanup_complete` other than `true`, or a `branch -d` refusal: leave
-`main`, the worktree and the branch as they are, take only the read-only next
-step atc-worktree names for a cleanup refusal (such as `audit` after
-`PERMISSION_DENIED`), and hand the result lines to the holder for the
-reviewer.
+Stop on a `switch` failure or a result mismatch: leave `main` and the branch
+as they are and hand the result lines to the holder for the reviewer.
 
-Done when the cleanup reported `cleanup_complete: true` or deleted the
-branch, and the handoff check ran, or the stop is with the holder.
+The worktree, branch and scratches are removed at close-out (governance
+`DELIVERY.md` § Close-out). Done when the result matches and the handoff
+check ran, or the stop is with the holder.
 
 ## Reviewer: after integration
 
-Once you confirm a topic integrated (the `main` position in step 1 of the next
-review), delete that topic's scratches right away with
-`atc tmp clean <dir>...`, or with `atc tmp clean --tree-name <name>` when every
-scratch of that tree is done. `atc tmp list` lists the candidates with
-their project, tree and size. Each `<dir>` ends on `DELETED`, `SKIPPED` or
-`REFUSED`; a `REFUSED` leaves that scratch as it is for the user.
+The task's scratches are removed at close-out (governance `DELIVERY.md`
+§ Close-out), not by the reviewer.
 
 A failing verifier or gate run leaves its working directory under
 `<tmp>/systmp` for inspection; it stays until `atc tmp prune` deletes it,
