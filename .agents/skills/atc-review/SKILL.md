@@ -259,12 +259,14 @@ other action need their own instruction. Who may run which form of
      `task` and `authority`, with any push request.
      `atc preflight push --repo <main checkout> --json` gives the same list
      before a later push.
-2. Close out (governance `DELIVERY.md` § Close-out): remove the task's
-   scratches with `atc tmp clean`, its report files
-   `~/.atc/reports/<task>-*.md` (the writer's and the reviewer's), and its
-   worktree with `atc worktree cleanup` under the `atc-worktree` skill,
-   unless your session's working directory is inside it; report that
-   worktree as skipped.
+2. Close out (governance `DELIVERY.md` § Close-out) with
+   `atc close-out --task <task>`, run from outside the task's worktree when
+   you can: it removes the task's worktree through `atc worktree cleanup`'s
+   checks, its scratches with their dependent runs, and its report files
+   `~/.atc/reports/<task>-*.md` (the writer's and the reviewer's), skips
+   the keep exceptions the record lists, and reports the worktree that holds
+   your working directory as `SKIPPED`. A repository without managed
+   worktrees keeps the topic branch for the holder.
 3. Run the hami-handoff-reminder check and report the integration result,
    every close-out line and the check's result lines to the holder only; the
    reviewer gets no relay.

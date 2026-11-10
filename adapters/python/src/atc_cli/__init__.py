@@ -8,6 +8,7 @@ Commands map onto the scripts under `adapters/python/scripts/`:
     preflight  git_preflight.py   merge / cleanup / push verdicts
     integrate  git_integrate.py   advance local main to a reviewed topic
     task       task_records.py    new / list / check task records
+    close-out  close_out.py       remove an integrated task's worktree, scratches, reports
     validate   validate_workspace.py
     onboard    onboard_project.py
     bootstrap  bootstrap.py       init / add / sync / status
@@ -17,7 +18,7 @@ Commands map onto the scripts under `adapters/python/scripts/`:
     classify   classify_change.py
     friction   friction.py
     test       atc_testkit            run / mutants
-    tmp        atc_testkit            list / clean / prune
+    tmp        atc_testkit            checkout / list / clean / prune
 
 The checkout root is, in order: `--root`, `$ATC_ROOT`, the nearest parent of
 the working directory holding `workspace.yaml`, else the checkout this
@@ -53,6 +54,7 @@ COMMANDS = {
     "preflight": "git_preflight",
     "integrate": "git_integrate",
     "task": "task_records",
+    "close-out": "close_out",
     "validate": "validate_workspace",
     "onboard": "onboard_project",
     "bootstrap": "bootstrap",
@@ -187,7 +189,7 @@ def _dispatch(command: str, rest: list[str], explicit_root: str | None) -> int:
     else:
         root = resolve_root(explicit_root, dict(os.environ), Path.cwd())
     module = __import__(COMMANDS[command])
-    if command in ("worktree", "task", "onboard", "bootstrap"):
+    if command in ("worktree", "task", "onboard", "bootstrap", "close-out"):
         return module.main(rest, root=root)
     if command == "integrate":
         return module.main(rest, root=root, root_given=explicit_root is not None)

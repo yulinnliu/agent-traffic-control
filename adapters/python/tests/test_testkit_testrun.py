@@ -477,13 +477,15 @@ def test_a_wrong_command_exits_two(arguments: tuple[str, ...], atc_tmp: Path, ca
     (["test", "mutants", "a"], "mutants", testrun, (["a"],)),
     (["tmp", "list"], "list_scratches", scratch, ()),
     (["tmp", "prune"], "prune", scratch, ()),
-    (["tmp", "clean", "a", "b"], "clean", scratch, (["a", "b"],)),
-    (["tmp", "clean", "--tree-name", "p"], "clean", scratch, ((), "p")),
+    (["tmp", "clean", "a", "b"], "clean", scratch, (["a", "b"], {"with_runs": False})),
+    (["tmp", "clean", "--tree-name", "p"], "clean", scratch, ((), "p", {"with_runs": False})),
+    (["tmp", "clean", "--with-runs", "a"], "clean", scratch, (["a"], {"with_runs": True})),
 ])
 def test_atc_reaches_the_package_with_its_arguments_and_returns_its_exit_code(
         monkeypatch: pytest.MonkeyPatch, arguments: list[str], attribute: str, module, expected: tuple) -> None:
     seen = []
-    monkeypatch.setattr(module, attribute, lambda *args: seen.append(args) or 41)
+    monkeypatch.setattr(module, attribute, lambda *args, **kwargs: seen.append(args + ((kwargs,) if kwargs else ()))
+                        or 41)
     assert atc_cli.main(arguments) == 41
     assert seen == [expected]
 
@@ -491,8 +493,11 @@ def test_atc_reaches_the_package_with_its_arguments_and_returns_its_exit_code(
 @pytest.mark.integration
 def test_tmp_clean_takes_only_the_tree_name_option(monkeypatch: pytest.MonkeyPatch,
                                                    capsys: pytest.CaptureFixture[str]) -> None:
-    monkeypatch.setattr(scratch, "clean", lambda *args: 0)
+    monkeypatch.setattr(scratch, "clean", lambda *args, **kwargs: 0)
     assert commands.main(["tmp", "clean", "--tree-name", "p"]) == 0
+    assert commands.main(["tmp", "clean", "--with-runs", "--tree-name", "p"]) == 0
     assert capsys.readouterr().err == ""
+    assert commands.main(["tmp", "clean", "--tree-name", "p", "--with-runs"]) == 2
+    assert capsys.readouterr().err.startswith("usage: atc tmp clean")
     assert commands.main(["tmp", "clean", "--project", "p"]) == 2
     assert capsys.readouterr().err.startswith("usage: atc tmp clean")

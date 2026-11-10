@@ -147,9 +147,9 @@ own commits write; session names belong only in the hand-over.
    - Confirm `main` at the integrated SHA and the task record at its
      post-integration state.
    - Archive the task's sessions.
-   - Remove what the writer's close-out skipped: its worktree with
-     `atc worktree cleanup` under the `atc-worktree` skill, or in a
-     repository without managed worktrees the topic branch with
+   - Remove what the writer's close-out skipped: run
+     `atc close-out --task <task>` from outside the task's worktree, or in a
+     repository without managed worktrees remove the topic branch with
      `git -C <main checkout> branch -d <topic branch>`; `-d` deletes only a
      branch `main` already contains.
    - Check with `atc tmp list` and `atc worktree list` that no scratch,

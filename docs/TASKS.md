@@ -38,6 +38,7 @@ The section may carry prose after the line; tools read only the line.
 | `authority` | yes | the six booleans `edit`, `commit`, `push_topic`, `integrate_main`, `push_main`, `deploy`, and no other key |
 | `authority_basis` | when any of `push_topic`, `integrate_main`, `push_main`, `deploy` is `true` | the Owner's words granting it, quoted |
 | `closure` | no | `{state: closed \| abandoned, note: text}`, written in the commit that ends a task without integrating it |
+| `keep` | no | the close-out keep exceptions, a list of `worktree`, `scratches` and `reports` (§ Close-out) |
 
 Other keys (`repository_identity_status`, `writer`,
 `verification_requirements`, `execution_context`, `delivery`, `decisions`)
@@ -119,6 +120,28 @@ reads `integrated` for its integrated part until its `closure` says
 | `atc task new --scope TEXT [--project P \| --repo ROOT]` | writes `.atc/tasks/<id>.yaml` in the topic worktree holding the working directory: `task_id` one past the highest on `main` and every local and remote-tracking branch and in `integrations.jsonl`, so a number is never reused on this machine; `repository` from the `origin` remote; `base_sha` the merge base of `HEAD` and `main`; `governance_source` and `governance_revision` from the repository's bound governance (the workspace root, being the source, binds its own `main`); `branch` the current branch; `authority` `edit` and `commit` true, the rest false. Refuses in a checkout on `main` and in the workspace root's canonical checkout |
 | `atc task list [--project P \| --repo ROOT \| --all] [--status S] [--json]` | reads the records on `main` and every local branch without a checkout, one line per task: `task_id`, status, `branch`, the first 60 characters of `scope`. A record on several refs shows the copy on `main` for authority and the copy on its own `branch` for the rest. Without a target it infers the project as `atc worktree` does; `--all` covers every registered project and the root |
 | `atc task check [DIR]` | checks the records in the working tree of `DIR` (default: the working directory's repository) |
+
+## Close-out
+
+`atc close-out --task <ID> [--project P | --repo ROOT]` carries out governance
+`DELIVERY.md` § Close-out for one task, the project named as `atc task` names
+it.
+
+1. It runs only when `integrations.jsonl` names an integration of the task
+   that is not records-only and whose candidate local `main` contains, and
+   the record on `main` is readable with a valid `keep`; otherwise it stops
+   with `NOT_INTEGRATED`, `RECORD_MISSING` or `RECORD_INVALID` (exit 2)
+   before anything is removed.
+2. The worktree whose branch is the record's `branch` goes through
+   `atc worktree cleanup` and its checks. A worktree that holds the
+   working directory ends `SKIPPED`, for the coordinator to remove.
+3. The scratches whose registry line names the task, with their dependent
+   runs (`ATC_HOME.md` § Deleting), go through `atc tmp clean`.
+4. The report files `~/.atc/reports/<ID>-*.md` are deleted.
+
+An item the record's `keep` names ends `SKIPPED`. Every item ends on one line,
+`DELETED`, `SKIPPED` or `REFUSED` with the reason, and a last line counts
+them; the exit code is 1 when one is `REFUSED`, else 0.
 
 `atc validate` runs the check on this repository and `atc validate
 --projects` on every registered project. A check reports: a file that is not

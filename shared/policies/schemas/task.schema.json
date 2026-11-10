@@ -36,6 +36,11 @@
         "state": {"enum": ["closed", "abandoned"]},
         "note": {"type": "string", "minLength": 1}
       }
+    },
+    "keep": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"enum": ["worktree", "scratches", "reports"]}
     }
   },
   "if": {
