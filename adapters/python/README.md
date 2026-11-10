@@ -56,9 +56,9 @@ under its marker contract: a new test carries a category, and
 `tests/unmarked_baseline.txt` lists the tests that have none yet.
 
 The `Verifier timeout` in the root `AGENTS.md` is three times the measured
-wall clock of a full run (664 s gives 2040 s), rounded up to a whole minute
-and never below 300 seconds, since the verifier's selection can widen to the
-full suite; re-measure it when the suite's duration changes.
+wall clock of a full run in the verifier (822 s gives 2520 s), rounded up to
+a whole minute and never below 300 seconds, since the verifier's selection
+can widen to the full suite; re-measure it when the suite's duration changes.
 
 ## Selected tests
 

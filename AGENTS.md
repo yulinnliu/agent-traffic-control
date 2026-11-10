@@ -40,7 +40,7 @@ Tasks here are identified by record (governance `CORE.md` § Task identity).
 `GIT_WORKFLOW.md` § Integration verifier source).
 
 - Verifier argv file: adapters/python/scripts/integration-verify.json
-- Verifier timeout: 2040
+- Verifier timeout: 2520
   (`adapters/python/README.md` states how this value is derived)
 
 The argv runs `adapters/python/scripts/integration_verify.py` in the

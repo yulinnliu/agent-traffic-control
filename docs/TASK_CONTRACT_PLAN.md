@@ -792,12 +792,11 @@ change, its side effects, their mitigations.
         New cases: a task record with a prose file, a mixed range, a
         selection that widens, an empty selection that runs no pytest.
     - Verify time, measured on this host:
-      - `README.md` only: before, the full suite (664 s for a full run on
-        this host) after about 1 s of static checks; after, about 1 s of
-        static checks, 1 s of selection and `test_shell_install.py`
-        (15 s), about 17 s.
-      - `select_tests.py` only: before and after, the full suite (664 s),
-        since `conftest.py` loads the selector (D.18).
+      - `README.md` only: before, the full suite after about 1 s of static
+        checks; after, the static checks, the selection and
+        `test_shell_install.py`, 19 s for the verifier run.
+      - `select_tests.py` only: before and after, the full suite, 822 s for
+        the verifier run, since `conftest.py` loads the selector (D.18).
       - One guarded skill file: before, the full suite; after, the static
         checks and 2 of 38 test files.
       - The parts measured apart: `validate_workspace.py` 0.5 s,
@@ -833,8 +832,9 @@ change, its side effects, their mitigations.
         so no recorded field changes meaning. The verifier's log carries
         the classification and the selection.
       - Timeout: `adapters/python/README.md` derives it as three times the
-        measured full-run wall clock, rounded up to a whole minute and
-        never below 300 s; 3 × 664 s = 1992 s gives 2040 s, which replaces
+        measured full-run wall clock in the verifier, rounded up to a whole
+        minute and never below 300 s; 3 × 822 s = 2466 s gives 2520 s,
+        which replaces
         1800 s in root `AGENTS.md`, since the verifier still widens to the
         full suite (`conftest.py`, the selector, `pyproject.toml`, an
         unmapped path).
