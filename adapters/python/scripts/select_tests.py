@@ -296,7 +296,7 @@ def classify(path: str, selection: TestSelection, graph: Graph) -> None:
         if pure.suffix.lower() != ".md" and not path.endswith("/") and not (graph.workspace / path).is_dir():
             readers |= graph.naming((pure.name,))
         if readers:
-            selection.add(path, readers, "declared readers in this checkout; validate_workspace.py checks it")
+            selection.add(path, readers, "declared readers in this checkout")
         elif pure.suffix.lower() == ".md":
             selection.add(path, (), "Markdown no declared test reads")
         else:

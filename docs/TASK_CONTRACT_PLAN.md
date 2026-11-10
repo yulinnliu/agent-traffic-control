@@ -895,23 +895,25 @@ review, one implementation review and one integration:
       `verify_*_mutations.py` through `atc test private` in the same
       change.
 18. Done ahead of D. `select_tests.py` selects, for the root's own guidance
-    and skills, only the test files declared to read them. The guarded
-    paths are `shared/governance/`, `shared/skills/`, the rendered copies
-    `.claude/skills/`, `.agents/skills/` and `.dsh/skills/`, and the root
-    `AGENTS.md` and `CLAUDE.md`. Each reader is declared in
-    `DIRECTORY_READERS` with the directories and files it reads in this
-    checkout; an entry matches a path equal to it or below it, so a root
-    file such as `AGENTS.md` selects its reader; entries and paths compare
-    with any case, separator or trailing slash. A guarded Markdown file or
-    directory selects its declared readers and nothing through the import
-    reach: neither the area name (`shared/governance`, `shared/skills`)
-    nor the bare name (`SKILL.md`, `AGENTS.md`, `CLAUDE.md`) matches
-    through it. A guarded file of another kind adds the test files whose
-    reach names its file name. A guarded Markdown path with no reader
-    selects nothing; a guarded path of another kind with none selects the
-    full suite. Every
-    other copy of those bare names lies under `shared/conformance/` and
-    keeps the area rule; every other path keeps its rule.
+    and skills and for every Markdown file outside `shared/`, only the test
+    files declared to read them. The guarded paths are
+    `shared/governance/`, `shared/skills/`, the rendered copies
+    `.claude/skills/`, `.agents/skills/` and `.dsh/skills/`, and every
+    Markdown file outside `shared/` and outside a `.venv` environment (the
+    root's top-level Markdown, `docs/`, the adapter READMEs). Each reader
+    is declared in `DIRECTORY_READERS` with the directories and files it
+    reads in this checkout; an entry matches a path equal to it or below
+    it, so a root file such as `AGENTS.md` selects its reader; entries and
+    paths compare with any case, separator or trailing slash. A guarded
+    Markdown file or directory selects its declared readers and nothing
+    through the import reach: neither the area name (`shared/governance`,
+    `shared/skills`) nor the bare name (`SKILL.md`, `AGENTS.md`,
+    `CLAUDE.md`, `README.md`) matches through it. A guarded file of another
+    kind adds the test files whose reach names its file name. A guarded
+    Markdown path with no reader selects nothing; a guarded path of another
+    kind with none selects the full suite. Markdown under another
+    `shared/<area>/`, `shared/conformance/` among them, keeps the area
+    rule; every other path keeps its rule.
     - Readers. A full run traced every file open, directory listing, copy
       and child command; the scripts that tests run as children were read
       for the paths they derive from their own location.
@@ -923,7 +925,8 @@ review, one implementation review and one integration:
         and read this checkout's `shared/skills/`, the three rendered
         copies, `shared/governance/*.md` and `CLAUDE.md`; `link-skills.sh`
         also reads `shared/templates/PROJECT_AGENTS.md`. It is declared for
-        every guarded path and for that template.
+        `SCRIPT_READS`: the guidance, the skills and their rendered copies,
+        the root's top-level Markdown and `shared/templates/`.
       - The other scripts that tests run as children read nothing guarded
         in this checkout: each child `validate_workspace.py` gets `--root`
         of a fixture, the conformance tools read `{input}` and
@@ -1083,7 +1086,8 @@ review, one implementation review and one integration:
         undeclared) reaches `main` and shows only in a dispatched CI run.
         Mitigations: every path no rule maps still runs the full suite;
         D.18's guard checks the selected tests in every integration run.
-      - An undeclared reader of a guarded Markdown path is never selected
+      - An undeclared reader of a guarded Markdown path (the guidance, the
+        skills, or any Markdown file outside `shared/`) is never selected
         for that path, so the guard never runs it on such a range locally.
         This is an accepted residual, caught by the Owner's CI dispatch
         after topic D. No static scan is added: tests write fixture files
