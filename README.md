@@ -97,7 +97,8 @@ opt-in adapters beside the baseline ones, and accepts a checkout you already
 placed at `projects/<name>` when `--repo` is omitted. This path adds the
 worktree, preflight, policy and friction tools behind one command, `atc`
 (`uv run atc --help`, or `uv tool install -e .` to have it on PATH); the
-layout it expects is in `docs/LAYOUT.md`. `atc` finds the workspace from the
+layout it expects is in `docs/LAYOUT.md`, and `docs/WORKFLOW.md` walks one
+task from worktree to push with the command of each step. `atc` finds the workspace from the
 nearest `workspace.yaml` above the working directory or from the checkout it
 was installed from; `ATC_ROOT` is an optional override, never a requirement.
 

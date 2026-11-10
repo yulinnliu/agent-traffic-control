@@ -446,9 +446,11 @@ review, one implementation review and one integration:
   step names its command, who runs it, and its common refusals with their
   fix. It says how, never the rules: it links governance (`DELIVERY.md`,
   `GIT_WORKFLOW.md`) and the skills (`atc-coordinator`, `atc-review`,
-  `atc-worktree`) instead of restating them. Whether `README.md`,
-  `AGENTS.md` and the skills point to it is decided and noted here when it
-  is written.
+  `atc-worktree`) instead of restating them. `README.md` points to it
+  beside `docs/LAYOUT.md`; `AGENTS.md` does not, since every session loads
+  it and the guide is read on demand; the skills do not, since a canonical
+  skill names no path of this checkout and a project's vendored copy could
+  not open it.
   - Side effects: a second place a command form is written, which drifts
     when the CLI changes.
   - Mitigations: it is written after D.17, against the settled CLI, and
