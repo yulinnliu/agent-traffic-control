@@ -10,9 +10,8 @@
   behaviour change); Fable only after the Owner agreed for that session.
 - The step report or verdict goes by SendMessage as "Every block you write"
   says, to the receiving session addressed by the exact name ListAgents
-  shows. The harness's idle
-  note carries only the first few hundred characters; it is a pointer, never
-  the report.
+  shows. The harness's idle note carries only the first few hundred
+  characters; it is a pointer, never the report.
 - A large hand-over (a brief revised repeatedly, a template) may go as a file
   in the side-session notes folder, the message naming its absolute path.
 - Sessions are archived and scratches removed at close-out (governance

@@ -178,8 +178,8 @@ file is `~/.atc/reports/<task>-<short sha>-review.md`.
 - On a PASS, when the project's adopted process lets a PASS carry an
   integration instruction, the integration instruction. The Owner's word on
   the exact reviewed SHA approves integration. The holder of that word, a
-  coordinator or on the paste carrier the user who counts as one, runs the
-  instruction or forwards it to the writer as governance `GIT_WORKFLOW.md`
+  coordinator or, in a paste-only setup with no coordinator session, the
+  user who counts as one, runs the instruction or forwards it to the writer as governance `GIT_WORKFLOW.md`
   § Task and authority splits the forms by flag. Before writing it, run
   `atc integrate --check --json` (governance `GIT_WORKFLOW.md` § Integrate)
   with the same arguments as the integrate command below. The PASS carries
@@ -196,8 +196,8 @@ file is `~/.atc/reports/<task>-<short sha>-review.md`.
   `CHECKOUT_NOT_ON_MAIN` refusal naming the topic branch is the expected
   check result: the PASS still carries the instruction, the verified line
   quotes that refusal and every entry of `resolved.warnings`, and the
-  writer's run after `switch main` assesses a
-  dirty checkout and `FF` or `NO_FF`.
+  writer's run after `switch main` assesses a dirty checkout and `FF` or
+  `NO_FF`.
 
   When `main` has moved, the topic follows governance `GIT_WORKFLOW.md`
   § Integrate and § After formal review, and the word is asked for again on
@@ -275,6 +275,7 @@ seven days after its last change.
   user is to paste; a notes file's content is written as it is.
 - The report or verdict is written inline in the reply, in full, in the
   one code block the user pastes ("Every block you write").
-- An instruction carrying `--owner-words` is run by the user, who counts as
-  the coordinator, and is never pasted to a writer (governance
-  `GIT_WORKFLOW.md` § Task and authority).
+- In a paste-only setup with no coordinator session, an instruction carrying
+  `--owner-words` is run by the user, who counts as the coordinator, and is
+  never pasted to a writer (governance `GIT_WORKFLOW.md` § Task and
+  authority).

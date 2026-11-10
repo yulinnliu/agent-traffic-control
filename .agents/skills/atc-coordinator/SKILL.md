@@ -98,13 +98,18 @@ own commits write; session names belong only in the hand-over.
      `GIT_WORKFLOW.md` § Task and authority).
    - On a `refusal` whose `next` names a rebase (`REBASE_REQUIRED`, or
      `OVERLAP` or `CONFLICT` of an unpublished topic), the writer rebases
-     and reports the new tip; run
-     `atc integrate --check --json --reviewed <reviewed SHA> --rebased <rebased tip>`
-     as governance `GIT_WORKFLOW.md` § After formal review states, or, while
-     the authority is pending, leave the carry-over to the integration run.
-     When the carry-over holds, ask the Owner for the word on the rebased tip,
-     naming the carried-from SHA and the `main` commits in between; on
-     `CARRY_OVER_REFUSED`, the reviewer re-reviews the rebased tip first.
+     and reports the new tip.
+     - When the record grants the integration, run
+       `atc integrate --check --json --reviewed <reviewed SHA> --rebased <rebased tip>`
+       as governance `GIT_WORKFLOW.md` § After formal review states. When
+       the carry-over holds, ask the Owner for the word on the rebased tip,
+       naming the carried-from SHA and the `main` commits in between; on
+       `CARRY_OVER_REFUSED`, the reviewer re-reviews the rebased tip first.
+     - While the authority is pending, ask the Owner for the word on the
+       rebased tip first, naming the carried-from SHA and the `main` commits
+       in between; the integration run then checks the carry-over. On
+       `CARRY_OVER_REFUSED`, the rebased tip goes to re-review and needs a
+       new word.
    - On any other `refusal`, follow its `next` (`GIT_WORKFLOW.md`
      § Command results); a `next` that names a re-review goes back to the
      reviewer before any word is asked for.

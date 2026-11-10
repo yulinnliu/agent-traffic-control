@@ -5,6 +5,7 @@
   user is to paste; a notes file's content is written as it is.
 - The report or verdict is written inline in the reply, in full, in the
   one code block the user pastes ("Every block you write").
-- An instruction carrying `--owner-words` is run by the user, who counts as
-  the coordinator, and is never pasted to a writer (governance
-  `GIT_WORKFLOW.md` § Task and authority).
+- In a paste-only setup with no coordinator session, an instruction carrying
+  `--owner-words` is run by the user, who counts as the coordinator, and is
+  never pasted to a writer (governance `GIT_WORKFLOW.md` § Task and
+  authority).
