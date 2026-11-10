@@ -418,16 +418,25 @@ and by a test per command that pins its default output.
 ## D. CLI changes
 
 Code, tests, `shared/conformance/`, `docs/TESTKIT.md`, `docs/ATC_HOME.md` and
-`adapters/python/README.md`. Order: D.5 before D.7 (the alias needs a
-`--check` without authority), D.9 before D.12 (the child encoding), D.13
-before D.12's scratch-name form, D.15 before D.12 (the `--json` form
-`--select` runs), D.17 last; D.18 and D.19 are done ahead of the rest, D.20
-first of the rest, D.21 after D.20, D.22 only on the Owner's
-governance authorization, D.23 after D.20; D.5's governance and skill
-part on the Owner's governance authorization (given for
-`GIT_WORKFLOW.md` § Task and authority, `DELIVERY.md` § Close-out,
-`FAILURE_ESCALATION.md`, `atc-review` with its Codex overlay and
-`atc-coordinator`), D.24 and D.25 at any point. Each entry: the change, its side effects, their mitigations.
+`adapters/python/README.md`. Done: D.5, D.9, D.18, D.19, D.20, D.24 and
+D.25. Order within the rest: D.13 before D.12's scratch-name form, D.15
+before D.12 (the `--json` form `--select` runs), D.17 last. Each entry: the
+change, its side effects, their mitigations.
+
+The rest of D runs in two batches (Owner's ruling), each with one design
+review, one implementation review and one integration:
+
+- Batch 1, no governance edit, in this order: D.21 and D.23; the direct
+  fixes D.4, D.6 and D.11; D.15, D.13, D.12; D.2 with D.3; D.10 with
+  D.16; D.8; D.17 last. A direct fix is self-evident and gets no design
+  beyond its entry; the implementation review checks its side effects.
+- Not taken: D.1. `atc task new` in the new worktree is one command, and a
+  second entry point that writes records adds the side effects D.1 lists
+  for no saving.
+- Batch 2, on the Owner's authorization of the governance edits: D.22;
+  D.14, whose prefix form `GIT_WORKFLOW.md` § Integrate names as arriving
+  with D.14; D.7, whose retired verdicts `REMOVABLE` and cleanup `KEEP`
+  are rows of `GIT_WORKFLOW.md` § Command results.
 
 1. `atc worktree create --scope <text>` writes the task record in the new
    worktree through `task_records.new`.
@@ -456,7 +465,11 @@ part on the Owner's governance authorization (given for
      when `integrations.jsonl` has the task's line and the local `main`
      contains it (no push needed, `DELIVERY.md` § Close-out), and skips the keep exceptions in the record; every item
      ends `DELETED`, `SKIPPED` or `REFUSED`; it touches nothing outside the
-     task and runs `worktree cleanup`'s own checks.
+     task and runs `worktree cleanup`'s own checks. A worktree that holds
+     the caller's working directory ends `SKIPPED` with that reason, so a
+     writer running it from its worktree (D.5) leaves that item to the
+     coordinator; `atc-review` "Writer: after integration" and
+     `atc-coordinator` step 6 name the command once it lands.
 4. Drop `--main` from `atc integrate` and `atc preflight push`.
    - Side effects: none found (0 references, 0 calls).
    - Mitigations: argparse's unknown-flag error.
@@ -1171,22 +1184,52 @@ part on the Owner's governance authorization (given for
       root `AGENTS.md` `Verifier timeout`, and `git_integrate.py`'s
       timeout line with its test. D.17's version bump covers the testkit
       change.
-21. The slowest tests: design deferred to its own gate, after D.20, from
-    durations measured under the stages. In the coordinator's serial
-    `--durations=30` run on `main` 438280a the top 30 sum to about 140 s
-    of 791 s, so the cost is spread over per-test fixture repositories and
-    child processes; candidates:
-    - `test_shell_install.py::test_managed_directory_is_repaired_whatever_its_file_names`,
-      12.3 s: six `sh` runs of `link-skills.sh` and `check-skills.sh`, each
-      starting many POSIX tools under Git Bash.
+21. The slowest tests. Measured on `main` 4338ad7 with
+    `ci --stages --durations=0` at 8 workers (`workers: 8 (default)`, 24
+    logical CPUs): 1446 passed, 20 skipped in 232 s; the per-test times
+    sum to 1132 s (call 839 s, setup 293 s), more than the serial run's
+    791 s because eight workers contend. By module: `test_git_integrate.py`
+    229 s (98 tests), `test_testkit_evidence.py` 145 s (42),
+    `test_hami_worktree.py` 130 s (159), `test_integrate_task.py` 129 s
+    (37), `test_integrate_moving_main.py` 77 s (19), the rest under 60 s
+    each. Under `loadscope` a module runs on one worker, so
+    `test_git_integrate.py` alone is the parallel stage's 228 s (D.23).
+    Each fix keeps every assertion:
+    - `test_testkit_evidence.py`: its `verified` fixture runs one real
+      `atc integrate` per test, 3.6-3.9 s of setup each, 131 s in all. A
+      module-scoped fixture builds that repository once under
+      `tmp_path_factory`, and each test gets a `shutil.copytree` copy of
+      it; the evidence record lives under the copy's `.git/atc/` and holds
+      digests and SHAs, no path.
+      - Side effects: tests share one integration's history; a test that
+        changed the template would leak into the next; the module now has
+        a module-scoped fixture, so D.23 keeps its tests on one worker.
+      - Mitigations: each test reads and writes only its copy, and the
+        template is never handed out; one worker running 42 tests of
+        about 0.5 s each is well under the stage.
     - `test_testkit_plugin.py::test_a_surviving_child_fails_the_run_with_its_token`,
-      10.6 s: the survivor check waits its full 10 s window
-      (`children.REAP_SECONDS`) for a child that is meant to stay alive.
-    - `test_integrate_*.py` and `test_git_integrate.py`, 3-7 s each: a
-      fixture repository and its `git` children built per test.
-    - Each fix keeps the test's assertions; its side effects are listed
-      when the entry is designed.
-22. Proposed, waiting for the Owner's authorization of a
+      two cases of 10.8-11.7 s: the plugin waits its whole 10 s window
+      (`children.REAP_SECONDS`) for a child meant to outlive it. The
+      plugin reads the window from the ini option
+      `atc_testkit_reap_seconds`, taking a value below the default and
+      refusing a larger one at startup; the test passes `-o
+      atc_testkit_reap_seconds=1`.
+      - Side effects: a project can set the option.
+      - Mitigations: a shorter window only fails a lasting child sooner,
+        so it never weakens the check; a larger value is refused.
+    - `test_shell_install.py::test_managed_directory_is_repaired_whatever_its_file_names`,
+      12-22 s: six `sh` runs, each starting many POSIX tools under Git
+      Bash, every one asserting a different state. No change: after D.23
+      it no longer sets the stage's length.
+    - `test_git_integrate.py`, `test_integrate_task.py` and
+      `test_integrate_moving_main.py`: 2-10 s each, nearly all in the
+      `atc integrate` runs themselves (setup is 0.45 s and 0.69 s a test).
+      No change here; cutting the `git` processes one integration starts
+      is a product change for its own entry.
+    - Expected: the parallel stage at the `load` figure of D.20 (174 s)
+      less about 16 s for the evidence fixture; the implementation
+      measures it.
+22. Batch 2. Proposed, waiting for the Owner's authorization of a
     `shared/governance/` edit: `VERIFICATION.md` makes 30 minutes (1800 s)
     the verifier test budget of every project, with D.20's rule that a run
     over it is a signal to optimise the tests or for the Owner to decide.
@@ -1204,15 +1247,42 @@ part on the Owner's governance authorization (given for
       signal then counting against that declared budget.
     - Not designed further until the authorization; no governance file
       changes in ATC-0008 without it.
-23. The parallel stage's scheduler, testkit-wide: `loadscope` cost the
-    root's suite about 54 s of 228 s against `load` (D.20). Design deferred
-    to its own gate, after D.20: measure each project's parallel stage
-    under `load` (and xdist's `worksteal`) beside `loadscope`, list the
-    module- and class-scoped fixtures each would build once per worker
-    instead of once per module, and choose one scheduler for every project
-    or keep `loadscope`. The evidence record names no scheduler, so a
-    change leaves reuse as it is; a fixture that holds a shared resource
-    per module is the side effect to check.
+23. The parallel stage's scheduler, testkit-wide. `loadscope` keeps a
+    module on one worker; the root's 228 s parallel stage is exactly its
+    longest module (D.21), against 174 s under `load` (D.20). What
+    `loadscope` protects is a module-, class- or package-scoped fixture,
+    built once per module instead of once per worker that runs a test of
+    the module: the root has one (`test_select_tests.py`'s `graph`),
+    hami-quant 40 in 24 files, hami-quant-trading 10 in 9, ria-project and
+    my-heartopia-tools none.
+    - Change: the parallel stage runs `--dist loadgroup`, and the testkit
+      plugin, at collection, marks every test that uses a fixture of
+      module, class or package scope with `xdist_group` named after its
+      module (its package for a package-scoped fixture). Those modules
+      stay on one worker as under `loadscope`; every other test spreads as
+      under `load`. A test that already carries `xdist_group` keeps its
+      own group.
+    - Side effects:
+      - The plugin reads each item's fixture definitions through pytest's
+        `_fixtureinfo`, a private attribute.
+      - A fixture of function scope that still shares a resource across a
+        module (a fixed path, a port) runs on several workers at once.
+      - Projects get the change with their testkit upgrade; their
+        `xdist_group` marks (hami-quant and hami-quant-trading use
+        `--dist=loadgroup` in places) meet the plugin's marks.
+      - `--dist loadgroup` names grouped tests with an `@<group>` suffix in
+        xdist's output.
+    - Mitigations:
+      - A unit test pins the grouping on pytest's current fixture API, and
+        a missing attribute stops collection with the testkit's token
+        rather than ungrouping silently.
+      - The marker contract already places shared-resource tests in
+        `serial`, which runs `-n 0`; the root's run under `load` (D.20)
+        passed; each project's upgrade task (D.17) runs its suite under
+        the new scheduler before it lands.
+      - An explicit mark wins, and the plugin adds none beside it.
+      - The evidence record names no scheduler, so reuse is unchanged;
+        the suffix is display only.
 24. `atc integrate --repo .` prints every `.` in its human output as the
     project name (`integration_verifyrootpy`, `AGENTSrootmd`): the
     human stream replaces `str(target.repo)`, which is `.`. It replaces
