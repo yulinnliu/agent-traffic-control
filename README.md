@@ -72,8 +72,8 @@ no path back to this checkout. Files the repository owns are reported and
 left alone. `--link` symlinks instead of copying; `--prune` removes adapters
 whose canonical skill no longer exists. On Windows run it from Git Bash.
 
-Skills that run a tool (`atc-worktree`, the merge preflight) call the `atc`
-command, so put it on PATH once per machine:
+Skills that run a tool (`atc-worktree`, `atc-review`, `atc-coordinator`,
+`atc-shared-skill`) call the `atc` command, so put it on PATH once per machine:
 
 ```sh
 uv tool install -e atc/adapters/python
