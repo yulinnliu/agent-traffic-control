@@ -626,12 +626,15 @@ change, its side effects, their mitigations.
     `AGENTS.md` and `CLAUDE.md`. Each reader is declared in
     `DIRECTORY_READERS` with the directories and files it reads in this
     checkout; an entry matches a path equal to it or below it, so a root
-    file such as `AGENTS.md` selects its reader. A guarded path selects its
-    declared readers and nothing through the import reach: neither the
-    area name (`shared/governance`, `shared/skills`) nor the bare name
-    (`SKILL.md`, `AGENTS.md`, `CLAUDE.md`) matches through it. A guarded
-    Markdown path with no declared reader selects nothing; a guarded path
-    of another kind with no declared reader selects the full suite. Every
+    file such as `AGENTS.md` selects its reader; entries and paths compare
+    with any case, separator or trailing slash. A guarded Markdown file or
+    directory selects its declared readers and nothing through the import
+    reach: neither the area name (`shared/governance`, `shared/skills`)
+    nor the bare name (`SKILL.md`, `AGENTS.md`, `CLAUDE.md`) matches
+    through it. A guarded file of another kind adds the test files whose
+    reach names its file name. A guarded Markdown path with no reader
+    selects nothing; a guarded path of another kind with none selects the
+    full suite. Every
     other copy of those bare names lies under `shared/conformance/` and
     keeps the area rule; every other path keeps its rule.
     - Readers. A full run traced every file open, directory listing, copy
@@ -704,106 +707,132 @@ change, its side effects, their mitigations.
 19. Done ahead of D. The root's integration verifier follows
     `VERIFICATION.md` § Full regression timing and evidence reuse: local
     integration runs the impact selection, and the full suite runs in a
-    dispatched CI run. Root data only; the testkit source stays as it is.
+    dispatched CI run. `atc_testkit` stays as it is; the root's
+    `integration_verify.py`, `select_tests.py`, `tests/root_reads.py` and
+    their tests change, and since `conftest.py` loads the selector and the
+    guard (D.18), that range itself verifies with the full suite.
     - Mechanism:
       - The skeleton's root form (`docs/TESTKIT.md` § Integration verifier,
-        a `Project` with no `select`) already takes the test command and the
-        documentation-only predicate as the root's data. A selection hook
-        for the root form does not exist: `select` turns on the consumer
-        form, with its stages, lock, contract, lint and collection rows and
-        its report, which the root does not carry. So the root keeps the
-        root form and changes only its data in
-        `adapters/python/scripts/integration_verify.py`.
+        a `Project` with no `select`) takes the test command and the
+        documentation-only predicate as the root's data. It has no
+        selection hook: `select` turns on the consumer form, with stages,
+        lock, contract, lint and collection rows and a report the root does
+        not carry. So the root keeps the root form and changes its data.
       - Test command: `uv run --locked python scripts/select_tests.py
-        --base <ATC_EXPECTED_MAIN_SHA> --run --`, built from the verifier's
-        environment. The skeleton appends `--basetemp <dir>`, which reaches
-        pytest after `--`. In the clean candidate at `ATC_INTEGRATION_SHA`
-        the selector's range, from the merge base of the base and `HEAD` to
-        the working tree, is exactly
+        --base <ATC_EXPECTED_MAIN_SHA> --run --`. The skeleton appends
+        `--basetemp <dir>`, which reaches pytest after `--`. In the clean
+        candidate at `ATC_INTEGRATION_SHA` the selector's range, from the
+        merge base of the base and `HEAD` to the working tree, is exactly
         `ATC_EXPECTED_MAIN_SHA..ATC_INTEGRATION_SHA`: the skeleton has
-        checked the expected main is an ancestor and the final-state check
+        checked the expected main is an ancestor, and its final-state check
         refuses a dirty tree. An empty selection exits 0 without pytest; a
-        path the selector widens runs the full suite, as the script's rules
-        say.
+        path the selector widens runs the full suite.
+      - The base reaches the command through the environment the verifier
+        already reads: `main(environ, root, run)` builds
+        `project(root, environ)`, and `project()` puts
+        `--base <ATC_EXPECTED_MAIN_SHA>` in the command when the variable is
+        present. `iv.project(WORKSPACE)` without an environment, as the
+        import test calls it, builds the command with the selector's
+        default base `main`; the verifier never reaches that form, since
+        `require_env` refuses a missing variable before any check runs.
       - Documentation-only, by consumers (`VERIFICATION.md`
-        § Documentation-only verification): a range is documentation-only
+        § Documentation-only verification): the predicate builds one
+        selector graph and calls `select_tests.select(paths)` over the
+        range's paths, not `changed_paths`. The range is documentation-only
         when every path is Markdown under `docs/`, a task record under
         `.atc/tasks/`, or Markdown the selection maps to no test file. Such
         a range skips the test command; the static checks
         (`validate_workspace.py`, `policies.py check`, `git diff --check`)
         run for every range.
       - The root's top-level Markdown joins D.18's guarded paths, so it
-        selects only its declared readers instead of every test that names
-        `README.md`. A full run traced with all of them guarded: in process only `test_integration_verify.py` reads `AGENTS.md`, and the shell scripts read `CLAUDE.md` alone among them.
-        With no reader, `README.md`, `README.zh-TW.md`, `GLOSSARY.md` and
-        `SCOPE.md` are documentation-only.
-      - A child run of `scripts/*.sh` counts as reading the paths those two
-        scripts derive from their own checkout (`SHELL_READS`: the D.18
-        directories, `CLAUDE.md`, `shared/templates/PROJECT_AGENTS.md`)
-        instead of every guarded path; they read the root's top-level
-        Markdown only as `CLAUDE.md`, and the project's `AGENTS.md` under
-        `$REPO`. A test reads each `$ROOT/` path in `scripts/*.sh` and fails
-        when `SHELL_READS` does not cover it. `AGENTS.md` then selects
-        `test_integration_verify.py` alone.
+        selects its declared readers instead of every test that names a
+        `README.md`. A full run traced with all of them guarded: in process
+        only `test_integration_verify.py` reads `AGENTS.md`. D.18's rule
+        stands that a child run of `scripts/*.sh` reads every guarded path
+        (the scripts build paths as `"$ROOT"/…` and from a `$tool`
+        variable, which no literal check follows), so `test_shell_install.py`
+        is declared for the new ones too and each top-level Markdown file
+        selects it: `README.md`, `README.zh-TW.md`, `GLOSSARY.md` and
+        `SCOPE.md` are not documentation-only and run that one test file.
       - `.github/workflows/validate.yml` stays `workflow_dispatch` only.
         Root `AGENTS.md` § Integration verification states what the local
-        verification covers (static checks, the selection, the
-        documentation-only classes above) and that the full suite, with
-        D.18's `ROOT_READ_UNDECLARED` guard over every test file, runs only
-        in a dispatched run of that workflow, which the Owner starts after
-        topic D. `docs/TESTKIT.md`'s root-form paragraph says the root's
-        predicate and test command are its data.
+        verification covers: the static checks, the selection, the
+        documentation-only classes above, and that the skeleton's line
+        `classification: full` names every range that is not
+        documentation-only, the selector's lines after it saying what ran,
+        until D.17's version bump renames it. It states that the full suite,
+        with D.18's `ROOT_READ_UNDECLARED` guard over every test file, runs
+        only in a dispatched run of that workflow, which the Owner starts
+        after topic D.
+      - Edits: `integration_verify.py`; `select_tests.py` (`GUARDED` gains
+        the top-level Markdown, the docstring's line 3-4 "the integration
+        verifier runs the full suite" becomes the selection over the range);
+        `adapters/python/README.md` § Selected tests (its "the integration
+        verifier alone runs the full suite" becomes the dispatched CI run)
+        and its timeout paragraph; root `AGENTS.md` § Integration
+        verification and its `Verifier timeout`; `docs/TESTKIT.md`'s
+        root-form paragraph (the root's predicate and test command are its
+        data).
+      - Tests that pin today's behaviour and move: in
+        `test_integration_verify.py`, `name()` and the fake run (`"pytest"
+        in argv`, lines 37 and 62), the documentation-only table (`README.md`
+        and `AGENTS.md` not documentation-only), the move case expecting
+        `classification: full` with `pytest` started (171), the
+        failing-check and failing-suite cases keyed on `pytest` (194-196,
+        212, 223), and the CI parity test (257-264), which becomes: CI's
+        job runs the full `uv run --locked pytest` and the two static
+        checks, and the local verifier runs the same static checks with
+        the selection in place of pytest. In `test_select_tests.py`, the
+        guarded-reader table (line 81) gains the top-level Markdown rows.
+        New cases: a task record with a prose file, a mixed range, a
+        selection that widens, an empty selection that runs no pytest.
     - Verify time, measured on this host:
-      - `README.md` only: before, the full suite (664 s for a full run
-        on this host) after about 1 s of static checks; after, the static
-        checks and the classification, about 2 s, no test.
+      - `README.md` only: before, the full suite (664 s for a full run on
+        this host) after about 1 s of static checks; after, about 1 s of
+        static checks, 1 s of selection and `test_shell_install.py`
+        (15 s), about 17 s.
       - `select_tests.py` only: before and after, the full suite (664 s),
         since `conftest.py` loads the selector (D.18).
-      - A range of one guarded skill file: before, the full suite; after,
-        the static checks and 2 of 38 test files.
-      - Times are the parts measured apart (`validate_workspace.py`
-        0.5 s, `policies.py check` 0.4 s, the selection 1 s, `git diff
-        --check` 0.1 s, the full suite 664 s); the candidate's environment
-        build is the same before and after.
+      - One guarded skill file: before, the full suite; after, the static
+        checks and 2 of 38 test files.
+      - The parts measured apart: `validate_workspace.py` 0.5 s,
+        `policies.py check` 0.4 s, the selection 1 s, `git diff --check`
+        0.1 s; the candidate's environment build is the same before and
+        after.
     - Side effects and mitigations:
       - A selector blind spot (a test reading what the graph does not see,
         undeclared) reaches `main` and shows only in a dispatched CI run.
         Mitigations: every path no rule maps still runs the full suite;
-        D.18's guard checks the selected tests in every integration run;
-        the Owner dispatches CI after topic D and before the final sync;
-        the Owner rules this is not production and speed comes first.
+        D.18's guard checks the selected tests in every integration run.
+      - An undeclared reader of a guarded Markdown path is never selected
+        for that path, so the guard never runs it on such a range locally.
+        This is an accepted residual, caught by the Owner's CI dispatch
+        after topic D. No static scan is added: tests write fixture files
+        under the same names (`AGENTS.md`, `SKILL.md`), so a scan of test
+        source would flag fixtures as readers.
       - Guard timing: an undeclared reader among the tests a range does not
-        select fails only in the dispatched CI run, not at integration.
-        Mitigation: the guard prints the test and the paths, so the fix is
-        one declaration.
-      - `VERIFICATION.md` § Testing says only the integration verifier runs
-        the full suite; § Full regression timing names remote CI the
-        default venue and local integration impact-selected. The root
-        follows the latter, as the Owner ruled. Whether § Testing's
-        sentence is reworded is a governance question for the Owner; this
-        task does not edit `shared/governance/`.
-      - `integrations.jsonl`: the root's line carries no verification
-        classification today (authority, candidate, `main_before`,
-        `records_only`, reviewed, task) and the root writes no
-        verification report, so no recorded field changes meaning. The
-        verifier's log carries the classification and the selection.
-      - The skeleton's root form prints `classification: full` for every
-        range that is not documentation-only; with this change it means
-        "the test command runs", and the selector's next lines say what it
-        ran. Renaming that label is testkit source, so it waits for D.17's
-        version bump and is added to D there.
-      - Timeout: the verifier still runs the full suite on a fallback
-        (`conftest.py`, the selector, `pyproject.toml`, an unmapped path),
-        so the declared 1800 s stays, derived from the full run as
-        `adapters/python/README.md` states.
+        select fails only in the dispatched CI run. The guard names the test
+        and the paths, so the fix is one declaration.
+      - `VERIFICATION.md` § Testing ("only the integration verifier runs
+        the full suite") and § Independent review ("the integration
+        verifier's full suite is the safety net") stop holding for the
+        root; their rewording waits on the Owner's authorization and is
+        not part of this entry until given.
+      - `integrations.jsonl`: the root's line records task, authority,
+        candidate, `main_before`, `records_only` and the reviewed SHA, with
+        no verification field, and the root writes no verification report,
+        so no recorded field changes meaning. The verifier's log carries
+        the classification and the selection.
+      - Timeout: `adapters/python/README.md` derives it as three times the
+        measured full-run wall clock, rounded up to a whole minute and
+        never below 300 s; 3 × 664 s = 1992 s gives 2040 s, which replaces
+        1800 s in root `AGENTS.md`, since the verifier still widens to the
+        full suite (`conftest.py`, the selector, `pyproject.toml`, an
+        unmapped path).
       - The addition to D where the verifier subtracts what the writer
         already ran is not in this plan yet; for the root it would find
         nothing to subtract, since the root writes no evidence the writer's
         run could match, so it concerns the consumer form only.
-      - `tests/test_integration_verify.py` pins the old classification
-        (`README.md` and `AGENTS.md` not documentation-only, the root's
-        test command `uv run --locked pytest`); its cases move to the new
-        rules, adding a task record, a root prose file and a mixed range.
       - Markdown that the selection maps to tests by a bare name stays not
         documentation-only (`adapters/python/README.md` selects the five
         tests that name some `README.md`); this errs toward running tests.
