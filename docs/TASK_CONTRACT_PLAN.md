@@ -422,7 +422,8 @@ Code, tests, `shared/conformance/`, `docs/TESTKIT.md`, `docs/ATC_HOME.md` and
 `--check` without authority), D.9 before D.12 (the child encoding), D.13
 before D.12's scratch-name form, D.15 before D.12 (the `--json` form
 `--select` runs), D.17 last; D.18 and D.19 are done ahead of the rest, D.20
-first of the rest, D.21 after D.20. Each entry: the
+first of the rest, D.21 after D.20, D.22 only on the Owner's
+governance authorization, D.23 after D.20. Each entry: the
 change, its side effects, their mitigations.
 
 1. `atc worktree create --scope <text>` writes the task record in the new
@@ -858,10 +859,19 @@ change, its side effects, their mitigations.
       skipped; the three stages through
       `python -m atc_testkit.ci --stages` at the default 8 workers 232 s,
       every stage exiting 0 (`serial` and `interactive` collect none;
-      the doubled `-q` below hid the count). The 48 s over 184 s are
-      `loadscope`, which keeps a module on one worker (`test_integrate_task.py`
-      holds a 10.6 s and two 6 s tests), and three runner starts; `loadscope`
-      is the testkit's contract and stays. Small selections: `test_shell_install.py`
+      the doubled `-q` below hid the count). A second staged run split it:
+      232 s again, the parallel stage 228 s, the empty serial stage 1 s,
+      the empty interactive stage 2 s; the parallel stage's marker
+      expression alone at `-n 8 --dist load` took 174 s (1339 passed, 20
+      skipped). So the three runner starts cost about 3 s and `loadscope`
+      about 54 s: it keeps a module on one worker, and the heavy modules
+      (`test_integrate_task.py` holds a 10.6 s and two 6 s tests) set the
+      critical path.
+    - `loadscope` stays in this item. It is the testkit's stage contract
+      for every project's gate, verifier and CI (`TESTKIT.md` § Stages),
+      it keeps a module- or class-scoped fixture built once per module, and
+      no project's suite has been measured under `load`. The lever is
+      testkit-wide, never root-only: D.23. Small selections: `test_shell_install.py`
       (3 tests) 15.7 s serial, 14.5 s at `-n 16`; `test_task_records.py`
       (19 tests) 14.3 s serial, 6.1 s at `-n 16`: the workers' start-up,
       about 4 s, is repaid by a few tests, so every selection runs the
@@ -895,7 +905,16 @@ change, its side effects, their mitigations.
         its stage method there, each stage with its own environment, base
         directory, data root and log in the working directory, the
         interactive stage off the private desktop. `Project.test_command`
-        and `TestCommand` go; the root is their one user.
+        and `TestCommand` go; the root is their one user. The projects'
+        vendored 0.8.1 wheels still carry both until the D.17 upgrade, and
+        no project code names them (no match outside the wheels in the
+        three checkouts), so the upgrade removes them with nothing to
+        migrate.
+      - The root's `serial` and `interactive` stages are kept although they
+        collect nothing today: the stage list is the testkit's, so a test
+        that takes either marker runs in its stage with no root change, and
+        an empty stage passes (`TESTKIT.md` § Stages). Their cost is a
+        runner start and a collection each, 1 s and 2 s here.
       - Testkit. The worker count (below).
     - Worker count:
       - Precedence: `--workers N` on the command, then `test_workers` in
@@ -923,13 +942,20 @@ change, its side effects, their mitigations.
         holds a stage's name, marker expression and ignored paths, not the
         count, so a record from another count covers the push as before.
       - CI passes its own `--workers` (`TESTKIT.md` § Stages) or takes the
-        default; the host file never reaches it.
+        default; the host file never reaches it. hami-quant's CI runs
+        `ci --stages --workers 4` and hami-quant-trading's
+        `scripts/ci_pytest.py --stages --workers 4`; both keep their count.
+        The root's CI job passes none and takes `min(8, cpu count)` of its
+        runner.
     - Side effects and mitigations:
       - The three projects run the vendored testkit 0.8.1 until their
-        upgrade at the final sync (D.17); then the default is unchanged and
-        a host with no `~/.atc/config.toml` runs as today. A host file
-        applies to every project's gate, verifier and runs on that host at
-        once, including hami-quant's load-sensitive tests; the flag lowers
+        upgrade at the final sync (D.17), and 0.8.1 reads no host file and
+        takes no `--workers` on the gate, so until then a host file reaches
+        no project: it reaches the root's runs only, the root running the
+        testkit from source. After the upgrade the default is unchanged and
+        a host with no `~/.atc/config.toml` runs as today, while a host
+        file applies to every project's gate, verifier and runs on that
+        host at once, including hami-quant's load-sensitive tests; the flag lowers
         it for one run, and a test that fails under the higher count takes
         `serial`.
       - The stages' worker count reaches `atc test run`'s flag form only:
@@ -968,15 +994,28 @@ change, its side effects, their mitigations.
         10 s survivor window. All passed in every run above; a failure
         under load widens the ceiling and keeps the assertion, or takes
         `serial`.
-      - Verifier timeout: the rule in `adapters/python/README.md` stays,
-        three times the measured wall clock of a full run in the verifier,
-        rounded up to a whole minute, never below 300 s. The implementation
-        measures the staged verifier run over a range that widens to the
-        full suite and replaces 2520 in root `AGENTS.md` and the README's
-        example; from the staged run above that is about
-        3 × (232 + 31) s, 840 s, the 31 s being about the verifier's own
-        steps (D.19's 822 s less the serial 791 s). A host file with more
-        workers only shortens the run.
+      - Verifier timeout (Owner ruling): a fixed test budget of 30 minutes.
+        Root `AGENTS.md` `Verifier timeout` becomes 1800, and
+        `adapters/python/README.md` replaces its derivation (three times a
+        measured full run) with the budget rule: the budget is not derived
+        from a run and not scaled by the worker count; a run that exceeds
+        it is a signal to optimise the tests or for the Owner to decide,
+        and nothing raises it automatically.
+        - Headroom: the staged full run at 8 workers takes about 232 s;
+          one worker, or a small host, runs about as the serial 791 s, and
+          D.19 measured the verifier's own steps at about 31 s over that
+          (822 s), so every worker count stays under 1800 s.
+        - `atc integrate`'s timeout stop keeps its token
+          `VERIFICATION_TIMEOUT` and its text "candidate verification timed
+          out after <n>s for <sha>", which the tests assert, and adds
+          "test budget exceeded: optimise the tests or ask the Owner; a
+          retry does not help". The installed `atc` runs the root's code,
+          so the line reaches every project's integration at once; their
+          `VERIFICATION_TIMEOUT` handling reads the token, not the text.
+        - Projects' current budgets, read from their `AGENTS.md`:
+          hami-quant 3600 s, which exceeds 1800 s; hami-quant-trading
+          1800 s; ria-project 600 s. This item changes none of them; D.22
+          proposes the rule for every project.
     - Tests: the verifier's root form runs the stages (fake run: three
       stage commands, cwd, per-stage base directory, `None` skips them);
       `select_tests.py --run` starts the stage runner with the paths and
@@ -991,12 +1030,14 @@ change, its side effects, their mitigations.
       `docs/TESTKIT.md` § Stages and § Integration verifier,
       `docs/ATC_HOME.md` § Layout; the root's `select_tests.py`,
       `integration_verify.py`, `check.ps1`, `.gitignore`,
-      `.github/workflows/validate.yml`, `adapters/python/README.md` and
-      root `AGENTS.md` `Verifier timeout`. D.17's version bump covers the
-      testkit change.
-21. The slowest tests, after D.20 and measured under it with
-    `--durations=30`. On `main` 438280a the top 30 sum to about 140 s of
-    791 s, so the cost is spread over per-test fixture repositories and
+      `.github/workflows/validate.yml`, `adapters/python/README.md`,
+      root `AGENTS.md` `Verifier timeout`, and `git_integrate.py`'s
+      timeout line with its test. D.17's version bump covers the testkit
+      change.
+21. The slowest tests: design deferred to its own gate, after D.20, from
+    durations measured under the stages. In the coordinator's serial
+    `--durations=30` run on `main` 438280a the top 30 sum to about 140 s
+    of 791 s, so the cost is spread over per-test fixture repositories and
     child processes; candidates:
     - `test_shell_install.py::test_managed_directory_is_repaired_whatever_its_file_names`,
       12.3 s: six `sh` runs of `link-skills.sh` and `check-skills.sh`, each
@@ -1008,6 +1049,25 @@ change, its side effects, their mitigations.
       fixture repository and its `git` children built per test.
     - Each fix keeps the test's assertions; its side effects are listed
       when the entry is designed.
+22. Proposed, waiting for the Owner's authorization of a
+    `shared/governance/` edit: `VERIFICATION.md` makes 30 minutes (1800 s)
+    the verifier test budget of every project, with D.20's rule that a run
+    over it is a signal to optimise the tests or for the Owner to decide.
+    - Side effects: hami-quant declares 3600 s and would either fit its
+      verifier into 1800 s or carry an Owner-approved exception;
+      hami-quant-trading (1800 s) and ria-project (600 s) already fit. The
+      29 vendored governance copies change at the final sync.
+    - Not designed further until the authorization; no governance file
+      changes in ATC-0008 without it.
+23. The parallel stage's scheduler, testkit-wide: `loadscope` cost the
+    root's suite about 54 s of 228 s against `load` (D.20). Design deferred
+    to its own gate, after D.20: measure each project's parallel stage
+    under `load` (and xdist's `worksteal`) beside `loadscope`, list the
+    module- and class-scoped fixtures each would build once per worker
+    instead of once per module, and choose one scheduler for every project
+    or keep `loadscope`. The evidence record names no scheduler, so a
+    change leaves reuse as it is; a fixture that holds a shared resource
+    per module is the side effect to check.
 
 ## After D
 
