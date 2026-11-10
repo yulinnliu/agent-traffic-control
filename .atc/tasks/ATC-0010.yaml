@@ -1,0 +1,15 @@
+task_id: ATC-0010
+repository: yulinnliu/agent-traffic-control
+base_sha: 115f3f14d75ec97d2e6fbddd0af56e68972cd07f
+scope: 'verifier speed: select_tests Markdown over-selection fixed by declared readers;
+  stage timings measured before and after; load-sensitive tests observed'
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: 115f3f14d75ec97d2e6fbddd0af56e68972cd07f
+branch: worktree-claude+verifier-speed
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
