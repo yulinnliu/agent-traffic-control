@@ -421,7 +421,8 @@ Code, tests, `shared/conformance/`, `docs/TESTKIT.md`, `docs/ATC_HOME.md` and
 `adapters/python/README.md`. Order: D.5 before D.7 (the alias needs a
 `--check` without authority), D.9 before D.12 (the child encoding), D.13
 before D.12's scratch-name form, D.15 before D.12 (the `--json` form
-`--select` runs), D.17 last; D.18 and D.19 are done ahead of the rest. Each entry: the
+`--select` runs), D.17 last; D.18 and D.19 are done ahead of the rest, D.20
+first of the rest, D.21 after D.20. Each entry: the
 change, its side effects, their mitigations.
 
 1. `atc worktree create --scope <text>` writes the task record in the new
@@ -844,6 +845,128 @@ change, its side effects, their mitigations.
       - Markdown that the selection maps to tests by a bare name stays not
         documentation-only (`adapters/python/README.md` selects the five
         tests that name some `README.md`); this errs toward running tests.
+
+20. The adapter suite runs under pytest-xdist by default. `addopts` in
+    `adapters/python/pyproject.toml` gains `-n auto`, and
+    `tests/conftest.py` implements xdist's `pytest_xdist_auto_num_workers`
+    hook: `PYTEST_XDIST_AUTO_NUM_WORKERS` when set, as in xdist, otherwise
+    `min(16, cpu count)`. Distribution stays xdist's `load`. Every runner
+    of the suite inherits it: a bare `uv run --locked pytest`,
+    `select_tests.py --run` and through it the integration verifier,
+    `check.ps1 -Tests` and the CI job. `-n 0` or
+    `-n <count>` on a command line overrides it. `pytest-xdist==3.6.1` is
+    already in the dev group, so `uv.lock` does not change.
+    - Worker count, measured on this host (16 physical cores, 24 threads),
+      full suite, each run 1339 passed and 20 skipped: serial 791 s,
+      `-n 8` 184 s, `-n 16` 136 s. The cap is 16, this host's physical
+      cores: each test's cost is the `git`, `sh` and Python children it
+      starts, so a worker beyond the physical cores shares one with
+      another worker's children. The testkit's parallel stage keeps
+      `min(8, cpu count)` (`TESTKIT.md` § Stages); that count is the
+      projects' contract and its own change. A host with fewer threads
+      gets one worker per thread.
+    - Small selections, measured on this host: `test_shell_install.py`
+      (3 tests) 15.7 s serial, 14.5 s at `-n 16`; `test_task_records.py`
+      (19 tests) 14.3 s serial, 6.1 s at `-n 16`. The workers' start-up,
+      about 4 s, is repaid by a few tests, so `select_tests.py --run` keeps
+      the default for every selection.
+    - Serial tests: none. No test opens a port or writes inside the checkout
+      or the real home; every shared place has a per-test name (the
+      `atc_tmp` and `fake_home` roots, `tmp_path`, the private desktop
+      `atc_<uuid>`); process state a test changes stays in its worker and
+      `restored_process` restores it per test, as today. The root's one
+      pytest invocation has no serial stage, so a `serial` mark would change
+      nothing: `conftest.py` refuses a `serial`-marked test at collection
+      with a usage error saying the suite has no serial stage. A test that needs a host-wide
+      resource takes a per-test name instead; a test whose deadline fails
+      under load has its ceiling widened and keeps its assertion.
+    - Side effects and mitigations:
+      - Temporary directories. Each worker gets `<basetemp>/popen-gw<N>`
+        below the controller's base directory (xdist `workermanage.py`);
+        the plugin moves the temporary directory in the controller before
+        the workers start and they inherit it
+        (`test_xdist_workers_inherit_the_location`). The plugin's survivor
+        check (`CHILD_PROCESSES_ALIVE`) runs in the controller only, over
+        the whole base directory, after the workers end, so it covers every
+        worker's children; no test proves that under xdist, so
+        `test_a_surviving_child_fails_the_run_with_its_token` gains an
+        `-n 2` case.
+      - Environment. Workers carry `PYTEST_XDIST_WORKER`,
+        `PYTEST_XDIST_WORKER_COUNT` and `PYTEST_XDIST_TESTRUNUID` into the
+        children tests start. Nothing in `atc_cli`, `atc_testkit` or
+        `scripts/` reads them, and every child pytest runs in a fixture root
+        with its own ini, passing `-n 0` or dropping `PYTEST_*`
+        (`test_root_reads.py`), so the root's `addopts` never reaches it.
+      - Console windows. Workers are console children of the controller and
+        open no console of their own; children keep the testkit's launch
+        flags (`TESTKIT.md` § Child processes); each private desktop has its
+        own name. The console and desktop tests (`test_testkit_children.py`,
+        `test_testkit_desktop.py`) passed in the `-n 8` and `-n 16` runs.
+      - The root-read guard (`tests/root_reads.py`, D.18) already hands each
+        worker's failures to the controller (`WORKER_KEY`,
+        `pytest_testnodedown`), proven by
+        `test_an_undeclared_open_fails_the_session[xdist]`; every worker
+        collects every selected module, so a read at import time is recorded
+        in each and merged once. With xdist the default, that hand-off
+        becomes the guard's main path; it does not change.
+      - `atc test run`. Its positional form passes `-n 0` before the
+        caller's pytest arguments, so a run of this tree stays serial and
+        its output byte-identical
+        (`test_xdist_is_turned_off_when_installed_and_the_cache_provider_always`);
+        a root writer who wants the workers adds `-n auto` after `--`, since
+        the later option wins. D.12's flag form keeps `-n 0`: `TESTKIT.md`
+        § Commands step 5 is the contract for every project tree, whose
+        parallelism is the stages'. `atc test mutants` keeps its serial
+        runs.
+      - CI. The `python-adapter` job's `uv run --locked pytest` gets
+        `min(16, cpu count)` of its runner; its command, its
+        `timeout-minutes: 30` and the CI parity test in
+        `test_integration_verify.py` stay.
+      - Verifier timeout. The rule in `adapters/python/README.md` stays:
+        three times the measured wall clock of a full run in the verifier,
+        rounded up to a whole minute, never below 300 s. The implementation
+        measures a verifier run over a range that widens to the full suite
+        (a `select_tests.py` change, as D.19's 822 s) and replaces 2520 in
+        root `AGENTS.md` and the README's example; from the numbers above
+        that is about 3 × (136 + 31) s, near 540 s, the 31 s being about the
+        verifier's own steps (D.19's 822 s less the serial 791 s). Two
+        sessions' full runs at once share 16 cores; the factor three is
+        that margin, and the verifier's argv is fixed, so no `-n 0` reaches
+        it.
+      - Output. Under `-q` pytest prints one workers line instead of
+        per-file progress; failure lines, `ROOT_READ_UNDECLARED` and
+        `CHILD_PROCESSES_ALIVE` keep their form; `-x` stops the run after
+        the first failure, the other workers finishing their current test.
+      - Load-sensitive deadlines now run beside other workers:
+        `test_git_integrate.py`'s verifier timeouts (`--verify-timeout`
+        0.05 and 1, `elapsed < 20`), `test_testkit_children.py`'s
+        `timeout=3`, `test_integration_slot.py`'s contention (`wait(10)`),
+        the plugin's 10 s survivor window. All passed at `-n 8` and
+        `-n 16`; a failure under load widens the ceiling as above.
+    - Tests: the `addopts` test in `test_integration_verify.py` also asserts
+      `-n auto`; the hook returns `min(16, cpu count)` and yields to
+      `PYTEST_XDIST_AUTO_NUM_WORKERS`; a `serial`-marked test is refused;
+      the survivor check's `-n 2` case. `pyproject.toml` and `conftest.py`
+      select the full suite, so the range verifies itself under the
+      workers.
+    - Edits: `pyproject.toml` `addopts`, `tests/conftest.py`, the tests
+      above, `adapters/python/README.md` (the suite line says it runs on
+      `min(16, cpu count)` workers and how to override; the timeout
+      example), root `AGENTS.md` `Verifier timeout`.
+21. The slowest tests, after D.20 and measured under it with
+    `--durations=30`. On `main` 438280a the top 30 sum to about 140 s of
+    791 s, so the cost is spread over per-test fixture repositories and
+    child processes; candidates:
+    - `test_shell_install.py::test_managed_directory_is_repaired_whatever_its_file_names`,
+      12.3 s: six `sh` runs of `link-skills.sh` and `check-skills.sh`, each
+      starting many POSIX tools under Git Bash.
+    - `test_testkit_plugin.py::test_a_surviving_child_fails_the_run_with_its_token`,
+      10.6 s: the survivor check waits its full 10 s window
+      (`children.REAP_SECONDS`) for a child that is meant to stay alive.
+    - `test_integrate_*.py` and `test_git_integrate.py`, 3-7 s each: a
+      fixture repository and its `git` children built per test.
+    - Each fix keeps the test's assertions; its side effects are listed
+      when the entry is designed.
 
 ## After D
 
