@@ -32,6 +32,7 @@ Then read `shared/governance/INDEX.md` and `CORE.md` from that exact same revisi
 - Task prefix: ATC
 
 Records live in `.atc/tasks/`; `docs/TASKS.md` specifies them and `atc task`.
+Tasks here are identified by record (governance `CORE.md` § Task identity).
 
 ## Integration verification
 

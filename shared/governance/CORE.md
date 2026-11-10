@@ -48,7 +48,8 @@ should prefer their descriptive names.
 
 `task_id` takes the form the project's `AGENTS.md` declares: a numbered task
 record, or a plan section and step together with the bound branch and target
-SHA. A project whose `AGENTS.md` declares none identifies a task by repository,
+SHA. A repository whose `AGENTS.md` has a `## Task records` declaration
+identifies tasks by record. A project whose `AGENTS.md` declares none identifies a task by repository,
 branch and target SHA. Delivery, review and integration records name the task
 in that form. A task identity belongs to its own repository, so another
 project's numbering never labels the work.
