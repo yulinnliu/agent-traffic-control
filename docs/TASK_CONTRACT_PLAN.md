@@ -428,7 +428,8 @@ review, one implementation review and one integration:
 
 - Batch 1, no governance edit, in this order: D.21 and D.23; the direct
   fixes D.4, D.6 and D.11; D.15, D.13, D.12; D.2 with D.3; D.10 with
-  D.16; D.8; D.17; then the lifecycle guide. A direct fix is self-evident
+  D.16; D.8; D.26 and D.27 after their own design review; D.17; then the
+  lifecycle guide. A direct fix is self-evident
   and gets no design beyond its entry; the implementation review checks
   its side effects. Direct fixes beside D.4, D.6 and D.11:
   - `atc task new` refused with `UNKNOWN_PROJECT` (given `--repo .`) or
@@ -771,8 +772,9 @@ review, one implementation review and one integration:
 16. The output proposals 2, 3, 5, 9, 12 and 13 of Tool output, with the
     side effects and mitigations listed there.
 17. D.9, D.12, D.20, D.21 (the `atc_testkit_reap_seconds` ini option) and
-    D.23 (the stages' scheduler and the plugin's grouping) change
-    atc-testkit source, so D bumps
+    D.23 (the stages' scheduler and the plugin's grouping) and D.26 (the
+    private desktop by default, the plugin's desktop guard,
+    `atc test private`) change atc-testkit source, so D bumps
     `atc_testkit.__version__`, updates `adapters/python/atc-testkit/README.md`
     to the new version and builds the release wheel, as that README
     requires for every source change.
@@ -786,7 +788,12 @@ review, one implementation review and one integration:
       runs `atc test run` from source, so projects get the flag form,
       `--select` and the log without re-vendoring; the one re-run of the
       stages is the upgrade's expected cost and is named in each project's
-      upgrade task.
+      upgrade task. `atc test run`'s private default and
+      `atc test private` reach projects through the root's `atc` at once;
+      the desktop guard is in the plugin, so it arrives with the upgrade,
+      and hami-quant-trading's upgrade task routes its
+      `verify_*_mutations.py` through `atc test private` in the same
+      change.
 18. Done ahead of D. `select_tests.py` selects, for the root's own guidance
     and skills, only the test files declared to read them. The guarded
     paths are `shared/governance/`, `shared/skills/`, the rendered copies
@@ -1359,6 +1366,126 @@ review, one implementation review and one integration:
       - Side effects: none.
       - Mitigations: tests pass 5000 digits and leading zeros to
         `flag_count`, and a 5000-digit flag to `ci --stages` and the gate.
+26. A private desktop by default (Owner's ruling: batch 1). A
+    hami-quant-trading mutation script started pytest directly and Tk test
+    windows showed on the Owner's desktop; `atc test run` and
+    `atc test mutants` use a private desktop only with
+    `ATC_PRIVATE_DESKTOP=1`.
+    - `atc test run` and `atc test mutants` run on a private desktop on
+      Windows unless `ATC_PRIVATE_DESKTOP=0`, and on a private one exclude
+      `interactive_desktop` tests, printing one line that says so and names
+      the opt-out. `0` runs on the interactive desktop with those tests
+      included. Unset and `1` are private; any other value is refused with
+      `PRIVATE_DESKTOP_INVALID` (exit 9). The variable stays the one
+      switch: the positional form passes every argument after `<label>` to
+      pytest, so it has no room for a flag, and D.12's flag form reads the
+      same variable.
+    - A guard in `atc_testkit.plugin`: on Windows, a session whose own
+      desktop is the interactive one (`WinSta0\Default`, read through
+      `GetThreadDesktop` and `GetUserObjectInformationW`) refuses a Tk root
+      created in a test not marked `interactive_desktop`, or outside any
+      test (collection, a session fixture). `tkinter.Tk.__init__` raises
+      `INTERACTIVE_DESKTOP_WINDOW` naming the test and the two ways out
+      (`atc test run`, or the marker) before Tcl creates the window, and
+      the test's report is failed at teardown as well, so product code that
+      swallows the exception does not hide it. `Toplevel` needs a root and
+      `tkinter.Tcl()` opens no window, so the root is the one place.
+      `ATC_DESKTOP_GUARD` overrides the detection: `0` off, `1` on, unset
+      automatic; any other value is a usage error (exit 4). A failure, not
+      a warning: only a refusal before the window exists keeps the desktop
+      clear, which is the incident; a warning reports a window that has
+      already shown, and in a passing `-q` run nobody reads it.
+    - `atc test private <command> [args...]` runs one command on a private
+      desktop, its output streamed and its exit code returned, through
+      `atc_testkit.desktop`; `atc_testkit.desktop.run(command, cwd, env)`
+      is the same for a Python caller. A project script that starts pytest
+      goes through either; routing hami-quant-trading's
+      `verify_*_mutations.py` through it is that project's change.
+    - Side effects:
+      - CI: the `parallel` and `serial` stages already run private; the
+        `interactive` stage holds only marked tests, which the guard
+        allows. The `slow` invocation runs on the job's desktop, where an
+        unmarked slow Tk test would now be refused if that desktop is
+        `WinSta0\Default`.
+      - The verifier: its stages are the same as CI's; nothing changes.
+      - `atc test run` without the variable no longer runs
+        `interactive_desktop` tests: a reviewer targeting one sets
+        `ATC_PRIVATE_DESKTOP=0`. A run whose selection is only such tests
+        exits 5 (none collected).
+      - hami-quant-trading: 26 test files and the product's Tk modules
+        open Tk roots, and 58 `verify_*_mutations.py` scripts start pytest
+        directly. Once it moves its testkit pin, those scripts' runs on the
+        Owner's desktop fail with `INTERACTIVE_DESKTOP_WINDOW` (a red
+        baseline) until they go through `atc test private`, and a plain
+        `pytest` of a Tk test there fails the same way. hami-quant has one
+        Tk test file. Their documented `ATC_PRIVATE_DESKTOP=1` still means
+        private.
+      - A Tk window opened by a child process a test starts is outside
+        the guard (it runs no plugin); the private desktop, which the
+        child inherits, is what covers it.
+    - Mitigations: `ci.py` sets `ATC_DESKTOP_GUARD=0` for the `slow`
+      invocation, the one run documented on the job's desktop; the
+      excluded-tests line names the opt-out; the guard reaches a consumer
+      only with its testkit pin, so hami-quant-trading routes its scripts
+      in the same change, and D.17's plan note for it says so. Tests: the
+      variable's three forms and the refusal, through `atc test run` and
+      `atc test mutants`; the guard in a child pytest forced on with
+      `ATC_DESKTOP_GUARD=1` (an unmarked test, a marked one, a swallowed
+      exception, a root at collection), skipped without `tkinter`; `0`
+      forces it off; `atc test private` returns the child's exit code and
+      reports `desktop: private`. `docs/TESTKIT.md` § Private desktop and
+      § Commands, and `adapters/python/atc-testkit/README.md`.
+27. The reviewer runs the integration verifier before the Owner's word
+    (Owner's ruling: batch 1). A hami-quant-trading step passed review and
+    got the Owner's word, then integration stopped with
+    `VERIFICATION_FAILED` on a test neither targeted set had selected,
+    which cost a second word.
+    - `atc verify --repo <checkout> --reviewed <full sha>
+      [--rebased <full sha>] [--branch <name>] [--json]`: the target
+      options of `atc integrate`, without authority. It fetches and
+      preflights as `atc integrate --check` does, builds the candidate
+      `atc integrate` would build (the reviewed commit on a fast-forward,
+      the merge on `NO_FF`) in a detached worktree under `<tmp>/candidates`,
+      runs the project's verifier from that candidate's own argv file and
+      timeout, and removes the candidate. It takes no slot, updates no ref,
+      writes no evidence or integration record and needs no Owner's word.
+      Its last line is `VERIFY PASS <candidate sha>`, or the refusal
+      `atc integrate` would give after the candidate
+      (`VERIFICATION_FAILED`, `VERIFICATION_TIMEOUT`, `CANDIDATE_CHANGED`)
+      with the verifier's tails and the kept working directory. It shares
+      `git_integrate`'s candidate and verifier code, so the selection,
+      static checks and stages (`parallel` and `serial` on a private
+      desktop) are the integration's own; a separate selection command
+      would need each project's selector and its static checks restated.
+    - A separate command, not `atc integrate --check --verify`:
+      `GIT_WORKFLOW.md` § Integrate says the check creates no candidate,
+      and changing that is a governance edit (batch 2). No governance text
+      has to change for `atc verify`.
+    - `atc-review` (a skill edit): before a PASS on a tests or behaviour
+      diff the reviewer runs `atc verify` with the integrate command's
+      target arguments and quotes its last line in the verified line; a
+      refusal is a blocker finding. Synced with
+      `atc onboard --sync --root-only`.
+    - Side effects:
+      - About four minutes per review plus the candidate's environment
+        (the root and hami-quant-trading build `.venv` from the lock), and
+        integration runs the verifier again: no evidence carries over.
+      - A candidate worktree is registered in the checkout's `.git` while
+        it runs; one left by a crash is pruned by `atc tmp prune` after
+        seven days, and an `atc worktree audit` run meanwhile lists it as
+        it lists `atc integrate`'s candidates.
+      - `main` may move between `atc verify` and the integration; the
+        integration verifies its own candidate, so a PASS from `atc verify`
+        is evidence for the review, not for the integration.
+      - CI: none. hami-quant and hami-quant-trading: their reviewers gain
+        the step once the skills are synced to them (After D).
+    - Mitigations: tests reuse `test_git_integrate`'s verifier fixtures: a
+      passing and a failing verifier, the candidate removed both ways, no
+      ref, record or evidence written, `main` unchanged, a `NO_FF` candidate
+      is the merge, and no slot taken (a concurrent `atc integrate` proceeds).
+      Reusing `atc verify`'s result as integration evidence is a
+      `VERIFICATION.md` § Full regression timing and evidence reuse change,
+      so it is not part of this entry.
 
 ## After D
 
