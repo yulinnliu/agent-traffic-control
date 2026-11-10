@@ -79,12 +79,12 @@ uv tool install -e atc/adapters/python
 git clone https://github.com/yulinnliu/agent-traffic-control.git atc
 cd atc/adapters/python
 uv run --locked python scripts/bootstrap.py init                        # 建立 workspace.yaml 與 projects/ worktrees/ state/
-uv run --locked python scripts/bootstrap.py add my-project --repo <url> # clone、登記、onboard、驗證
+uv run --locked python scripts/bootstrap.py add my-project --url <url>  # clone、登記、onboard、驗證
 uv run --locked python scripts/bootstrap.py status                      # doctor 加上 onboarding 乾跑檢查
 ```
 
 `add` 可加 `--skills atc-worktree,hami-writing-for-agents` 在 baseline 之外
-安裝 opt-in adapter；省略 `--repo` 時會使用你已放在 `projects/<name>` 的
+安裝 opt-in adapter；省略 `--url` 時會使用你已放在 `projects/<name>` 的
 checkout。這條路徑多了 worktree、preflight、policy 與 friction 工具，全部收在
 `atc` 一個指令底下（`uv run atc --help`，或 `uv tool install -e .` 放上
 PATH）；預期的目錄配置見 `docs/LAYOUT.md`。`atc` 會從工作目錄往上找最近的

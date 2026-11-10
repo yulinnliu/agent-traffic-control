@@ -88,13 +88,13 @@ uv tool install -e atc/adapters/python
 git clone https://github.com/yulinnliu/agent-traffic-control.git atc
 cd atc/adapters/python
 uv run --locked python scripts/bootstrap.py init                        # workspace.yaml, projects/ worktrees/ state/
-uv run --locked python scripts/bootstrap.py add my-project --repo <url> # clone, register, onboard, validate
+uv run --locked python scripts/bootstrap.py add my-project --url <url>  # clone, register, onboard, validate
 uv run --locked python scripts/bootstrap.py status                      # doctor plus a dry onboarding check
 ```
 
 `add` also takes `--skills atc-worktree,hami-writing-for-agents` to install
 opt-in adapters beside the baseline ones, and accepts a checkout you already
-placed at `projects/<name>` when `--repo` is omitted. This path adds the
+placed at `projects/<name>` when `--url` is omitted. This path adds the
 worktree, preflight, policy and friction tools behind one command, `atc`
 (`uv run atc --help`, or `uv tool install -e .` to have it on PATH); the
 layout it expects is in `docs/LAYOUT.md`, and `docs/WORKFLOW.md` walks one

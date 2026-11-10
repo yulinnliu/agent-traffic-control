@@ -17,22 +17,21 @@ the code every session runs.
   `worktrees/root`, so `atc validate` and every command that loads the map
   report it; `atc bootstrap add root` refuses before writing.
 - The canonical checkout stays on `main` with no tracked modification. It is
-  fast-forwarded by `atc integrate --repo` and serves the installed `atc`; it
+  fast-forwarded by `atc integrate` and serves the installed `atc`; it
   never checks out a topic branch and never renders managed copies.
 
 ### 2. `atc worktree` for the root
 
-- `create`, `resume`, `audit` and `cleanup` take `--repo <workspace root>`,
-  exclusive with `--project`. `--repo` accepts only the workspace root itself
-  (equal path key); any other path returns `UNKNOWN_PROJECT`.
-- The root is a `Project` built in `run` from `--repo` or from inference, never
+- `create`, `resume`, `audit` and `cleanup` take `--project root`, the name
+  `root` being reserved for the workspace root.
+- The root is a `Project` built in `run` from `--project root` or from inference, never
   an entry of `ws.projects`: repo `<root>`, worktrees `<root>/worktrees/root`,
   state `None`. `check_target_path` keeps iterating `ws.projects` for protected
   paths, so the root's missing state never enters it.
 - Inference: a working directory under `<root>/worktrees/root/` infers the
   root, in `atc worktree` and in `atc integrate` (which then targets the
-  canonical checkout as `--repo` does). Any other directory of the canonical
-  checkout infers nothing, as today, and needs `--repo`.
+  canonical checkout as `--project root` does). Any other directory of the
+  canonical checkout infers nothing and needs `--project root`.
 - `external_roots` always adds `<root>/.claude/worktrees`, independent of
   `ws.projects`.
 - A root worktree holds the committed tree only, as the integration verifier's
@@ -70,7 +69,7 @@ the code every session runs.
 ### 4. Documents
 
 - Root `AGENTS.md` § Changing this repo: an authorized change uses a worktree
-  created by `atc worktree create --repo <root>`; the canonical checkout always
+  created by `atc worktree create --project root`; the canonical checkout always
   stays on `main`; rendering and validation run in the topic worktree's
   `adapters/python/` through `uv run --locked atc` (bare `atc` runs the
   canonical checkout's code), from a subshell.
@@ -78,7 +77,7 @@ the code every session runs.
   the reserved name `root`.
 - `shared/skills/atc-worktree/SKILL.md`: the description (line 3), the
   inference rule (§ near line 59) and the closing note (line 183) describe
-  `--repo` and the root's inference; overlays and the three managed copies
+  `--project root` and the root's inference; overlays and the three managed copies
   follow through sync.
 - Docstrings of `hami_worktree.py` and `atc_cli`, `adapters/python/README.md`.
 

@@ -64,12 +64,13 @@ the final sync after the `.atc/` layout work.
 ## B. Integration task and authority
 
 1. `atc integrate`:
-   - `--task <value>`: a value of the form `<prefix>-<four digits>` with a
-     declared prefix names a record and derives the repository from the
-     prefix; the record must exist in the reviewed commit's tree
-     (`TASK_NOT_FOUND`) with the integrated branch as its `branch`
-     (`TASK_BRANCH_MISMATCH`). Any other value is a task identity string
-     (`CORE.md` § Task identity) and needs `--project` or `--repo`.
+   - `--task <value>` is required: a value of the form
+     `<prefix>-<four digits>` with a declared prefix names a record and
+     derives the repository from the prefix; the record must exist in the
+     reviewed commit's tree (`TASK_NOT_FOUND`), and for a range beyond
+     `.atc/tasks/` its `branch` is the integrated branch. Any other value is a
+     task identity string (`CORE.md` § Task identity) and needs `--project`
+     (`root` for the workspace root).
    - Authority is exactly one of: the record on `main` with
      `integrate_main: true`, which covers decision `FF` only
      (`AUTHORITY_NOT_FF`); or `--owner-words <quote>`.
@@ -95,13 +96,8 @@ the final sync after the `.atc/` layout work.
    - A range whose changed paths are all under `.atc/tasks/` runs the record
      check in place of the project's verifier, and its integration record
      carries `"records_only": true`, which `atc task list` reads.
-   - `--authority-reference` stays as a deprecated alias for the final-sync
-     period: its value becomes the task identity string, its authority is
-     recorded as `{"kind": "unclassified"}` (the run proceeds as today, on
-     the per-SHA word the caller holds), it never satisfies a record's
-     `integrate_main`, it is refused for any range that touches
-     `.atc/tasks/`, and stderr names the replacement. Its removal after the
-     final sync is a gate of this plan, not an option.
+   - `{"kind": "unclassified"}` remains an authority readers accept in
+     existing `integrations.jsonl` lines; no run writes it.
    - `--project root` names the workspace root in `atc integrate`,
      `atc worktree` and `atc task`.
 2. Records: `integrations.jsonl` lines gain `task`, `records_only` and `authority`
@@ -1649,14 +1645,16 @@ review, one implementation review and one integration:
 
 ## After D
 
-The `.atc/` layout work, then the final sync to every project (skills,
-governance, `## Task records` declarations with prefixes `HQ`, `HQT`, `RIA`,
-atc-coordinator seeded in hami-quant and hami-quant-trading), then the CLI
-trim below.
+The `.atc/` layout work, then the CLI trim below, integrated in the root
+first, then immediately the final sync to every project (skills, governance,
+`## Task records` declarations with prefixes `HQ`, `HQT`, `RIA`,
+atc-coordinator seeded in hami-quant and hami-quant-trading).
 
-## CLI trim after the final sync
+## CLI trim before the final sync
 
-Project skills use these until the final sync replaces them.
+Project skills name the removed flags until the final sync, which follows the
+trim's integration immediately, replaces them. Items 1-5 are done; items 6
+and 7 are deferred to the next atc-testkit release, after the final sync.
 
 1. `--authority-reference` goes; `--task` becomes required.
    - Side effects: a repository without `## Task records` (heartopia) has
@@ -1674,17 +1672,18 @@ Project skills use these until the final sync replaces them.
      the default does today, and stops when there are several.
 4. Drop `--contract`.
    - Side effects: 9 project skill files pass it until the final sync.
-   - Mitigations: the final sync drops it first; `atc doctor` keeps
-     printing the contract number.
+   - Mitigations: the final sync drops it right after the trim; `atc doctor`
+     keeps printing the contract number.
 5. Drop `onboard --apply`.
    - Side effects: `atc bootstrap add` calls it.
-   - Mitigations: `bootstrap` calls the apply mode as a function; the
-     adapter README row changes with it.
-6. Drop `tmp clean --tree-name`; `close-out --task` replaces it.
+   - Mitigations: `bootstrap` calls the apply mode as a function, and its
+     `--repo URL` becomes `--url URL`; the adapter README row changes with it.
+6. Deferred: drop `tmp clean --tree-name`; `close-out --task` replaces it.
    - Side effects: `atc-review` and 8 project skill files use it.
    - Mitigations: the final sync moves them to `close-out --task` first.
-7. Drop `atc preflight merge`'s alias (D.7) and `atc test run`'s positional
-   form (D.12).
+7. Deferred: drop `atc test run`'s positional form (D.12). `atc preflight
+   merge` already refuses and names `atc integrate --check`, since the trim
+   leaves it no `--branch` to forward.
    - Side effects: vendored governance and project skills that still name
      them.
    - Mitigations: the final sync carries C's governance and skills first.

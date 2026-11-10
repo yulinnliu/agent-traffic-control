@@ -16,7 +16,7 @@ The coordinator, on the Owner's word to start.
 
 ```text
 atc worktree create --project <project> --owner claude --topic <topic>
-atc worktree create --repo <root> --owner claude --topic <topic>
+atc worktree create --project root --owner claude --topic <topic>
 ```
 
 The second form is for a task of the workspace root itself, whose
@@ -33,7 +33,7 @@ and cleanup.
 The coordinator, inside the new worktree.
 
 ```text
-atc task new --repo "<root>" --scope "<plan section>"
+atc task new --project root --scope "<plan section>"
 atc task new --project <project> --scope "<plan section>"
 ```
 
@@ -41,8 +41,8 @@ It writes `.atc/tasks/<ID>.yaml` granting `edit` and `commit`; commit it on
 the topic branch. A record's `keep` list names what close-out keeps
 permanently (`docs/TASKS.md` § Record).
 
-- `CHECKOUT_CANONICAL` or `UNKNOWN_PROJECT` with a relative `--repo`: run it
-  inside the new worktree with the absolute root path, as the refusal says.
+- `CHECKOUT_CANONICAL`: the working directory is the canonical checkout; run
+  it inside the new worktree, as the refusal says.
 - `ON_MAIN`: the working directory is a checkout on `main`, not the
   worktree.
 
@@ -75,7 +75,7 @@ The writer runs the check on its tip, then writes the step report to
 report" says.
 
 ```text
-atc integrate --check --repo "<root>" --branch <branch> --task <ID> --reviewed <sha>
+atc integrate --check --task <ID> --reviewed <sha>
 ```
 
 - `REBASE_REQUIRED` or `OVERLAP`: rebase onto `main` and report the new tip.
@@ -91,7 +91,7 @@ build, and quotes its last line in the verified line
 (`VERIFICATION.md` § Independent review):
 
 ```text
-atc verify --repo "<root>" --branch <branch> --reviewed <sha>
+atc verify --project <project> --reviewed <sha>
 ```
 
 `atc verify` takes no slot, moves no ref and needs no Owner's word. Run it
@@ -110,11 +110,13 @@ full SHA to the writer (`GIT_WORKFLOW.md` § Task and authority).
 The writer, after the relay:
 
 ```text
-atc integrate --repo "<root>" --branch <branch> --task <ID> --reviewed <sha> --owner-words "<the relayed words>"
-atc close-out --task <ID> --repo "<root>"
+atc integrate --task <ID> --reviewed <sha> --owner-words "<the relayed words>"
+atc close-out --task <ID>
 ```
 
-Use `--project <project>` in place of `--repo "<root>"` for a project task.
+The record ID names the repository by its prefix and the branch by the
+record's `branch`; `--project <project>` (`root` for the workspace root)
+names it where the prefix is not declared on `main`.
 `atc close-out` removes the worktree, the task's scratches and its reports
 (`docs/TASKS.md` § Close-out):
 
@@ -134,6 +136,6 @@ Use `--project <project>` in place of `--repo "<root>"` for a project task.
 ## 8. Coordinator: push and archive
 
 The coordinator asks the Owner's push word once for whatever is integrated,
-checks with `atc preflight push --repo "<root>"`, pushes, archives the task's
+checks with `atc preflight push --project <project>`, pushes, archives the task's
 sessions and runs `atc close-out` for what the writer skipped
 (`DELIVERY.md` § Close-out and § 10).

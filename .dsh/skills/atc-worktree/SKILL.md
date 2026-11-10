@@ -57,10 +57,10 @@ the `GIT_WORKFLOW.md` topic-branch procedure in this clone, and report the
 branch, tip SHA and base SHA instead of a worktree path. Never substitute raw
 `git worktree` commands.
 
-Every call passes `--project <name> --contract 1 --json`. With `--project` absent,
+Every call passes `--project <name> --json`. With `--project` absent,
 the CLI infers the project whose repository or worktrees root holds the
 working directory; an explicit `--project` always wins. The workspace root
-repo takes `--repo <workspace root>` in place of `--project`; its worktrees
+repo takes `--project root`; its worktrees
 live under `worktrees/root/`, a working directory there infers it, and the
 rest of its canonical checkout infers nothing. Read the result from
 `--json`: `contract`, `command`, and per target `verdict`
@@ -190,7 +190,7 @@ missing lock and `PATH_UNSAFE` are findings.
   without a shell edits files but takes no part in worktree identity.
 - The workspace root repo's canonical checkout stays on `main`, since the
   installed `atc` runs its code; each root topic gets a worktree from
-  `atc worktree create --repo <workspace root>`.
+  `atc worktree create --project root`.
 
 ## Never
 
@@ -206,9 +206,8 @@ This tool's values for the two inputs you never choose yourself:
 
 - **owner:** `dsh`
 - **session:** `--session $env:DSH_SESSION_ID` on `create` and `resume` only; `audit` and `cleanup` reject it.
-- **contract:** pass `--contract 1` on every call.
 - The shell is Windows PowerShell 5.1: for example
-  `atc worktree audit --project <name> --contract 1`. There is no `&&`;
+  `atc worktree audit --project <name>`. There is no `&&`;
   chain with `; if ($?) { ... }`.
 - If `atc` is missing and the user points you at a checkout, the fallback is
   `uv run --locked --project "<checkout>\adapters\python" atc worktree ...`

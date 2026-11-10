@@ -65,8 +65,8 @@ End every completed step with a step report in the shape governance
    each command with its summary line and every surviving mutant.
 2. Run `atc integrate --check` on the tip (governance `GIT_WORKFLOW.md`
    § Mainline check before final self-verification) and report the verdict
-   it gives; `authority=missing` or `authority=not_checked` on its `CHECK`
-   line is pending authority (§ Integrate). On `REBASE_REQUIRED` or
+   it gives; `authority=missing` on its `CHECK` line is pending authority
+   (§ Integrate). On `REBASE_REQUIRED` or
    `OVERLAP`, rebase onto `main`, rerun the selection and report only the
    new tip.
 3. Stop every background job (governance `DELIVERY.md` § Background work).
@@ -158,8 +158,8 @@ diff against your last round's findings.
    gives, from the scratch copy's root; never with `python -I`, which
    drops the script's directory from the import path. Before a PASS on a diff that changes tests or behaviour, run
    `atc verify` with the target arguments of the integrate command below
-   (`--repo` or `--project`, `--branch`, `--reviewed`, and `--rebased` when
-   the integrate command has it): it runs the integration verifier on the
+   (`--project`, `--reviewed`, and `--rebased` when the integrate command
+   has it): it runs the integration verifier on the
    candidate `atc integrate` would build, without a slot, a ref update or
    the Owner's word. Run it while no integration runs. Quote its last line
    in the verified line; a refusal is a blocker finding.
@@ -204,9 +204,8 @@ file is `~/.atc/reports/<task>-<short sha>-review.md`.
   with `preflight.reason` and every entry of `resolved.warnings` in the
   verified line. A `refusal`, such as a missing `## Integration verification`
   section, leaves the PASS without an instruction: give the holder its
-  `reason`, `detail` and `next`. An authority of kind `missing` or
-  `not_checked` is pending authority (§ Integrate): the PASS still carries
-  the instruction. A
+  `reason`, `detail` and `next`. An authority of kind `missing` is pending
+  authority (§ Integrate): the PASS still carries the instruction. A
   `refusal` whose `next` names a rebase (`REBASE_REQUIRED`, or `OVERLAP` or
   `CONFLICT` of an unpublished topic) still carries the instruction, with that
   refusal quoted. In a repository without managed worktrees, a
@@ -224,12 +223,13 @@ file is `~/.atc/reports/<task>-<short sha>-review.md`.
   `atc integrate --task <task> --reviewed <SHA>`, with the task record ID,
   which names the repository, and the full 40-character reviewed SHA
   (governance `GIT_WORKFLOW.md` § Integrate). A task identity string in place
-  of a record ID adds `--project <name>`, or `--repo <root checkout>` for the
-  workspace root. When the record on `main` does not grant the integration,
+  of a record ID adds `--project <name>`, `--project root` for the workspace
+  root. When the record on `main` does not grant the integration,
   the holder adds `--owner-words` with the Owner's words quoted exactly and
   relays the filled instruction to the writer with the reviewed full SHA
   (governance `GIT_WORKFLOW.md` § Task and authority). The command names no branch, verifier or timeout: the tool
-  finds the branch from the reviewed SHA and reads the verifier from the
+  takes the branch from the record's `branch` (a task identity string: the
+  one local branch at the reviewed SHA) and reads the verifier from the
   `## Integration verification` section of `AGENTS.md` at `main`. In a
   repository without managed worktrees, where the topic branch lives in the
   main checkout, `git -C <main checkout> switch main` comes before it.
@@ -266,7 +266,7 @@ other action need their own instruction. Who may run which form of
    - `push.commits` lists every commit a push of `main` would carry; give
      the holder each entry whose `push_approval` is `false`, with its `sha`,
      `task` and `authority`, with any push request.
-     `atc preflight push --repo <main checkout> --json` gives the same list
+     `atc preflight push --project <name> --json` gives the same list
      before a later push.
 2. Close out (governance `DELIVERY.md` § Close-out) with
    `atc close-out --task <task>`, run from outside the task's worktree when

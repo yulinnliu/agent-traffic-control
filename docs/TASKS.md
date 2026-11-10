@@ -117,15 +117,15 @@ reads `integrated` for its integrated part until its `closure` says
 
 | Command | Does |
 | --- | --- |
-| `atc task new --scope TEXT [--project P \| --repo ROOT]` | writes `.atc/tasks/<id>.yaml` in the topic worktree holding the working directory: `task_id` one past the highest on `main` and every local and remote-tracking branch and in `integrations.jsonl`, so a number is never reused on this machine; `repository` from the `origin` remote; `base_sha` the merge base of `HEAD` and `main`; `governance_source` and `governance_revision` from the repository's bound governance (the workspace root, being the source, binds its own `main`); `branch` the current branch; `authority` `edit` and `commit` true, the rest false. Refuses in a checkout on `main` and in the workspace root's canonical checkout |
-| `atc task list [--project P \| --repo ROOT \| --all] [--status S] [--json]` | reads the records on `main` and every local branch without a checkout, one line per task: `task_id`, status, `branch`, the first 60 characters of `scope`. A record on several refs shows the copy on `main` for authority and the copy on its own `branch` for the rest. Without a target it infers the project as `atc worktree` does; `--all` covers every registered project and the root |
+| `atc task new --scope TEXT [--project P]` | writes `.atc/tasks/<id>.yaml` in the topic worktree holding the working directory: `task_id` one past the highest on `main` and every local and remote-tracking branch and in `integrations.jsonl`, so a number is never reused on this machine; `repository` from the `origin` remote; `base_sha` the merge base of `HEAD` and `main`; `governance_source` and `governance_revision` from the repository's bound governance (the workspace root, being the source, binds its own `main`); `branch` the current branch; `authority` `edit` and `commit` true, the rest false. Refuses in a checkout on `main` and in the workspace root's canonical checkout |
+| `atc task list [--project P \| --all] [--status S] [--json]` | reads the records on `main` and every local branch without a checkout, one line per task: `task_id`, status, `branch`, the first 60 characters of `scope`. A record on several refs shows the copy on `main` for authority and the copy on its own `branch` for the rest. Without a target it infers the project as `atc worktree` does; `--all` covers every registered project and the root |
 | `atc task check [DIR]` | checks the records in the working tree of `DIR` (default: the working directory's repository) |
 
 ## Close-out
 
-`atc close-out --task <ID> [--project P | --repo ROOT] [--skip ITEM]...` carries out governance
+`atc close-out --task <ID> [--project P] [--skip ITEM]...` carries out governance
 `DELIVERY.md` § Close-out for one task, the project named as `atc task` names
-it. Without `--project` or `--repo` the project is the one repository, the
+it. Without `--project` the project is the one repository, the
 workspace root or a registered project, whose `AGENTS.md` on `main` declares
 the task's prefix, as `atc integrate --task` resolves it; with none or
 several, the working directory's.
@@ -158,5 +158,5 @@ prefix; records without a declaration; a declaration with no prefix line;
 and one prefix declared by two repositories. `atc task list` marks a
 `task_id` that two refs bind to different branches as `CONFLICT`.
 
-The project is named as `atc worktree` names it: `--project <name>`, `--repo
-<workspace root>`, or inferred from the working directory.
+The project is named as `atc worktree` names it: `--project <name>`, `root`
+for the workspace root, or inferred from the working directory.

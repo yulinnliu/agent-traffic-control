@@ -4,7 +4,6 @@ This tool's values for the two inputs you never choose yourself:
 
 - **owner:** `claude`
 - **session:** `--session "$CLAUDE_CODE_SESSION_ID"` on `create` and `resume` only; `audit` and `cleanup` reject it.
-- **contract:** pass `--contract 1` on every call.
 - Reach the worktree through the absolute path the CLI prints: `git -C <path>`,
   absolute file paths, or a subshell `( cd <path> && ... )`. A top-level `cd`
   into the worktree becomes the session's working directory for every later

@@ -246,7 +246,7 @@ Side effects:
    path sync writes and is not checked.
 2. Validate, in a project that is the top of its own Git checkout, fails on
    a file sync writes that Git ignores or excludes, and lists one that is
-   not committed yet as a note: `atc bootstrap add` onboards with `--apply`,
+   not committed yet as a note: `atc bootstrap add` onboards with the apply step,
    which writes without committing, and validates right after.
 3. `scripts/check-skills.sh` reports an ignored one as `ignored`.
 

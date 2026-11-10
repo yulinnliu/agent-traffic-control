@@ -45,7 +45,7 @@ verdict              "FF" | "NO_FF"
 tasks                every task the integration names, as in its integrations.jsonl lines
 task                 the one entry of tasks, or null when tasks holds several
 authority            {"kind": "record", "task_id": str} | {"kind": "owner_words", "quote": str}
-                     | {"kind": "unclassified"} for the deprecated --authority-reference
+                     | {"kind": "unclassified"}, which readers accept and no adapter writes
 verify_argv          the verifier argv that ran
 platform             {"system": str, "machine": str}
 verified_at          UTC timestamp, ISO 8601
