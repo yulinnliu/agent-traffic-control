@@ -14,6 +14,12 @@ from test_tooling import run_git, write
 SH = shutil.which("sh")
 SCRIPTS = Path(__file__).resolve().parents[3] / "scripts"
 pytestmark = pytest.mark.skipif(SH is None, reason="no POSIX sh on PATH")
+# check-skills.sh judges the lock against this ATC tree's own history (`git -C "$ROOT" rev-parse HEAD`):
+# a Git checkout, as the integration candidate and CI are, has one; an `atc tmp checkout` export has none.
+needs_atc_history = pytest.mark.skipif(
+    not (SCRIPTS.parent / ".git").exists(),
+    reason="check-skills.sh reads the ATC tree's Git history; this tree is an export without .git",
+)
 
 
 def sh(script: str, *args: str, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
@@ -42,6 +48,7 @@ def test_directory_without_skill_md_is_a_collision(tmp_path: Path) -> None:
     assert mine.is_file()
 
 
+@needs_atc_history
 def test_managed_directory_is_repaired_whatever_its_file_names(tmp_path: Path) -> None:
     repo = make_repo(tmp_path)
     assert sh("link-skills.sh", repo.as_posix(), "hami-handoff-reminder").returncode == 0
@@ -68,6 +75,7 @@ def test_managed_directory_is_repaired_whatever_its_file_names(tmp_path: Path) -
     assert check.returncode == 0 and "current    .claude/skills/hami-handoff-reminder" in check.stdout
 
 
+@needs_atc_history
 def test_dangling_skill_md_link_is_relinked_only_when_alone(tmp_path: Path) -> None:
     repo = make_repo(tmp_path)
     adapter = repo / ".claude/skills/atc-review"
