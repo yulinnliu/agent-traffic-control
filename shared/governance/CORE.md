@@ -57,8 +57,8 @@ its own repository, so another project's numbering never labels the work.
 A change carried from the governance source into several repositories, such
 as a governance or skill sync, is identified by its source revision: each
 repository's sync commit subject names that revision and the reason for the
-sync. Every repository commits the files sync writes, so every sync is such
-a commit.
+sync. Every repository commits the files sync writes, so every sync that
+changes a file is such a commit.
 
 ### Effective authority and revocation
 

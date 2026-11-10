@@ -533,8 +533,10 @@ The verifier therefore:
 
 A project's `.atc/atc.lock` advances to a revision carrying this section only
 when the project's `AGENTS.md` already has its
-`## Integration verification` section and the named argv file exists. Add
-the section and the file in the project first, then sync.
+`## Integration verification` section and the named argv file exists.
+Otherwise sync stops the project with `VERIFICATION_SECTION_MISSING` and
+writes nothing, so the synced files never come from a newer revision than
+the lock. Add the section and the file in the project first, then sync.
 
 ## Governance sync commits
 
