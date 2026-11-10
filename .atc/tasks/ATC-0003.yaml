@@ -1,0 +1,16 @@
+task_id: ATC-0003
+repository: yulinnliu/agent-traffic-control
+base_sha: d5a8b27ef5cc836cc13c6612731b33b486018c0e
+scope: 'Plan doc for topic C of docs/TASK_CONTRACT_PLAN.md: § C additions, placement
+  table, C.8 editorial pass, D and item 5 CLI changes with side effects, tool-output
+  audit'
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: d5a8b27ef5cc836cc13c6612731b33b486018c0e
+branch: worktree-claude+task-contract-plan-c
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
