@@ -78,7 +78,7 @@ fi
 # Every file sync writes is committed, so none may be ignored or excluded.
 ignored=$(for path in AGENTS.md CLAUDE.md .atc/README.md .atc/atc.lock .atc/governance/INDEX.md; do echo "$path"; done
   for skill in "$@"; do for tool in .claude .agents .dsh; do
-    [ -f "$ROOT/$tool/skills/$skill/SKILL.md" ] && echo "$tool/skills/$skill/SKILL.md"
+    if [ -f "$ROOT/$tool/skills/$skill/SKILL.md" ]; then echo "$tool/skills/$skill/SKILL.md"; fi
   done; done)
 ignored=$(echo "$ignored" | git -C "$REPO" check-ignore --stdin 2>/dev/null || true)
 if [ -n "$ignored" ]; then

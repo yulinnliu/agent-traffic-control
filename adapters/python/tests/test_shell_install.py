@@ -23,6 +23,9 @@ def make_repo(tmp_path: Path) -> Path:
     repo = tmp_path / "repo"
     repo.mkdir()
     run_git(repo, "init", "-q", "-b", "main")
+    # link-skills stops before writing without this section (GIT_WORKFLOW.md § Lock advancement).
+    write(repo / "AGENTS.md", "# AGENTS.md\n\n## Integration verification\n\n- Verifier argv file: verify.json\n")
+    write(repo / "verify.json", '["true"]\n')
     return repo
 
 

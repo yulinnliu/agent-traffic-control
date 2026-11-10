@@ -487,14 +487,14 @@ def test_stray_file_under_atc_is_reported_and_blocks_the_atc_part(tmp_path: Path
 @pytest.mark.integration
 def test_task_records_under_atc_are_the_projects_and_never_touched(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root, project = make_workspace(tmp_path)
-    record = project / ".atc/tasks/DEMO-0001.yaml"
+    record = project / validator.TASKS_DIR / "DEMO-0001.yaml"
     write(record, "task_id: DEMO-0001\n")
-    write(project / ".atc/tasks/notes/scratch.txt", "x\n")
+    write(project / validator.TASKS_DIR / "notes/scratch.txt", "x\n")
     plan = onboard_project.build_plan(project, root)
-    assert not any(i.path.is_relative_to(project / ".atc/tasks") for i in plan)
+    assert not any(i.path.is_relative_to(project / validator.TASKS_DIR) for i in plan)
     assert onboard_project.run("sync", [("demo", project)], root, prune=True) == 0
     assert record.read_text(encoding="utf-8") == "task_id: DEMO-0001\n"
-    assert not any(".atc/tasks" in f and "not a file sync writes" in f for f in check_registered_projects(root, monkeypatch))
+    assert not any(validator.TASKS_DIR.as_posix() in f and "not a file sync writes" in f for f in check_registered_projects(root, monkeypatch))
 
 
 @pytest.mark.integration
@@ -503,7 +503,7 @@ def test_project_in_the_previous_layout_is_migrated_in_write_order(tmp_path: Pat
     write(project / "AGENTS.md", f"# AGENTS.md\n\nIntro.\n\n{validator.LEGACY_POLICY_BEGIN}\nold\n{validator.LEGACY_POLICY_END}\n\n## What this is\n\nDemo.\n\n" + VERIFICATION_SECTION)
     write(project / ".atc/governance.yaml", "# Written by Agent Traffic Control sync; never edited by hand.\nmanaged-by: agent-traffic-control\nsource: a/b\nrevision: 1234\n")
     write(project / ".atc/governance/CORE.md", "# older\n")
-    write(project / ".atc/tasks/DEMO-0001.yaml", "task_id: DEMO-0001\n")
+    write(project / validator.TASKS_DIR / "DEMO-0001.yaml", "task_id: DEMO-0001\n")
     write(project / "CLAUDE.md", onboard_project.LEGACY_CLAUDE_MD)
     plan = onboard_project.build_plan(project, root)
     writes = [i.path.relative_to(project).as_posix() for i in plan if i.action in ("create", "update")]
@@ -513,7 +513,7 @@ def test_project_in_the_previous_layout_is_migrated_in_write_order(tmp_path: Pat
     assert onboard_project.run("sync", [("demo", project)], root) == 0
     assert not (project / ".atc/governance.yaml").exists()
     assert sorted(p.name for p in (project / ".atc").iterdir()) == ["README.md", "atc.lock", "governance", "tasks"]
-    assert (project / ".atc/tasks/DEMO-0001.yaml").read_text(encoding="utf-8") == "task_id: DEMO-0001\n"
+    assert (project / validator.TASKS_DIR / "DEMO-0001.yaml").read_text(encoding="utf-8") == "task_id: DEMO-0001\n"
     assert (project / "AGENTS.md").read_text(encoding="utf-8").startswith(f"# AGENTS.md\n\nIntro.\n\n{POINTER}\n\n## What this is\n")
     assert (project / "CLAUDE.md").read_text(encoding="utf-8") == (root / "CLAUDE.md").read_text(encoding="utf-8")
     assert not [f for f in check_registered_projects(root, monkeypatch) if "task records" not in f]
@@ -621,7 +621,7 @@ def test_previous_root_claude_md_is_replaced_and_any_other_kept(tmp_path: Path) 
 def test_root_atc_holds_only_task_records(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root, _ = make_workspace(tmp_path)
     monkeypatch.setattr(validator, "ROOT", root)
-    write(root / ".atc/tasks/ATC-0001.yaml", "task_id: ATC-0001\n")
+    write(root / validator.TASKS_DIR / "ATC-0001.yaml", "task_id: ATC-0001\n")
     validator.FAILURES.clear()
     validator.check_root_atc()
     assert validator.FAILURES == []
