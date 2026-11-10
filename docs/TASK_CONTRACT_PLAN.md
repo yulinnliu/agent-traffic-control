@@ -44,8 +44,8 @@ the final sync after the `.atc/` layout work.
      `integrations.jsonl` through `git_preflight.read_integrations`.
    - `new` reads the governance binding through one function,
      `bound_governance(repo)`: the root's `main`, or the revision in a
-     project's `.atc/governance.yaml` (the layout work changes only this
-     function, to read `.atc/atc.lock`). It writes with `yaml.safe_dump`.
+     project's `.atc/atc.lock` (`docs/ATC_LAYOUT_PLAN.md` § 2). It writes
+     with `yaml.safe_dump`.
 3. `validate_workspace.py`: the record check for this repository and for each
    registered project, and the duplicate-prefix check across them.
 4. Conformance: `shared/conformance/task-records/` with cases `ok`,
@@ -834,10 +834,9 @@ change, its side effects, their mitigations.
       - Timeout: `adapters/python/README.md` derives it as three times the
         measured full-run wall clock in the verifier, rounded up to a whole
         minute and never below 300 s; 3 × 822 s = 2466 s gives 2520 s,
-        which replaces
-        1800 s in root `AGENTS.md`, since the verifier still widens to the
-        full suite (`conftest.py`, the selector, `pyproject.toml`, an
-        unmapped path).
+        which replaces 1800 s in root `AGENTS.md`, since the verifier still
+        widens to the full suite (`conftest.py`, the selector,
+        `pyproject.toml`, an unmapped path).
       - The addition to D where the verifier subtracts what the writer
         already ran is not in this plan yet; for the root it would find
         nothing to subtract, since the root writes no evidence the writer's

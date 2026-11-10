@@ -15,7 +15,7 @@ Then read `shared/governance/INDEX.md` and `CORE.md` from that exact same revisi
 - Normative governance lives only under `shared/governance/`. Changing it routes through `GOVERNANCE_CHANGES.md`.
 - Policy shapes live in `shared/policies/schemas/`; `shared/policies/examples/` are illustrations, never a project's real policy.
 - A shared skill's single source is `shared/skills/<name>/SKILL.md` plus optional per-tool overlays in `adapters/<tool>.md`; `.claude/`, `.agents/` and `.dsh/` hold managed copies rendered from them by `atc onboard --sync --root-only`, never edited by hand. A canonical skill never names this checkout by path or environment variable.
-- `CLAUDE.md` here is what onboarding copies verbatim into every registered project, so it stays a one-line pointer that reads correctly from any repo. Guidance belongs in this file or `docs/`.
+- `CLAUDE.md` here is what onboarding copies verbatim into every registered project, so it stays the `@AGENTS.md` import with one sentence, which reads correctly from any repo. Guidance belongs in this file or `docs/`.
 - `scripts/` holds POSIX sh entry points that need no runtime (install and check adapters); tool implementations live under `adapters/<language>/`; the contract they implement is `shared/conformance/`, not their own tests.
 
 ## Changing this repo

@@ -15,7 +15,7 @@ location, in that order.
 | `atc` command | Script | Does |
 | --- | --- | --- |
 | `bootstrap` | `bootstrap.py` | `init`, `add NAME [--repo URL] [--skills a,b]`, `sync [NAME] [--prune]`, `status`: the quickstart path over the tools below |
-| `validate` | `validate_workspace.py` | canonical skills versus rendered adapters, root contract, task records and their declaration, `--projects` for registered checkouts (adapters, policy block, vendored governance, task records, one prefix per repository), `--root DIR --adapters-only` for a fixture |
+| `validate` | `validate_workspace.py` | canonical skills versus rendered adapters, root contract, task records and their declaration, `--projects` for registered checkouts (adapters, the `AGENTS.md` pointer line, `.atc/` with its lock, task records, one prefix per repository), `--root DIR --adapters-only` for a fixture |
 | `onboard` | `onboard_project.py` | `--check`, `--apply`, `--sync [--prune]` a project's managed files; `--root-only` re-renders this checkout's adapters; never touches project-owned files |
 | `doctor` | `doctor.py` | local readiness: `READY`, `NOT_INITIALIZED`, `ERROR` |
 | `policies` | `policies.py` | `check DIR`: schema-validate a policy directory and refuse contradictions |
