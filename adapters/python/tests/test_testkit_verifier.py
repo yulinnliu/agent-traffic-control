@@ -563,3 +563,43 @@ def test_atc_integrate_reports_the_skeletons_refusal_token(integration_repo: Pat
     assert git(integration_repo, "rev-parse", "main") == before
     kept = list((atc_tmp / "systmp").iterdir())
     assert len(kept) == 1 and (kept[0] / "pytest-parallel.log").is_file()
+
+
+def verify(root: Path, *extra: str) -> int:
+    tip = (root / ".git/atc-test-tip").read_text(encoding="utf-8")
+    return gi.verify_main(["--repo", str(root), "--branch", "topic", "--reviewed", tip, *extra])
+
+
+@pytest.mark.integration
+def test_atc_verify_runs_the_verifier_on_the_candidate_without_the_slot_or_a_ref(
+        integration_repo: Path, atc_tmp: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    from integration_slot import IntegrationSlot
+    before = git(integration_repo, "rev-parse", "main")
+    refs = git(integration_repo, "for-each-ref")
+    with IntegrationSlot(integration_repo):
+        code = verify(integration_repo)
+    captured = capsys.readouterr()
+    assert code == 0, captured
+    last = captured.out.splitlines()[-1]
+    assert last.startswith("VERIFY PASS ") and " FF log " in last
+    assert git(integration_repo, "rev-parse", "main") == before and git(integration_repo, "for-each-ref") == refs
+    assert git(integration_repo, "worktree", "list", "--porcelain").count("worktree ") == 1
+    assert [path.suffix for path in (atc_tmp / "candidates").iterdir()] == [".log"]
+
+
+@pytest.mark.integration
+def test_atc_verify_reports_the_verifiers_refusal_and_moves_nothing(
+        integration_repo: Path, atc_tmp: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    git(integration_repo, "switch", "-q", "topic")
+    (integration_repo / "tests/test_a.py").write_text("def test_a():\n    assert False\n", encoding="utf-8")
+    git(integration_repo, "add", ".")
+    git(integration_repo, "commit", "-q", "-m", "red")
+    tip = git(integration_repo, "rev-parse", "HEAD")
+    git(integration_repo, "switch", "-q", "main")
+    (integration_repo / ".git/atc-test-tip").write_text(tip, encoding="utf-8")
+    before = git(integration_repo, "rev-parse", "main")
+    assert verify(integration_repo) == 3
+    captured = capsys.readouterr()
+    assert any(line.startswith("STOP VERIFICATION_FAILED") for line in captured.err.splitlines())
+    assert "verifier: TESTS_FAILED" in captured.err
+    assert "VERIFY PASS" not in captured.out and git(integration_repo, "rev-parse", "main") == before

@@ -288,11 +288,16 @@ last round's findings continues the same reviewer with the findings and the
 fix diff; new design or new files get a fresh reviewer. No rule requires the
 final round to be fresh.
 
-A reviewer does not rerun the selection the writer ran at the reviewed SHA.
-It runs only the tests that settle its own doubts, such as a finding, a
-suspected gap or a test it adds in its scratch, and names those tests in its
-verdict. The full regression of § Full regression timing and evidence reuse,
-by default the project's manually dispatched remote CI, is the safety net.
+A reviewer's targeted tests are its own choice: the tests that settle its own
+doubts, such as a finding, a suspected gap or a test it adds in its scratch,
+named in its verdict. Before a PASS on a diff that changes tests or
+behaviour, it also runs `atc verify` with the integrate command's target
+arguments, which runs the integration verifier's own checks and selection on
+the candidate `atc integrate` would build, and quotes its last line in the
+verified line; a refusal is a blocker finding. Apart from that run it does
+not rerun the selection the writer ran at the reviewed SHA. The full
+regression of § Full regression timing and evidence reuse, by default the
+project's manually dispatched remote CI, is the safety net.
 
 A verdict's first line is the verdict token, then one line per finding
 (severity, `file:line`, required fix), the verified items as one line, and no

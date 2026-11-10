@@ -18,7 +18,7 @@ pytestmark = pytest.mark.integration
 SUBCOMMANDS = [
     ("worktree",), ("worktree", "create"), ("worktree", "resume"), ("worktree", "audit"), ("worktree", "cleanup"),
     ("preflight",), ("preflight", "merge"), ("preflight", "cleanup"),
-    ("integrate",), ("close-out",), ("task",), ("task", "new"), ("task", "list"), ("task", "check"), ("validate",), ("onboard",),
+    ("integrate",), ("verify",), ("close-out",), ("task",), ("task", "new"), ("task", "list"), ("task", "check"), ("validate",), ("onboard",),
     ("bootstrap",), ("bootstrap", "init"), ("bootstrap", "add"), ("bootstrap", "sync"), ("bootstrap", "status"),
     ("doctor",), ("policies",), ("policies", "check"), ("enforce",), ("classify",),
     ("friction",), ("friction", "add"), ("friction", "list"), ("friction", "summary"), ("friction", "resolve"),

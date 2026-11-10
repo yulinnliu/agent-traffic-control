@@ -19,6 +19,7 @@ import sys
 import time
 import uuid
 import tempfile
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -837,149 +838,97 @@ def integrate(t: Target, progress: bool = True) -> tuple[int, dict]:
         if rev(repo, main) != main_before or rev(repo, "HEAD") != main_before:
             return STOP_BEFORE_CANDIDATE, {**result, "refusal": stop("REF_DRIFT", f"{main} moved after preflight; main unchanged")}
 
-        places = locations.locate()
-        candidate_root = places.tmp / locations.CANDIDATES
-        try:
-            candidate_root.mkdir(exist_ok=True)
-        except OSError as exc:
-            raise locations.Refusal(locations.UNSUITABLE, f"cannot be created: {candidate_root}: {exc}") from exc
-        candidate_dir = candidate_root / secrets.token_hex(CANDIDATE_ID_BYTES)
-        report_path = candidate_dir.with_name(candidate_dir.name + ".report.json")
-        candidate_created = False
+        built = Built()
         candidate_ref: str | None = None
         integration_updated = False
         try:
-            base = main_before if report.verdict == "NO_FF" else reviewed
-            add = git(repo, "worktree", "add", "--detach", str(candidate_dir), base, check=False)
-            if add.returncode:
-                raise Refused("CANDIDATE_NOT_CREATED", f"could not create isolated candidate worktree: {(add.stderr or add.stdout).strip()}")
-            candidate_created = True
+            with build_and_verify(
+                repo, main_before, reviewed, report.verdict, t.verify_argv, t.timeout, built,
+                branch=branch, records_only=t.binding.records_only, timeout_source=t.timeout_source,
+                progress=progress,
+            ):
+                built.fill(result)
+                candidate_sha = built.candidate_sha
+                verifier_report = built.report
 
-            if report.verdict == "NO_FF":
-                result["message"] = f"merge({topic_name(branch)}): integrate reviewed changes"
-                merged = git(
-                    candidate_dir, "merge", "--no-ff", "--no-edit", "-m", result["message"], reviewed,
-                    check=False,
-                )
-                if merged.returncode:
-                    git(candidate_dir, "merge", "--abort", check=False)
-                    raise Refused("CANDIDATE_MERGE_FAILED", f"candidate merge failed: {(merged.stderr or merged.stdout).strip()}")
-            candidate_sha = rev(candidate_dir, "HEAD")
-            if candidate_sha is None or not FULL_SHA.fullmatch(candidate_sha):
-                raise Refused("CANDIDATE_NOT_CREATED", "candidate did not resolve to a full commit SHA")
-            result["candidate_sha"] = candidate_sha
-            if report.verdict == "NO_FF":
-                first, second = _git_ok(candidate_dir, "rev-parse", f"{candidate_sha}^1", f"{candidate_sha}^2").split()
-                result.update(first_parent=first, second_parent=second)
-                if (first, second) != (main_before, reviewed):
+                # Final source and target checks are inside the cooperative slot.
+                if rev(repo, branch) != source_before or source_before != reviewed:
+                    raise stop("REF_DRIFT", "source tip changed after candidate verification; main unchanged", after_candidate=True)
+                if rev(repo, main) != main_before or rev(repo, "HEAD") != main_before:
+                    raise stop("REF_DRIFT", f"{main} drifted after candidate verification; main unchanged", after_candidate=True)
+                if git(repo, "status", "--porcelain", "--untracked-files=no").stdout.strip():
+                    raise stop("REF_DRIFT", "integration checkout became dirty; main unchanged", after_candidate=True)
+
+                candidate_ref = f"{CANDIDATE_REFS}/{candidate_sha}"
+                ref_create = git(repo, "update-ref", candidate_ref, candidate_sha, check=False)
+                if ref_create.returncode:
+                    raise Refused("CANDIDATE_REF_FAILED", f"could not retain candidate recovery ref: {(ref_create.stderr or ref_create.stdout).strip()}")
+                result["candidate_ref"] = candidate_ref
+
+                update = git(repo, "merge", "--ff-only", candidate_sha, check=False)
+                if update.returncode:
                     raise stop(
-                        "CANDIDATE_CHANGED", f"candidate parent mismatch: {first} {second}; expected {main_before} {reviewed}",
+                        "REF_DRIFT",
+                        f"checkout-aware fast-forward rejected candidate; main was not reset: {(update.stderr or update.stdout).strip()}",
                         after_candidate=True,
                     )
-            elif candidate_sha != reviewed:
-                raise stop("CANDIDATE_CHANGED", f"FF candidate is {candidate_sha}, expected reviewed SHA {reviewed}", after_candidate=True)
-
-            verification_started = time.monotonic()
-            if t.binding.records_only:
-                if progress:
-                    print(f"verify: candidate {candidate_sha} {RECORD_CHECK}", file=sys.stderr)
-                _check_records(candidate_dir, candidate_sha)
-                verification_warning, verifier_report, evidence_reason = None, None, "RECORDS_ONLY"
-            else:
-                if progress:
-                    print(f"verify: candidate {candidate_sha} timeout {t.timeout:g}s ({t.timeout_source})", file=sys.stderr)
-                verification_warning, log = _verify_candidate(
-                    t.verify_argv, candidate_dir, candidate_sha, main_before, reviewed, t.timeout, places.systmp,
-                    report_path,
-                )
-                if log is not None:
-                    result[LOG_KEY] = str(log)
-                verifier_report, evidence_reason = _read_report(report_path)
-            result["verification"] = "PASS"
-            result["verification_seconds"] = round(time.monotonic() - verification_started, 1)
-            result["evidence_reason"] = evidence_reason
-            if verification_warning:
-                result["verification_warning"] = verification_warning
-
-            # Final source and target checks are inside the cooperative slot.
-            if rev(repo, branch) != source_before or source_before != reviewed:
-                raise stop("REF_DRIFT", "source tip changed after candidate verification; main unchanged", after_candidate=True)
-            if rev(repo, main) != main_before or rev(repo, "HEAD") != main_before:
-                raise stop("REF_DRIFT", f"{main} drifted after candidate verification; main unchanged", after_candidate=True)
-            if git(repo, "status", "--porcelain", "--untracked-files=no").stdout.strip():
-                raise stop("REF_DRIFT", "integration checkout became dirty; main unchanged", after_candidate=True)
-
-            candidate_ref = f"{CANDIDATE_REFS}/{candidate_sha}"
-            ref_create = git(repo, "update-ref", candidate_ref, candidate_sha, check=False)
-            if ref_create.returncode:
-                raise Refused("CANDIDATE_REF_FAILED", f"could not retain candidate recovery ref: {(ref_create.stderr or ref_create.stdout).strip()}")
-            result["candidate_ref"] = candidate_ref
-
-            update = git(repo, "merge", "--ff-only", candidate_sha, check=False)
-            if update.returncode:
-                raise stop(
-                    "REF_DRIFT",
-                    f"checkout-aware fast-forward rejected candidate; main was not reset: {(update.stderr or update.stdout).strip()}",
-                    after_candidate=True,
-                )
-            integration_updated = True
-            main_after = rev(repo, main)
-            result["main_after"] = main_after
-            if main_after == candidate_sha:
-                # main holds the candidate, so the integration happened even
-                # when its checkout needs recovery below.
-                _note_integration(repo, result, candidate_sha, reviewed, t.binding, t.carried_from, main_before, t.verifier)
-            if main_after != candidate_sha or rev(repo, "HEAD") != candidate_sha:
-                raise stop(
-                    "RECOVERY_REQUIRED",
-                    f"main={main_after}, HEAD={rev(repo, 'HEAD')}, candidate={candidate_sha}; retained {candidate_ref}",
-                    after_candidate=True,
-                )
-            status = git(repo, "status", "--porcelain", "--untracked-files=no").stdout.strip()
-            if status:
-                raise stop(
-                    "RECOVERY_REQUIRED",
-                    f"main advanced to {candidate_sha} but checkout is dirty ({status}); retained {candidate_ref}",
-                    after_candidate=True,
-                )
-            if verifier_report is not None:
+                integration_updated = True
+                main_after = rev(repo, main)
+                result["main_after"] = main_after
+                if main_after == candidate_sha:
+                    # main holds the candidate, so the integration happened even
+                    # when its checkout needs recovery below.
+                    _note_integration(repo, result, candidate_sha, reviewed, t.binding, t.carried_from, main_before, t.verifier)
+                if main_after != candidate_sha or rev(repo, "HEAD") != candidate_sha:
+                    raise stop(
+                        "RECOVERY_REQUIRED",
+                        f"main={main_after}, HEAD={rev(repo, 'HEAD')}, candidate={candidate_sha}; retained {candidate_ref}",
+                        after_candidate=True,
+                    )
+                status = git(repo, "status", "--porcelain", "--untracked-files=no").stdout.strip()
+                if status:
+                    raise stop(
+                        "RECOVERY_REQUIRED",
+                        f"main advanced to {candidate_sha} but checkout is dirty ({status}); retained {candidate_ref}",
+                        after_candidate=True,
+                    )
+                if verifier_report is not None:
+                    try:
+                        result["evidence"] = str(_write_evidence(repo, {
+                            "schema": EVIDENCE_SCHEMA,
+                            "candidate_sha": candidate_sha,
+                            "tree": _git_ok(repo, "rev-parse", f"{candidate_sha}^{{tree}}"),
+                            "clean": True,
+                            "expected_main": main_before,
+                            "reviewed": reviewed,
+                            "verdict": result["verdict"],
+                            **({"carried_over_from": t.carried_from} if t.carried_from else {}),
+                            "task": t.binding.tasks[0] if len(t.binding.tasks) == 1 else None,
+                            "tasks": t.binding.tasks,
+                            "authority": t.binding.authority,
+                            "verify_argv": t.verify_argv,
+                            "platform": {"system": sys.platform, "machine": platform.machine()},
+                            "verified_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                            "duration_seconds": result["verification_seconds"],
+                            "report": verifier_report,
+                        }))
+                    except (OSError, GitError):
+                        result["evidence_reason"] = "WRITE_FAILED"
                 try:
-                    result["evidence"] = str(_write_evidence(repo, {
-                        "schema": EVIDENCE_SCHEMA,
-                        "candidate_sha": candidate_sha,
-                        "tree": _git_ok(repo, "rev-parse", f"{candidate_sha}^{{tree}}"),
-                        "clean": True,
-                        "expected_main": main_before,
-                        "reviewed": reviewed,
-                        "verdict": result["verdict"],
-                        **({"carried_over_from": t.carried_from} if t.carried_from else {}),
-                        "task": t.binding.tasks[0] if len(t.binding.tasks) == 1 else None,
-                        "tasks": t.binding.tasks,
-                        "authority": t.binding.authority,
-                        "verify_argv": t.verify_argv,
-                        "platform": {"system": sys.platform, "machine": platform.machine()},
-                        "verified_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-                        "duration_seconds": result["verification_seconds"],
-                        "report": verifier_report,
-                    }))
-                except (OSError, GitError):
-                    result["evidence_reason"] = "WRITE_FAILED"
-            try:
-                own = set(git(repo, "rev-list", f"{main_before}..{candidate_sha}").stdout.split())
-                result["push"] = gp.push_listing(repo, main, own)
-            except GitError as exc:
-                result["push_warning"] = f"could not list origin/{main}..{main}: {exc}"
-            return 0, result
+                    own = set(git(repo, "rev-list", f"{main_before}..{candidate_sha}").stdout.split())
+                    result["push"] = gp.push_listing(repo, main, own)
+                except GitError as exc:
+                    result["push_warning"] = f"could not list origin/{main}..{main}: {exc}"
+            code = 0
         except Refused as exc:
+            built.fill(result)
             result["refusal"] = exc
             if integration_updated:
                 result["recovery_required"] = True
-            return exc.code, result
+            code = exc.code
         finally:
-            report_path.unlink(missing_ok=True)
-            cleanup_error = _remove_candidate(repo, candidate_dir) if candidate_created else None
-            if cleanup_error:
-                result["candidate_cleanup_warning"] = cleanup_error
+            if built.cleanup_warning:
+                result["candidate_cleanup_warning"] = built.cleanup_warning
             # Keep the immutable candidate ref when integration/verification
             # failed. On success main now retains the commit through its branch.
             if (
@@ -990,6 +939,104 @@ def integrate(t: Target, progress: bool = True) -> tuple[int, dict]:
             ):
                 git(repo, "update-ref", "-d", candidate_ref, check=False)
                 result["candidate_ref"] = None
+        return code, result
+
+
+@dataclass
+class Built:
+    """What `build_and_verify` built and found; filled as it goes, so a stop still reports it."""
+
+    candidate_sha: str | None = None
+    first_parent: str | None = None
+    second_parent: str | None = None
+    message: str | None = None
+    verification: str = "NOT_RUN"
+    seconds: float | None = None
+    evidence_reason: str | None = None
+    warning: str | None = None
+    log: str | None = None
+    report: dict | None = None
+    cleanup_warning: str | None = None
+
+    def fill(self, result: dict) -> None:
+        result.update(
+            candidate_sha=self.candidate_sha, first_parent=self.first_parent, second_parent=self.second_parent,
+            message=self.message, verification=self.verification, verification_seconds=self.seconds,
+            evidence_reason=self.evidence_reason,
+        )
+        if self.warning:
+            result["verification_warning"] = self.warning
+        if self.log:
+            result[LOG_KEY] = self.log
+
+
+@contextmanager
+def build_and_verify(
+    repo: Path, main_before: str, reviewed: str, verdict: str, argv: list[str], timeout: float, built: Built, *,
+    branch: str, records_only: bool, timeout_source: str = "", progress: bool = False,
+):
+    """Build the candidate `atc integrate` would build in a detached worktree under `<tmp>/candidates` (the
+    reviewed commit on `FF`, the merge on `NO_FF`), verify it with the verifier, or the record check for a
+    records-only range, and remove it when the block ends. It takes no slot and creates no ref (plan D.27)."""
+    places = locations.locate()
+    candidate_root = places.tmp / locations.CANDIDATES
+    try:
+        candidate_root.mkdir(exist_ok=True)
+    except OSError as exc:
+        raise locations.Refusal(locations.UNSUITABLE, f"cannot be created: {candidate_root}: {exc}") from exc
+    candidate_dir = candidate_root / secrets.token_hex(CANDIDATE_ID_BYTES)
+    report_path = candidate_dir.with_name(candidate_dir.name + ".report.json")
+    created = False
+    try:
+        base = main_before if verdict == "NO_FF" else reviewed
+        add = git(repo, "worktree", "add", "--detach", str(candidate_dir), base, check=False)
+        if add.returncode:
+            raise Refused("CANDIDATE_NOT_CREATED", f"could not create isolated candidate worktree: {(add.stderr or add.stdout).strip()}")
+        created = True
+
+        if verdict == "NO_FF":
+            built.message = f"merge({topic_name(branch)}): integrate reviewed changes"
+            merged = git(candidate_dir, "merge", "--no-ff", "--no-edit", "-m", built.message, reviewed, check=False)
+            if merged.returncode:
+                git(candidate_dir, "merge", "--abort", check=False)
+                raise Refused("CANDIDATE_MERGE_FAILED", f"candidate merge failed: {(merged.stderr or merged.stdout).strip()}")
+        candidate_sha = rev(candidate_dir, "HEAD")
+        if candidate_sha is None or not FULL_SHA.fullmatch(candidate_sha):
+            raise Refused("CANDIDATE_NOT_CREATED", "candidate did not resolve to a full commit SHA")
+        built.candidate_sha = candidate_sha
+        if verdict == "NO_FF":
+            first, second = _git_ok(candidate_dir, "rev-parse", f"{candidate_sha}^1", f"{candidate_sha}^2").split()
+            built.first_parent, built.second_parent = first, second
+            if (first, second) != (main_before, reviewed):
+                raise stop(
+                    "CANDIDATE_CHANGED", f"candidate parent mismatch: {first} {second}; expected {main_before} {reviewed}",
+                    after_candidate=True,
+                )
+        elif candidate_sha != reviewed:
+            raise stop("CANDIDATE_CHANGED", f"FF candidate is {candidate_sha}, expected reviewed SHA {reviewed}", after_candidate=True)
+
+        started = time.monotonic()
+        if records_only:
+            if progress:
+                print(f"verify: candidate {candidate_sha} {RECORD_CHECK}", file=sys.stderr)
+            _check_records(candidate_dir, candidate_sha)
+            built.evidence_reason = "RECORDS_ONLY"
+        else:
+            if progress:
+                print(f"verify: candidate {candidate_sha} timeout {timeout:g}s ({timeout_source})", file=sys.stderr)
+            warning, log = _verify_candidate(
+                argv, candidate_dir, candidate_sha, main_before, reviewed, timeout, places.systmp, report_path,
+            )
+            built.warning = warning
+            built.log = None if log is None else str(log)
+            built.report, built.evidence_reason = _read_report(report_path)
+        built.verification = "PASS"
+        built.seconds = round(time.monotonic() - started, 1)
+        yield built
+    finally:
+        report_path.unlink(missing_ok=True)
+        if created:
+            built.cleanup_warning = _remove_candidate(repo, candidate_dir)
 
 
 def _project_name(repo: Path, root: Path) -> str:
@@ -1509,6 +1556,110 @@ def _main(args: argparse.Namespace, root: Path, root_given: bool, cwd: str | Non
         print(render_result(result, target.binding, target.project, log))
     return code
 
+
+
+def build_verify_parser() -> argparse.ArgumentParser:
+    parser = _Parser(prog="atc verify", allow_abbrev=False, description=(
+        "Run the integration verifier on the candidate `atc integrate` would build, without the Integration "
+        "Slot, a ref update or authority (VERIFICATION.md § Independent review). The last line is "
+        "`VERIFY PASS <candidate> <FF|NO_FF>`; a stop prints the `atc integrate` stop lines."))
+    target = parser.add_mutually_exclusive_group()
+    target.add_argument("--repo", type=Path, help="main checkout of the repository; the workspace root takes this form")
+    target.add_argument("--project", help="registered project name from workspace.yaml; root names the workspace root")
+    parser.add_argument("--branch", help="reviewed topic branch (default: the one local branch at --reviewed)")
+    parser.add_argument("--reviewed", required=True, help="full 40-character SHA named by the review")
+    parser.add_argument("--rebased", help="full SHA of the topic rebased onto main, as `atc integrate --rebased` takes it")
+    parser.add_argument("--json", action="store_true", help="print the result as JSON")
+    return parser
+
+
+def verify(t: Target, as_json: bool) -> int:
+    """`atc verify`: preflight as `--check` does, then `build_and_verify` with no slot."""
+    payload = {"command": "verify", "resolved": {**asdict(t), "repo": str(t.repo)}}
+    if t.branch is None:
+        _print_refusal(
+            stop("ALREADY_MERGED", f"the reviewed SHA {t.reviewed} is already reachable from {t.main}; nothing to verify"),
+            payload, as_json,
+        )
+        return STOP_BEFORE_CANDIDATE
+    report = merge_preflight(t.repo, t.branch, t.reviewed, t.main)
+    if report.verdict == "STOP":
+        _print_stop_report(report, payload, as_json)
+        return STOP_BEFORE_CANDIDATE
+    payload["preflight"] = asdict(report)
+    main_before = report.evidence["main_tip"]
+    if t.carried_from:
+        try:
+            payload["carried_over"] = carry_over(t.repo, t.main, t.carried_from, t.reviewed, main_before)
+        except Refused as refusal:
+            _print_refusal(refusal, payload, as_json)
+            return refusal.code
+    result: dict = {}
+    built = Built()
+    try:
+        with build_and_verify(
+            t.repo, main_before, t.reviewed, report.verdict, t.verify_argv, t.timeout, built,
+            branch=t.branch, records_only=t.binding.records_only, timeout_source=t.timeout_source, progress=as_json,
+        ):
+            pass
+    except Refused as refusal:
+        built.fill(result)
+        log = result.pop(LOG_KEY, None)
+        _print_refusal(refusal, {**payload, **result, "log": log}, as_json)
+        return refusal.code
+    built.fill(result)
+    log = result.pop(LOG_KEY, None)
+    if built.cleanup_warning:
+        print(f"WARNING {built.cleanup_warning}", file=sys.stderr)
+    if as_json:
+        print(json.dumps({**payload, **result, "verdict": report.verdict, "log": log,
+                          "candidate_cleanup_warning": built.cleanup_warning}, indent=2))
+        return 0
+    if built.warning:
+        print(f"WARNING {built.warning}", file=sys.stderr)
+    print(f"VERIFY PASS {built.candidate_sha} {report.verdict}" + (f" log {log}" if log else ""))
+    return 0
+
+
+def verify_main(argv: list[str] | None = None, root: Path = hw.ROOT, root_given: bool = False,
+                cwd: str | None = None) -> int:
+    """`atc verify`: the target options of `atc integrate`, resolved as `--check` resolves them."""
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="backslashreplace")
+    try:
+        args = build_verify_parser().parse_args(argv)
+    except Refused as refusal:
+        print("\n".join(refusal.lines()), file=sys.stderr)
+        return refusal.code
+    args.task = args.owner_words = args.authority_reference = args.verify_timeout = None
+    args.check = True
+    streams = sys.stdout, sys.stderr
+    if not args.json:
+        sys.stdout, sys.stderr = _Human(streams[0]), _Human(streams[1])
+    try:
+        locations.enter()
+        target = resolve(args, root, root_given, cwd or os.getcwd())
+        for stream in (sys.stdout, sys.stderr):
+            if isinstance(stream, _Human):
+                stream.paths.update({str(path): target.project for path in (target.repo, target.repo.resolve())
+                                     if path.is_absolute()})
+        if args.json:
+            print(target.line(), file=sys.stderr)
+        for warning in target.warnings:
+            print(f"WARNING {warning}", file=sys.stderr)
+        return verify(target, args.json)
+    except locations.Refusal as refusal:
+        print(f"{refusal.token} {refusal.detail}", file=sys.stderr)
+        return refusal.code
+    except Refused as refusal:
+        _print_refusal(refusal, {"command": "verify"}, args.json)
+        return refusal.code
+    except (GitError, RuntimeError) as exc:
+        _print_refusal(Refused("GIT" if isinstance(exc, GitError) else "RUNTIME", str(exc)), {"command": "verify"}, args.json)
+        return ERROR
+    finally:
+        sys.stdout, sys.stderr = streams
 
 if __name__ == "__main__":
     sys.exit(main())

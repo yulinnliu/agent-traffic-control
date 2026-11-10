@@ -54,7 +54,7 @@ whole directory loses nothing. Persistent state lives elsewhere
       qdr/                      data root
     systmp/                     stand-in for the system temporary directory
       pytest-of-<user>/         pytest runs started without a scratch
-    candidates/                 candidate trees and verifier reports of `atc integrate`
+    candidates/                 candidate trees, verifier reports and logs of `atc integrate` and `atc verify`
   cache/                        regenerable
     uv/                         UV_CACHE_DIR
     python/                     UV_PYTHON_INSTALL_DIR
@@ -242,13 +242,15 @@ It reports registered scratches older than seven days and deletes none.
 
 ## Integration and the pre-push gate
 
-- `atc integrate` creates each candidate tree at
-  `<tmp>/candidates/<id>` and names the verifier's report file
+- `atc integrate` and `atc verify` create each candidate tree at
+  `<tmp>/candidates/<id>` and name the verifier's report file
   `<tmp>/candidates/<id>.report.json` through
   `ATC_VERIFICATION_REPORT`. `<id>` is twelve random lowercase hexadecimal
   digits, so the tree's absolute path is at most 64 characters, the bound of
-  a scratch. It removes both when the run ends. The files that
-  capture the verifier's output are under `<tmp>/systmp`.
+  a scratch. They remove both when the run ends. The files that
+  capture the verifier's output are under `<tmp>/systmp`; its stdout and
+  stderr are then written to `<tmp>/candidates/<id>.verify.log`, which the
+  run names and `atc tmp prune` deletes after seven days.
 - A project's integration verifier keeps its logs and per-stage data in a
   working directory under `<tmp>/systmp`. It removes the directory after a
   passing run and leaves it, with the path printed, after a failing one.

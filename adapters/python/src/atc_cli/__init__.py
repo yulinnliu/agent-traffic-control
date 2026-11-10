@@ -7,6 +7,7 @@ Commands map onto the scripts under `adapters/python/scripts/`:
     worktree   hami_worktree.py   create / resume / audit / cleanup
     preflight  git_preflight.py   merge / cleanup / push verdicts
     integrate  git_integrate.py   advance local main to a reviewed topic
+    verify     git_integrate.py   run the verifier on the candidate integrate would build
     task       task_records.py    new / list / check task records
     close-out  close_out.py       remove an integrated task's worktree, scratches, reports
     validate   validate_workspace.py
@@ -17,7 +18,7 @@ Commands map onto the scripts under `adapters/python/scripts/`:
     enforce    generate_enforcement.py   (+ --workspace <root>/workspace.yaml when present)
     classify   classify_change.py
     friction   friction.py
-    test       atc_testkit            run / mutants
+    test       atc_testkit            run / mutants / private
     tmp        atc_testkit            checkout / list / clean / prune
 
 The checkout root is, in order: `--root`, `$ATC_ROOT`, the nearest parent of
@@ -56,6 +57,7 @@ COMMANDS = {
     "worktree": "hami_worktree",
     "preflight": "git_preflight",
     "integrate": "git_integrate",
+    "verify": "git_integrate",
     "task": "task_records",
     "close-out": "close_out",
     "validate": "validate_workspace",
@@ -206,6 +208,8 @@ def _dispatch(command: str, rest: list[str], explicit_root: str | None) -> int:
         return module.main(rest, root=root)
     if command == "integrate":
         return module.main(rest, root=root, root_given=explicit_root is not None)
+    if command == "verify":
+        return module.verify_main(rest, root=root, root_given=explicit_root is not None)
     if command == "doctor":
         if rest[:1] in (["-h"], ["--help"]):
             print(f"usage: atc doctor\n\n{module.__doc__.strip()}")

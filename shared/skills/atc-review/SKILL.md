@@ -65,7 +65,7 @@ End every completed step with a step report in the shape governance
    each command with its summary line and every surviving mutant.
 2. Run `atc integrate --check` on the tip (governance `GIT_WORKFLOW.md`
    § Mainline check before final self-verification) and report the verdict
-   it gives; `authority=missing` or `authority=not_checked` on its resolved
+   it gives; `authority=missing` or `authority=not_checked` on its `CHECK`
    line is pending authority (§ Integrate). On `REBASE_REQUIRED` or
    `OVERLAP`, rebase onto `main`, rerun the selection and report only the
    new tip.
@@ -154,7 +154,14 @@ diff against your last round's findings.
    blocker to tell the holder now.
 4. **Run tests and mutants.** Run the tests governance `VERIFICATION.md`
    § Independent review assigns a reviewer, and name them in the verified
-   line. One single-string mutant per guard, one at a time, restored after
+   line. Before a PASS on a diff that changes tests or behaviour, run
+   `atc verify` with the target arguments of the integrate command below
+   (`--repo` or `--project`, `--branch`, `--reviewed`, and `--rebased` when
+   the integrate command has it): it runs the integration verifier on the
+   candidate `atc integrate` would build, without a slot, a ref update or
+   the Owner's word. Run it while no integration runs. Quote its last line
+   in the verified line; a refusal is a blocker finding.
+   One single-string mutant per guard, one at a time, restored after
    each run.
    Done when every file in the copy is proven equal to its Git object again
    and every surviving mutant is listed as a test gap or argued equivalent.
@@ -180,7 +187,8 @@ The verdict takes the shape governance `VERIFICATION.md` § Independent review
 gives. Deliver it as "Every block you write" says; on session messaging its
 file is `~/.atc/reports/<task>-<short sha>-review.md`.
 
-- The verified line: test counts, mutant results, read-only host evidence.
+- The verified line: test counts, mutant results, `atc verify`'s last line,
+  read-only host evidence.
 - On a PASS, when the project's adopted process lets a PASS carry an
   integration instruction, the integration instruction. The Owner's word on
   the exact reviewed SHA approves integration. The holder of that word, a
