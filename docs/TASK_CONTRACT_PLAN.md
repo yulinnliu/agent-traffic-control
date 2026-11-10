@@ -198,14 +198,16 @@ the rules and steps, C.8 is the editorial pass over every file they touched.
    - New § Background work, after § Close-out: every session stops its
      background work before its final report; every background wait has a
      ceiling; no background work remains after the final report, and a
-     later notification gets one delta line or nothing. Reviewers run their tests in the foreground.
+     later notification gets one delta line or nothing. Reviewers run
+     their tests in the foreground.
 4. `CORE.md` § Task identity: a repository with a `## Task records`
    declaration identifies tasks by record.
 5. `shared/skills/atc-review`, steps citing C.1 to C.3:
    - The step report (shape in `DELIVERY.md` § 8.1): the writer saves it to
      `~/.atc/reports/<task>-<short sha>.md` and sends that path. Its closing
      message in its own session is one line for the Owner, in plain Chinese
-     with no tokens, for example 「報告已送 coordinator（tip <sha>）。可直接合併，等審查與你核准；尚未整合、未 push。」;
+     with no tokens, for example
+     「報告已送 coordinator（tip <sha>），等審查與你核准；尚未整合、未 push。」;
      when there is a problem the line names it plainly instead (for example,
      a rebase is needed). Tokens stay in the step report.
    - The verdict (shape in `VERIFICATION.md` § Independent review): saved to
@@ -417,7 +419,8 @@ and by a test per command that pins its default output.
 Code, tests, `shared/conformance/`, `docs/TESTKIT.md`, `docs/ATC_HOME.md` and
 `adapters/python/README.md`. Order: D.5 before D.7 (the alias needs a
 `--check` without authority), D.9 before D.12 (the child encoding), D.13
-before D.12's scratch-name form. Each entry: the change, its side effects,
+before D.12's scratch-name form, D.15 before D.12 (the `--json` form
+`--select` runs). Each entry: the change, its side effects,
 their mitigations.
 
 1. `atc worktree create --scope <text>` writes the task record in the new
@@ -524,18 +527,28 @@ their mitigations.
       lines; both stay byte-identical, pinned by their tests, while
       `execute` and `_capture` gain the log and summary path.
     - Python defaults to the tree's `.venv`; a missing one stops with
-      `VENV_MISSING`, never system Python. `--select <base>` lives in
-      atc-testkit and runs the tree's declared selector: a new optional
-      `[tool.atc-testkit]` key `selector` (an argv that takes changed paths
-      and prints the selected test paths as JSON), defaulting to the `gate`
-      key's `--paths` mode. The root adapter declares
-      `scripts/select_tests.py --paths ... --json` (D.15). The changed
-      paths come from `git diff --name-only <base>` in the tree, or, for a
-      scratch export, in the source worktree and commit its registry entry
-      records (D.13). A tree with no declared selector stops with
-      `SELECTION_UNDECLARED` and runs nothing. It prints the base and the
-      count. The console
-      prints the log path at start, then one summary line (counts, failed
+      `VENV_MISSING`, never system Python.
+    - Ruling on the selector: `--select <base>` lives in atc-testkit and
+      runs the argv of a new optional `[tool.atc-testkit]` key `selector`,
+      a command that takes the changed paths as arguments and prints the
+      selected test paths as JSON. The root adapter declares
+      `selector = ["scripts/select_tests.py", "--json", "--paths"]` (D.15).
+      A tree without the key stops with `SELECTION_UNDECLARED` (exit 9,
+      added to `TESTKIT.md`'s token table beside the other pre-run
+      refusals) and runs nothing. The gate stays untouched. The other
+      design, a default to the gate's `--paths` mode, needs a `--json`
+      form in the gate, a testkit release re-vendored in every project,
+      a re-run of each project's stages after re-vendoring (evidence
+      records the testkit version), and detection of an old gate that
+      rejects `--json`; the declared key needs none of these, since the
+      root's `atc` reads the key and nothing in the testkit rejects an
+      unknown `[tool.atc-testkit]` key.
+    - The changed paths are `git diff --name-only <base>` plus
+      `git ls-files --others --exclude-standard`, so new untracked files
+      count, run in the tree, or, for a scratch export, in the source
+      worktree and commit its registry entry records (D.13). It prints the
+      base and the count.
+    - The console prints the log path at start, then one summary line (counts, failed
       test names, log path); the full log, pytest's dots and the summary
       line `-q` hides stay in the log in the run directory, written live
       with `PYTHONUNBUFFERED=1`. `--progress` streams for humans. An
@@ -547,15 +560,16 @@ their mitigations.
       a selection that misses a test; output an agent read in the console
       is now in a file; `atc test mutants`, which shares `execute` and
       `_capture` (`testrun.py:284`) and which the vendored `atc-review`
-      skill uses (`references/mutants.md` in four projects); project gates
-      print their selection as text until the final sync gives them the
-      JSON form.
+      skill uses (`references/mutants.md` in four projects); a project
+      gets `--select` only once it declares `selector`, which is its own
+      change after the final sync.
     - Mitigations: `VENV_MISSING` names `atc tmp checkout` and the project's
       `AGENTS.md` preparation; logs live in the scratch and go with it; the
       verifier still runs the full suite; the summary names each failed
       test and the log; mutants and the positional form keep their output,
-      pinned by tests; a project whose gate lacks the JSON form stops with
-      `SELECTION_UNDECLARED` instead of a guessed selection.
+      pinned by tests; an undeclared tree stops with `SELECTION_UNDECLARED`
+      instead of a guessed selection, and its positional runs are
+      unchanged.
 13. `atc tmp checkout <sha> --task <ID>` exports the commit, runs
     `uv sync --locked` and registers the scratch with its task, source
     worktree and commit, so `atc test run` takes the scratch name.
@@ -575,10 +589,12 @@ their mitigations.
       (`hami_worktree.py:1025-1031`): they bind a deletion, and their values
       come from `--json` or `integrations.jsonl`, which carry full SHAs.
 15. `select_tests.py` prints a summary by default (selected n of m, one
-    reason line per changed path); the per-test list only with `--explain`.
+    reason line per changed path); the per-test list only with `--explain`;
+    a new `--json` flag prints the selected test paths as a JSON array, the
+    form D.12's `selector` runs.
     - Side effects: callers that read the per-test list.
-    - Mitigations: its only reader today is `tests/test_select_tests.py`;
-      `--json` prints the selected test paths for `atc test run --select`.
+    - Mitigations: its only reader today is `tests/test_select_tests.py`,
+      which moves to `--explain` and `--json`.
 16. The output proposals 2, 3, 5, 9, 12 and 13 of Tool output, with the
     side effects and mitigations listed there.
 
