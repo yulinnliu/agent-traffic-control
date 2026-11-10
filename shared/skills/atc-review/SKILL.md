@@ -180,11 +180,11 @@ carries the verdict token and that path.
   the Owner's word for that SHA) runs or forwards the instruction, within
   governance `GIT_WORKFLOW.md` § Task and authority on who runs which form.
   Before writing it, run `atc integrate --check --json` with the same
-  arguments as the integrate command below; it runs `git fetch origin` and otherwise only reads. The
-  PASS carries the instruction only when the result has no `refusal` and its
-  `preflight.verdict` is `FF` or `NO_FF`; quote that verdict with
-  `preflight.reason` and every entry of `resolved.warnings` in the verified
-  line. A `refusal`, such as a missing `## Integration verification`
+  arguments as the integrate command below; it runs `git fetch origin` and
+  otherwise only reads. The PASS carries the instruction only when the
+  result has no `refusal` and its `preflight.verdict` is `FF` or `NO_FF`;
+  quote that verdict with `preflight.reason` and every entry of
+  `resolved.warnings` in the verified line. A `refusal`, such as a missing `## Integration verification`
   section, leaves the PASS without an instruction: give the holder its
   `reason`, `detail` and `next`. A `refusal` whose `next` names a rebase
   (`REBASE_REQUIRED`, or `OVERLAP` or `CONFLICT` of an unpublished topic)
