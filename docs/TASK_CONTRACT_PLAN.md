@@ -813,11 +813,13 @@ change, its side effects, their mitigations.
       - Guard timing: an undeclared reader among the tests a range does not
         select fails only in the dispatched CI run. The guard names the test
         and the paths, so the fix is one declaration.
-      - `VERIFICATION.md` § Testing ("only the integration verifier runs
-        the full suite") and § Independent review ("the integration
-        verifier's full suite is the safety net") stop holding for the
-        root; their rewording waits on the Owner's authorization and is
-        not part of this entry until given.
+      - `VERIFICATION.md` § Testing and § Independent review named the
+        integration verifier's full suite; with the Owner's authorization
+        both now point to § Full regression timing and evidence reuse:
+        local integration runs impact-selected checks unless a project
+        requires a local full regression, and the full suite, by default
+        the project's manually dispatched remote CI, is the safety net.
+        Projects receive the wording at the final sync.
       - `integrations.jsonl`: the root's line records task, authority,
         candidate, `main_before`, `records_only` and the reviewed SHA, with
         no verification field, and the root writes no verification report,
