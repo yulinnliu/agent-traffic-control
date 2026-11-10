@@ -61,6 +61,16 @@ Authority used:
 Next action:
 ```
 
+Writers report to the coordinator only. The coordinator relays step reports
+and findings verbatim, as file paths, and never reviews what it integrates.
+
+A step report holds the task, branch, tip, range, verification as command
+and result, the `atc integrate --check` verdict token, rulings, deviations
+and open items, in at most 40 lines or 3,000 characters. It carries no diff,
+log, file content or narrative of what changed; larger material goes as
+`<sha>:<path>` or as a path plus its SHA-256. The coordinator returns an
+oversized report unchanged.
+
 For cross-environment Git review, identity is not enough: the recipient must
 also be able to retrieve the target Git object. A Git-ref delivery therefore
 must either name an authorized fetchable ref whose tip is exactly the target
@@ -247,6 +257,21 @@ Report ahead/behind counts as plain status ("ahead of origin by N"). Do not
 present unpublished commits as an open item, a recommendation, or a prompt to
 publish. Publish only when the task authority asks or the task contract
 grants publication authority; local commits are not publication.
+
+## Close-out
+
+Close-out is a standing rule of every task. After a task is integrated and
+pushed (the push under § 10), the coordinator removes that task's worktree and
+scratches and archives its sessions, then reports. Keep exceptions are
+written in the task record. Items outside the task, `REFUSED` and `ANOMALY`
+lines, refused archives and failed integrations go to the Owner.
+
+## Background work
+
+Every session stops its background work before its final report, and every
+background wait has a ceiling. No background work remains after the final
+report; a later notification gets one delta line or nothing. Reviewers run
+their tests in the foreground.
 
 ## Writer transfer
 
