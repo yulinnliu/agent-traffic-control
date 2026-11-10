@@ -1002,9 +1002,11 @@ change, its side effects, their mitigations.
         it is a signal to optimise the tests or for the Owner to decide,
         and nothing raises it automatically.
         - Headroom: the staged full run at 8 workers takes about 232 s;
-          one worker, or a small host, runs about as the serial 791 s, and
-          D.19 measured the verifier's own steps at about 31 s over that
-          (822 s), so every worker count stays under 1800 s.
+          the stages at `--workers 1` took 825 s (1373 passed, 20
+          skipped), measured beside a concurrent full-suite run, so an
+          upper bound; D.19 measured the verifier's own steps at about
+          31 s, so every worker count stays under 1800 s even under that
+          load.
         - `atc integrate`'s timeout stop keeps its token
           `VERIFICATION_TIMEOUT` and its text "candidate verification timed
           out after <n>s for <sha>", which the tests assert, and adds
