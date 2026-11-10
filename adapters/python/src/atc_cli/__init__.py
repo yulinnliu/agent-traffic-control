@@ -36,13 +36,16 @@ and is no linked worktree), every command but `doctor` and `--help` stops with
 `onboard --root-only` stops with `ERROR CHECKOUT_CANONICAL` when the checkout
 it would render is the canonical one (root `AGENTS.md` § Changing this repo).
 
-`atc <command> --help` describes one command. A module the installed `atc`
+`atc <command> --help` describes one command. An argument error prints
+argparse's usage line and error, then `next: atc <command> [<subcommand>]
+--help`. A module the installed `atc`
 lacks stops the command with `ERROR MISSING_DEPENDENCY` and the reinstall
 command of the root's AGENTS.md.
 """
 
 from __future__ import annotations
 
+import argparse
 import os
 import sys
 from pathlib import Path
@@ -110,6 +113,14 @@ def _child_encoding() -> None:
     os.environ[CHILD_ENCODING[0]] = CHILD_ENCODING[1]
 
 
+def _usage_error(parser: argparse.ArgumentParser, message: str):
+    """argparse's usage line and error, then the command that prints the whole help (GIT_WORKFLOW.md § Command results)."""
+    parser.print_usage(sys.stderr)
+    print(f"{parser.prog}: error: {message}", file=sys.stderr)
+    print(f"next: {parser.prog} --help", file=sys.stderr)
+    raise SystemExit(2)
+
+
 def _scripts_on_path() -> None:
     if str(SCRIPTS) not in sys.path:
         sys.path.insert(0, str(SCRIPTS))
@@ -160,8 +171,9 @@ def main(argv: list[str] | None = None, checkout: Path | None = None) -> int:
     refused = _guard(command, rest, GUARDED_CHECKOUT if checkout is None else checkout)
     if refused is not None:
         return refused
-    program = sys.argv[0]
+    program, parser_error = sys.argv[0], argparse.ArgumentParser.error
     sys.argv[0] = f"atc {command}"
+    argparse.ArgumentParser.error = _usage_error
     try:
         return _dispatch(command, rest, explicit_root)
     except ModuleNotFoundError as error:
@@ -170,6 +182,7 @@ def main(argv: list[str] | None = None, checkout: Path | None = None) -> int:
         return 2
     finally:
         sys.argv[0] = program
+        argparse.ArgumentParser.error = parser_error
 
 
 def _dispatch(command: str, rest: list[str], explicit_root: str | None) -> int:

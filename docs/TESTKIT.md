@@ -339,7 +339,9 @@ depends on the package by its path in the tree, and `atc` dispatches to it;
 `atc <command> [<subcommand>] --help` prints a usage line that starts with
 `usage: atc <command> [<subcommand>]` and exits 0; output the console cannot
 encode is written as backslash escapes. A wrong form prints the usage on
-stderr and exits 2, and no option is matched by an abbreviation. A command
+stderr and exits 2, and no option is matched by an abbreviation; an argument
+error that argparse finds adds its error line and
+`next: atc <command> [<subcommand>] --help`. A command
 that imports a module the installed `atc` lacks stops with
 `ERROR MISSING_DEPENDENCY` (exit 2) naming the module and the reinstall
 command of the root's `AGENTS.md`.

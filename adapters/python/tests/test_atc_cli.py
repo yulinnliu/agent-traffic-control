@@ -22,7 +22,7 @@ SUBCOMMANDS = [
     ("bootstrap",), ("bootstrap", "init"), ("bootstrap", "add"), ("bootstrap", "sync"), ("bootstrap", "status"),
     ("doctor",), ("policies",), ("policies", "check"), ("enforce",), ("classify",),
     ("friction",), ("friction", "add"), ("friction", "list"), ("friction", "summary"), ("friction", "resolve"),
-    ("test",), ("test", "run"), ("test", "mutants"),
+    ("test",), ("test", "run"), ("test", "mutants"), ("test", "private"),
     ("tmp",), ("tmp", "checkout"), ("tmp", "list"), ("tmp", "clean"), ("tmp", "prune"),
 ]
 
@@ -65,6 +65,19 @@ def test_help_names_the_subcommand_exits_zero_and_escapes_non_ascii(
     assert text.startswith(f"usage: atc {' '.join(subcommand)}")
     assert "python -m" not in text and ".py" not in text.splitlines()[0]
     assert all(not parser.allow_abbrev for parser in parsers)
+
+
+@pytest.mark.parametrize("arguments", [["classify", "--no-such-option"], ["worktree", "create", "--no-such-option"]],
+                         ids=["classify", "worktree create"])
+def test_a_usage_error_prints_the_usage_line_and_names_the_help(
+        arguments: list[str], capsys: pytest.CaptureFixture[str]) -> None:
+    error = argparse.ArgumentParser.error
+    assert call(arguments) == 2
+    lines = capsys.readouterr().err.splitlines()
+    program = "atc " + " ".join(arguments[:-1])
+    assert lines[0].startswith(f"usage: {program}") and lines[-1] == f"next: {program} --help"
+    assert any(line.startswith(f"{program}: error:") for line in lines)
+    assert argparse.ArgumentParser.error is error
 
 
 def test_help_restores_the_program_name(monkeypatch: pytest.MonkeyPatch) -> None:
