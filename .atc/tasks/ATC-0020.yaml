@@ -22,3 +22,7 @@ decisions:
   - 'O4: order is rank (gapped integers) plus after (prerequisite task IDs)'
   - 'O5: atc task new also issues its ID through the backlog compare-and-swap'
   - 'O6: coordinator-skill steps 1-2, Recovery and Briefs (S1-S4) fold into ATC-0020; the coordinator-skill task follows and rewords "no new status"'
+  - 'D1: atc task drop ID --note TEXT abandons a planned task on the backlog branch'
+  - 'D2: metavar N (a positive integer) joins CLI.md § Help and METAVAR_WORDS'
+  - 'D3: backlog loss is documented in TASKS.md § Backlog (consequence and reflog recovery), not detected'
+  - 'D4: atc task start drops rank and keeps the other planned fields'
