@@ -533,7 +533,7 @@ def test_a_check_needs_no_authority(tasks_repo: Path, capsys: pytest.CaptureFixt
     assert run(tasks_repo, work, "--task", "x", "--check") == 0
     captured = capsys.readouterr()
     assert captured.out.startswith("CHECK FF ")
-    assert captured.out.rstrip().endswith('task="x" authority=missing')
+    assert captured.out.rstrip().endswith('task="x" authority=missing reuse=NO_RECORD')
     assert run(tasks_repo, work, "--check") == 2
     assert run(tasks_repo, work, "--task", "x") == 1
     assert main_tip(tasks_repo) == before
@@ -547,7 +547,7 @@ def test_a_check_reports_a_missing_grant_and_the_run_still_stops(tasks_repo: Pat
     assert run(tasks_repo, work, "--task", "DEMO-0001", "--check") == 0
     captured = capsys.readouterr()
     assert captured.out.startswith("CHECK FF ")
-    assert captured.out.rstrip().endswith('task="DEMO-0001" authority=missing')
+    assert captured.out.rstrip().endswith('task="DEMO-0001" authority=missing reuse=NO_RECORD')
     status, data, _ = run_json(tasks_repo, capsys, work, "--task", "DEMO-0001")
     assert (status, data["refusal"]["reason"]) == (1, "AUTHORITY_MISSING")
 

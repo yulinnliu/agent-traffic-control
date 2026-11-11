@@ -1435,7 +1435,8 @@ def test_the_default_check_output_is_the_check_line(repo: Path, capsys: pytest.C
     assert integrate(repo, "topic", tip, "--check") == 0
     captured = capsys.readouterr()
     assert captured.out == (
-        f'CHECK FF FAST_FORWARD: repo branch=topic tip={tip[:12]} task="test-owner-authorization" authority=owner_words\n'
+        f'CHECK FF FAST_FORWARD: repo branch=topic tip={tip[:12]} task="test-owner-authorization" authority=owner_words '
+        'reuse=NO_RECORD\n'
     )
     assert not_warnings(captured.err) == []
 

@@ -172,9 +172,9 @@ def test_a_clean_rebase_carries_the_approval_over(repo: Path, capsys: pytest.Cap
     reviewed, between = stale_two_commit_topic(repo)
     rebased = rebase(repo, "topic")
     assert run(repo, reviewed, "--rebased", rebased, "--check") == 0
-    assert capsys.readouterr().out.rstrip().endswith(f"carried_from={short(reviewed)}")
+    assert capsys.readouterr().out.rstrip().endswith(f"carried_from={short(reviewed)} reuse=NO_RECORD")
     assert run(repo, reviewed[:12], "--rebased", rebased[:12], "--check") == 0
-    assert capsys.readouterr().out.rstrip().endswith(f"carried_from={short(reviewed)}")
+    assert capsys.readouterr().out.rstrip().endswith(f"carried_from={short(reviewed)} reuse=NO_RECORD")
     assert run(repo, reviewed, "--rebased", rebased, "--check", "--json") == 0
     carried = json.loads(capsys.readouterr().out)["carried_over"]
     assert (carried["carried_over_from"], carried["rebased"], carried["commits"]) == (reviewed, rebased, 2)

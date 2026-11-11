@@ -1593,7 +1593,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--check", action="store_true",
                         help="write nothing: resolve, preflight and warn without a slot or candidate; exit 0 when "
-                             "the integration would proceed")
+                             "the integration would proceed; reuse= names whether it would reuse an `atc verify` "
+                             "record")
     cli_conventions.add_json(parser)
     return parser
 
