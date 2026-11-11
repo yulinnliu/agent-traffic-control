@@ -403,6 +403,21 @@ def test_the_root_stages_run_its_selection_in_its_tests_directory(candidate: Can
 
 
 @pytest.mark.integration
+def test_the_verifier_reads_the_workers_and_the_memory_key_in_its_tests_directory(
+        candidate: Candidate, monkeypatch: pytest.MonkeyPatch) -> None:
+    candidate.advance()
+    roots: list[Path] = []
+    resolve, open_budget = stages.resolve_workers, stages.open_budget
+    monkeypatch.setattr(stages, "resolve_workers", lambda *a, root=None, **k: roots.append(root) or
+                        resolve(*a, root=root, **k))
+    monkeypatch.setattr(stages, "open_budget", lambda *a, root=None, **k: roots.append(root) or
+                        open_budget(*a, root=root, **k))
+    project = root_form(candidate.root, tests_dir="adapter", test_paths=lambda paths: ["tests/test_x.py"])
+    assert verifier.main(project, candidate.env(), Recorder()) == 0
+    assert roots == [candidate.root / "adapter"] * 2
+
+
+@pytest.mark.integration
 def test_a_root_selection_of_no_test_runs_no_stage(candidate: Candidate, capsys: pytest.CaptureFixture[str]) -> None:
     candidate.advance()
     recorder = Recorder()

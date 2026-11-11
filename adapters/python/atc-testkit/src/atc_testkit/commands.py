@@ -42,7 +42,7 @@ DESCRIPTIONS = {
     ("test", "status"): """List the runs holding or waiting for host test workers, from the pool's ledger rows:
 one RUN line per run (label, pid, stage, workers held of wanted, time held, the last
 pytest progress percentage in its log, its log) with its workers: line under it, one WAIT
-line per waiting run, or IDLE when none. Removes no row and takes no token.
+line per waiting run, or IDLE when none. Removes no row and holds no token.
 
   --json          the pool's state, size, free tokens, runs and waiters
 

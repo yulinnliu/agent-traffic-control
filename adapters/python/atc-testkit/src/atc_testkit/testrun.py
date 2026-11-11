@@ -700,7 +700,7 @@ def run(argv: Sequence[str], environ: MutableMapping[str, str] | None = None) ->
     budget = stages.open_budget(f"atc test run {place.name}", environ, root=tree, max_wait=args.timeout)
     xdist = xdist_installed(python, tree, environ)
     workers, pytest_arguments = _worker_request(pytest_arguments, tree, environ, xdist)
-    if workers is not None and workers.source != stages.SOURCE_FLAG and budget.active:
+    if workers is not None and workers.source == stages.SOURCE_DEFAULT and budget.active:
         if items is None:
             items = _count(python, tree, place, environ, private, pytest_arguments)
         workers = workers.capped(items)

@@ -490,12 +490,14 @@ def test_a_stage_job_keeps_the_trees_committed_peak(monkeypatch: pytest.MonkeyPa
 
 
 @pytest.mark.unit
-def test_the_default_asks_one_worker_per_eight_collected_tests_and_a_flag_is_never_cut() -> None:
+def test_only_the_default_asks_one_worker_per_eight_collected_tests() -> None:
     default = stages.Workers(18, "default")
     assert default.capped(None) == default and default.capped(400) == default
     assert default.capped(31) == stages.Workers(4, "default", 18, "31 tests collected, 8 per worker")
     assert default.capped(3).count == workers.FLOOR
     assert stages.Workers(8, "flag").capped(3) == stages.Workers(8, "flag")
+    for kept in (stages.Workers(12, stages.SOURCE_HOST), stages.Workers(1, stages.SOURCE_NESTED)):
+        assert kept.capped(20) == kept
 
 
 @pytest.mark.unit
@@ -543,3 +545,28 @@ def test_the_stages_collect_first_and_note_the_log_and_limit_on_the_row(tmp_path
     line = env[stages.WORKERS_LINE]
     assert line.startswith("workers: 2 of 6 (default 6, 9 tests collected, 8 per worker")
     assert rows[0] == (str(tmp_path / "parallel"), line) and line in capsys.readouterr().out
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("pooled", [False, True])
+def test_only_a_pooled_default_stage_collects_first(tmp_path: Path, pool_dir: Path, pooled: bool) -> None:
+    budget = workers.Budget(workers.Pool(pool_dir, 6) if pooled else None, label="stages")
+    counted: list[list[str]] = []
+    seen: list[list[str]] = []
+
+    def count(command, cwd, env) -> int:
+        counted.append(list(command))
+        return 9
+
+    def fake(command, *, cwd, env, log, private=False) -> int:
+        seen.append(list(command))
+        return 0
+
+    for chosen in (stages.Workers(6, "default"), stages.Workers(6, stages.SOURCE_HOST)):
+        outcome = stages.run_stages(["runner"], [], cwd=tmp_path, stage_list=[Stage("parallel", "a")],
+                                    env_for=lambda stage: {}, options_for=lambda stage: (),
+                                    log_for=lambda stage: tmp_path / stage.name, workers=chosen, run=fake,
+                                    budget=budget, count=count)
+        assert outcome.token is None
+    assert len(counted) == (1 if pooled else 0)
+    assert [command[command.index("-n") + 1] for command in seen] == (["2", "6"] if pooled else ["6", "6"])

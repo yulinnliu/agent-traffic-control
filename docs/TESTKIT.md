@@ -669,7 +669,7 @@ from then; a wait past its limit stops it with `WORKER_WAIT_TIMEOUT` (exit
 ### `atc test status [--json]`
 
 The host's test runs, read from the pool's rows (§ Host worker budget); it
-removes no row and takes no lock. Each run holding tokens is one line,
+removes no row and holds no token. Each run holding tokens is one line,
 `RUN <label> pid <pid> <stage> <tokens>/<want> workers held <time> progress <pct>% log <path>`,
 followed by its `workers:` line indented; progress is the last `[ NN%]` in
 the last 8 KiB of its log, `-` when there is none. A waiting run is
@@ -773,7 +773,7 @@ In `[tool.atc-testkit]`; the first seven keys are required:
 | `ci_init` | the CI runner's initialization function, as `module:function` |
 | `ignore` | `--ignore` paths appended to a stage, under `nt` and `posix` |
 | `selector` | the argv of the command `atc test run --select` runs; with `--direct` after the changed paths it prints only the changed test files and the test files one import from a changed module, which `--touched` runs (§ Commands) |
-| `select_full_fraction` | the share of the tree's tests, a number from 0 to 1, at which `atc test run --select` skips the selection with `SKIPPED_WIDE`; 0.5 when absent, 1 skips only a selection of every test (§ Commands); any other value stops the run with `ATC_CONFIG_INVALID` (exit 9) |
+| `select_full_fraction` | the share of the tree's tests, a number from 0 to 1, at which `atc test run --select` skips the selection with `SKIPPED_WIDE`; 0.5 when absent, 1 turns the skip off (§ Commands); any other value stops the run with `ATC_CONFIG_INVALID` (exit 9) |
 | `toolchain` | the toolchain's name, `python` when absent (§ Toolchain) |
 | `worker_memory_mib` | the memory one test worker is counted to need, an integer from 1 to 65536; when absent, the project's recorded cost on a host, else 256 (§ Stages); any other value stops a run with `ATC_CONFIG_INVALID` (exit 9) |
 

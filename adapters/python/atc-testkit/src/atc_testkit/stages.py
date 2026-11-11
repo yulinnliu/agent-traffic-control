@@ -164,8 +164,8 @@ class Workers:
         return f"workers: {self.count}{f' of {self.pool}' if self.pool else ''} ({text})"
 
     def capped(self, items: int | None) -> Workers:
-        """At most one worker per ``ITEMS_PER_WORKER`` collected tests, at least ``FLOOR``; a flag is never cut."""
-        if items is None or self.source == SOURCE_FLAG:
+        """At most one worker per ``ITEMS_PER_WORKER`` collected tests, at least ``FLOOR``; only the default is cut."""
+        if items is None or self.source != SOURCE_DEFAULT:
             return self
         most = max(host_workers.FLOOR, -(-items // ITEMS_PER_WORKER))
         if most >= self.count:
@@ -490,7 +490,8 @@ def run_stages(runner: Sequence[str], paths: Sequence[str], *, cwd: Path | str, 
         log = log_for(stage)
         parallel = stage.name == PARALLEL.name
         wanted = workers
-        if parallel and count is not None and budget.active and toolchain.name == "python":
+        if (parallel and count is not None and budget.active and workers.source == SOURCE_DEFAULT
+                and toolchain.name == "python"):
             command = toolchain.stage_command(runner, stage, None, [*options_for(stage), "--collect-only"], paths)
             wanted = workers.capped(count(command, cwd, env_for(stage)))
         grant = budget.acquire(stage.name, wanted.count if parallel else 1, wanted.floor() if parallel else 1)
