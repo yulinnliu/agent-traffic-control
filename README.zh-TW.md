@@ -170,7 +170,7 @@ render 出來的檔案都帶有 `managed-by: agent-traffic-control` 標記；沒
 
 ## 狀態
 
-目前版本是 0.1.0（git tag `v0.1.0`，Python adapter 也是同一個版號）。
+目前版本是 0.2.0，也就是 Python adapter 的版號。
 governance、policy、schema、skill、conformance fixture 和 Python 參考實作都
 已經到位。GitHub Actions 的 `validate.yml` 只在手動觸發時執行：它會用 schema
 檢查 policy 範例，並在 Linux 和 Windows 上跑 shell 安裝腳本與完整的 Python
