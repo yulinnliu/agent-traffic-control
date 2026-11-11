@@ -207,7 +207,7 @@ def test_project_root_runs_the_whole_lifecycle_for_the_workspace_root(ws: Worksp
     assert (status, single(results)["reason"]) == (0, "OK")
     status, results = ws.cli(capsys, "audit", "--project", "root")
     assert (status, [os.path.normcase(r["target"]) for r in results]) == (0, [os.path.normcase(str(target))])
-    status, results = ws.cli(capsys, "cleanup", *identity)
+    status, results = ws.cli(capsys, "clean", *identity)
     assert (status, single(results)["reason"]) == (0, "OK")
     assert not target.exists()
     assert run_git(ws.root, "branch", "--list", "worktree-claude+topic") == ""
@@ -245,9 +245,9 @@ def test_lock_reason_session_is_opaque() -> None:
     assert hw.parse_lock(None) is None
 
 
-@pytest.mark.parametrize("command", ["create", "resume", "cleanup"])
+@pytest.mark.parametrize("command", ["create", "resume", "clean"])
 def test_worktrees_root_outside_the_workspace_is_refused(ws: Workspace, command: str, capsys: pytest.CaptureFixture[str]) -> None:
-    if command == "cleanup":
+    if command == "clean":
         assert ws.run(capsys, "create", "claude", "topic", "--session", "s1")[0] == 0
         worktree = ws.path("claude", "topic")
         before = snapshot(ws.repo / ".git")
@@ -272,13 +272,13 @@ def test_target_that_is_another_project_state_is_protected(ws: Workspace, capsys
     assert not other.exists()
 
 
-@pytest.mark.parametrize("command", ["create", "resume", "cleanup"])
+@pytest.mark.parametrize("command", ["create", "resume", "clean"])
 @pytest.mark.parametrize("linked", ["worktrees", f"worktrees/{PROJECT}", f"worktrees/{PROJECT}/claude+topic"])
 def test_reparse_point_on_the_path_is_refused(ws: Workspace, tmp_path: Path, command: str, linked: str, capsys: pytest.CaptureFixture[str]) -> None:
     link = ws.root / linked
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
-    if command == "cleanup":
+    if command == "clean":
         assert ws.run(capsys, "create", "claude", "topic", "--session", "s1")[0] == 0
         replace_path_with_reparse(link, tmp_path / "backing", elsewhere)
     else:
@@ -416,7 +416,7 @@ def test_create_and_cleanup_print_one_verdict_line_each(ws: Workspace, capsys: p
     kwargs = dict(root=ws.root, environ=ws.environ, home=str(ws.home))
     assert hw.main(["create", *common], **kwargs) == 0
     assert capsys.readouterr().out.splitlines() == [f"CREATED {PROJECT}/claude+topic base {main}"]
-    assert hw.main(["cleanup", *common], **kwargs) == 0
+    assert hw.main(["clean", *common], **kwargs) == 0
     assert capsys.readouterr().out.splitlines() == [f"REMOVED {PROJECT}/claude+topic main {main}"]
 
 
@@ -559,7 +559,7 @@ def test_cleanup_removes_a_merged_clean_worktree_and_its_branch(ws: Workspace, c
     ws.run(capsys, "create")
     path = ws.path("claude", "topic")
     merge_into_main(ws, path)
-    status, results = ws.run(capsys, "cleanup")
+    status, results = ws.run(capsys, "clean")
     assert (status, single(results)["reason"], results[0]["evidence"]["branch_kept"]) == (0, "OK", False)
     assert not path.exists()
     assert run_git(ws.repo, "branch", "--list", "worktree-claude+topic") == ""
@@ -569,7 +569,7 @@ def test_cleanup_keeps_an_unmerged_worktree(ws: Workspace, capsys: pytest.Captur
     ws.run(capsys, "create", "claude", "topic", "--session", "s1")
     path = ws.path("claude", "topic")
     commit(path, "work.txt", "work\n")
-    status, results = ws.run(capsys, "cleanup")
+    status, results = ws.run(capsys, "clean")
     assert (status, single(results)["reason"]) == (1, "UNMERGED")
     assert (path / "work.txt").exists()
     assert ws.lock_reason(path) == "claude:topic:s1"
@@ -579,7 +579,7 @@ def test_cleanup_keeps_a_dirty_worktree(ws: Workspace, capsys: pytest.CaptureFix
     ws.run(capsys, "create")
     path = ws.path("claude", "topic")
     (path / "scratch.txt").write_text("x", encoding="utf-8")
-    status, results = ws.run(capsys, "cleanup")
+    status, results = ws.run(capsys, "clean")
     assert (status, single(results)["reason"]) == (1, "DIRTY")
     assert (path / "scratch.txt").exists()
 
@@ -596,7 +596,7 @@ def test_cleanup_refuses_a_tree_containing_a_reparse_point(ws: Workspace, tmp_pa
     # Ignore the link so the tree is clean and the reparse scan itself refuses.
     (ws.repo / ".git" / "info").mkdir(exist_ok=True)
     (ws.repo / ".git" / "info" / "exclude").write_text("sub/\n", encoding="utf-8")
-    status, results = ws.run(capsys, "cleanup")
+    status, results = ws.run(capsys, "clean")
     assert (status, single(results)["reason"], results[0]["detail"]) == (1, "PATH_UNSAFE", "reparse")
     assert (outside / "keep.txt").exists()
     assert path.exists()
@@ -614,7 +614,7 @@ def test_cleanup_relocks_when_removal_fails(ws: Workspace, monkeypatch: pytest.M
         return real_git(repo, *args, readonly=readonly)
 
     monkeypatch.setattr(hw, "git", failing_remove)
-    status, results = ws.run(capsys, "cleanup")
+    status, results = ws.run(capsys, "clean")
     assert (single(results)["reason"], results[0]["evidence"]["lock_restored"]) == ("PERMISSION_DENIED", True)
     assert ws.lock_reason(path) == "claude:topic:s1"
 
@@ -635,7 +635,7 @@ def test_cleanup_reports_when_the_lock_could_not_be_restored(ws: Workspace, monk
     # read-back is what decides: an observed mismatch is false, not a success.
     monkeypatch.setattr(hw, "restore_lock", lambda repo, target, reason: True)
     monkeypatch.setattr(hw, "current_lock", lambda repo, target: "other:topic:s9")
-    status, results = ws.run(capsys, "cleanup")
+    status, results = ws.run(capsys, "clean")
     assert (single(results)["reason"], results[0]["evidence"]["lock_restored"]) == ("PERMISSION_DENIED", False)
 
 
@@ -654,7 +654,7 @@ def test_lock_restored_is_true_from_the_read_back_not_the_restore_command(ws: Wo
     # so the read-back alone must decide that it was restored.
     monkeypatch.setattr(hw, "restore_lock", lambda repo, target, reason: False)
     monkeypatch.setattr(hw, "current_lock", lambda repo, target: "claude:topic:s1")
-    status, results = ws.run(capsys, "cleanup")
+    status, results = ws.run(capsys, "clean")
     assert (single(results)["reason"], results[0]["evidence"]["lock_restored"]) == ("PERMISSION_DENIED", True)
 
 
@@ -674,7 +674,7 @@ def test_lock_restored_is_null_when_the_read_back_fails(ws: Workspace, monkeypat
 
     monkeypatch.setattr(hw, "git", failing_remove)
     monkeypatch.setattr(hw, "current_lock", unreadable)
-    status, results = ws.run(capsys, "cleanup")
+    status, results = ws.run(capsys, "clean")
     result = single(results)
     # The remove failure stays primary; only the unobservable state is recorded.
     assert (result["reason"], result["detail"]) == ("PERMISSION_DENIED", "remove failed")
@@ -696,7 +696,7 @@ def test_lock_restored_is_absent_when_no_restoration_was_attempted_even_if_unobs
 
     monkeypatch.setattr(hw, "git", failing_unlock)
     monkeypatch.setattr(hw, "current_lock", unreadable)
-    status, results = ws.run(capsys, "cleanup")
+    status, results = ws.run(capsys, "clean")
     result = single(results)
     assert result["reason"] == "PERMISSION_DENIED"
     # Nothing was ever restored, so no restoration claim may be invented here.
@@ -718,7 +718,7 @@ def test_dirty_removal_keeps_its_result_when_the_lock_cannot_be_observed(ws: Wor
 
     monkeypatch.setattr(hw, "git", dirty_remove)
     monkeypatch.setattr(hw, "current_lock", unreadable)
-    status, results = ws.run(capsys, "cleanup")
+    status, results = ws.run(capsys, "clean")
     result = single(results)
     # The unobservable lock must not displace the primary DIRTY refusal.
     assert (result["reason"], result["detail"]) == ("DIRTY", "git refused removal")
@@ -735,7 +735,7 @@ def test_lock_restored_is_absent_without_a_restoration_attempt(ws: Workspace, mo
         return real_git(repo, *args, readonly=readonly)
 
     monkeypatch.setattr(hw, "git", failing_unlock)
-    status, results = ws.run(capsys, "cleanup")
+    status, results = ws.run(capsys, "clean")
     result = single(results)
     assert (result["reason"], result["evidence"]["lock_reason"]) == ("PERMISSION_DENIED", "claude:topic:s1")
     # No lock was unlocked, so nothing was restored and no state is claimed.
@@ -757,7 +757,7 @@ def test_cleanup_keeps_the_branch_when_branch_delete_refuses(ws: Workspace, caps
     path = ws.path("claude", "topic")
     tip = commit(path, "work.txt", "work\n")
     run_git(ws.repo, "update-ref", "refs/heads/main", tip)
-    status, results = ws.run(capsys, "cleanup")
+    status, results = ws.run(capsys, "clean")
     result = single(results)
     assert (status, result["reason"], result["evidence"]["branch_kept"]) == (0, "OK", True)
     assert not path.exists()
@@ -766,7 +766,7 @@ def test_cleanup_keeps_the_branch_when_branch_delete_refuses(ws: Workspace, caps
 def test_cleanup_by_another_harness_is_a_mismatch(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
     ws.run(capsys, "create")
     merge_into_main(ws, ws.path("claude", "topic"))
-    status, results = ws.run(capsys, "cleanup", "codex", "topic")
+    status, results = ws.run(capsys, "clean", "codex", "topic")
     assert (status, single(results)["reason"]) == (1, "IDENTITY_MISMATCH")
     assert ws.path("claude", "topic").exists()
 
@@ -774,7 +774,7 @@ def test_cleanup_by_another_harness_is_a_mismatch(ws: Workspace, capsys: pytest.
 def test_cleanup_of_a_legacy_checkout_is_legacy(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
     legacy = ws.repo / ".claude" / "worktrees" / "claude+topic"
     run_git(ws.repo, "worktree", "add", "-q", "-b", "worktree-claude+topic", str(legacy), "main")
-    status, results = ws.run(capsys, "cleanup")
+    status, results = ws.run(capsys, "clean")
     assert (status, single(results)["reason"]) == (1, "LEGACY_TARGET")
     assert legacy.exists()
 
@@ -784,7 +784,7 @@ def test_cleanup_requires_the_lock(ws: Workspace, capsys: pytest.CaptureFixture[
     path = ws.path("claude", "topic")
     merge_into_main(ws, path)
     run_git(ws.repo, "worktree", "unlock", str(path))
-    status, results = ws.run(capsys, "cleanup")
+    status, results = ws.run(capsys, "clean")
     assert (status, single(results)["reason"]) == (1, "IDENTITY_AMBIGUOUS")
     assert path.exists()
 
@@ -971,7 +971,7 @@ def test_leftover_probe_after_a_failed_unlock_keeps_the_lock_evidence(ws: Worksp
 
     monkeypatch.setattr(hw, "git", failing_unlock)
     monkeypatch.setattr(hw.os, "remove", stuck_probe)
-    status, results = ws.run(capsys, "cleanup")
+    status, results = ws.run(capsys, "clean")
     monkeypatch.undo()
     result = single(results)
     assert (result["reason"], result["target"]) == ("PERMISSION_DENIED", str(ws.path("claude", "topic")))
@@ -1047,7 +1047,7 @@ def test_failed_unlock_reports_the_current_lock(ws: Workspace, monkeypatch: pyte
         return real_git(repo, *args, readonly=readonly)
 
     monkeypatch.setattr(hw, "git", failing_unlock)
-    status, results = ws.run(capsys, "cleanup")
+    status, results = ws.run(capsys, "clean")
     assert (single(results)["reason"], results[0]["evidence"]["lock_reason"]) == ("PERMISSION_DENIED", "claude:topic:s1")
 
 
@@ -1090,7 +1090,7 @@ def test_abandoned_cleanup_preserves_exact_tag_and_other_worktree(ws, capsys, an
     path, tip, tag = archived_topic(ws, capsys, annotated=annotated)
     ws.run(capsys, "create", "claude", "other", "--session", "other-session")
     other = ws.path("claude", "other")
-    status, results = ws.run(capsys, "cleanup", "codex", "discard", *abandon_args(tip, tag))
+    status, results = ws.run(capsys, "clean", "codex", "discard", *abandon_args(tip, tag))
     result = single(results)
     assert (status, result["reason"], result["evidence"]["branch_kept"]) == (0, "OK", False), result["evidence"].get("git")
     assert result["evidence"]["abandoned"] and result["evidence"]["preserved_head"] == tip
@@ -1123,7 +1123,7 @@ def test_abandoned_cleanup_refuses_without_complete_preservation(ws, capsys, fau
     elif fault == "missing_lock":
         run_git(ws.repo, "worktree", "unlock", str(path))
         expected_reason = "IDENTITY_AMBIGUOUS"
-    status, results = ws.run(capsys, "cleanup", owner, "discard", *abandon_args(tip, tag))
+    status, results = ws.run(capsys, "clean", owner, "discard", *abandon_args(tip, tag))
     assert (status, single(results)["reason"]) == (1, expected_reason)
     assert path.exists() and (path / "work.txt").exists()
     assert run_git(ws.repo, "branch", "--list", "worktree-codex+discard")
@@ -1132,7 +1132,7 @@ def test_abandoned_cleanup_refuses_without_complete_preservation(ws, capsys, fau
 @pytest.mark.parametrize("extra", [("--abandon",), ("--archive-tag", "archive/example"), ("--expected-head", "a" * 40)])
 def test_abandoned_cleanup_requires_all_authority_fields(ws, capsys, extra):
     with pytest.raises(SystemExit) as exc:
-        ws.run(capsys, "cleanup", "codex", "discard", *extra)
+        ws.run(capsys, "clean", "codex", "discard", *extra)
     assert exc.value.code == 2
 
 
@@ -1150,7 +1150,7 @@ def test_abandoned_cleanup_keeps_branch_if_retained_refs_change(ws, capsys, monk
                 run_git(ws.repo, "update-ref", "refs/heads/worktree-codex+discard", changed_tip)
         return result
     monkeypatch.setattr(hw, "git", racing_git)
-    status, results = ws.run(capsys, "cleanup", "codex", "discard", *abandon_args(tip, tag))
+    status, results = ws.run(capsys, "clean", "codex", "discard", *abandon_args(tip, tag))
     assert status == 0 and single(results)["evidence"]["branch_kept"]
     assert not path.exists()
     assert run_git(ws.repo, "rev-parse", "worktree-codex+discard") == (tip if race == "tag" else changed_tip)
@@ -1163,7 +1163,7 @@ def test_abandoned_cleanup_refuses_reparse_and_restores_lock_on_busy_remove(ws, 
     # A trailing slash would ignore Windows junctions but not POSIX symlinks.
     (ws.repo / ".git" / "info" / "exclude").write_text("ignored-link\n", encoding="utf-8")
     assert run_git(path, "status", "--porcelain") == ""
-    status, results = ws.run(capsys, "cleanup", "codex", "discard", *abandon_args(tip, tag))
+    status, results = ws.run(capsys, "clean", "codex", "discard", *abandon_args(tip, tag))
     assert (status, single(results)["reason"], results[0]["detail"]) == (1, "PATH_UNSAFE", "reparse")
     assert path.exists() and outside.exists()
     if sys.platform == "win32":
@@ -1176,7 +1176,7 @@ def test_abandoned_cleanup_refuses_reparse_and_restores_lock_on_busy_remove(ws, 
             return subprocess.CompletedProcess(args, 1, "", "simulated busy directory")
         return real_git(repo, *args, readonly=readonly, input=input)
     monkeypatch.setattr(hw, "git", busy)
-    status, results = ws.run(capsys, "cleanup", "codex", "discard", *abandon_args(tip, tag))
+    status, results = ws.run(capsys, "clean", "codex", "discard", *abandon_args(tip, tag))
     assert (status, single(results)["reason"]) == (2, "PERMISSION_DENIED")
     assert ws.lock_reason(path) == "codex:discard:s1"
     assert run_git(ws.repo, "rev-parse", f"refs/tags/{tag}^{{commit}}") == tip
@@ -1197,7 +1197,7 @@ def test_abandoned_cleanup_handles_upstream_settings(ws, capsys, monkeypatch, fa
             run_git(ws.repo, "update-ref", "refs/heads/" + branch, tip)
         return result
     monkeypatch.setattr(hw, "git", mutate)
-    status, results = ws.run(capsys, "cleanup", "codex", "discard", *abandon_args(tip, tag))
+    status, results = ws.run(capsys, "clean", "codex", "discard", *abandon_args(tip, tag))
     result = single(results)
     assert (status, result["reason"], result["evidence"]["branch_kept"]) == (0, "OK", False)
     assert not path.exists() and run_git(ws.repo, "rev-parse", f"refs/tags/{tag}^{{commit}}") == tip
@@ -1236,7 +1236,7 @@ def squash_args(facts, reviewed_option="--reviewed", **override):
 
 
 def squash_cleanup(ws, capsys, facts, **override):
-    return ws.run(capsys, "cleanup", "codex", "sq", *squash_args(facts, **override))
+    return ws.run(capsys, "clean", "codex", "sq", *squash_args(facts, **override))
 
 
 def assert_kept(ws, path, facts):
@@ -1347,7 +1347,7 @@ def test_squash_cleanup_of_a_topic_already_in_main_points_to_plain_cleanup(ws, c
 
 def test_squash_cleanup_keeps_the_identity_checks(ws, capsys):
     path, facts = squashed_topic(ws, capsys)
-    status, results = ws.run(capsys, "cleanup", "claude", "sq", *squash_args(facts))
+    status, results = ws.run(capsys, "clean", "claude", "sq", *squash_args(facts))
     assert (status, single(results)["reason"]) == (1, "IDENTITY_MISMATCH")
     run_git(ws.repo, "worktree", "unlock", str(path))
     status, results = squash_cleanup(ws, capsys, facts)
@@ -1419,14 +1419,14 @@ def test_squash_cleanup_options_are_a_mutually_exclusive_mode(ws, capsys, extra)
             "--integrated-as", "c" * 40, "--retained-ref", "refs/tags/x")
     argv = (*extra, *base, "--squash-integrated") if extra[0] == "--abandon" else extra
     with pytest.raises(SystemExit) as exc:
-        ws.run(capsys, "cleanup", "codex", "sq", *argv)
+        ws.run(capsys, "clean", "codex", "sq", *argv)
     assert exc.value.code == 2
 
 
 def test_plain_cleanup_reports_completion_from_observed_state(ws, capsys):
     ws.run(capsys, "create")
     merge_into_main(ws, ws.path("claude", "topic"))
-    status, results = ws.run(capsys, "cleanup")
+    status, results = ws.run(capsys, "clean")
     evidence = single(results)["evidence"]
     assert (status, evidence["worktree_removed"], evidence["cleanup_complete"]) == (0, True, True)
 
@@ -1436,7 +1436,7 @@ def test_plain_cleanup_with_a_kept_branch_is_not_complete(ws, capsys):
     ws.run(capsys, "create")
     tip = commit(ws.path("claude", "topic"), "work.txt", "work\n")
     run_git(ws.repo, "update-ref", "refs/heads/main", tip)
-    status, results = ws.run(capsys, "cleanup")
+    status, results = ws.run(capsys, "clean")
     evidence = single(results)["evidence"]
     assert (status, evidence["branch_kept"], evidence["worktree_removed"], evidence["cleanup_complete"]) == (0, True, True, False)
 
@@ -1537,14 +1537,14 @@ def half_cleaned(ws: Workspace, capsys: pytest.CaptureFixture[str], merged: bool
 def test_cleanup_recovers_an_unregistered_empty_directory_with_a_merged_branch(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
     path = half_cleaned(ws, capsys)
     run_git(ws.repo, "config", "branch.worktree-claude+topic.description", "kept")
-    status, results = ws.run(capsys, "cleanup")
+    status, results = ws.run(capsys, "clean")
     result = single(results)
     assert (status, result["reason"], result["target"]) == (0, "RECOVERED", str(path))
     assert result["evidence"]["branch_kept"] is False
     assert (result["evidence"]["cleanup_complete"], result["evidence"]["branch_config"]) == (True, "removed")
     assert not path.exists()
     assert run_git(ws.repo, "branch", "--list", "worktree-claude+topic") == ""
-    assert single(ws.run(capsys, "cleanup")[1])["reason"] == "NOT_FOUND"
+    assert single(ws.run(capsys, "clean")[1])["reason"] == "NOT_FOUND"
 
 
 @pytest.mark.integration
@@ -1560,7 +1560,7 @@ def test_cleanup_refuses_recovery_unless_all_three_conditions_hold(ws: Workspace
         make_link(path / "link", tmp_path / "elsewhere")
     before = run_git(ws.repo, "for-each-ref", "refs/heads")
     extra = ("--abandon", "--archive-tag", "archive/x", "--expected-head", "a" * 40) if fault == "abandon-mode" else ()
-    status, results = ws.run(capsys, "cleanup", "claude", "topic", *extra)
+    status, results = ws.run(capsys, "clean", "claude", "topic", *extra)
     result = single(results)
     assert (status, result["reason"], result["detail"]) == (1, "PATH_UNSAFE", "unregistered")
     assert path.is_dir()
@@ -1573,7 +1573,7 @@ def test_cleanup_refuses_recovery_unless_all_three_conditions_hold(ws: Workspace
 def test_cleanup_recovers_an_unregistered_empty_directory_whose_branch_is_gone(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
     path = half_cleaned(ws, capsys, merged=False)
     run_git(ws.repo, "branch", "-D", "worktree-claude+topic")
-    status, results = ws.run(capsys, "cleanup")
+    status, results = ws.run(capsys, "clean")
     result = single(results)
     assert (status, result["reason"], result["target"]) == (0, "RECOVERED", str(path))
     assert (result["evidence"]["branch_missing"], result["evidence"]["cleanup_complete"]) == (True, True)
@@ -1586,7 +1586,7 @@ def test_cleanup_refuses_recovery_of_a_reparse_point_at_the_target(ws: Workspace
     path.rmdir()
     (tmp_path / "elsewhere").mkdir()
     make_link(path, tmp_path / "elsewhere")
-    status, results = ws.run(capsys, "cleanup")
+    status, results = ws.run(capsys, "clean")
     assert (status, single(results)["reason"], results[0]["detail"]) == (1, "PATH_UNSAFE", "reparse")
     assert os.path.lexists(path)
     assert run_git(ws.repo, "branch", "--list", "worktree-claude+topic") != ""
@@ -1600,7 +1600,7 @@ def test_recovery_of_a_busy_directory_keeps_the_branch(ws: Workspace, monkeypatc
         raise PermissionError(13, "Access is denied", target)
 
     monkeypatch.setattr(hw, "remove_empty_directory", busy)
-    status, results = ws.run(capsys, "cleanup")
+    status, results = ws.run(capsys, "clean")
     assert (status, single(results)["reason"]) == (2, "PERMISSION_DENIED")
     assert path.is_dir()
     assert run_git(ws.repo, "branch", "--list", "worktree-claude+topic") != ""
@@ -1617,7 +1617,7 @@ def test_the_removed_flags_are_unknown_options(ws: Workspace, flag: list[str]) -
 @pytest.mark.integration
 def test_an_expected_head_without_its_mode_names_the_modes(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit) as exc:
-        ws.run(capsys, "cleanup", "claude", "topic", "--expected-head", "0" * 40)
+        ws.run(capsys, "clean", "claude", "topic", "--expected-head", "0" * 40)
     assert exc.value.code == 2
     error = capsys.readouterr().err
     assert "--abandon" in error and "--squash-integrated" in error
