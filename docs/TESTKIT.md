@@ -614,7 +614,9 @@ the isolation of `atc test run`. Each run is pytest with `-x` and a
 baseline to its end; a wait for it past 900 seconds stops the command with
 `WORKER_WAIT_TIMEOUT` (exit 124) before the baseline, and an interrupt
 during the wait stops it with `INTERRUPTED` (exit 130) (§ Host worker
-budget).
+budget). That one token covers every run of the command: an `-n K` among
+the `--tests` arguments runs K workers on it, outside the pool and its
+memory clamp.
 
 - `<sha>` must name a commit in `<worktree>` (`git rev-parse --verify`):
   `SHA_NOT_FOUND` (exit 9) before the scratch is touched, then
