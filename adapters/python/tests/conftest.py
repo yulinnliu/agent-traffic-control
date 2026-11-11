@@ -44,6 +44,9 @@ def _no_host_worker_pool(monkeypatch: pytest.MonkeyPatch, _test_worker_pool: Pat
     sizes workers without the host's free memory; a test that needs either supplies it."""
     monkeypatch.setattr(workers, "available_memory", lambda: None)
     monkeypatch.setenv(workers.POOL_DIRECTORY, str(_test_worker_pool))
+    named = stages.pool_directory
+    monkeypatch.setattr(stages, "pool_directory",
+                        lambda environ: named(environ) if environ.get(workers.POOL_DIRECTORY) else _test_worker_pool)
     for name in (workers.HELD, workers.WAIT_FILE, workers.MAX_WAIT):
         monkeypatch.delenv(name, raising=False)
 
