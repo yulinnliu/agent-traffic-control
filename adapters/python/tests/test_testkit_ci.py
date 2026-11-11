@@ -12,7 +12,9 @@ import pytest
 from atc_testkit import ci, python_toolchain, stages
 
 CONFTEST = 'pytest_plugins = ("atc_testkit.plugin",)\n'
-PYPROJECT = '[tool.pytest.ini_options]\ntestpaths = ["tests"]\n[tool.atc-testkit]\nci_init = "setup_hook:prepare"\n'
+# A worker counted at 1 MiB: the runner a test starts sizes its workers without the host's free memory.
+PYPROJECT = ('[tool.pytest.ini_options]\ntestpaths = ["tests"]\n[tool.atc-testkit]\nci_init = "setup_hook:prepare"\n'
+             'worker_memory_mib = 1\n')
 SETUP = 'def prepare():\n    print("PROJECT_INIT", flush=True)\n'
 FAILING = """import pytest
 
