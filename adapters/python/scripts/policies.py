@@ -1,18 +1,10 @@
 #!/usr/bin/env python3
-"""Load a policy directory, validate each file against its schema, and refuse
-contradictions.
+"""Load a policy directory, validate each file against its schema, and refuse contradictions.
 
-    atc policies check <dir> [--schemas <dir>]
-
-<dir> holds any of hard-deny.yaml, approval-required.yaml,
-permission-presets.yaml and escalation.yaml. Each present file must match its
-schema under shared/policies/schemas/. A permission preset that grants a
-capability or a write path hard deny denies for edit or write is refused
-(`preset-regrants-hard-deny`), as is an approval-required id that hard deny
-already makes impossible (`approval-overlaps-hard-deny`) and a glob listed
-twice in `filesystem.deny` (`duplicate-glob`). Prints `ok` and
-exits 0, or one problem per line and exits 1. A loader that proceeds past a
-problem would turn a policy file into prose; this one fails closed.
+A permission preset that grants a capability or a write path hard deny denies for edit or write is refused
+(`preset-regrants-hard-deny`), as is an approval-required id that hard deny already makes impossible
+(`approval-overlaps-hard-deny`) and a glob listed twice in `filesystem.deny` (`duplicate-glob`). A loader
+that proceeds past a problem would turn a policy file into prose; this one fails closed.
 """
 
 from __future__ import annotations
@@ -116,23 +108,36 @@ def contradictions(loaded: dict[str, dict]) -> list[str]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(allow_abbrev=False, description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    sub = parser.add_subparsers(dest="command", required=True)
-    check = sub.add_parser("check", allow_abbrev=False, help="validate a policy directory")
-    check.add_argument("directory", type=Path)
-    check.add_argument("--schemas", type=Path, default=SCHEMAS)
+    import cli_conventions
+    parser = argparse.ArgumentParser(prog="atc policies", allow_abbrev=False, **cli_conventions.form(
+        "Load a policy directory, validate each file against its schema, and refuse contradictions.",
+        see="shared/policies/schemas/"))
+    sub = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
+    check = sub.add_parser("check", allow_abbrev=False, help="validate a policy directory", **cli_conventions.form(
+        "Validate the policy files in DIR: hard-deny.yaml, approval-required.yaml, permission-presets.yaml,\n"
+        "escalation.yaml. Prints `ok: <kinds>` or one problem per line.",
+        exit="0 ok; 1 problems found, or no policy file in DIR; 2 usage error"))
+    check.add_argument("directory", type=Path, metavar="DIR", help="the policy directory to check")
+    check.add_argument("--schemas", type=Path, default=SCHEMAS, metavar="DIR",
+                       help="policy schema directory (default: shared/policies/schemas)")
+    cli_conventions.add_json(check)
     args = parser.parse_args(argv)
+
+    def report(verdict: str, problems: list[str], kinds: list[str]) -> int:
+        if args.json:
+            print(json.dumps({"verdict": verdict, "directory": str(args.directory), "kinds": kinds,
+                              "problems": problems}, indent=2))
+        else:
+            print("\n".join(problems) if problems else "ok: " + ", ".join(kinds))
+        return cli_conventions.STOP if problems else cli_conventions.OK
+
     try:
         loaded = load(args.directory, args.schemas)
     except PolicyError as exc:
-        for problem in exc.problems:
-            print(problem)
-        return 1
+        return report("PROBLEMS", list(exc.problems), [])
     if not loaded:
-        print(f"no policy files found in {args.directory}")
-        return 1
-    print("ok: " + ", ".join(sorted(loaded)))
-    return 0
+        return report("PROBLEMS", [f"no policy files found in {args.directory}"], [])
+    return report("OK", [], sorted(loaded))
 
 
 if __name__ == "__main__":

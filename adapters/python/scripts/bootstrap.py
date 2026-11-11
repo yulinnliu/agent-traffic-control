@@ -1,33 +1,20 @@
 #!/usr/bin/env python3
 """Set up this checkout as a workspace root and bring projects under it.
 
-    atc bootstrap init   [--governance-source OWNER/REPO] [--force]
-    atc bootstrap add    NAME [--url URL] [--skills a,b]
-    atc bootstrap status
-
-`init` writes `workspace.yaml` with this checkout as `workspace_root`,
-creates `projects/`, `worktrees/` and `state/`, and prints how to put the
-`atc` command on PATH. No environment variable is needed.
-
-`add` registers one project: clones `--url` into `projects/NAME`, or expects
-a checkout already there; appends the entry to `workspace.yaml`; creates its
-worktree and state directories; installs the requested opt-in skill
-adapters; then runs onboarding's apply step so the project receives `CLAUDE.md`,
-the pointer line in `AGENTS.md`, `.atc/` and every baseline adapter, and validates the
-result. Project-owned files are never rewritten.
-
-`sync [NAME] [--prune]` converges one or every project's workspace-owned
-files: creates missing baseline adapters, rewrites drifted managed ones,
-with `--prune` deletes managed adapters whose canonical skill was renamed or
-removed, then validates. Project-owned files are never touched.
-
-`status` runs doctor and a dry onboarding check across every registered
-project.
+`init` writes `workspace.yaml` with this checkout as `workspace_root`, creates `projects/`, `worktrees/` and
+`state/`, and prints how to put the `atc` command on PATH. `add` registers one project: clones `--url` into
+`projects/NAME` or expects a checkout there, appends the entry to `workspace.yaml`, creates its worktree and
+state directories, installs the requested opt-in skills, runs onboarding's apply step and validates. `status`
+runs doctor and `atc onboard --check --all`. `sync` is the deprecated spelling of `atc onboard --sync`.
+Project-owned files are never rewritten.
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
+import json
 import os
 import re
 import shutil
@@ -37,6 +24,7 @@ from pathlib import Path
 
 import yaml
 
+import cli_conventions
 import doctor
 import validate_workspace
 import onboard_project
@@ -171,45 +159,71 @@ def add(root: Path, name: str, url: str | None, skills: list[str]) -> int:
 
 
 def sync(root: Path, name: str | None, prune: bool) -> int:
-    args = ["--sync", *(["--prune"] if prune else []), *(["--all"] if name is None else [name])]
-    print("$ onboard_project.py " + " ".join(args))
+    args = ["--sync", *(["--prune"] if prune else []), *(["--all"] if name is None else ["--project", name])]
+    cli_conventions.deprecated("atc bootstrap sync", "atc onboard " + " ".join(args))
     code = onboard_project.main(args, root=root)
-    if code == 2:
-        return code
     return validate(root) or code
 
 
-def status(root: Path) -> int:
+def status(root: Path, as_json: bool = False) -> int:
     checks = doctor.diagnose(root)
+    errors = sum(check.status == "ERROR" for check in checks)
+    if as_json:
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            code = onboard_project.main(["--check", "--all", "--json"], root=root)
+        code = code or (cli_conventions.STOP if errors else cli_conventions.OK)
+        print(json.dumps({"verdict": "NOT_READY" if code else "READY",
+                          "doctor": [{"name": c.name, "status": c.status, "detail": c.detail} for c in checks],
+                          "onboard": json.loads(buffer.getvalue())}, indent=2))
+        return code
     for check in checks:
         print(f"{check.status:15} {check.name}: {check.detail}")
-    errors = sum(check.status == "ERROR" for check in checks)
-    print(f"\nDoctor: {errors} error(s).\n$ onboard_project.py --check --all")
+    print(f"\nDoctor: {errors} error(s).\n$ atc onboard --check --all")
     return onboard_project.main(["--check", "--all"], root=root) or (1 if errors else 0)
 
 
-def main(argv: list[str] | None = None, root: Path = ROOT) -> int:
-    parser = argparse.ArgumentParser(allow_abbrev=False, description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    sub = parser.add_subparsers(dest="command", required=True)
-    p_init = sub.add_parser("init", allow_abbrev=False)
-    p_init.add_argument("--governance-source", metavar="OWNER/REPO")
-    p_init.add_argument("--force", action="store_true")
-    p_add = sub.add_parser("add", allow_abbrev=False)
-    p_add.add_argument("name")
-    p_add.add_argument("--url", help="git URL to clone into projects/NAME")
-    p_add.add_argument("--skills", default="", help="comma-separated opt-in skills to install")
-    p_sync = sub.add_parser("sync", allow_abbrev=False)
-    p_sync.add_argument("name", nargs="?")
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="atc bootstrap", allow_abbrev=False, **cli_conventions.form(
+        "Set up this checkout as a workspace root and bring projects under it.", see="README.md § Installation"))
+    sub = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
+    p_init = sub.add_parser("init", allow_abbrev=False, help="write workspace.yaml and the workspace directories",
+                            **cli_conventions.form("Write workspace.yaml with this checkout as workspace_root and "
+                                                   "create projects/, worktrees/ and state/."))
+    p_init.add_argument("--governance-source", metavar="OWNER/REPO",
+                        help="the repository governance is read from (default: this checkout's origin)")
+    p_init.add_argument("--force", action="store_true", help="overwrite an existing workspace.yaml")
+    p_add = sub.add_parser("add", allow_abbrev=False, help="register one project and onboard it",
+                           **cli_conventions.form("Register one project, onboard it and validate the result."))
+    targets = p_add.add_mutually_exclusive_group(required=True)
+    cli_conventions.add_project(targets, help="the project's name in workspace.yaml and under projects/")
+    targets.add_argument("legacy_name", nargs="?", metavar="NAME", help="deprecated: use --project NAME")
+    p_add.add_argument("--url", metavar="URL", help="git URL to clone into projects/NAME")
+    p_add.add_argument("--skills", default="", metavar="NAME,...", help="comma-separated opt-in skills to install")
+    p_sync = sub.add_parser("sync", allow_abbrev=False, help="deprecated: use atc onboard --sync",
+                            **cli_conventions.form("Deprecated: runs `atc onboard --sync --all` or "
+                                                   "`atc onboard --sync --project NAME`, then validates."))
+    p_sync.add_argument("name", nargs="?", metavar="NAME", help="one project (default: every project)")
     p_sync.add_argument("--prune", action="store_true", help="delete orphaned managed adapters")
-    sub.add_parser("status", allow_abbrev=False)
-    args = parser.parse_args(argv)
+    p_status = sub.add_parser("status", allow_abbrev=False, help="run doctor and atc onboard --check --all",
+                              **cli_conventions.form("Run doctor and `atc onboard --check --all`; changes nothing.",
+                                                     exit="0 ready and current; 1 an error or drift; 2 usage error"))
+    cli_conventions.add_json(p_status)
+    return parser
+
+
+def main(argv: list[str] | None = None, root: Path = ROOT) -> int:
+    args = build_parser().parse_args(argv)
     if args.command == "init":
         return init(root, args.governance_source, args.force)
     if args.command == "add":
-        return add(root, args.name, args.url, [s for s in args.skills.split(",") if s])
+        name = args.project or args.legacy_name
+        if args.legacy_name:
+            cli_conventions.deprecated(f"atc bootstrap add {name}", f"atc bootstrap add --project {name}")
+        return add(root, name, args.url, [s for s in args.skills.split(",") if s])
     if args.command == "sync":
         return sync(root, args.name, args.prune)
-    return status(root)
+    return status(root, args.json)
 
 
 if __name__ == "__main__":

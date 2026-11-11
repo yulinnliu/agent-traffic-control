@@ -1,52 +1,46 @@
-"""`atc`: one command in front of the Python reference tools.
+"""usage: atc [--root DIR] <command> [<args>]
+       atc --version
 
-    atc [--root DIR] <command> [args...]
+Agent Traffic Control: governed task lifecycle for agent-written changes.
 
-Commands map onto the scripts under `adapters/python/scripts/`:
+Task lifecycle:
+  task        new / list / check task records
+  worktree    create / resume / audit / clean a topic worktree
+  verify      run the verifier on the candidate integrate would build
+  integrate   fast-forward main to a reviewed topic
+  close-out   remove an integrated task's worktree, scratches and reports
+  preflight   list what a push of main would carry
 
-    worktree   hami_worktree.py   create / resume / audit / cleanup
-    preflight  git_preflight.py   push listing
-    integrate  git_integrate.py   advance local main to a reviewed topic
-    verify     git_integrate.py   run the verifier on the candidate integrate would build
-    task       task_records.py    new / list / check task records
-    close-out  close_out.py       remove an integrated task's worktree, scratches, reports
-    validate   validate_workspace.py
-    onboard    onboard_project.py
-    bootstrap  bootstrap.py       init / add / sync / status
-    doctor     doctor.py
-    policies   policies.py        check DIR
-    enforce    generate_enforcement.py   (+ --workspace <root>/workspace.yaml when present)
-    classify   classify_change.py
-    friction   friction.py
-    test       atc_testkit            run / mutants / private
-    tmp        atc_testkit            checkout / list / clean / prune
+Testing:
+  test        run / mutants / private: isolated pytest runs
+  tmp         checkout / list / clean / prune scratch checkouts
 
-The checkout root is, in order: `--root`, `$ATC_ROOT`, the nearest parent of
-the working directory holding `workspace.yaml`, else the checkout this
-package was installed from. `onboard --root-only` renders the ATC checkout
-holding the working directory, which in a linked worktree has no
-`workspace.yaml`; `--root` and `$ATC_ROOT` still win. Every command names its
-repository with `--project` (`root` for the workspace root), resolved in that
-root's workspace.yaml. Skills call `atc` by name, so a repository that
-uses them needs nothing but this command on PATH.
+Workspace:
+  bootstrap   init / add / status: set up a workspace root and its projects
+  onboard     check or sync the files ATC owns in projects
+  doctor      diagnose runtime readiness; changes nothing
+  validate    check this checkout's contract (and its projects')
 
-When this package runs from the canonical checkout (it holds `workspace.yaml`
-and is no linked worktree), every command but `doctor` and `--help` stops with
-`ERROR CHECKOUT_NOT_MAIN` while that checkout is off `main`, and warns with
-`WARNING CHECKOUT_DIRTY` while it has tracked modifications;
-`onboard --root-only` stops with `ERROR CHECKOUT_CANONICAL` when the checkout
-it would render is the canonical one (root `AGENTS.md` § Changing this repo).
+Policy:
+  policies    check a policy directory
+  enforce     generate harness deny configs from hard-deny.yaml
+  classify    classify a change LOW or HIGH
 
-`atc <command> --help` describes one command. An argument error prints
-argparse's usage line and error, then `next: atc <command> [<subcommand>]
---help`. A module the installed `atc`
-lacks stops the command with `ERROR MISSING_DEPENDENCY` and the reinstall
-command of the root's AGENTS.md.
+Log:
+  friction    add / list / summary / resolve friction incidents
+
+--root DIR    the ATC checkout to act on, before or after the command
+              (shared/conformance/CLI.md § Root resolution)
+Exit codes, --json and naming: shared/conformance/CLI.md
+Run `atc <command> --help` for one command.
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
+import json
 import os
 import sys
 from pathlib import Path
@@ -54,7 +48,7 @@ from pathlib import Path
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"
 CHECKOUT = SCRIPTS.parents[2]
 COMMANDS = {
-    "worktree": "hami_worktree",
+    "worktree": "managed_worktree",
     "preflight": "git_preflight",
     "integrate": "git_integrate",
     "verify": "git_integrate",
@@ -71,6 +65,8 @@ COMMANDS = {
 }
 TESTKIT_COMMANDS = ("test", "tmp")
 GUARD_EXEMPT = ("doctor",)
+GROUPED = ("worktree", "preflight", "task", "bootstrap", "policies", "friction", "test", "tmp")
+LIST_KEYS = {"atc tmp list": "scratches"}
 GUARDED_CHECKOUT = CHECKOUT
 
 
@@ -149,20 +145,67 @@ def _guard(command: str, rest: list[str], checkout: Path) -> int | None:
     return None
 
 
+def version() -> str:
+    from importlib import metadata
+
+    from atc_testkit import __version__ as testkit
+    try:
+        atc = metadata.version("atc-python-adapter")
+    except metadata.PackageNotFoundError:
+        atc = "unknown"
+    return f"atc {atc} (atc-testkit {testkit})"
+
+
+def _take_root(args: list[str]) -> tuple[str | None, list[str], str | None]:
+    """Remove every `--root DIR` / `--root=DIR` before a `--`; the last one wins. Returns (root, rest, error)."""
+    explicit, rest, index = None, [], 0
+    while index < len(args):
+        arg = args[index]
+        if arg == "--":
+            rest.extend(args[index:])
+            break
+        if arg == "--root":
+            if index + 1 >= len(args):
+                return None, args, "--root needs a directory"
+            explicit, index = args[index + 1], index + 2
+            continue
+        if arg.startswith("--root="):
+            explicit = arg.split("=", 1)[1]
+        else:
+            rest.append(arg)
+        index += 1
+    return explicit, rest, None
+
+
+def _command_name(command: str, rest: list[str]) -> str:
+    if command in GROUPED and rest and not rest[0].startswith("-"):
+        return f"atc {command} {'clean' if (command, rest[0]) == ('worktree', 'cleanup') else rest[0]}"
+    return f"atc {command}"
+
+
+def _wants_json(rest: list[str]) -> bool:
+    head = rest[:rest.index("--")] if "--" in rest else rest
+    return "--json" in head and not any(arg in ("-h", "--help") for arg in head)
+
+
 def main(argv: list[str] | None = None, checkout: Path | None = None) -> int:
     """``checkout`` is the checkout serving this `atc` for the guard; tests name one."""
     _escape_unencodable_output()
     if argv is None:
         _child_encoding()
     args = list(sys.argv[1:] if argv is None else argv)
-    explicit_root = None
-    if args[:1] == ["--root"]:
-        if len(args) < 2:
-            print("--root needs a directory", file=sys.stderr)
-            return 2
-        explicit_root, args = args[1], args[2:]
-    elif args and args[0].startswith("--root="):
-        explicit_root, args = args[0].split("=", 1)[1], args[1:]
+    if args[:1] in (["--version"], ["-V"]):
+        print(version())
+        return 0
+    command_at = next((i for i, arg in enumerate(args) if not arg.startswith("-") and (i == 0 or args[i - 1] != "--root")), None)
+    if command_at is not None and args[command_at] == "test":
+        explicit_root, head, error = _take_root(args[:command_at])
+        args = head + args[command_at:]
+    else:
+        explicit_root, args, error = _take_root(args)
+    if error:
+        print(error, file=sys.stderr)
+        return 2
     if not args or args[0] in ("-h", "--help", "help"):
         print(usage())
         return 0
@@ -177,6 +220,8 @@ def main(argv: list[str] | None = None, checkout: Path | None = None) -> int:
     sys.argv[0] = f"atc {command}"
     argparse.ArgumentParser.error = _usage_error
     try:
+        if command != "test" and _wants_json(rest):
+            return _enveloped(_command_name(command, rest), lambda: _dispatch(command, rest, explicit_root))
         return _dispatch(command, rest, explicit_root)
     except ModuleNotFoundError as error:
         print(f"ERROR MISSING_DEPENDENCY atc {command} needs the module {error.name!r}, which this "
@@ -185,6 +230,28 @@ def main(argv: list[str] | None = None, checkout: Path | None = None) -> int:
     finally:
         sys.argv[0] = program
         argparse.ArgumentParser.error = parser_error
+
+
+def _enveloped(name: str, run) -> int:
+    """Run one `--json` command and print its result inside the common envelope (shared/conformance/CLI.md § Output)."""
+    _scripts_on_path()
+    import cli_conventions
+    buffer = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buffer):
+            code = run()
+    except SystemExit as stop:
+        code = stop.code if isinstance(stop.code, int) else (0 if stop.code is None else 2)
+    text = buffer.getvalue()
+    if not text.strip():
+        return code
+    try:
+        payload = json.loads(text)
+    except ValueError:
+        sys.stdout.write(text)
+        return code
+    print(json.dumps(cli_conventions.envelope(name, code, payload, LIST_KEYS.get(name, "items")), indent=2))
+    return code
 
 
 def _dispatch(command: str, rest: list[str], explicit_root: str | None) -> int:
@@ -204,18 +271,11 @@ def _dispatch(command: str, rest: list[str], explicit_root: str | None) -> int:
     else:
         root = resolve_root(explicit_root, dict(os.environ), Path.cwd())
     module = __import__(COMMANDS[command])
-    if command in ("worktree", "task", "onboard", "bootstrap", "close-out"):
-        return module.main(rest, root=root)
-    if command in ("integrate", "preflight"):
+    if command in ("worktree", "task", "onboard", "bootstrap", "close-out", "integrate", "preflight", "doctor"):
         return module.main(rest, root=root)
     if command == "verify":
         return module.verify_main(rest, root=root)
-    if command == "doctor":
-        if rest[:1] in (["-h"], ["--help"]):
-            print(f"usage: atc doctor\n\n{module.__doc__.strip()}")
-            return 0
-        return module.main(root)
-    if command == "validate" and "--root" not in rest and not any(a.startswith("--root=") for a in rest):
+    if command == "validate":
         rest = [*rest, "--root", str(root)]
     if command == "enforce" and (root / "workspace.yaml").is_file() and not any(a.split("=", 1)[0] == "--workspace" for a in rest):
         rest = [*rest, "--workspace", str(root / "workspace.yaml")]

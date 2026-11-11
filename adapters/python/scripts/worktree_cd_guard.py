@@ -3,7 +3,7 @@
 
 A Bash `cd`/`pushd` outside a subshell, or any PowerShell `cd`/`Set-Location`/
 `sl`/`Push-Location`, carries into every later call of the session; a shell
-parked inside a managed worktree keeps it busy and `atc worktree cleanup`
+parked inside a managed worktree keeps it busy and `atc worktree clean`
 stops halfway. A target naming a variable assigned a literal earlier in the
 same command is resolved first. Reads the hook payload on stdin and prints a deny decision;
 anything it cannot parse is allowed.
@@ -374,7 +374,7 @@ def reason(tool: str, target: str) -> str:
     return (
         f"Refused: changing directory to {target} {where} makes the worktree the session's "
         f"working directory for every later call, which keeps it busy and makes "
-        f"`atc worktree cleanup` stop halfway. Run Git as `git -C <path> ...` and pass absolute "
+        f"`atc worktree clean` stop halfway. Run Git as `git -C <path> ...` and pass absolute "
         f"paths{subshell}. To prove tests import the worktree's code, set `PYTHONPATH` to its "
         f"`packages/*/src` directories instead of entering it."
     )

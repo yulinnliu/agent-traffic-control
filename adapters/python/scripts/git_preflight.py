@@ -5,7 +5,7 @@
 carry, grouped by the integration that brought it in (PUSH / STOP).
 `merge_preflight()` evaluates that file's integration table for `atc
 integrate`, and `cleanup_preflight()` judges a worktree's removal for `atc
-worktree cleanup`. None of them writes a branch, the index or the working
+worktree clean`. None of them writes a branch, the index or the working
 tree: conflicts are detected with `git merge-tree --write-tree`, which creates
 only unreferenced objects, and the fetch updates only remote-tracking refs.
 
@@ -538,21 +538,24 @@ def render(report: Report) -> str:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(allow_abbrev=False, description=__doc__.splitlines()[0])
-    sub = parser.add_subparsers(dest="command", required=True)
-    push = sub.add_parser("push", allow_abbrev=False, help="fetch origin and list what a push of main would carry")
-    push.add_argument("--project", help="registered project name from workspace.yaml; root names the workspace root "
-                      "(default: the working directory's project)")
-    push.add_argument(
-        "--integration", help="candidate SHA whose commits carry push approval; every other commit is flagged",
-    )
-    push.add_argument("--json", action="store_true", help="print the report as JSON")
+    import cli_conventions
+    parser = argparse.ArgumentParser(prog="atc preflight", allow_abbrev=False, **cli_conventions.form(
+        "Read-only Git preflight for the lifecycle in GIT_WORKFLOW.md.",
+        exit="0 PUSH; 1 STOP; 2 ERROR", see="GIT_WORKFLOW.md § Publication boundary"))
+    sub = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
+    push = sub.add_parser("push", allow_abbrev=False, help="fetch origin and list what a push of main would carry",
+                          **cli_conventions.form("Fetch origin and list what a push of main would carry.",
+                                                 exit="0 PUSH; 1 STOP; 2 ERROR"))
+    cli_conventions.add_project(push, " (default: the working directory's project)")
+    push.add_argument("--integration", metavar="SHA",
+                      help="candidate SHA whose commits carry push approval; every other commit is flagged")
+    cli_conventions.add_json(push)
     return parser
 
 
 def checkout_of(project: str | None, root: Path | None, cwd: str) -> Path:
     """The main checkout `--project` names (`root` the workspace root), else the working directory's project."""
-    import hami_worktree as hw  # imports this module, so not at the top
+    import managed_worktree as hw  # imports this module, so not at the top
 
     root = hw.ROOT if root is None else root
     try:

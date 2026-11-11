@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create, resume, audit and clean up per-topic worktrees from the workspace map.
+"""Create, resume, audit and clean per-topic worktrees from the workspace map.
 
 Contract 1. Every path derives from workspace.yaml and the durable key
 `<owner>+<topic>`: directory `<project.worktrees>/<owner>+<topic>`, branch
@@ -13,15 +13,6 @@ project's repository or worktrees root; an explicit value always wins.
 `--project root` targets the workspace root itself, whose worktrees live
 under `worktrees/root`; a working directory there infers it, while the rest
 of the canonical checkout infers nothing.
-
-Usage:
-  hami_worktree.py create  --project P --owner O --topic T [--session S] [--base-sha FULL_SHA] [--json]
-  hami_worktree.py resume  --project P --owner O --topic T [--session S] [--rebind-session] [--json]
-  hami_worktree.py audit   --project P [--owner O] [--topic T] [--json]
-  hami_worktree.py cleanup --project P --owner O --topic T [--json]
-    [--abandon --archive-tag archive/NAME --expected-head FULL_SHA]
-    [--squash-integrated --expected-head FULL_SHA --reviewed FULL_SHA --expected-main FULL_SHA
-     --integrated-as FULL_SHA --retained-ref refs/tags/NAME]
 
 Exit status: 0 for OK; 1 for a refusal or an audit finding; 2 for a usage,
 environment, permission or contract problem.
@@ -974,7 +965,7 @@ def readiness(root: Path, environ: dict[str, str], home: str) -> tuple[str, str]
         lock_reason = supports_lock_reason(ws.root)
     except Stop as stop:
         return "ERROR", f"contract {CONTRACT}; {stop.result.code}: {stop.result.detail}"
-    cli = Path(ws.root) / "adapters" / "python" / "scripts" / "hami_worktree.py"
+    cli = Path(ws.root) / "adapters" / "python" / "scripts" / "managed_worktree.py"
     if not cli.is_file():
         return "ERROR", f"contract {CONTRACT}; the CLI is missing at {cli}"
     try:
@@ -1018,32 +1009,54 @@ def full_sha_arg(value: str) -> str:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(allow_abbrev=False, description=__doc__.splitlines()[0])
-    sub = parser.add_subparsers(dest="command", required=True)
-    commands = {name: sub.add_parser(name, allow_abbrev=False) for name in ("create", "resume", "audit", "cleanup")}
+    import cli_conventions
+    parser = argparse.ArgumentParser(prog="atc worktree", allow_abbrev=False, **cli_conventions.form(
+        "Create, resume, audit and clean per-topic worktrees from the workspace map.",
+        exit="0 OK; 1 a refusal or an audit finding; 2 ERROR (usage, environment, contract)",
+        see="the atc-worktree skill"))
+    sub = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
+    summaries = {
+        "create": "create the topic's worktree and branch from main (or --base-sha)",
+        "resume": "re-enter an existing topic worktree after checking its identity",
+        "audit": "list worktrees and whether each is removable; changes nothing",
+        "clean": "remove an integrated or abandoned topic's worktree and branch",
+    }
+    commands = {}
+    for name, summary in summaries.items():
+        aliases = ["cleanup"] if name == "clean" else []
+        commands[name] = sub.add_parser(name, aliases=aliases, allow_abbrev=False, help=summary,
+                                        **cli_conventions.form(summary[0].upper() + summary[1:] + "."))
     for name, p in commands.items():
         identity_required = name != "audit"
-        p.add_argument("--project", help="registered project name from workspace.yaml; root names the workspace root, "
-                       "whose worktrees live under worktrees/root")
-        p.add_argument("--owner", choices=OWNERS, required=identity_required)
-        p.add_argument("--topic", type=topic_arg, required=identity_required)
-        p.add_argument("--json", action="store_true")
+        cli_conventions.add_project(p, ", whose worktrees live under worktrees/root (default: the working "
+                                       "directory's project)")
+        p.add_argument("--owner", choices=OWNERS, required=identity_required, help="the tool that owns the topic")
+        p.add_argument("--topic", type=topic_arg, required=identity_required, metavar="TOPIC",
+                       help="the topic name; with --owner it forms the durable key OWNER+TOPIC")
+        cli_conventions.add_json(p)
     for name in ("create", "resume"):
-        commands[name].add_argument("--session", type=session_arg, default=NO_SESSION)
-    commands["create"].add_argument("--base-sha", type=full_sha_arg,
+        commands[name].add_argument("--session", type=session_arg, default=NO_SESSION, metavar="ID",
+                                    help="the session that holds the worktree's lock")
+    commands["create"].add_argument("--base-sha", type=full_sha_arg, metavar="SHA",
                                    help="start from this exact tip of the topic's own branch on origin")
-    commands["resume"].add_argument("--rebind-session", action="store_true")
-    commands["cleanup"].add_argument("--abandon", action="store_true",
-                                    help="explicitly abandon a clean topic preserved by a local archive tag")
-    commands["cleanup"].add_argument("--archive-tag")
-    commands["cleanup"].add_argument("--expected-head", type=full_sha_arg)
-    commands["cleanup"].add_argument("--squash-integrated", action="store_true",
-                                    help="clean up a topic integrated by an authorized same-tree squash")
-    commands["cleanup"].add_argument("--reviewed", dest="reviewed_sha", type=full_sha_arg,
-                                    help="full SHA the review named; equal to --expected-head")
-    commands["cleanup"].add_argument("--expected-main", type=full_sha_arg)
-    commands["cleanup"].add_argument("--integrated-as", type=full_sha_arg)
-    commands["cleanup"].add_argument("--retained-ref")
+    commands["resume"].add_argument("--rebind-session", action="store_true",
+                                    help="move the lock to --session when another session holds it")
+    clean = commands["clean"]
+    clean.add_argument("--abandon", action="store_true",
+                       help="explicitly abandon a clean topic preserved by a local archive tag")
+    clean.add_argument("--archive-tag", metavar="TAG", help="with --abandon: the local tag archive/NAME at the tip")
+    clean.add_argument("--expected-head", type=full_sha_arg, metavar="SHA",
+                       help="with --abandon or --squash-integrated: the exact topic tip authorized")
+    clean.add_argument("--squash-integrated", action="store_true",
+                       help="clean a topic integrated by an authorized same-tree squash")
+    clean.add_argument("--reviewed", dest="reviewed_sha", type=full_sha_arg, metavar="SHA",
+                       help="with --squash-integrated: full SHA the review named; equal to --expected-head")
+    clean.add_argument("--expected-main", type=full_sha_arg, metavar="SHA",
+                       help="with --squash-integrated: the main tip the squash was recorded on")
+    clean.add_argument("--integrated-as", type=full_sha_arg, metavar="SHA",
+                       help="with --squash-integrated: the squash commit on main")
+    clean.add_argument("--retained-ref", metavar="REF",
+                       help="with --squash-integrated: an existing ref that keeps the topic tip reachable")
     return parser
 
 
@@ -1180,6 +1193,10 @@ def main(argv: list[str] | None = None, root: Path = ROOT, environ: dict[str, st
     parser = build_parser()
     args = parser.parse_args(argv)
     if args.command == "cleanup":
+        import cli_conventions
+        cli_conventions.deprecated("atc worktree cleanup", "atc worktree clean")
+    if args.command in ("clean", "cleanup"):
+        args.command = "cleanup"
         cleanup_mode(parser, args)
     environ = dict(os.environ) if environ is None else environ
     results = run(args, root, environ, home if home is not None else os.path.expanduser("~"), cwd or os.getcwd())

@@ -271,7 +271,7 @@ other action need their own instruction. Who may run which form of
      before a later push.
 2. Close out (governance `DELIVERY.md` § Close-out) with
    `atc close-out --task <task>`, run from outside the task's worktree when
-   you can: it removes the task's worktree through `atc worktree cleanup`'s
+   you can: it removes the task's worktree through `atc worktree clean`'s
    checks, its scratches with their dependent runs, and its report files
    `~/.atc/reports/<task>-*.md` (the writer's and the reviewer's), leaves
    what the record's `keep` lists and what `--skip <item>` names for an

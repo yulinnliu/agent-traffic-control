@@ -941,15 +941,19 @@ def check_projects(canonical: dict[str, dict], project_checkouts: dict[str, Path
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(allow_abbrev=False, description=__doc__)
-    parser.add_argument(
-        "--projects",
-        action="store_true",
-        help="also check each project in the local workspace.yaml (local-only, not for CI)",
-    )
-    parser.add_argument("--adapters-only", action="store_true", help="check only canonical skills and their adapters under the root")
-    parser.add_argument("--root", metavar="DIR", help="validate DIR instead of this checkout (conformance runs)")
-    parser.add_argument("--project-checkout", action="append", default=[], metavar="NAME=PATH", help="validate an explicit candidate checkout for a registered project")
+    import cli_conventions
+    parser = argparse.ArgumentParser(prog="atc validate", allow_abbrev=False, **cli_conventions.form(
+        "Check this checkout's contract: workspace.yaml.example, canonical skills against their managed adapters,\n"
+        "and task records. With --projects, also every registered project on disk.",
+        exit="0 every check passed; 1 problems found, all of them printed; 2 usage error",
+        see="adapters/python/README.md § validate"))
+    parser.add_argument("--projects", action="store_true",
+                        help="also check each project in the local workspace.yaml and user-level skill copies")
+    parser.add_argument("--adapters-only", action="store_true", help="check only canonical skills and their adapters")
+    parser.add_argument("--root", metavar="DIR", help="the ATC checkout to validate, as the global atc --root")
+    parser.add_argument("--project-checkout", action="append", default=[], metavar="NAME=PATH",
+                        help="also validate this checkout as registered project NAME (repeatable)")
+    cli_conventions.add_json(parser)
     args = parser.parse_args(argv)
     if args.root:
         global ROOT
@@ -979,6 +983,9 @@ def main(argv: list[str] | None = None) -> int:
         check_projects(canonical, project_checkouts, root_prefix=root_prefix)
         check_user_level_duplicates(canonical, Path.home())
 
+    if args.json:
+        print(json.dumps({"verdict": "PROBLEMS" if FAILURES else "OK", "problems": FAILURES}, indent=2))
+        return 1 if FAILURES else 0
     if FAILURES:
         print(f"validate_workspace: {len(FAILURES)} problem(s) found:\n")
         for f in FAILURES:

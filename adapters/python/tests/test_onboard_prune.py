@@ -45,15 +45,15 @@ def test_plan_reports_orphaned_managed_adapters_only(tmp_path: Path) -> None:
 
 def test_check_only_reports_and_sync_without_prune_keeps_orphans(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     root, project = _orphaned_project(tmp_path)
-    assert onboard_project.main(["--check", "demo"], root=root) == 1
+    assert onboard_project.main(["--check", "--project", "demo"], root=root) == 1
     assert "would prune (2)" in capsys.readouterr().out
-    assert onboard_project.main(["--sync", "demo"], root=root) == 1
+    assert onboard_project.main(["--sync", "--project", "demo"], root=root) == 1
     assert (project / ".claude/skills/old-skill/SKILL.md").is_file()
 
 
 def test_sync_prune_removes_orphans_and_validator_passes(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     root, project = _orphaned_project(tmp_path)
-    assert onboard_project.main(["--sync", "--prune", "demo"], root=root) == 0
+    assert onboard_project.main(["--sync", "--prune", "--project", "demo"], root=root) == 0
     assert "prune (2)" in capsys.readouterr().out
     assert not (project / ".claude/skills/old-skill").exists()
     assert not (project / ".agents/skills/old-skill").exists()
@@ -68,7 +68,7 @@ def test_sync_prune_removes_orphans_and_validator_passes(tmp_path: Path, capsys:
 def test_prune_requires_sync_mode(tmp_path: Path) -> None:
     root, _ = _orphaned_project(tmp_path)
     with pytest.raises(SystemExit):
-        onboard_project.main(["--check", "--prune", "demo"], root=root)
+        onboard_project.main(["--check", "--prune", "--project", "demo"], root=root)
 
 
 def test_bootstrap_sync_converges_every_project(tmp_path: Path) -> None:
@@ -83,14 +83,14 @@ def test_bootstrap_sync_converges_every_project(tmp_path: Path) -> None:
 @pytest.mark.integration
 def test_default_output_lists_changes_and_counts_skips_verbose_lists_skips(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     root, _ = _orphaned_project(tmp_path)
-    onboard_project.main(["--sync", "--prune", "demo"], root=root)
+    onboard_project.main(["--sync", "--prune", "--project", "demo"], root=root)
     capsys.readouterr()
-    assert onboard_project.main(["--check", "demo"], root=root) == 0
+    assert onboard_project.main(["--check", "--project", "demo"], root=root) == 0
     quiet = capsys.readouterr().out
     assert "is current" not in quiet and "skip (" not in quiet
     counts = [line for line in quiet.splitlines() if line.startswith("  skip ")]
     assert len(counts) == 2 and all(line.endswith(", update 0") and int(line.split()[1].rstrip(",")) > 0 for line in counts)
-    assert onboard_project.main(["--check", "demo", "--verbose"], root=root) == 0
+    assert onboard_project.main(["--check", "--project", "demo", "--verbose"], root=root) == 0
     loud = capsys.readouterr().out
     assert "skip (" in loud and "is current" in loud and "  skip " not in loud.replace("  skip (", "")
 
@@ -98,7 +98,7 @@ def test_default_output_lists_changes_and_counts_skips_verbose_lists_skips(tmp_p
 @pytest.mark.integration
 def test_default_output_still_prints_every_change(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     root, _ = _orphaned_project(tmp_path)
-    assert onboard_project.main(["--check", "demo"], root=root) == 1
+    assert onboard_project.main(["--check", "--project", "demo"], root=root) == 1
     out = capsys.readouterr().out
     assert "would prune (2)" in out and "would create" in out
     assert any(line.startswith("  skip ") for line in out.splitlines())

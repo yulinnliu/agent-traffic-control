@@ -1,6 +1,8 @@
 # Conformance fixtures
 
-Language-neutral test cases for every tool in the contract. A conforming
+Language-neutral test cases for every tool in the contract. The conventions
+every `atc` command follows (help, exit codes, `--json`, naming, versions and
+deprecations) are in `CLI.md`. A conforming
 implementation, in any language, passes all of them; the Python reference
 implementation under `adapters/python/` runs them as its own test suite
 (`tests/test_conformance.py`).
@@ -39,7 +41,7 @@ worktree identity (`CREATED`, `RESUMED`, `IDENTITY_MISMATCH`,
 `IDENTITY_AMBIGUOUS`, `ALREADY_EXISTS`, `REMOVABLE`) and task records
 (`atc task new` and `list`) need live git
 repositories. Their cases are the Python suites `tests/test_git_preflight.py`,
-`tests/test_integrate_moving_main.py`, `tests/test_hami_worktree.py` and
+`tests/test_integrate_moving_main.py`, `tests/test_managed_worktree.py` and
 `tests/test_task_records.py`, which build
 each repository in code; a second implementation ports those suites until
 fixtures with an `init.json` repository description exist here.

@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-import hami_worktree as hw
+import managed_worktree as hw
 
 PROJECT = "demo-project"
 

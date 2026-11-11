@@ -1,15 +1,9 @@
 #!/usr/bin/env python3
-"""Task records: write, list and check `.atc/tasks/<task_id>.yaml` (`docs/TASKS.md`).
+"""Task records: write, list and check `.atc/tasks/<task_id>.yaml` (docs/TASKS.md).
 
-    atc task new --scope TEXT [--project P]
-    atc task list [--project P | --all] [--status S] [--json]
-    atc task check [DIR]
-
-`new` writes a record in the topic worktree holding the working directory.
-`list` reads the records on `main` and every local branch without a checkout
-and derives each task's status. `check` reports the records and declaration in
-a working tree, one problem per line, and exits 1 when there is any. A refusal
-prints `ERROR <TOKEN> <detail>` and exits 2.
+`new` writes a record in the topic worktree holding the working directory. `list` reads the records on `main`
+and every local branch without a checkout and derives each task's status. `check` reports the records and
+declaration in a working tree, one problem per line.
 """
 
 from __future__ import annotations
@@ -25,6 +19,7 @@ from pathlib import Path
 import yaml
 from jsonschema import Draft202012Validator
 
+import cli_conventions
 import task_section
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -35,6 +30,10 @@ STATUSES = ("closed", "abandoned", "open", "integrated", "bound", "unknown")
 SCOPE_WIDTH = 60
 REMOTE_URL = re.compile(r"^(?:[a-z][a-z0-9+.-]*://[^/]+/|[^/@:]+@[^/:]+:)(?:.*/)?([^/]+/[^/]+?)(?:\.git)?/?$")
 REPOSITORY_ENV = ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY")
+
+
+# Refusals caused by the invocation or a fault; every other token is a STOP of a valid call (CLI.md § Exit codes).
+ERROR_TOKENS = frozenset({"GIT_FAILED", "UNKNOWN_PROJECT", "RECORD_INVALID"})
 
 
 class Refused(Exception):
@@ -101,7 +100,7 @@ def main_prefix(repo: Path, main: str = "main") -> str | None:
 def declaring(ws, task: str | None) -> list:
     """The repositories, the workspace root and the registered projects, whose `AGENTS.md` on ``main`` declares
     the prefix of the record ID ``task``."""
-    import hami_worktree as hw
+    import managed_worktree as hw
     import task_authority as ta
     record = ta.RECORD_ID.fullmatch(task or "")
     if not record:
@@ -159,7 +158,7 @@ def resolve(root: Path, environ: dict[str, str], cwd: str, project: str | None, 
     Without ``project``, a record ID ``task`` names the one repository declaring its prefix; with none
     or several, the working directory's project.
     """
-    import hami_worktree as hw
+    import managed_worktree as hw
     try:
         ws = hw.load_workspace(root, environ)
     except hw.Stop as stop:
@@ -415,21 +414,31 @@ def render(rows: list[dict], with_project: bool) -> str:
 # command line
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="atc task", allow_abbrev=False, description=__doc__,
-                                     formatter_class=argparse.RawDescriptionHelpFormatter)
-    sub = parser.add_subparsers(dest="command", required=True)
-    new_parser = sub.add_parser("new", allow_abbrev=False, help="write a record in the current topic worktree")
-    new_parser.add_argument("--scope", required=True)
-    list_parser = sub.add_parser("list", allow_abbrev=False, help="list tasks with their derived status")
+    parser = argparse.ArgumentParser(prog="atc task", allow_abbrev=False, **cli_conventions.form(
+        "Write, list and check task records under .atc/tasks/.", see="docs/TASKS.md"))
+    sub = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
+    new_parser = sub.add_parser("new", allow_abbrev=False, help="write a record in the current topic worktree",
+                                **cli_conventions.form(
+                                    "Write a record for the topic worktree holding the working directory.",
+                                    exit="0 created; 1 STOP (not a topic worktree, no declaration); 2 ERROR"))
+    new_parser.add_argument("--scope", required=True, metavar="TEXT", help="what the task covers, one sentence")
+    list_parser = sub.add_parser("list", allow_abbrev=False, help="list tasks with their derived status",
+                                 **cli_conventions.form("List tasks from the records on main and every local branch, "
+                                                        "with their derived status."))
     for p in (new_parser, list_parser):
         target = p.add_mutually_exclusive_group()
-        target.add_argument("--project", help="registered project name from workspace.yaml; root names the workspace root")
+        cli_conventions.add_project(target, " (default: the working directory's project)")
         if p is list_parser:
-            target.add_argument("--all", action="store_true")
-    list_parser.add_argument("--status", choices=STATUSES)
-    list_parser.add_argument("--json", action="store_true")
-    check_parser = sub.add_parser("check", allow_abbrev=False, help="check the records in a working tree")
-    check_parser.add_argument("directory", nargs="?", type=Path)
+            target.add_argument("--all", action="store_true", help="every registered project and the root")
+    list_parser.add_argument("--status", choices=STATUSES, help="only tasks with this status")
+    check_parser = sub.add_parser("check", allow_abbrev=False, help="check the records in a working tree",
+                                  **cli_conventions.form("Check the records and the task declaration in a working "
+                                                         "tree, one problem per line.",
+                                                         exit="0 no problem; 1 problems found; 2 ERROR"))
+    check_parser.add_argument("directory", nargs="?", type=Path, metavar="DIR",
+                              help="the working tree (default: the one holding the working directory)")
+    for p in (new_parser, list_parser, check_parser):
+        cli_conventions.add_json(p)
     return parser
 
 
@@ -442,24 +451,37 @@ def main(argv: list[str] | None = None, root: Path = ROOT, environ: dict[str, st
         if args.command == "check":
             directory = args.directory or toplevel(Path(cwd)) or Path(cwd)
             found = problems(directory)
-            for problem in found:
-                print(problem)
-            if not found:
-                print(f"ok: {directory}")
-            return 1 if found else 0
+            if args.json:
+                print(json.dumps({"verdict": "PROBLEMS" if found else "OK", "directory": str(directory),
+                                  "problems": found}, indent=2))
+            else:
+                for problem in found:
+                    print(problem)
+                if not found:
+                    print(f"ok: {directory}")
+            return cli_conventions.STOP if found else cli_conventions.OK
         if args.command == "new":
             path = new(root, environ, cwd, args.scope, args.project)
-            print(f"CREATED {path.stem} {path}")
-            return 0
+            print(json.dumps({"verdict": "CREATED", "task_id": path.stem, "path": str(path)}, indent=2)
+                  if args.json else f"CREATED {path.stem} {path}")
+            return cli_conventions.OK
         targets = resolve(root, environ, cwd, args.project, every=args.all)
         rows = [row for name, repo in targets for row in tasks(name, repo, fold_warnings=not args.json)]
         if args.status:
             rows = [row for row in rows if row["status"] == args.status]
         print(json.dumps({"tasks": rows}, indent=2) if args.json else render(rows, with_project=args.all))
-        return 0
+        return cli_conventions.OK
     except Refused as refused:
-        print(f"ERROR {refused.token} {refused.detail}", file=sys.stderr)
-        return 2
+        if refused.token in ERROR_TOKENS:
+            print(f"ERROR {refused.token} {refused.detail}", file=sys.stderr)
+            code = cli_conventions.ERROR
+        else:
+            print(f"STOP {refused.token}: {refused.detail}", file=sys.stderr)
+            code = cli_conventions.STOP
+        if args.json:
+            print(json.dumps({"refusal": {"verdict": "ERROR" if code == cli_conventions.ERROR else "STOP",
+                                          "reason": refused.token, "detail": refused.detail, "next": None}}, indent=2))
+        return code
 
 
 if __name__ == "__main__":

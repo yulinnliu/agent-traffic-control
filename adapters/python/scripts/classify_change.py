@@ -1,21 +1,19 @@
 #!/usr/bin/env python3
 """Classify a delegated change LOW or HIGH under an escalation policy.
 
-    atc classify --policy escalation.yaml --changed <file> [--severity low|med|high]
-
-<file> lists one repo-relative changed path per line. LOW means the topic is
-ready for a human fast-forward; HIGH means an independent review runs first.
-HIGH wins whenever any `high_if_any` trigger fires; otherwise the change is
-LOW only when every path matches `low_only_if`, and HIGH by default. Prints
-the verdict and its reason; exits 0 for either verdict, 1 on a bad input.
+LOW means the topic is ready for a human fast-forward; HIGH means an independent
+review runs first. HIGH wins whenever any `high_if_any` trigger fires; otherwise
+the change is LOW only when every path matches `low_only_if`, and HIGH by default.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
+import cli_conventions
 import globs
 import policies
 
@@ -45,25 +43,43 @@ def classify(policy: dict, changed: list[str], severity: str | None) -> tuple[st
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(allow_abbrev=False, description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--policy", type=Path, required=True)
-    parser.add_argument("--changed", type=Path, required=True)
-    parser.add_argument("--severity", choices=sorted(SEVERITY, key=SEVERITY.get))
-    parser.add_argument("--schemas", type=Path, default=policies.SCHEMAS)
+    parser = argparse.ArgumentParser(prog="atc classify", allow_abbrev=False, **cli_conventions.form(
+        "Classify a delegated change LOW or HIGH under an escalation policy.",
+        "HIGH wins whenever a high_if_any trigger fires; otherwise LOW only when every path matches low_only_if.",
+        exit="0 either verdict; 2 ERROR (unreadable or invalid policy or change list)"))
+    parser.add_argument("--policy", type=Path, required=True, metavar="FILE", help="the escalation.yaml to apply")
+    parser.add_argument("--changed", type=Path, required=True, metavar="FILE",
+                        help="a file listing one repo-relative changed path per line")
+    parser.add_argument("--severity", choices=sorted(SEVERITY, key=SEVERITY.get),
+                        help="the change's declared severity, compared with the policy's severity trigger")
+    parser.add_argument("--schemas", type=Path, default=policies.SCHEMAS, metavar="DIR",
+                        help="policy schema directory (default: shared/policies/schemas)")
+    cli_conventions.add_json(parser)
     args = parser.parse_args(argv)
+
+    def refuse(problems: list[str]) -> int:
+        if args.json:
+            print(json.dumps({"verdict": "ERROR", "problems": problems}, indent=2))
+        else:
+            print("\n".join(problems))
+        return cli_conventions.ERROR
+
     try:
         loaded = policies.load(args.policy.parent, args.schemas)
     except policies.PolicyError as exc:
-        for problem in exc.problems:
-            print(problem)
-        return 1
+        return refuse(list(exc.problems))
     if "escalation" not in loaded or args.policy.name != "escalation.yaml":
-        print(f"{args.policy}: expected an escalation.yaml")
-        return 1
-    changed = [line.strip() for line in args.changed.read_text(encoding="utf-8").splitlines() if line.strip()]
+        return refuse([f"{args.policy}: expected an escalation.yaml"])
+    try:
+        changed = [line.strip() for line in args.changed.read_text(encoding="utf-8").splitlines() if line.strip()]
+    except OSError as exc:
+        return refuse([f"{args.changed}: {exc.strerror or exc}"])
     verdict, reason = classify(loaded["escalation"], changed, args.severity)
-    print(f"{verdict}: {reason}")
-    return 0
+    if args.json:
+        print(json.dumps({"verdict": verdict, "reason": reason, "changed": len(changed)}, indent=2))
+    else:
+        print(f"{verdict}: {reason}")
+    return cli_conventions.OK
 
 
 if __name__ == "__main__":

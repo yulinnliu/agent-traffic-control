@@ -131,7 +131,7 @@ def test_new_falls_back_to_a_marked_previous_layout_pin_without_a_lock(ws: Works
 ])
 def test_new_refuses_without_a_readable_binding(ws: Workspace, capsys: pytest.CaptureFixture[str], files: dict, detail: str) -> None:
     status, err = bound(ws, capsys, files)
-    assert status == 2 and "NO_GOVERNANCE_BINDING" in err and detail in err
+    assert status == 1 and "STOP NO_GOVERNANCE_BINDING:" in err and detail in err
 
 
 # new
@@ -187,16 +187,16 @@ def test_new_counts_a_number_only_a_remote_tracking_branch_holds(ws: Workspace, 
 
 def test_new_refuses_on_main(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
     status, _, err = ws.cli(capsys, "new", "--scope", "s", cwd=ws.repo)
-    assert status == 2
-    assert err.startswith("ERROR ON_MAIN ")
+    assert status == 1
+    assert err.startswith("STOP ON_MAIN: ")
     assert not (ws.repo / TASKS_DIR).exists()
 
 
 def test_new_refuses_in_the_canonical_checkout_on_any_branch(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
     run_git(ws.root, "switch", "-q", "-c", "topic-in-place")
     status, _, err = ws.cli(capsys, "new", "--scope", "s", "--project", "root", cwd=ws.root)
-    assert status == 2
-    assert err.startswith("ERROR CHECKOUT_CANONICAL ")
+    assert status == 1
+    assert err.startswith("STOP CHECKOUT_CANONICAL: ")
     assert "Run it inside the new worktree: atc task new --project <name> --scope <text>, root for the workspace root" in err
 
 
@@ -222,8 +222,8 @@ def test_new_in_a_root_worktree_binds_the_root_main(ws: Workspace, capsys: pytes
 def test_new_refuses_a_worktree_of_another_project(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
     topic = ws.worktree(ws.root, "claude+contract", "topic-contract")
     status, _, err = ws.cli(capsys, "new", "--scope", "s", "--project", PROJECT, cwd=topic)
-    assert status == 2
-    assert err.startswith("ERROR WRONG_REPOSITORY ")
+    assert status == 1
+    assert err.startswith("STOP WRONG_REPOSITORY: ")
 
 
 # list
@@ -353,8 +353,8 @@ def test_project_root_names_the_workspace_root(ws: Workspace, capsys: pytest.Cap
     status, out, err = ws.cli(capsys, "list", "--project", "root", "--json", cwd=ws.root)
     assert status == 0, err
     assert [(row["project"], row["task_id"]) for row in json.loads(out)["tasks"]] == [("root", "ATC-0001")]
-    import hami_worktree
-    assert hami_worktree.main(["audit", "--project", "root"], root=ws.root, environ={},
+    import managed_worktree
+    assert managed_worktree.main(["audit", "--project", "root"], root=ws.root, environ={},
                               home=str(ws.root)) == 0
     assert capsys.readouterr().out.strip() == "OK root/ (no worktrees) - continue"
 

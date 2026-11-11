@@ -73,11 +73,12 @@ def checkout(argv: Sequence[str], environ: Mapping[str, str] | None = None, run:
                     "and commit, and build its environment with the tree's toolchain, `uv sync --locked` for Python "
                     "(docs/ATC_HOME.md § Checkout).",
         epilog="Exit: 0 when the environment is built; 1 for a failed sync; 9 for a refusal.")
-    parser.add_argument("sha", help="the commit to export: a full SHA or a unique prefix")
-    parser.add_argument("--task", required=True, help="the task ID the scratch belongs to, for example ATC-0008")
-    parser.add_argument("--worktree", help="the repository that holds <sha> (default: the working directory's)")
-    parser.add_argument("--scratch", help="scratch name (default: <task>-<first 7 characters of the commit>)")
-    parser.add_argument("--lock-dir", default=".",
+    parser.add_argument("sha", metavar="SHA", help="the commit to export: a full SHA or a unique prefix")
+    parser.add_argument("--task", required=True, metavar="ID",
+                        help="the task ID the scratch belongs to, for example ATC-0008")
+    parser.add_argument("--worktree", metavar="DIR", help="the repository that holds SHA (default: the working directory's)")
+    parser.add_argument("--scratch", metavar="NAME", help="scratch name (default: ID-<first 7 characters of the commit>)")
+    parser.add_argument("--lock-dir", default=".", metavar="DIR",
                         help="the directory under the tree that holds uv.lock, where `atc test run` runs (default: the tree)")
     args = parser.parse_args(argv)
     environ = os.environ if environ is None else environ

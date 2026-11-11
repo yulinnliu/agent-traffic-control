@@ -1,26 +1,15 @@
 #!/usr/bin/env python3
 """Generate each harness's native deny configuration from hard-deny.yaml.
 
-    atc enforce --policies <dir> --out <dir>
-        [--workspace FILE [--local-out <dir>]]
-        [--check [--live-claude PATH] [--live-claude-local PATH] [--live-codex PATH] [--live-hook PATH]]
-
-Writes three files under --out, deterministically, so a consuming project can
-commit them and diff them in CI:
+Writes three files under --out, deterministically, so a consuming project can commit them and diff them in CI:
 
     claude-code/settings.json   permissions.deny for Claude Code
     codex/hard-deny.rules       prefix_rule block for ~/.codex/rules
     git-hooks/pre-commit        refuses a commit adding a hard-denied path (mode 0755)
 
---check regenerates in memory and exits 1 if any file under --out differs;
-the --live-* options also compare the installed copies: the deny list of a
-Claude settings file, the marker block of a Codex rules file, a whole hook.
-A filesystem glob holding a ${...} token is refused (`unresolved-token`):
-no harness output can resolve it.
-
---workspace adds the machine-local segment: an Edit deny on every
-registered project's state root, as absolute paths, written to --local-out (never under --out) and compared through
---live-claude-local. The mapping is specified in docs/ENFORCEMENT.md.
+--workspace adds the machine-local segment: an Edit deny on every registered project's state root, as
+absolute paths, written to --local-out (never under --out). A filesystem glob holding a ${...} token is
+refused (`unresolved-token`).
 """
 
 from __future__ import annotations
@@ -240,17 +229,34 @@ def drift(files: dict[str, str], out: Path) -> list[str]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(allow_abbrev=False, description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--policies", type=Path, required=True)
-    parser.add_argument("--out", type=Path, required=True)
-    parser.add_argument("--check", action="store_true", help="exit 1 if --out differs from the generated output")
-    parser.add_argument("--live-claude", type=Path, help="with --check: a Claude settings file whose permissions.deny must match")
-    parser.add_argument("--live-claude-local", type=Path, help="with --check: a Claude settings file whose absolute-path deny entries must match the machine-local segment")
-    parser.add_argument("--live-codex", type=Path, help="with --check: a Codex rules file whose atc hard-deny block must match")
-    parser.add_argument("--live-hook", type=Path, help="with --check: an installed pre-commit hook that must match")
-    parser.add_argument("--workspace", type=Path, help="workspace.yaml whose project state roots form the machine-local segment")
-    parser.add_argument("--local-out", type=Path, help=f"with --workspace: directory for the machine-local {LOCAL_FILE}")
-    parser.add_argument("--schemas", type=Path, default=policies.SCHEMAS)
+    import cli_conventions
+    parser = argparse.ArgumentParser(prog="atc enforce", allow_abbrev=False, **cli_conventions.form(
+        __doc__.splitlines()[0], "\n".join(__doc__.strip().splitlines()[2:]),
+        exit="0 generated, or current under --check; 1 drift under --check, or a policy problem; 2 usage error",
+        see="docs/ENFORCEMENT.md"))
+    parser.add_argument("--policies", type=Path, required=True, metavar="DIR",
+                        help="the policy directory holding hard-deny.yaml")
+    parser.add_argument("--out", type=Path, required=True, metavar="DIR",
+                        help="where the generated files go (committed by the consuming project)")
+    parser.add_argument("--check", action="store_true",
+                        help="write nothing; exit 1 when --out or a --live-* copy differs from the generated output")
+    parser.add_argument("--live-claude", type=Path, metavar="FILE",
+                        help="with --check: a Claude settings file whose permissions.deny must match")
+    parser.add_argument("--live-claude-local", type=Path, metavar="FILE",
+                        help="with --check: a Claude settings file whose absolute-path deny entries must match the "
+                             "machine-local segment")
+    parser.add_argument("--live-codex", type=Path, metavar="FILE",
+                        help="with --check: a Codex rules file whose atc hard-deny block must match")
+    parser.add_argument("--live-hook", type=Path, metavar="FILE",
+                        help="with --check: an installed pre-commit hook that must match")
+    parser.add_argument("--workspace", type=Path, metavar="FILE",
+                        help="workspace.yaml whose project state roots form the machine-local segment "
+                             "(atc passes the root's own when present)")
+    parser.add_argument("--local-out", type=Path, metavar="DIR",
+                        help=f"with --workspace: directory for the machine-local {LOCAL_FILE}")
+    parser.add_argument("--schemas", type=Path, default=policies.SCHEMAS, metavar="DIR",
+                        help="policy schema directory (default: shared/policies/schemas)")
+    cli_conventions.add_json(parser)
     args = parser.parse_args(argv)
     if not args.check and (args.live_claude or args.live_claude_local or args.live_codex or args.live_hook):
         parser.error("--live-claude, --live-claude-local, --live-codex and --live-hook require --check")
@@ -258,28 +264,31 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--local-out requires --workspace")
     if args.local_out and args.local_out.resolve().is_relative_to(args.out.resolve()):
         parser.error("--local-out must lie outside --out, which is committed and holds no absolute path")
+
+    def done(verdict: str, lines: list[str], code: int, **fields) -> int:
+        if args.json:
+            print(json.dumps({"verdict": verdict, **fields}, indent=2))
+        else:
+            print("\n".join(lines))
+        return code
+
     try:
         loaded = policies.load(args.policies, args.schemas)
     except policies.PolicyError as exc:
-        for problem in exc.problems:
-            print(problem)
-        return 1
+        return done("PROBLEMS", list(exc.problems), 1, problems=list(exc.problems))
     if "hard-deny" not in loaded:
-        print(f"missing hard-deny.yaml in {args.policies}")
-        return 1
+        problem = f"missing hard-deny.yaml in {args.policies}"
+        return done("PROBLEMS", [problem], 1, problems=[problem])
     problems = unresolved_tokens(loaded["hard-deny"])
     if problems:
-        for problem in problems:
-            print(problem)
-        return 1
+        return done("PROBLEMS", problems, 1, problems=problems)
     files = render(loaded["hard-deny"])
     local = None
     if args.workspace:
         try:
             roots = state_roots(args.workspace)
         except (OSError, ValueError, yaml.YAMLError) as exc:
-            print(f"workspace: {exc}")
-            return 1
+            return done("PROBLEMS", [f"workspace: {exc}"], 1, problems=[f"workspace: {exc}"])
         local = {LOCAL_FILE: local_settings(roots)} if roots else None
     if args.check:
         found = drift(files, args.out) + live_drift(
@@ -288,24 +297,23 @@ def main(argv: list[str] | None = None) -> int:
         if local and args.local_out:
             found += [f"machine-local {rel}" for rel in drift(local, args.local_out)]
         if found:
-            print("drift: " + ", ".join(found))
-            return 1
-        print("ok: enforcement configs are current")
-        return 0
+            return done("DRIFT", ["drift: " + ", ".join(found)], 1, drift=found)
+        return done("CURRENT", ["ok: enforcement configs are current"], 0, drift=[])
     for rel, content in files.items():
         target = args.out / rel
         target.parent.mkdir(parents=True, exist_ok=True)
         write_if_changed(target, content)
     os.chmod(args.out / "git-hooks/pre-commit", 0o755)
-    print("generated: " + ", ".join(files))
+    lines = ["generated: " + ", ".join(files)]
+    local_target = None
     if local and args.local_out:
-        target = args.local_out / LOCAL_FILE
-        target.parent.mkdir(parents=True, exist_ok=True)
-        write_if_changed(target, local[LOCAL_FILE])
-        print(f"machine-local: {target} (from {args.workspace})")
+        local_target = args.local_out / LOCAL_FILE
+        local_target.parent.mkdir(parents=True, exist_ok=True)
+        write_if_changed(local_target, local[LOCAL_FILE])
+        lines.append(f"machine-local: {local_target} (from {args.workspace})")
     elif local:
-        print(f"machine-local: {args.workspace} names state roots; pass --local-out DIR to write {LOCAL_FILE}")
-    return 0
+        lines.append(f"machine-local: {args.workspace} names state roots; pass --local-out DIR to write {LOCAL_FILE}")
+    return done("GENERATED", lines, 0, files=list(files), local=str(local_target) if local_target else None)
 
 
 if __name__ == "__main__":

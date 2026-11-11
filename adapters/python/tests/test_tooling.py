@@ -452,7 +452,7 @@ def test_invalid_lock_fails_validate_and_is_a_sync_collision(tmp_path: Path, mon
     write(project / ".atc/atc.lock", lock)
     assert any(f"projects.demo: .atc/atc.lock: {problem}" in f for f in check_registered_projects(root, monkeypatch))
     write(project / ".atc/governance/CORE.md", "# edited locally\n")
-    assert onboard_project.run("sync", [("demo", project)], root) == 2
+    assert onboard_project.run("sync", [("demo", project)], root) == 1
     assert (project / ".atc/atc.lock").read_text(encoding="utf-8") == lock
     assert (project / ".atc/governance/CORE.md").read_text(encoding="utf-8") == "# edited locally\n"
 
@@ -480,7 +480,7 @@ def test_stray_file_under_atc_is_reported_and_blocks_the_atc_part(tmp_path: Path
     plan = onboard_project.build_plan(project, root)
     assert {i.path for i in plan if i.action == "collision"} == {project / ".atc/notes.md", project / ".atc/governance/EXTRA.md"}
     assert not any(i.path.is_relative_to(project / ".atc") and i.action != "collision" for i in plan)
-    assert onboard_project.run("sync", [("demo", project)], root) == 2
+    assert onboard_project.run("sync", [("demo", project)], root) == 1
     assert (project / ".atc/governance/CORE.md").read_text(encoding="utf-8") == "# edited locally\n"
 
 
@@ -523,7 +523,7 @@ def test_project_in_the_previous_layout_is_migrated_in_write_order(tmp_path: Pat
 def test_previous_layout_pin_without_marker_is_a_collision(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root, project = make_workspace(tmp_path)
     write(project / ".atc/governance.yaml", "source: mine\nrevision: abc\n")
-    assert onboard_project.run("sync", [("demo", project)], root) == 2
+    assert onboard_project.run("sync", [("demo", project)], root) == 1
     assert (project / ".atc/governance.yaml").read_text(encoding="utf-8") == "source: mine\nrevision: abc\n"
     assert not (project / ".atc/atc.lock").exists() and not (project / ".atc/README.md").exists()
 
@@ -596,7 +596,7 @@ def test_verification_gate_stops_the_project_before_writing(tmp_path: Path, caps
     ):
         write(project / "AGENTS.md", text)
         capsys.readouterr()
-        assert onboard_project.run("sync", [("demo", project)], root) == 2
+        assert onboard_project.run("sync", [("demo", project)], root) == 1
         out = capsys.readouterr().out
         assert f"  stop: VERIFICATION_SECTION_MISSING AGENTS.md" in out or f"  stop: VERIFICATION_SECTION_MISSING verifier" in out
         assert problem in out
@@ -1085,7 +1085,7 @@ def test_onboarding_plans_a_dsh_adapter_for_a_baseline_contract_skill(tmp_path: 
 
 
 def canonical_cli(root: Path) -> Path:
-    return root / "adapters/python/scripts/hami_worktree.py"
+    return root / "adapters/python/scripts/managed_worktree.py"
 
 
 def write_cli_stub(root: Path) -> None:
@@ -1093,7 +1093,7 @@ def write_cli_stub(root: Path) -> None:
     canonical_cli(root).write_text("import sys\n\nsys.exit(0 if '--help' in sys.argv else 1)\n", encoding="utf-8")
 
 
-def test_doctor_reports_hami_worktree_readiness(tmp_path: Path) -> None:
+def test_doctor_reports_managed_worktree_readiness(tmp_path: Path) -> None:
     root, _ = make_workspace(tmp_path)
     write_cli_stub(root)
     environ = {"CODEX_HOME": str(tmp_path / "codex")}
@@ -1122,7 +1122,7 @@ def run_doctor(scripts: Path, workspace_root: Path) -> subprocess.CompletedProce
     )
 
 
-def hami_worktree_line(stdout: str) -> str:
+def managed_worktree_line(stdout: str) -> str:
     return next(line for line in stdout.splitlines() if "atc-worktree" in line)
 
 
@@ -1133,23 +1133,23 @@ def write_minimal_workspace(root: Path) -> None:
     write(root / validator.POLICY_RELATIVE, "# Policy\n")
 
 
-def test_doctor_exposes_the_hami_worktree_capability_when_it_loads() -> None:
+def test_doctor_exposes_the_managed_worktree_capability_when_it_loads() -> None:
     """The guard must leave a working module usable, not shadow it."""
-    assert doctor.hami_worktree is not None
-    assert doctor.HAMI_WORKTREE_IMPORT_ERROR == ""
+    assert doctor.managed_worktree is not None
+    assert doctor.WORKTREE_IMPORT_ERROR == ""
 
 
-def test_doctor_starts_and_reports_a_missing_hami_worktree_module(tmp_path: Path) -> None:
+def test_doctor_starts_and_reports_a_missing_managed_worktree_module(tmp_path: Path) -> None:
     """Only a real startup exercises the import guard; diagnose() on the live module cannot."""
     scripts = tmp_path / "scripts"
     shutil.copytree(Path(doctor.__file__).resolve().parent, scripts)
-    real_module = scripts / "hami_worktree.py"
+    real_module = scripts / "managed_worktree.py"
     write_minimal_workspace(tmp_path)
     real_module.unlink()
 
     missing = run_doctor(scripts, tmp_path)
     assert "Traceback" not in missing.stderr and "Traceback" not in missing.stdout
-    line = hami_worktree_line(missing.stdout)
+    line = managed_worktree_line(missing.stdout)
     assert "ERROR" in line
     assert "could not be loaded" in line
 
@@ -1157,14 +1157,14 @@ def test_doctor_starts_and_reports_a_missing_hami_worktree_module(tmp_path: Path
     real_module.write_text("def broken(:\n", encoding="utf-8")
     broken = run_doctor(scripts, tmp_path)
     assert "Traceback" not in broken.stderr and "Traceback" not in broken.stdout
-    assert "could not be loaded" in hami_worktree_line(broken.stdout)
+    assert "could not be loaded" in managed_worktree_line(broken.stdout)
 
     # With the real module present, doctor must load it rather than die or disable it.
-    shutil.copy(Path(doctor.hami_worktree.__file__), real_module)
+    shutil.copy(Path(doctor.managed_worktree.__file__), real_module)
     present = run_doctor(scripts, tmp_path)
     assert "Traceback" not in present.stderr and "Traceback" not in present.stdout
     assert "could not be loaded" not in present.stdout
-    assert "contract 1" in hami_worktree_line(present.stdout)
+    assert "contract 1" in managed_worktree_line(present.stdout)
 
 
 
@@ -1215,8 +1215,8 @@ def test_adapter_identity_collision_blocks_sync(tmp_path: Path, baseline: bool, 
     old_value = {"managed-by": "agent-traffic-control", "canonical": "bound-skill", "name": "bound-skill"}[field]
     original = text.replace(f"{field}: {old_value}\n", "" if value is None else f"{field}: {value}\n")
     write(target, original)
-    assert onboard_project.run("check", [("demo", project)], root) == 2
-    assert onboard_project.run("sync", [("demo", project)], root) == 2
+    assert onboard_project.run("check", [("demo", project)], root) == 1
+    assert onboard_project.run("sync", [("demo", project)], root) == 1
     assert target.read_text(encoding="utf-8") == original
     assert not (project / "CLAUDE.md").exists()
 
@@ -1268,7 +1268,7 @@ def test_uncertain_opt_in_metadata_is_collision(tmp_path: Path, original: str) -
     add_contract_skill(root)
     target = project / ".dsh/skills/bound-skill/SKILL.md"
     write(target, original)
-    assert onboard_project.run("sync", [("demo", project)], root) == 2
+    assert onboard_project.run("sync", [("demo", project)], root) == 1
     assert target.read_text(encoding="utf-8") == original
 
 
@@ -1278,7 +1278,7 @@ def test_root_adapter_with_foreign_identity_is_a_collision(tmp_path: Path) -> No
     source = root / ".dsh/skills/bound-skill/SKILL.md"
     foreign = contract_adapter(root).replace("canonical: bound-skill", "canonical: other-skill")
     write(source, foreign)
-    assert onboard_project.run("sync", [("demo", project)], root) == 2
+    assert onboard_project.run("sync", [("demo", project)], root) == 1
     assert source.read_text(encoding="utf-8") == foreign
 
 

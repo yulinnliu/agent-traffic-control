@@ -36,7 +36,7 @@ def records(project: Path) -> list[dict]:
 def test_sync_commits_on_main_and_records_it(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     root, project = committed_workspace(tmp_path)
     before = git_out(project, "rev-parse", "HEAD")
-    assert onboard_project.main(["--sync", "demo"], root=root) == 0
+    assert onboard_project.main(["--sync", "--project", "demo"], root=root) == 0
     head = git_out(project, "rev-parse", "HEAD")
     revision = git_out(root, "rev-parse", "HEAD")
     assert head != before and git_out(project, "status", "--porcelain") == ""
@@ -45,7 +45,7 @@ def test_sync_commits_on_main_and_records_it(tmp_path: Path, capsys: pytest.Capt
     assert (project / ".atc/atc.lock").read_text(encoding="utf-8").endswith(f'revision = "{revision}"\n')
     [record] = records(project)
     assert (record["kind"], record["candidate_sha"], record["main_before"], record["source_revision"]) == ("sync", head, before, revision)
-    assert onboard_project.main(["--sync", "demo"], root=root) == 0
+    assert onboard_project.main(["--sync", "--project", "demo"], root=root) == 0
     assert git_out(project, "rev-parse", "HEAD") == head
     assert "  commit: none (no tracked file changed)" in capsys.readouterr().out
     assert len(records(project)) == 1
@@ -69,7 +69,7 @@ def test_project_precondition_stops_before_writing(tmp_path: Path, capsys: pytes
         run_git(project, "reset", "-q", "--hard", "HEAD~1")
     head = git_out(project, "rev-parse", "HEAD")
     try:
-        assert onboard_project.main(["--sync", "demo"], root=root) == 2
+        assert onboard_project.main(["--sync", "--project", "demo"], root=root) == 1
     finally:
         if slot is not None:
             slot.release()
@@ -89,7 +89,7 @@ def test_atc_checkout_precondition_stops_every_project(tmp_path: Path, capsys: p
         write(root / "CLAUDE.md", "Read AGENTS.md first.\n")
     else:
         (root / ".agents/skills/demo-skill/SKILL.md").unlink()
-    assert onboard_project.main(["--sync", "--all"], root=root) == 2
+    assert onboard_project.main(["--sync", "--all"], root=root) == 1
     assert f"  stop: {expected} " in capsys.readouterr().out
     assert not (project / ".atc/atc.lock").exists()
     assert case != "adapter" or not (root / ".agents/skills/demo-skill/SKILL.md").exists()
@@ -99,7 +99,7 @@ def test_ignored_synced_files_stop_before_writing(tmp_path: Path, capsys: pytest
     root, project = committed_workspace(tmp_path)
     write(project / ".git/info/exclude", "/.atc/\n/CLAUDE.md\n")
     head = git_out(project, "rev-parse", "HEAD")
-    assert onboard_project.main(["--sync", "demo"], root=root) == 2
+    assert onboard_project.main(["--sync", "--project", "demo"], root=root) == 1
     out = capsys.readouterr().out
     assert "  stop: IGNORED_OUTPUT every file sync writes is committed; Git ignores or excludes: .atc/README.md, .atc/atc.lock" in out
     assert "CLAUDE.md" in out.split("IGNORED_OUTPUT")[1]
@@ -138,7 +138,7 @@ def test_change_outside_the_synced_files_is_left_uncommitted(
 
     monkeypatch.setattr(onboard_project, "apply_plan", apply_and_stray)
     head = git_out(project, "rev-parse", "HEAD")
-    assert onboard_project.main(["--sync", "demo"], root=root) == 2
+    assert onboard_project.main(["--sync", "--project", "demo"], root=root) == 1
     assert "  stop: UNMANAGED_CHANGE changed outside the synced files, left uncommitted: stray.txt" in capsys.readouterr().out
     assert git_out(project, "rev-parse", "HEAD") == head
     assert records(project) == []
@@ -169,7 +169,7 @@ def test_the_integration_slot_is_held_while_sync_writes(tmp_path: Path, monkeypa
         apply_plan(plan, mode, prune)
 
     monkeypatch.setattr(onboard_project, "apply_plan", apply_while_probing)
-    assert onboard_project.main(["--sync", "demo"], root=root) == 0
+    assert onboard_project.main(["--sync", "--project", "demo"], root=root) == 0
     assert held == [True]
 
 
@@ -185,7 +185,7 @@ def test_checkout_dirtied_before_the_slot_is_taken_stops_inside_it(
 
     monkeypatch.setattr(onboard_project, "IntegrationSlot", DirtyingSlot)
     head = git_out(project, "rev-parse", "HEAD")
-    assert onboard_project.main(["--sync", "demo"], root=root) == 2
+    assert onboard_project.main(["--sync", "--project", "demo"], root=root) == 1
     assert "  stop: CHECKOUT_DIRTY " in capsys.readouterr().out
     assert git_out(project, "rev-parse", "HEAD") == head
     assert not (project / ".atc/atc.lock").exists()
@@ -197,7 +197,7 @@ def test_project_that_is_not_its_own_repository_stops(tmp_path: Path, capsys: py
     run_git(root, "add", "-A")
     run_git(root, *COMMIT, "release")
     head = git_out(root, "rev-parse", "HEAD")
-    assert onboard_project.main(["--sync", "demo"], root=root) == 2
+    assert onboard_project.main(["--sync", "--project", "demo"], root=root) == 1
     assert "  stop: NOT_A_REPOSITORY " in capsys.readouterr().out
     assert git_out(root, "rev-parse", "HEAD") == head
     assert not (project / ".atc/atc.lock").exists()
@@ -208,7 +208,7 @@ def test_root_adapter_collision_stops_every_project(tmp_path: Path, capsys: pyte
     write(root / ".agents/skills/demo-skill/SKILL.md", "---\nname: demo-skill\ndescription: local\n---\n\n# Local\n")
     run_git(root, "add", "-A")
     run_git(root, *COMMIT, "unowned adapter")
-    assert onboard_project.main(["--sync", "demo"], root=root) == 2
+    assert onboard_project.main(["--sync", "--project", "demo"], root=root) == 1
     assert "  stop: ROOT_ADAPTER_DRIFT " in capsys.readouterr().out
     assert not (project / ".atc/atc.lock").exists()
 
@@ -223,7 +223,7 @@ def test_ownership_stops_at_the_directory_boundary(tmp_path: Path) -> None:
 def test_push_listing_names_the_sync_source(tmp_path: Path) -> None:
     root, project = committed_workspace(tmp_path)
     run_git(project, "update-ref", "refs/remotes/origin/main", "HEAD")
-    assert onboard_project.main(["--sync", "demo"], root=root) == 0
+    assert onboard_project.main(["--sync", "--project", "demo"], root=root) == 0
     head = git_out(project, "rev-parse", "HEAD")
     revision = git_out(root, "rev-parse", "HEAD")
     lines = git_preflight.render_push(git_preflight.push_listing(project))
@@ -238,7 +238,7 @@ def test_validate_fails_on_an_ignored_synced_file_and_notes_an_uncommitted_one(
 ) -> None:
     import validate_workspace as validator
     root, project = committed_workspace(tmp_path)
-    assert onboard_project.main(["--sync", "demo"], root=root) == 0
+    assert onboard_project.main(["--sync", "--project", "demo"], root=root) == 0
     monkeypatch.setattr(validator, "ROOT", root)
     canonical = onboard_project.canonical_skills(root)
     validator.FAILURES.clear()

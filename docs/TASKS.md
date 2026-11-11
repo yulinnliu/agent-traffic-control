@@ -133,10 +133,10 @@ several, the working directory's.
 1. It runs only when `integrations.jsonl` names an integration of the task
    that is not records-only and whose candidate local `main` contains, and
    the record on `main` is readable with a valid `keep`; otherwise it stops
-   with `NOT_INTEGRATED`, `RECORD_MISSING` or `RECORD_INVALID` (exit 2)
-   before anything is removed.
+   with `STOP NOT_INTEGRATED` or `STOP RECORD_MISSING` (exit 1), or
+   `ERROR RECORD_INVALID` (exit 2), before anything is removed.
 2. The worktree whose branch is the record's `branch` goes through
-   `atc worktree cleanup` and its checks, and so does an empty directory
+   `atc worktree clean` and its checks, and so does an empty directory
    left at that branch's managed path after Git unregistered the worktree.
    A worktree that holds the working directory ends
    `SKIPPED (working directory)`, for the coordinator to remove.
@@ -149,7 +149,8 @@ is permanent. An item a `--skip` names (`worktree`, `scratches` or
 `reports`, repeatable) ends `SKIPPED (--skip)` on this run only, and nothing
 is written; a `--skip` of an absent item does nothing. Every item ends on one line,
 `DELETED`, `SKIPPED` or `REFUSED` with the reason, and a last line counts
-them; the exit code is 1 when one is `REFUSED`, else 0.
+them; the exit code is 0 when none is `REFUSED`, 3 when one is `REFUSED`
+and another `DELETED`, else 1. `--json` prints the items and counts.
 
 `atc validate` runs the check on this repository and `atc validate
 --projects` on every registered project. A check reports: a file that is not

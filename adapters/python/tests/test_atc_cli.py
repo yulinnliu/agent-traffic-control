@@ -16,7 +16,7 @@ from atc_testkit import check, gate
 pytestmark = pytest.mark.integration
 
 SUBCOMMANDS = [
-    ("worktree",), ("worktree", "create"), ("worktree", "resume"), ("worktree", "audit"), ("worktree", "cleanup"),
+    ("worktree",), ("worktree", "create"), ("worktree", "resume"), ("worktree", "audit"), ("worktree", "clean"),
     ("preflight",), ("preflight", "push"),
     ("integrate",), ("verify",), ("close-out",), ("task",), ("task", "new"), ("task", "list"), ("task", "check"), ("validate",), ("onboard",),
     ("bootstrap",), ("bootstrap", "init"), ("bootstrap", "add"), ("bootstrap", "sync"), ("bootstrap", "status"),
@@ -97,7 +97,7 @@ def test_testkit_entry_points_take_no_abbreviation(main, parsers: list[argparse.
 
 
 def test_an_abbreviated_option_is_refused(capsys: pytest.CaptureFixture[str]) -> None:
-    code = call(["worktree", "cleanup", "--owner", "claude", "--topic", "t",
+    code = call(["worktree", "clean", "--owner", "claude", "--topic", "t",
                  "--squash-integrated", "--reviewe", "a" * 40])
     assert code == 2 and "unrecognized arguments: --reviewe" in capsys.readouterr().err
 
@@ -137,7 +137,7 @@ def test_root_only_onboard_renders_the_linked_worktree_not_the_workspace_above(t
     assert atc_cli.resolve_checkout(None, {"ATC_ROOT": str(workspace)}, cwd) == workspace.resolve()
 
 
-@pytest.mark.parametrize(("args", "expected"), [(["--sync", "--root-only"], "worktree"), (["--check", "demo"], "workspace")])
+@pytest.mark.parametrize(("args", "expected"), [(["--sync", "--root-only"], "worktree"), (["--check", "--project", "demo"], "workspace")])
 def test_onboard_dispatch_picks_the_root_by_target(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, args: list[str], expected: str,
 ) -> None:

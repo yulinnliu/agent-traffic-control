@@ -151,24 +151,36 @@ def threshold(group: list[dict]) -> str:
     return "RECORD_ONLY"
 
 
-def print_open(events_file: Path) -> None:
+def print_open(events_file: Path, every: bool = False, as_json: bool = False) -> None:
     incidents, resolutions = project_state(load_records(events_file))
-    open_events = [event for event_id, event in incidents.items() if event_id not in resolutions]
-    if not open_events:
-        print("No open friction incidents.")
+    shown = [event for event_id, event in incidents.items() if every or event_id not in resolutions]
+    shown.sort(key=lambda item: item.get("time", ""))
+    if as_json:
+        print(json.dumps({"incidents": [{**event, "resolved": event["event_id"] in resolutions} for event in shown]},
+                         indent=2))
         return
-    for event in sorted(open_events, key=lambda item: item.get("time", "")):
+    if not shown:
+        print("No friction incidents." if every else "No open friction incidents.")
+        return
+    for event in shown:
+        state = ("resolved  " if event["event_id"] in resolutions else "open  ") if every else ""
         print(
-            f"{event['event_id']}  {event.get('kind', '-')}  "
+            f"{event['event_id']}  {state}{event.get('kind', '-')}  "
             f"{event.get('project', '-')}  {event.get('recurrence_key', '-')}"
         )
 
 
-def print_summary(events_file: Path, group_field: str) -> None:
+def print_summary(events_file: Path, group_field: str, as_json: bool = False) -> None:
     incidents, resolutions = project_state(load_records(events_file))
     groups: dict[str, list[dict]] = defaultdict(list)
     for event in incidents.values():
         groups[str(event.get(group_field) or "(none)")].append(event)
+    if as_json:
+        print(json.dumps({"group": group_field, "groups": [{
+            "key": key, "total": len(group), "open": sum(e["event_id"] not in resolutions for e in group),
+            "projects": len({e.get("project") for e in group}), "tools": len({e.get("tool") for e in group}),
+            "threshold": threshold(group)} for key, group in sorted(groups.items())]}, indent=2))
+        return
     if not groups:
         print("No friction incidents recorded.")
         return
@@ -182,29 +194,43 @@ def print_summary(events_file: Path, group_field: str) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(allow_abbrev=False, description=__doc__)
-    subparsers = parser.add_subparsers(dest="command", required=True)
-    add = subparsers.add_parser("add", allow_abbrev=False, help="append one incident")
-    add.add_argument("--kind", required=True, choices=ALLOWED_KINDS)
-    add.add_argument("--project", required=True)
-    add.add_argument("--tool", required=True)
-    add.add_argument("--policy-key")
-    add.add_argument("--skill")
-    add.add_argument("--session-id")
-    add.add_argument("--expected", required=True)
-    add.add_argument("--observed", required=True)
-    add.add_argument("--evidence", required=True)
-    add.add_argument("--recurrence-key", required=True)
+    import cli_conventions
+    parser = argparse.ArgumentParser(prog="atc friction", allow_abbrev=False, **cli_conventions.form(
+        "Append-only friction incident log with replayed resolution state.",
+        exit="0 OK; 1 an unreadable log or unknown event; 2 usage error"))
+    subparsers = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
+    add = subparsers.add_parser("add", allow_abbrev=False, help="append one incident",
+                                **cli_conventions.form("Append one friction incident to the log."))
+    add.add_argument("--kind", required=True, choices=ALLOWED_KINDS, help="the incident's kind")
+    add.add_argument("--project", required=True, metavar="NAME",
+                     help="the repository where it happened (free text; need not be registered)")
+    add.add_argument("--tool", required=True, metavar="NAME", help="the agent tool, for example claude or codex")
+    add.add_argument("--policy-key", metavar="KEY", help="the governance or policy rule involved")
+    add.add_argument("--skill", metavar="NAME", help="the skill involved")
+    add.add_argument("--session-id", metavar="ID", help="the session that met it")
+    add.add_argument("--expected", required=True, metavar="TEXT", help="what should have happened")
+    add.add_argument("--observed", required=True, metavar="TEXT", help="what happened")
+    add.add_argument("--evidence", required=True, metavar="TEXT", help="where to see it: a path, SHA or quote")
+    add.add_argument("--recurrence-key", required=True, metavar="KEY", help="groups incidents of the same cause")
 
-    list_parser = subparsers.add_parser("list", allow_abbrev=False, help="list projected incidents")
-    list_parser.add_argument("--open", action="store_true", dest="open_only", required=True)
+    list_parser = subparsers.add_parser("list", allow_abbrev=False, help="list incidents, open ones by default",
+                                        **cli_conventions.form("List friction incidents, oldest first."))
+    shown = list_parser.add_mutually_exclusive_group()
+    shown.add_argument("--open", action="store_true", dest="open_only", help="only unresolved incidents (default)")
+    shown.add_argument("--all", action="store_true", help="resolved incidents too")
 
-    summary = subparsers.add_parser("summary", allow_abbrev=False, help="summarize incident recurrence")
-    summary.add_argument("--group", choices=("recurrence_key",), default="recurrence_key")
+    summary = subparsers.add_parser("summary", allow_abbrev=False, help="summarize incident recurrence",
+                                    **cli_conventions.form("Summarize incidents by recurrence, with each group's "
+                                                           "escalation threshold."))
+    summary.add_argument("--group", choices=("recurrence_key",), default="recurrence_key",
+                         help="the field incidents are grouped by")
 
-    resolve = subparsers.add_parser("resolve", allow_abbrev=False, help="append a resolution event")
-    resolve.add_argument("event_id")
-    resolve.add_argument("--evidence", required=True)
+    resolve = subparsers.add_parser("resolve", allow_abbrev=False, help="append a resolution event",
+                                    **cli_conventions.form("Append a resolution event for one incident."))
+    resolve.add_argument("event_id", metavar="EVENT_ID", help="the incident to resolve")
+    resolve.add_argument("--evidence", required=True, metavar="TEXT", help="where the fix can be seen")
+    for p in (add, list_parser, summary, resolve):
+        cli_conventions.add_json(p)
     return parser
 
 
@@ -225,14 +251,16 @@ def main(argv: list[str] | None = None, events_file: Path = EVENTS_FILE) -> int:
                 recurrence_key=args.recurrence_key,
                 events_file=events_file,
             )
-            print(f"friction: appended incident {event['event_id']} to {events_file}")
+            print(json.dumps({"verdict": "APPENDED", "event": event}, indent=2) if args.json
+                  else f"friction: appended incident {event['event_id']} to {events_file}")
         elif args.command == "list":
-            print_open(events_file)
+            print_open(events_file, every=args.all, as_json=args.json)
         elif args.command == "summary":
-            print_summary(events_file, args.group)
+            print_summary(events_file, args.group, as_json=args.json)
         elif args.command == "resolve":
             event = resolve_incident(args.event_id, args.evidence, events_file)
-            print(f"friction: appended resolution {event['event_id']} for {args.event_id}")
+            print(json.dumps({"verdict": "APPENDED", "event": event}, indent=2) if args.json
+                  else f"friction: appended resolution {event['event_id']} for {args.event_id}")
         return 0
     except ValueError as exc:
         print(f"friction: {exc}", file=sys.stderr)

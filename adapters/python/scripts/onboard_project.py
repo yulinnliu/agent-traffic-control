@@ -10,7 +10,7 @@ time. `.atc/tasks/` is the project's; an adapter without an ownership marker
 is project-owned; neither is ever rewritten. A project in the layout before
 `atc.lock` is migrated in the same pass (docs/LAYOUT.md).
 
-`--sync` with a project or `--all` commits what it writes on each project's
+`--sync` with `--project` or `--all` commits what it writes on each project's
 `main` and records the commit in `integrations.jsonl`; `--root-only` renders
 the adapters of the checkout it runs in and commits nothing. The rules:
 GIT_WORKFLOW.md "Governance sync commits". `apply()` creates a new project's
@@ -20,6 +20,7 @@ missing files, updates nothing and commits nothing (`atc bootstrap add`).
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import re
@@ -34,9 +35,12 @@ import yaml
 
 import validate_workspace as validator
 import verification_section
+import cli_conventions
 from integration_slot import IntegrationSlot
 
 ROOT = Path(__file__).resolve().parents[3]
+# The `--json` result: one entry per checkout `run` plans, None outside `--json` (shared/conformance/CLI.md § Output).
+EVENTS: list[dict] | None = None
 LEGACY_POLICY_PATTERN = validator.LEGACY_POLICY_BLOCK
 POINTER_LINE = re.compile(rf"^{re.escape(validator.POINTER_MARKER)}.*$", re.MULTILINE)
 # The workspace root's CLAUDE.md before it imported AGENTS.md; a project copy
@@ -421,6 +425,10 @@ def apply_plan(plan: list[PlanItem], mode: str, prune: bool = False) -> None:
 
 def print_plan(name: str, project_path: Path, plan: list[PlanItem], mode: str, prune: bool = False, verbose: bool = False) -> None:
     applied = {"apply": ("create",), "sync": ("create", "update") + (("prune",) if prune else ())}.get(mode, ())
+    if EVENTS is not None:
+        EVENTS.append({"project": name, "path": str(project_path), "mode": mode, "prune": prune,
+                       "items": [{"action": item.action, "path": str(item.path), "detail": item.detail}
+                                 for item in plan if verbose or item.action != "skip"]})
     print(f"\n=== {name} ({project_path}) [{mode}{' --prune' if prune else ''}] ===")
     for action in ("create", "update", "prune", "collision", "skip"):
         items = [item for item in plan if item.action == action]
@@ -568,8 +576,8 @@ def run(mode: str, targets: list[tuple[str, Path]], root: Path = ROOT, prune: bo
                 raise SyncStop("ROOT_ADAPTER_DRIFT", "the ATC checkout's own adapters are not current; render them in the topic that changed the skill")
             revision = root_commit_revision(root)
         except SyncStop as stop:
-            print(f"  stop: {stop.code} {stop.detail}")
-            return 2
+            _stop(stop.code, stop.detail)
+            return cli_conventions.STOP
         source = governance_source(root)
     elif not root_collision or mode == "check":
         apply_plan(root_plan, mode)
@@ -577,6 +585,8 @@ def run(mode: str, targets: list[tuple[str, Path]], root: Path = ROOT, prune: bo
         if not project_path.is_dir():
             print(f"\n=== {name} ({project_path}) [{mode}] ===")
             print("  readiness: NOT_INITIALIZED (registered repo path is absent)")
+            if EVENTS is not None:
+                EVENTS.append({"project": name, "path": str(project_path), "mode": mode, "readiness": "NOT_INITIALIZED"})
             continue
         plan = build_plan(project_path, root, prune)
         print_plan(name, project_path, plan, mode, prune, verbose)
@@ -584,9 +594,9 @@ def run(mode: str, targets: list[tuple[str, Path]], root: Path = ROOT, prune: bo
         ignored = ignored_outputs(project_path, plan)
         if gate or ignored:
             if gate:
-                print(f"  stop: VERIFICATION_SECTION_MISSING {gate}; add it in the project first (GIT_WORKFLOW.md § Lock advancement)")
+                _stop("VERIFICATION_SECTION_MISSING", f"{gate}; add it in the project first (GIT_WORKFLOW.md § Lock advancement)")
             if ignored:
-                print(f"  stop: IGNORED_OUTPUT every file sync writes is committed; Git ignores or excludes: {', '.join(ignored)}")
+                _stop("IGNORED_OUTPUT", f"every file sync writes is committed; Git ignores or excludes: {', '.join(ignored)}")
             has_stop = True
             continue
         project_collision = any(item.action == "collision" for item in plan)
@@ -598,42 +608,79 @@ def run(mode: str, targets: list[tuple[str, Path]], root: Path = ROOT, prune: bo
             try:
                 sha = sync_and_commit(project_path, plan, prune, source, revision)
             except SyncStop as stop:
-                print(f"  stop: {stop.code} {stop.detail}")
+                _stop(stop.code, stop.detail)
                 has_stop = True
                 continue
             print(f"  commit: {sha}" if sha else "  commit: none (no tracked file changed)")
+            if EVENTS:
+                EVENTS[-1]["commit"] = sha
         elif not commit and (not project_collision or mode == "check"):
             apply_plan(plan, mode, prune)
     if has_collision or has_stop:
-        return 2
+        return cli_conventions.STOP
     if mode == "check" and has_pending:
-        return 1
+        return cli_conventions.STOP
     if mode == "apply" and has_updates:
-        return 1
+        return cli_conventions.STOP
     if mode == "sync" and unpruned:
-        return 1
-    return 0
+        return cli_conventions.STOP
+    return cli_conventions.OK
+
+
+def _stop(code: str, detail: str) -> None:
+    print(f"  stop: {code} {detail}")
+    if EVENTS:
+        EVENTS[-1].setdefault("stops", []).append({"reason": code, "detail": detail})
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(allow_abbrev=False, description=__doc__)
+    parser = argparse.ArgumentParser(prog="atc onboard", allow_abbrev=False, **cli_conventions.form(
+        "Check or sync the files Agent Traffic Control owns inside projects.",
+        "Owned: CLAUDE.md when absent, the AGENTS.md pointer line, .atc/ (README.md, atc.lock,\n"
+        "governance/) and one managed adapter per baseline skill. --sync commits on each project's main.",
+        exit="0 current or synced; 1 STOP (drift under --check, a collision, a sync precondition); 2 ERROR",
+        see="docs/LAYOUT.md; GIT_WORKFLOW.md § Governance sync commits"))
     modes = parser.add_mutually_exclusive_group(required=True)
-    modes.add_argument("--check", action="store_const", const="check", dest="mode")
-    modes.add_argument("--sync", action="store_const", const="sync", dest="mode")
+    modes.add_argument("--check", action="store_const", const="check", dest="mode",
+                       help="write nothing; exit 1 when a sync would change anything")
+    modes.add_argument("--sync", action="store_const", const="sync", dest="mode",
+                       help="write the owned files and commit them on each project's main")
     targets = parser.add_mutually_exclusive_group(required=True)
-    targets.add_argument("project", nargs="?")
-    targets.add_argument("--all", action="store_true")
-    targets.add_argument("--root-only", action="store_true", help="render only this checkout's own adapters; commits nothing")
+    cli_conventions.add_project(targets, help="registered project name from workspace.yaml")
+    targets.add_argument("legacy_project", nargs="?", metavar="NAME", help="deprecated: use --project NAME")
+    targets.add_argument("--all", action="store_true", help="every project registered in workspace.yaml")
+    targets.add_argument("--root-only", action="store_true",
+                         help="render only the adapters of the ATC checkout holding the working directory; commits nothing")
     parser.add_argument("--verbose", action="store_true", help="also list the items already current")
-    parser.add_argument("--prune", action="store_true", help="with --sync: delete orphaned managed adapters (canonical skill renamed or removed)")
+    parser.add_argument("--prune", action="store_true",
+                        help="with --sync: delete orphaned managed adapters (canonical skill renamed or removed)")
+    cli_conventions.add_json(parser)
     return parser
 
 
 def main(argv: list[str] | None = None, root: Path = ROOT) -> int:
+    global EVENTS
     parser = build_parser()
     args = parser.parse_args(argv)
     if args.prune and args.mode != "sync":
         parser.error("--prune only applies with --sync")
+    if args.legacy_project:
+        cli_conventions.deprecated(f"atc onboard --{args.mode} {args.legacy_project}",
+                                   f"atc onboard --{args.mode} --project {args.legacy_project}")
+        args.project = args.legacy_project
+    if not args.json:
+        return _run(args, root)
+    EVENTS = []
+    try:
+        with contextlib.redirect_stdout(sys.stderr):
+            code = _run(args, root)
+        print(json.dumps({"mode": args.mode, "checkouts": EVENTS}, indent=2))
+        return code
+    finally:
+        EVENTS = None
+
+
+def _run(args: argparse.Namespace, root: Path) -> int:
     try:
         if args.root_only:
             return run(args.mode, [], root, args.prune, verbose=args.verbose)
@@ -641,15 +688,15 @@ def main(argv: list[str] | None = None, root: Path = ROOT) -> int:
         if args.all:
             selected = projects.items()
         elif args.project not in projects:
-            print(f"'{args.project}' is not registered in workspace.yaml.", file=sys.stderr)
-            return 2
+            print(f"ERROR PROJECT_UNKNOWN '{args.project}' is not registered in workspace.yaml.", file=sys.stderr)
+            return cli_conventions.ERROR
         else:
             selected = [(args.project, projects[args.project])]
         targets = [(name, (root / entry["repo"]).resolve()) for name, entry in selected]
         return run(args.mode, targets, root, args.prune, commit=args.mode == "sync", verbose=args.verbose)
     except ValueError as exc:
-        print(f"onboard: {exc}", file=sys.stderr)
-        return 2
+        print(f"ERROR ONBOARD {exc}", file=sys.stderr)
+        return cli_conventions.ERROR
 
 
 def apply(name: str, root: Path = ROOT) -> int:

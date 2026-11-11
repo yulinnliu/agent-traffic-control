@@ -27,7 +27,8 @@ from pathlib import Path
 
 from atc_testkit import locations, stages, timing
 import git_preflight as gp
-import hami_worktree as hw
+import cli_conventions
+import managed_worktree as hw
 import task_authority as ta
 import task_records
 import verification_section
@@ -1560,17 +1561,19 @@ class _Parser(argparse.ArgumentParser):
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = _Parser(allow_abbrev=False, description=__doc__.splitlines()[0])
-    parser.add_argument("--project", help="registered project name from workspace.yaml; root names the workspace "
-                        "root (default: the task's declared prefix)")
-    parser.add_argument("--reviewed", required=True, help="SHA named by the review: " + SHA_FORM)
+    parser = _Parser(prog="atc integrate", allow_abbrev=False, **cli_conventions.form(
+        "Fast-forward main to a reviewed topic through a verified candidate.",
+        exit="0 integrated, or CHECK FF / CHECK NO_FF; 1 STOP before a candidate exists; 2 ERROR; 3 STOP after the candidate exists, main unchanged, or a required recovery",
+        see="GIT_WORKFLOW.md § Integrate, § Command results"))
+    cli_conventions.add_project(parser, " (default: the task's declared prefix)")
+    parser.add_argument("--reviewed", required=True, metavar="SHA", help="SHA named by the review: " + SHA_FORM)
     parser.add_argument(
-        "--rebased",
+        "--rebased", metavar="SHA",
         help="SHA of the unpublished topic rebased onto main (" + SHA_FORM + "); integrates it carrying over the approval "
         "of --reviewed when the rebase is clean and every patch-id matches",
     )
     parser.add_argument(
-        "--task", required=True,
+        "--task", required=True, metavar="ID",
         help="the task: a record ID with a declared prefix (it names the repository and the branch), or a task "
         "identity string",
     )
@@ -1580,11 +1583,13 @@ def build_parser() -> argparse.ArgumentParser:
         "integrate_main, which covers FF only",
     )
     parser.add_argument(
-        "--verify-timeout", type=float,
+        "--verify-timeout", type=float, metavar="SECONDS",
         help="maximum verifier runtime in seconds (default: the AGENTS.md declaration, else 300)",
     )
-    parser.add_argument("--check", action="store_true", help="resolve, preflight and warn; take no slot and create no candidate")
-    parser.add_argument("--json", action="store_true", help="print the result as JSON")
+    parser.add_argument("--check", action="store_true",
+                        help="write nothing: resolve, preflight and warn without a slot or candidate; exit 0 when "
+                             "the integration would proceed")
+    cli_conventions.add_json(parser)
     return parser
 
 
@@ -1732,19 +1737,20 @@ def _main(args: argparse.Namespace, root: Path, cwd: str | None) -> int:
 
 
 def build_verify_parser() -> argparse.ArgumentParser:
-    parser = _Parser(prog="atc verify", allow_abbrev=False, description=(
+    parser = _Parser(prog="atc verify", allow_abbrev=False, **cli_conventions.form(
         "Run the integration verifier on the candidate `atc integrate` would build, without the Integration "
-        "Slot, a ref update or authority (VERIFICATION.md § Independent review). The last line is "
-        "`VERIFY PASS <candidate> <FF|NO_FF>`; a stop prints the `atc integrate` stop lines."))
-    parser.add_argument("--project", help="registered project name from workspace.yaml; root names the workspace "
-                        "root (default: the task's declared prefix, else the working directory's project)")
-    parser.add_argument("--reviewed", required=True, help="SHA named by the review: " + SHA_FORM)
-    parser.add_argument("--rebased", help="SHA of the topic rebased onto main, as `atc integrate --rebased` takes it")
-    parser.add_argument("--task", help="the task as `atc integrate --task` takes it; it resolves the target (the "
+        "Slot,\na ref update or authority. The last line is `VERIFY PASS <candidate> <FF|NO_FF>`.",
+        exit="0 VERIFY PASS; 1 STOP before a candidate exists; 2 ERROR; 3 the verifier failed or timed out",
+        see="VERIFICATION.md § Independent review"))
+    cli_conventions.add_project(parser, " (default: the task's declared prefix, else the working directory's project)")
+    parser.add_argument("--reviewed", required=True, metavar="SHA", help="SHA named by the review: " + SHA_FORM)
+    parser.add_argument("--rebased", metavar="SHA",
+                        help="SHA of the topic rebased onto main, as `atc integrate --rebased` takes it")
+    parser.add_argument("--task", metavar="ID", help="the task as `atc integrate --task` takes it; it resolves the target (the "
                         "record's branch, a records-only range, the project) and no authority is checked")
-    parser.add_argument("--verify-timeout", type=float,
+    parser.add_argument("--verify-timeout", type=float, metavar="SECONDS",
                         help="maximum verifier runtime in seconds, as `atc integrate --verify-timeout` takes it")
-    parser.add_argument("--json", action="store_true", help="print the result as JSON")
+    cli_conventions.add_json(parser)
     return parser
 
 

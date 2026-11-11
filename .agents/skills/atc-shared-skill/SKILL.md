@@ -71,8 +71,8 @@ Adapters are generated. From the checkout:
 
 ```
 atc onboard --sync --root-only          # this checkout's own .claude/ .agents/ .dsh/, no commit
-atc onboard --sync <project>            # one registered project, committed on its main
-atc bootstrap sync --prune              # every registered project, committed, then validate
+atc onboard --sync --project <project>  # one registered project, committed on its main
+atc onboard --sync --all --prune        # every registered project, committed on its main
 scripts/link-skills.sh <repo> <name>    # a repository outside the workspace map, no Python
 ```
 

@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import argparse
+import json
 import os
 import shutil
 import sys
@@ -12,18 +14,19 @@ from pathlib import Path
 import yaml
 
 import checkout_guard
+import cli_conventions
 import friction
 import onboard_project
 import validate_workspace as validator
 
 try:
-    import hami_worktree
+    import managed_worktree
 except (ImportError, SyntaxError) as exc:
     # Doctor must still start and report the gap rather than fail at import time.
-    hami_worktree = None
-    HAMI_WORKTREE_IMPORT_ERROR = str(exc)
+    managed_worktree = None
+    WORKTREE_IMPORT_ERROR = str(exc)
 else:
-    HAMI_WORKTREE_IMPORT_ERROR = ""
+    WORKTREE_IMPORT_ERROR = ""
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -106,10 +109,10 @@ def diagnose(root: Path = ROOT, environ: dict[str, str] | None = None, checkout:
         adapters = sum(len(validator.adapter_dirs(fm)) for fm in canonical.values())
         checks.append(Check("workspace-managed adapters", "READY", f"{adapters} adapters current"))
 
-    if hami_worktree is None:
-        checks.append(Check("atc-worktree", "ERROR", f"the shared capability could not be loaded: {HAMI_WORKTREE_IMPORT_ERROR}"))
+    if managed_worktree is None:
+        checks.append(Check("atc-worktree", "ERROR", f"the shared capability could not be loaded: {WORKTREE_IMPORT_ERROR}"))
     else:
-        status, detail = hami_worktree.readiness(root, environ, os.path.expanduser("~"))
+        status, detail = managed_worktree.readiness(root, environ, os.path.expanduser("~"))
         checks.append(Check("atc-worktree", status, detail))
 
     for name, entry in projects.items():
@@ -161,14 +164,29 @@ def diagnose(root: Path = ROOT, environ: dict[str, str] | None = None, checkout:
     return checks
 
 
-def main(root: Path = ROOT) -> int:
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="atc doctor", allow_abbrev=False, **cli_conventions.form(
+        "Diagnose local Agent Traffic Control runtime readiness; changes nothing.",
+        exit="0 every check READY or NOT_INITIALIZED; 1 a check reports ERROR; 2 usage error"))
+    cli_conventions.add_json(parser)
+    return parser
+
+
+def main(argv: list[str] | None = None, root: Path = ROOT) -> int:
+    args = build_parser().parse_args(argv)
     checks = diagnose(root)
-    for check in checks:
-        print(f"{check.status:15} {check.name}: {check.detail}")
     errors = sum(check.status == "ERROR" for check in checks)
     not_initialized = sum(check.status == "NOT_INITIALIZED" for check in checks)
+    code = cli_conventions.STOP if errors else cli_conventions.OK
+    if args.json:
+        print(json.dumps({"verdict": "NOT_READY" if errors else "READY", "errors": errors,
+                          "not_initialized": not_initialized,
+                          "checks": [{"name": c.name, "status": c.status, "detail": c.detail} for c in checks]}, indent=2))
+        return code
+    for check in checks:
+        print(f"{check.status:15} {check.name}: {check.detail}")
     print(f"\nDoctor: {errors} error(s), {not_initialized} not initialized.")
-    return 1 if errors else 0
+    return code
 
 
 if __name__ == "__main__":

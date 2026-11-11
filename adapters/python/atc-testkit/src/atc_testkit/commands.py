@@ -17,17 +17,25 @@ HELP_OPTIONS = ("-h", "--help")
 WITH_RUNS_OPTION = "--with-runs"
 
 USAGES = {
-    ("test", "run"): "usage: atc test run --scratch <name> [--tree <tree>] [--python <py>] [--select <base>] "
-                     "[--label <label>] [--timeout <s>] [--progress] [-- <pytest args...>]",
-    ("test", "mutants"): "usage: atc test mutants <scratch> <sha> <worktree> <mutants.json> --python <py> "
-                         "--tests <path>...",
-    ("test", "private"): "usage: atc test private [--] <command> [args...]",
-    ("tmp", "checkout"): "usage: atc tmp checkout <sha> --task <ID> [--worktree <path>] [--scratch <name>] "
-                         "[--lock-dir <dir>]",
+    ("test", "run"): "usage: atc test run --scratch NAME [--tree DIR] [--python PATH] [--select SHA] "
+                     "[--label NAME] [--timeout SECONDS] [--progress] [-- PYTEST_ARG...]",
+    ("test", "mutants"): "usage: atc test mutants NAME SHA DIR FILE --python PATH --tests ARG...",
+    ("test", "private"): "usage: atc test private [--] COMMAND [ARG...]",
+    ("tmp", "checkout"): "usage: atc tmp checkout SHA --task ID [--worktree DIR] [--scratch NAME] [--lock-dir DIR]",
     ("tmp", "list"): "usage: atc tmp list [--json]",
-    ("tmp", "clean"): f"usage: atc tmp clean [{WITH_RUNS_OPTION}] <dir>...",
+    ("tmp", "clean"): f"usage: atc tmp clean [{WITH_RUNS_OPTION}] DIR...",
     ("tmp", "prune"): "usage: atc tmp prune",
 }
+SUMMARIES = {
+    ("test", "run"): "one isolated pytest run in a scratch, its output kept in a log",
+    ("test", "mutants"): "apply each mutant alone to a scratch's tree and run the judging tests",
+    ("test", "private"): "run one command on a private desktop",
+    ("tmp", "checkout"): "export a commit into a new scratch and build its environment",
+    ("tmp", "list"): "list registered scratches; deletes nothing",
+    ("tmp", "clean"): "delete the scratches you name",
+    ("tmp", "prune"): "delete stale entries the tool finds under systmp/ and candidates/",
+}
+GROUP_SUMMARIES = {"test": "Isolated pytest runs.", "tmp": "Scratch checkouts under the ATC temporary root."}
 DESCRIPTIONS = {
     ("test", "private"): """Run one command on a private desktop from the current directory with the current
 environment; print `desktop: private` (or `desktop: interactive` where none can be
@@ -39,22 +47,31 @@ gone, and its task; delete nothing. A last line counts the missing ones and name
 
   --json          every registry field of each scratch plus `size` in bytes (null when missing)
 
-(docs/ATC_HOME.md § Scratch registry).""",
-    ("tmp", "clean"): f"""Delete scratches (docs/ATC_HOME.md § Deleting).
+See: docs/ATC_HOME.md § Scratch registry""",
+    ("tmp", "clean"): f"""Delete the scratches you name.
 
-  <dir>...                scratches under the ATC temporary root
+  DIR...                  scratches under the ATC temporary root
   {WITH_RUNS_OPTION}             also delete each scratch's dependent runs, the scratches
                           whose registered tree is inside it; without it they are listed
 
-Exit: 0, 1 for a refused directory, 2 before anything is deleted.""",
-    ("tmp", "prune"): """Delete entries of <tmp>/systmp and <tmp>/candidates older than seven days
-(docs/ATC_HOME.md § Deleting).""",
+Exit: 0, 1 for a refused directory, 2 before anything is deleted.
+See: docs/ATC_HOME.md § Deleting""",
+    ("tmp", "prune"): """Delete entries of <tmp>/systmp and <tmp>/candidates older than seven days.
+
+See: docs/ATC_HOME.md § Deleting""",
 }
 GROUPS = {"test": ("run", "mutants", "private"), "tmp": ("checkout", "list", "clean", "prune")}
 
 
 def _group_usage(group: str) -> str:
     return "\n".join(USAGES[(group, name)] for name in GROUPS[group])
+
+
+def _group_help(group: str) -> str:
+    width = max(len(name) for name in GROUPS[group])
+    lines = [f"usage: atc {group} COMMAND ...", "", GROUP_SUMMARIES[group], "", "commands:"]
+    lines += [f"  {name:<{width}}  {SUMMARIES[(group, name)]}" for name in GROUPS[group]]
+    return "\n".join(lines + ["", f"Run `atc {group} COMMAND --help` for one command."])
 
 
 def _asks_help(arguments: Sequence[str]) -> bool:
@@ -85,7 +102,7 @@ def _dispatch(arguments: Sequence[str]) -> int:
     if group not in GROUPS:
         return _usage("\n".join(_group_usage(name) for name in GROUPS))
     if _asks_help(arguments[1:]):
-        return _help(_group_usage(group))
+        return _help(_group_help(group))
     command, rest = tuple(arguments[:2]), arguments[2:]
     if command not in USAGES:
         return _usage(_group_usage(group))

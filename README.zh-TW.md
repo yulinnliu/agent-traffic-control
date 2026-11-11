@@ -96,7 +96,7 @@ git clone https://github.com/yulinnliu/agent-traffic-control.git atc
 uv tool install -e atc/adapters/python
 cd atc
 atc bootstrap init                          # 建立 workspace.yaml 和 projects/ worktrees/ state/
-atc bootstrap add my-project --url <url>    # clone、登記、onboard、驗證
+atc bootstrap add --project my-project --url <url>    # clone、登記、onboard、驗證
 atc bootstrap status                        # doctor 加上一次不寫入的 onboarding 檢查
 ```
 
@@ -115,7 +115,7 @@ repository 更新之後，要做的是重新 render，而不是手動去改：
 ```sh
 atc/scripts/check-skills.sh path/to/your-repo                           # current / drifted / orphaned / stale
 atc/scripts/link-skills.sh --prune path/to/your-repo                    # 修復
-atc bootstrap sync --prune                                              # 所有已登記的專案，各自在 main 上 commit，接著驗證
+atc onboard --sync --all --prune                                        # 所有已登記的專案，各自在 main 上 commit
 ```
 
 render 出來的檔案都帶有 `managed-by: agent-traffic-control` 標記；沒有這個
@@ -123,8 +123,9 @@ render 出來的檔案都帶有 `managed-by: agent-traffic-control` 標記；沒
 
 ## 指令
 
-每個指令的參數用 `atc <command> --help` 查；`adapters/python/README.md` 有一張
-表把它們全部列出來。
+`atc --help` 依群組列出所有指令，每個指令的參數用 `atc <command> --help` 查；
+`adapters/python/README.md` 有一張表把它們全部列出來。Exit code、`--json`、命名、
+版本與棄用的寫法見 `shared/conformance/CLI.md`。
 
 | 指令 | 用途 | 參考 |
 | --- | --- | --- |
@@ -136,8 +137,8 @@ render 出來的檔案都帶有 `managed-by: agent-traffic-control` 標記；沒
 | `atc preflight` | `push` 依 integration 列出 `origin/main..main` 會發布哪些內容，只讀不寫 | `docs/WORKFLOW.md` § 8 |
 | `atc test` | 在 scratch 副本上跑測試並寫成 log；`mutants` 檢查 guard 有沒有效；`private` 在私有桌面上執行指令 | `docs/TESTKIT.md` § Commands |
 | `atc tmp` | 把 commit 匯出成 scratch 並建好環境；列出、清除、定期清理 scratch | `docs/TESTKIT.md` § Commands、`docs/ATC_HOME.md` |
-| `atc bootstrap` | `init`、`add`、`sync`、`status`：建立 workspace，並讓已登記的專案保持最新 | 上面的〈安裝〉 |
-| `atc onboard` | 檢查或同步單一專案的受管檔案；`--root-only` 重新 render 這個 repository 自己的 skill 副本 | `docs/LAYOUT.md` |
+| `atc bootstrap` | `init`、`add`、`status`：建立 workspace 並登記專案 | 上面的〈安裝〉 |
+| `atc onboard` | 檢查或同步 `--project NAME` 或 `--all` 的受管檔案；`--root-only` 重新 render 這個 repository 自己的 skill 副本 | `docs/LAYOUT.md` |
 | `atc validate` | 檢查 skill 副本、任務紀錄和這個 repository 的規則；`--projects` 檢查所有已登記的專案 | `docs/LAYOUT.md`、`docs/ENFORCEMENT.md` § Drift |
 | `atc doctor` | 檢查這台機器是否已能執行這些工具（`READY`、`NOT_INITIALIZED`、`ERROR`），不改動任何東西 | `atc doctor --help` |
 | `atc policies` | `check` 用 schema 驗證 policy 目錄，發現互相矛盾的規則就拒絕 | `shared/policies/schemas/` |
@@ -170,7 +171,7 @@ render 出來的檔案都帶有 `managed-by: agent-traffic-control` 標記；沒
 
 ## 狀態
 
-目前版本是 0.2.0，也就是 Python adapter 的版號。
+目前版本是 0.3.0，也就是 Python adapter 的版號。
 governance、policy、schema、skill、conformance fixture 和 Python 參考實作都
 已經到位。GitHub Actions 的 `validate.yml` 只在手動觸發時執行：它會用 schema
 檢查 policy 範例，並在 Linux 和 Windows 上跑 shell 安裝腳本與完整的 Python

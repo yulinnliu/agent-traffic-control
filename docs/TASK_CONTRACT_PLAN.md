@@ -368,7 +368,7 @@ and by a test per command that pins its default output.
 
 1. `atc preflight cleanup` duplicates `atc worktree cleanup`: the check is
    the same. `worktree cleanup` runs `git_preflight.cleanup_preflight`
-   (`hami_worktree.py:824`) before it removes anything; `preflight cleanup`
+   (`managed_worktree.py:824`) before it removes anything; `preflight cleanup`
    runs that check alone, read-only. No root doc, skill, project skill or
    project doc names it, and the transcripts hold no call; its one test is
    the routing row in `tests/test_atc_cli.py:19`.
@@ -380,7 +380,7 @@ and by a test per command that pins its default output.
    hold no direct call.
 3. `--contract` accepts only 1: confirmed. It is a required integer and any
    value other than `CONTRACT = 1` stops with `CONTRACT_INCOMPATIBLE`
-   (`hami_worktree.py:47`, `:1071`); all 17 call sites pass `--contract 1`.
+   (`managed_worktree.py:47`, `:1071`); all 17 call sites pass `--contract 1`.
 4. Reference counts, files that name the flag:
 
    | Flag | Root docs, skills, governance | Root tests | Project skills | Project docs and vendored governance |
@@ -666,7 +666,7 @@ review, one implementation review and one integration:
        change: `test_git_preflight.py`'s two `merge` CLI tests (the old
        JSON keys, `NO_REVIEWED_SHA` at exit 1, the stop on stdout) move to
        the alias's forms; `test_atc_cli.py`'s subcommand list drops
-       `preflight cleanup`; `test_hami_worktree.py`'s exact audit evidence
+       `preflight cleanup`; `test_managed_worktree.py`'s exact audit evidence
        gains `removable`.
      - Side effects (beyond the entry's): a script that parsed `FF
        FAST_FORWARD` from `preflight merge` now reads a `CHECK` line; none
@@ -812,7 +812,7 @@ review, one implementation review and one integration:
       carries the full SHA.
     - `atc worktree cleanup --reviewed`, `--expected-head`,
       `--expected-main` and `--integrated-as` stay full-SHA only
-      (`hami_worktree.py:1025-1031`): they bind a deletion, and their values
+      (`managed_worktree.py:1025-1031`): they bind a deletion, and their values
       come from `--json` or `integrations.jsonl`, which carry full SHAs.
     - Design (batch 2):
       - `git_integrate.resolve()` checks the form first: 12 to 40
@@ -1330,7 +1330,7 @@ review, one implementation review and one integration:
     sum to 1132 s (call 839 s, setup 293 s), more than the serial run's
     791 s because eight workers contend. By module: `test_git_integrate.py`
     229 s (98 tests), `test_testkit_evidence.py` 145 s (42),
-    `test_hami_worktree.py` 130 s (159), `test_integrate_task.py` 129 s
+    `test_managed_worktree.py` 130 s (159), `test_integrate_task.py` 129 s
     (37), `test_integrate_moving_main.py` 77 s (19), the rest under 60 s
     each. Under `loadscope` a module runs on one worker, so
     `test_git_integrate.py` alone is the parallel stage's 228 s (D.23).

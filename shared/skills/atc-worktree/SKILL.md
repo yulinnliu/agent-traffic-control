@@ -61,7 +61,8 @@ working directory; an explicit `--project` always wins. The workspace root
 repo takes `--project root`; its worktrees
 live under `worktrees/root/`, a working directory there infers it, and the
 rest of its canonical checkout infers nothing. Read the result from
-`--json`: `contract`, `command`, and per target `verdict`
+`--json`: the common `command`, `verdict`, `exit_code` and `next`, then
+`contract` and, per target in `results`, `verdict`
 (`OK`, `STOP` for a refusal or finding, `ERROR` for an environment problem),
 `reason` (the code below), `target`, `detail`, `next` and `evidence`.
 
@@ -85,9 +86,9 @@ worktree's base.
 | `resume --owner O --topic T [--session S]` | continue a task in a new session | nothing; reports how many commits `main` has moved since the worktree's tip |
 | `resume ... --rebind-session` | the task authority explicitly asked to resume this topic from this session | rewrites the lock's session field (unlock then lock; not atomic) |
 | `audit [--owner O] [--topic T]` | list a project's worktrees with lock, clean and merged state | nothing; read-only |
-| `cleanup --owner O --topic T` | the task is integrated and the worktree is no longer needed | re-checks identity, merged and clean, then removes the worktree and deletes its branch; finishes a removal Git left half-done (below) |
-| `cleanup --owner O --topic T --abandon --archive-tag archive/NAME --expected-head FULL_SHA` | task authority explicitly abandons this exact topic tip | requires a clean tree and a local archive tag at the exact tip; removes the worktree and compare-and-deletes its branch while retaining the tag |
-| `cleanup --owner O --topic T --squash-integrated --expected-head FULL_SHA --reviewed FULL_SHA --expected-main FULL_SHA --integrated-as FULL_SHA --retained-ref refs/tags/NAME` | the topic was integrated by an authorized same-tree squash and cleanup is authorized | requires a clean tree, a single-parent squash commit on the recorded main tip with the topic tip's tree, reachable from current `main`, and an existing retained ref that reaches the tip; removes the worktree and compare-and-deletes its branch while retaining the ref |
+| `clean --owner O --topic T` | the task is integrated and the worktree is no longer needed | re-checks identity, merged and clean, then removes the worktree and deletes its branch; finishes a removal Git left half-done (below) |
+| `clean --owner O --topic T --abandon --archive-tag archive/NAME --expected-head FULL_SHA` | task authority explicitly abandons this exact topic tip | requires a clean tree and a local archive tag at the exact tip; removes the worktree and compare-and-deletes its branch while retaining the tag |
+| `clean --owner O --topic T --squash-integrated --expected-head FULL_SHA --reviewed FULL_SHA --expected-main FULL_SHA --integrated-as FULL_SHA --retained-ref refs/tags/NAME` | the topic was integrated by an authorized same-tree squash and cleanup is authorized | requires a clean tree, a single-parent squash commit on the recorded main tip with the topic tip's tree, reachable from current `main`, and an existing retained ref that reaches the tip; removes the worktree and compare-and-deletes its branch while retaining the ref |
 
 ## Results
 
@@ -100,7 +101,7 @@ usage, environment, permission or contract problem.
 | Code | Next step |
 | --- | --- |
 | `OK` | continue |
-| `RECOVERED` | `cleanup` finished a removal Git left half-done; continue |
+| `RECOVERED` | `clean` finished a removal Git left half-done; continue |
 | `ALREADY_EXISTS` | use `resume` |
 | `NOT_FOUND` | `create` it if this is a new task; otherwise confirm the topic |
 | `IDENTITY_MISMATCH` | stop and hand to the user — the directory, branch, lock or caller disagree about who owns it |
@@ -109,14 +110,14 @@ usage, environment, permission or contract problem.
 | `PATH_UNSAFE` | stop and hand to the user; `detail` is one of `outside-root`, `protected`, `reparse`, `unregistered`, `resolved-mismatch`, `external-root-overlap` |
 | `DIRTY` | commit or clean the worktree, then retry |
 | `UNMERGED` | integrate it per the lifecycle first, otherwise keep the worktree; explicitly authorized abandonment uses the archive-bound cleanup option; under `--squash-integrated`, `detail` names the recorded integration fact that does not hold |
-| `ALREADY_INTEGRATED` | the topic tip is already reachable from `main`; run `cleanup` without `--squash-integrated` |
+| `ALREADY_INTEGRATED` | the topic tip is already reachable from `main`; run `clean` without `--squash-integrated` |
 | `BASE_MISMATCH` | `--base-sha` is not the exact tip of the topic's own branch on `origin`, or that branch does not exist there; `evidence` holds `base_sha` and, when the branch exists, `remote_tip`. Confirm the published tip with the task authority, or `create` from `main` without the option |
 | `ARCHIVE_MISMATCH` | keep the worktree; verify the local archive tag or retained ref preserves the expected HEAD |
 | `HEAD_MISMATCH` | keep the worktree; confirm the exact HEAD authorized for abandonment or squash cleanup |
 | `MAP_INVALID` | fix `workspace.yaml` at the root `atc` resolved (or the `ATC_ROOT` override, if set) |
 | `UNKNOWN_PROJECT` | fix `--project` |
 | `CONTRACT_INCOMPATIBLE` | stop; report the contract your adapter expects and the one the workspace provides |
-| `PERMISSION_DENIED` | the sandbox, an ACL or a busy directory blocked Git metadata or the worktrees root; leave the directory or get approval, then retry once. A retried `cleanup` finishes a removal Git left half-done and reports `RECOVERED` |
+| `PERMISSION_DENIED` | the sandbox, an ACL or a busy directory blocked Git metadata or the worktrees root; leave the directory or get approval, then retry once. A retried `clean` finishes a removal Git left half-done and reports `RECOVERED` |
 | `UNSUPPORTED_ENVIRONMENT` | a local capability is missing or unverifiable (Git, `main`, lock-reason support, another tool's worktree root that cannot be read); stop retrying |
 
 In `audit`, `LEGACY_TARGET` is informational; only identity conflicts, a
@@ -127,13 +128,13 @@ missing lock and `PATH_UNSAFE` are findings.
 - Use the absolute path in the `--json` result's `target`, and run Git as `git -C <path> ...`.
 - Integrate the reviewed topic with `atc integrate` against the main
   checkout; it takes the branch and reviewed SHA, not the worktree. Run
-  `cleanup` after it.
-- Run `cleanup` from a working directory outside the worktree, as its own
+  `clean` after it.
+- Run `clean` from a working directory outside the worktree, as its own
   call after the last command that ran inside it (a merge step included). A
   shell still sitting in the tree keeps the directory busy: Git unregisters the
   worktree and deletes its files, the empty directory and the branch remain,
-  and `cleanup` returns `PERMISSION_DENIED`. Leave the directory and run the
-  same `cleanup` again. It finishes the removal and reports `RECOVERED` only
+  and `clean` returns `PERMISSION_DENIED`. Leave the directory and run the
+  same `clean` again. It finishes the removal and reports `RECOVERED` only
   when the path is not registered as a worktree, the directory is empty (no
   files, no reparse points) and the topic branch is merged into `main` or
   already gone; it removes the empty directory and compare-and-deletes a
@@ -141,10 +142,10 @@ missing lock and `PATH_UNSAFE` are findings.
   `evidence` `recovery_refused` names the failing condition, and nothing is
   deleted.
   Abandoned and squash cleanup never recover this way.
-- The lock stays from `create` until `cleanup`. It guards against removal and
+- The lock stays from `create` until `clean`. It guards against removal and
   records identity; it is not an edit lock. Never lock, unlock, move, prune or
   remove a worktree by hand.
-- Revision lifecycle/integration follow the bound governance revision's `GIT_WORKFLOW.md`; verification follows `VERIFICATION.md`; publication/delivery follows `DELIVERY.md`. Default `cleanup` requires
+- Revision lifecycle/integration follow the bound governance revision's `GIT_WORKFLOW.md`; verification follows `VERIFICATION.md`; publication/delivery follows `DELIVERY.md`. Default `clean` requires
   integration. Explicit task-authorized abandonment requires all three options
   `--abandon`, `--archive-tag archive/NAME` and `--expected-head FULL_SHA`; the
   existing local tag must resolve exactly to the authorized 40-character tip.

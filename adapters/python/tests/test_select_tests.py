@@ -30,7 +30,7 @@ def test_a_script_selects_its_own_tests(graph):
 
 def test_a_script_selects_the_tests_that_reach_it_through_another_module(graph):
     selected = chosen(graph, f"{ADAPTER}/scripts/git_preflight.py")
-    assert {"tests/test_git_preflight.py", "tests/test_hami_worktree.py", "tests/test_git_integrate.py"} <= set(selected)
+    assert {"tests/test_git_preflight.py", "tests/test_managed_worktree.py", "tests/test_git_integrate.py"} <= set(selected)
     assert "tests/test_worktree_cd_guard.py" not in selected
 
 

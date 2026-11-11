@@ -17,14 +17,13 @@ import sys
 import yaml
 
 from atc_testkit import locations, scratch
-import hami_worktree as hw
+import cli_conventions
+import managed_worktree as hw
 import task_records
 
 INTEGRATIONS = ("atc", "integrations.jsonl")
 ITEMS = ("worktree", "scratches", "reports")
 REPORTS = "reports"
-REFUSED_EXIT = 1
-STOP_EXIT = 2
 
 
 class Stop(Exception):
@@ -99,7 +98,7 @@ def leftover_directory(root: Path, name: str, branch: str, environ: dict[str, st
 
 
 def remove_worktree(root: Path, name: str, worktree: Path, cwd: str, environ: dict[str, str]) -> str:
-    """One report line for the task's worktree, removed through `atc worktree cleanup` and its checks."""
+    """One report line for the task's worktree, removed through `atc worktree clean` and its checks."""
     if Path(os.path.normcase(os.path.realpath(cwd))).is_relative_to(os.path.normcase(os.path.realpath(worktree))):
         return f"SKIPPED {worktree} (working directory)"
     owner, plus, topic = worktree.name.partition("+")
@@ -108,7 +107,7 @@ def remove_worktree(root: Path, name: str, worktree: Path, cwd: str, environ: di
     target = ["--project", name]
     out = io.StringIO()
     with contextlib.redirect_stdout(out):
-        code = hw.main(["cleanup", *target, "--owner", owner, "--topic", topic, "--json"], root=root,
+        code = hw.main(["clean", *target, "--owner", owner, "--topic", topic, "--json"], root=root,
                        environ=environ, home=str(locations.atc_home(environ).parent), cwd=cwd)
     if code == 0:
         return f"DELETED {worktree}"
@@ -116,22 +115,24 @@ def remove_worktree(root: Path, name: str, worktree: Path, cwd: str, environ: di
         first = json.loads(out.getvalue())["results"][0]
         why = f"{first['reason']}: {first['detail']}" if first.get("detail") else first["reason"]
     except (ValueError, KeyError, IndexError):
-        why = f"worktree cleanup exited {code}"
+        why = f"worktree clean exited {code}"
     return f"REFUSED {worktree} ({why})"
 
 
 def main(argv: list[str] | None = None, root: Path = task_records.ROOT, environ: dict[str, str] | None = None,
          cwd: str | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        prog="atc close-out", allow_abbrev=False, description=__doc__.splitlines()[0],
-        epilog="Exit: 0 when every item ends DELETED or SKIPPED; 1 when one ends REFUSED; 2 before anything is "
-               "removed.")
-    parser.add_argument("--task", required=True, help="the integrated task, for example ATC-0008")
-    parser.add_argument("--project", help="the task's project, root for the workspace root (default: the repository "
-                                          "declaring the task's prefix, else the working directory's)")
+    parser = argparse.ArgumentParser(prog="atc close-out", allow_abbrev=False, **cli_conventions.form(
+        "Close out an integrated task: remove its worktree, scratches and report files.",
+        exit="0 every item DELETED or SKIPPED; 1 STOP before anything is removed, or an item REFUSED with nothing "
+             "deleted; 3 PARTIAL: an item REFUSED while another was deleted; 2 ERROR",
+        see="docs/TASKS.md § Close-out; DELIVERY.md § Close-out"))
+    parser.add_argument("--task", required=True, metavar="ID", help="the integrated task, for example ATC-0008")
+    cli_conventions.add_project(parser, " (default: the repository declaring the task's prefix, else the working "
+                                        "directory's)")
     parser.add_argument("--skip", action="append", choices=ITEMS, default=[], metavar="ITEM",
                         help=f"leave this item for this run only, nothing written ({', '.join(ITEMS)}; repeatable; "
                              "an absent item is a no-op); the record's keep is permanent")
+    cli_conventions.add_json(parser)
     args = parser.parse_args(argv)
     environ = dict(os.environ) if environ is None else environ
     cwd = cwd or os.getcwd()
@@ -141,8 +142,13 @@ def main(argv: list[str] | None = None, root: Path = task_records.ROOT, environ:
         integrated(checkout, args.task)
         data = record(checkout, args.task)
     except (Stop, task_records.Refused) as stop:
-        print(f"ERROR {stop.token} {stop.detail}", file=sys.stderr)
-        return STOP_EXIT
+        error = stop.token in task_records.ERROR_TOKENS
+        print(f"ERROR {stop.token} {stop.detail}" if error else f"STOP {stop.token}: {stop.detail}", file=sys.stderr)
+        if args.json:
+            print(json.dumps({"task": args.task, "refusal": {"verdict": "ERROR" if error else "STOP",
+                                                             "reason": stop.token, "detail": stop.detail,
+                                                             "next": None}}, indent=2))
+        return cli_conventions.ERROR if error else cli_conventions.STOP
     keep, skip = set(data.get("keep", [])), set(args.skip)
 
     def skipped(item: str) -> str | None:
@@ -176,12 +182,25 @@ def main(argv: list[str] | None = None, root: Path = task_records.ROOT, environ:
         except OSError as error:
             lines.append(f"REFUSED {report} ({error})")
 
+    counts = {word: sum(line.startswith(f"{word} ") for line in lines) for word in ("DELETED", "SKIPPED", "REFUSED")}
+    if not counts["REFUSED"]:
+        code = cli_conventions.OK
+    else:
+        code = cli_conventions.PARTIAL if counts["DELETED"] else cli_conventions.STOP
+    if args.json:
+        items = []
+        for line in lines:
+            outcome, _, rest = line.partition(" ")
+            target, _, why = rest.partition(" (")
+            items.append({"outcome": outcome, "path": target, "why": why[:-1] if why.endswith(")") else why or None})
+        print(json.dumps({"verdict": {0: "DONE", 1: "REFUSED", 3: "PARTIAL"}[code], "task": args.task,
+                          "items": items, "counts": {k.lower(): v for k, v in counts.items()}}, indent=2))
+        return code
     for line in lines:
         print(line)
-    counts = {word: sum(line.startswith(f"{word} ") for line in lines) for word in ("DELETED", "SKIPPED", "REFUSED")}
     print(f"close-out {args.task}: {counts['DELETED']} deleted, {counts['SKIPPED']} skipped, "
           f"{counts['REFUSED']} refused")
-    return REFUSED_EXIT if counts["REFUSED"] else 0
+    return code
 
 
 if __name__ == "__main__":

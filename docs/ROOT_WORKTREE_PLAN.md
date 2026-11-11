@@ -79,7 +79,7 @@ the code every session runs.
   inference rule (§ near line 59) and the closing note (line 183) describe
   `--project root` and the root's inference; overlays and the three managed copies
   follow through sync.
-- Docstrings of `hami_worktree.py` and `atc_cli`, `adapters/python/README.md`.
+- Docstrings of `managed_worktree.py` and `atc_cli`, `adapters/python/README.md`.
 
 `shared/governance/` already describes rendering in a linked worktree and
 managed worktrees integrated from the integration checkout's `main`
@@ -89,7 +89,7 @@ managed worktrees integrated from the integration checkout's `main`
 
 1. `validate_workspace.py` and `bootstrap.py`: the reserved name `root` and the
    `worktrees/root` collision; tests.
-2. `hami_worktree.py`: `--repo`, the root `Project` built in `run`, the
+2. `managed_worktree.py`: `--repo`, the root `Project` built in `run`, the
    inference rule, the external root; `git_integrate.py`: root inference from
    `worktrees/root/`. Tests cover create, resume, audit and cleanup with
    `--repo`, the `--repo` refusals, inference from `worktrees/root/` for both

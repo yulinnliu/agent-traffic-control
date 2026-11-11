@@ -281,14 +281,17 @@ def mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None = None
         epilog="Exit: 0 when every mutant ran and every file is restored, survivors named on the last line; 1 for a "
                "red baseline, an aborted run or a restore mismatch; 9 for a refusal before the baseline, 8 for an "
                "import-guard refusal.")
-    parser.add_argument("scratch", help="scratch name; <scratch>/tree holds the export of <sha>")
-    parser.add_argument("sha", help="commit the export was made from; touched files are compared with it at the end")
-    parser.add_argument("worktree", help="repository that holds <sha>")
-    parser.add_argument("mutants", metavar="mutants.json",
+    parser.add_argument("scratch", metavar="NAME", help="scratch name; NAME/tree holds the export of SHA")
+    parser.add_argument("sha", metavar="SHA",
+                        help="commit the export was made from; touched files are compared with it at the end")
+    parser.add_argument("worktree", metavar="DIR", help="repository that holds SHA")
+    parser.add_argument("mutants", metavar="FILE",
                         help="JSON list of mutants: {label, edits: [{path, old, new}], tests?: [...]}, paths "
                              "relative to the tree; a mutant's own tests replace --tests for it")
-    parser.add_argument("--python", required=True, help="interpreter that runs pytest: a path, or a name on PATH")
-    parser.add_argument("--tests", nargs="+", required=True, help="pytest arguments naming the tests that judge a mutant")
+    parser.add_argument("--python", required=True, metavar="PATH",
+                        help="interpreter that runs pytest: a path, or a name on PATH")
+    parser.add_argument("--tests", nargs="+", required=True, metavar="ARG",
+                        help="pytest arguments naming the tests that judge a mutant")
     parser.add_argument("--kill-rule", choices=(KILL_FAILURE, KILL_ASSERTION), default=KILL_FAILURE,
                         help="failure (default): any failed test kills; assertion: only a run whose every failure "
                              "is an assertion, with no test errored, kills")
@@ -484,14 +487,15 @@ def run(argv: Sequence[str], environ: MutableMapping[str, str] | None = None) ->
         description="One isolated pytest run in a scratch, its output kept in a log (docs/TESTKIT.md § Commands).",
         epilog="Exit: pytest's code; 124 after --timeout, 130 when interrupted; 8 for a guard refusal, "
                "9 for a refusal before the run.")
-    parser.add_argument("--scratch", required=True, help="scratch name, a direct child of the ATC temporary root")
-    parser.add_argument("--tree", help="the tree the tests run in (default: the tree the scratch's registry line "
+    parser.add_argument("--scratch", required=True, metavar="NAME",
+                        help="scratch name, a direct child of the ATC temporary root")
+    parser.add_argument("--tree", metavar="DIR", help="the tree the tests run in (default: the tree the scratch's registry line "
                                        "names, as `atc tmp checkout` records it)")
-    parser.add_argument("--python", help="interpreter that runs pytest (default: the tree's .venv)")
-    parser.add_argument("--select", metavar="BASE",
-                        help="run only the tests the tree's declared selector picks for the paths changed since BASE")
-    parser.add_argument("--label", default="run", help="name of the run, in its log's file name")
-    parser.add_argument("--timeout", type=float, help="seconds before the run is ended and reported as TIMEOUT")
+    parser.add_argument("--python", metavar="PATH", help="interpreter that runs pytest (default: the tree's .venv)")
+    parser.add_argument("--select", metavar="SHA",
+                        help="run only the tests the tree's declared selector picks for the paths changed since SHA")
+    parser.add_argument("--label", default="run", metavar="NAME", help="name of the run, in its log's file name")
+    parser.add_argument("--timeout", type=float, metavar="SECONDS", help="seconds before the run is ended and reported as TIMEOUT")
     parser.add_argument("--progress", action="store_true", help="also stream pytest's output to the console")
     args = parser.parse_args(argv)
     environ = os.environ if environ is None else environ

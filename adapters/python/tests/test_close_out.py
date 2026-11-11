@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 import close_out
-import hami_worktree as hw
+import managed_worktree as hw
 from atc_testkit import scratch
 from test_task_records import PROJECT, Workspace, commit, record, run_git, ws  # noqa: F401 - the fixture
 
@@ -124,7 +124,7 @@ def test_a_task_main_does_not_hold_is_refused_before_anything(ws: Workspace, atc
     if case != "no line":
         ws.integrate(ws.repo, task=TASK, candidate_sha=tip, records_only=case == "records only")
     code, lines, err = close(ws, {"ATC_TMP": str(atc_tmp)}, capsys, ws.root)
-    assert code == 2 and lines == [] and err.startswith("ERROR NOT_INTEGRATED ")
+    assert code == 1 and lines == [] and err.startswith("STOP NOT_INTEGRATED: ")
     assert topic.is_dir()
 
 
@@ -141,8 +141,9 @@ def test_a_worktree_cleanup_refuses_is_reported(done, capsys: pytest.CaptureFixt
     ws, topic, environ = done
     commit(topic, {"later.txt": "x\n"})
     code, lines, _err = close(ws, environ, capsys, ws.root)
-    assert code == 1 and lines[0].startswith(f"REFUSED {topic} (") and topic.is_dir()
+    assert lines[0].startswith(f"REFUSED {topic} (") and topic.is_dir()
     assert lines[-1].endswith(", 1 refused")
+    assert code == (3 if any(line.startswith("DELETED ") for line in lines) else 1)
 
 
 def test_without_a_target_the_task_prefix_names_its_repository(ws: Workspace, atc_tmp: Path, tmp_path: Path,
@@ -158,6 +159,6 @@ def test_without_a_target_the_task_prefix_names_its_repository(ws: Workspace, at
     assert code == 0, captured.err
     assert captured.out.splitlines() == [f"SKIPPED {topic} (--skip)",
                                          f"close-out {rooted}: 0 deleted, 1 skipped, 0 refused"]
-    for cwd, token in ((ws.repo, "NOT_INTEGRATED"), (ws.root, "UNKNOWN_PROJECT")):
+    for cwd, token, expected in ((ws.repo, "NOT_INTEGRATED", 1), (ws.root, "UNKNOWN_PROJECT", 2)):
         code = close_out.main(["--task", "ZZZ-0001"], root=ws.root, environ=environ, cwd=str(cwd))
-        assert (code, capsys.readouterr().err.split(" ", 2)[1]) == (2, token)
+        assert (code, capsys.readouterr().err.split(" ", 2)[1].rstrip(":")) == (expected, token)
