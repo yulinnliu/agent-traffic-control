@@ -1,0 +1,17 @@
+task_id: ATC-0015
+repository: yulinnliu/agent-traffic-control
+base_sha: 0ac370a7e3042074e18714d40d144c1e3a2e52b6
+scope: 'atc-testkit phase one: one pytest command builder, stage contract as data,
+  Python runner layer for uv/.venv, ATC_TEST_TIME_SLACK, shared Markdown link checker,
+  strict kill rule for atc test mutants, deferred CLI items 6-7, coordinator-authority
+  sentence in atc-coordinator, release 0.10.0'
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: 0ac370a7e3042074e18714d40d144c1e3a2e52b6
+branch: worktree-claude+testkit-phase-one
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
