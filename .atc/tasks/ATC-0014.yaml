@@ -1,0 +1,16 @@
+task_id: ATC-0014
+repository: yulinnliu/agent-traffic-control
+base_sha: 46925fe1a5e6182ec44ae7b916606207139566ea
+scope: 'Docs refresh: WORKFLOW.md gaps and refusal fallback, README command index/testkit/integration
+  mechanism, zh-TW README native rewrite, AGENTS.md verification section trim and
+  This host move'
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: 46925fe1a5e6182ec44ae7b916606207139566ea
+branch: worktree-claude+docs-refresh
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
