@@ -14,3 +14,13 @@ authority:
   integrate_main: false
   push_main: false
   deploy: false
+decisions:
+  date: '2026-11-11'
+  source: the Owner, through the coordinator
+  O1: authorized the governance changes of GIT_WORKFLOW.md § Task and authority
+    and § Integrate, and DELIVERY.md § Close-out and § 10 (GOVERNANCE_CHANGES.md)
+  O2: 'the --owner-words decision label is "Owner run: approve integration"'
+  O3: the push of main is bound to the SHA, git -C "<main checkout>" push origin
+    <40-character SHA>:refs/heads/main
+  O4: the atc-testkit version takes a patch increment at integration time, after
+    ATC-0016's 0.10.2; set on rebase
