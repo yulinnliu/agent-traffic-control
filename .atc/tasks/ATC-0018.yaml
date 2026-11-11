@@ -1,0 +1,14 @@
+task_id: ATC-0018
+repository: yulinnliu/agent-traffic-control
+base_sha: dad8fbd45168996351ee2768450439f64cab90e9
+scope: atc-testkit host-wide worker budget and shared CPU+memory worker sizing (0.11.0)
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: dad8fbd45168996351ee2768450439f64cab90e9
+branch: worktree-claude+worker-budget
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
