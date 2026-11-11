@@ -11,7 +11,10 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+import time
+
 import yaml
+from atc_testkit import locations, stages, workers as host_workers
 
 import checkout_guard
 import cli_conventions
@@ -52,6 +55,30 @@ def checkout_check(checkout: Path) -> Check:
     return Check("canonical checkout", "READY", f"{checkout} is on main and clean")
 
 
+def worker_pool_checks(environ: dict[str, str]) -> list[Check]:
+    """The host worker pool (docs/TESTKIT.md § Host worker budget): its tokens, the runs holding them and the runs
+    waiting; it reads the pool and removes nothing."""
+    try:
+        if environ.get("CI"):
+            return [Check("worker pool", "READY", "CI is set: runs take the CPU and memory ceiling, no host pool")]
+        size = stages.pool_size(stages.host_table(environ))
+        if size == 0:
+            return [Check("worker pool", "READY", "off (test_worker_pool = 0 in ~/.atc/config.toml)")]
+        directory = stages.pool_directory(environ)
+        if not (directory / host_workers.POOL_FILE).exists():
+            return [Check("worker pool", "READY", f"{size} tokens, no run has used it yet ({directory})")]
+        status = host_workers.Pool(directory, size).status(prune=False)
+    except locations.Refusal as refusal:
+        return [Check("worker pool", "ERROR", f"{refusal.token} {refusal.detail}")]
+    now = time.time()
+    checks = [Check("worker pool", "READY", f"{status.free} of {status.size} tokens free, {len(status.runs)} run"
+                                            f"{'' if len(status.runs) == 1 else 's'} active, {len(status.waiters)} "
+                                            f"waiting ({directory})")]
+    checks += [Check("worker pool run", "READY", row.describe(now)) for row in status.runs]
+    checks += [Check("worker pool waiter", "READY", row.describe(now)) for row in status.waiters]
+    return checks
+
+
 def diagnose(root: Path = ROOT, environ: dict[str, str] | None = None, checkout: Path = ROOT) -> list[Check]:
     environ = environ if environ is not None else dict(os.environ)
     checks = [Check("workspace root", "READY", str(root.resolve())), checkout_check(checkout)]
@@ -71,6 +98,7 @@ def diagnose(root: Path = ROOT, environ: dict[str, str] | None = None, checkout:
             atc_path or f"not on PATH; skills call it: uv tool install -e \"{root / 'adapters' / 'python'}\"",
         )
     )
+    checks += worker_pool_checks(environ)
 
     workspace_file = root / "workspace.yaml"
     validator.FAILURES.clear()

@@ -25,7 +25,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
-from atc_testkit import locations, stages, timing
+from atc_testkit import locations, stages, timing, workers as host_workers
 import git_preflight as gp
 import cli_conventions
 import managed_worktree as hw
@@ -53,6 +53,8 @@ PASS, FAIL = "PASS", "FAIL"
 REUSED = "REUSED"
 RECORDS_ONLY = "RECORDS_ONLY"
 VERIFIER_FAILURES = ("VERIFICATION_FAILED", "VERIFICATION_TIMEOUT", "CANDIDATE_CHANGED")
+WAIT_GRACE = 30.0  # seconds past the verifier's own wait limit before its clock ends it
+WAIT_POLL = 5.0
 INTEGRATIONS = ("atc", "integrations.jsonl")
 CANDIDATE_REFS = "refs/atc/integration-candidates"
 TAIL_LINES = 20
@@ -81,6 +83,7 @@ NEXT = {
     "REF_DRIFT": _RERUN,
     "VERIFICATION_FAILED": _CORRECT,
     "VERIFICATION_TIMEOUT": _CORRECT,
+    "WORKER_WAIT_TIMEOUT": "run again when the host's test workers are free; atc doctor lists the runs holding them",
     "CANDIDATE_CHANGED": _CORRECT,
     "RECOVERY_REQUIRED": (
         "reconcile main and its checkout with the retained candidate ref the detail names "
@@ -326,14 +329,17 @@ def _create_kill_on_close_job():
 
 def _run_verifier(
     argv: list[str], cwd: Path, env: dict[str, str], timeout: float, captures: Path,
+    wait_file: Path | None = None,
 ) -> tuple[int | None, str, str, str | None]:
     """Run the verifier with a bounded wall clock and end its whole process tree.
 
     Output goes to temporary files in ``captures`` rather than pipes so a descendant that
     outlives the verifier cannot hold the wait open past the timeout. When the
     verifier returns or times out, every process it started is terminated.
-    Returns the exit code (``None`` on timeout), both streams, and the weaker
-    isolation the run had to fall back to, if any.
+    The time the verifier reports in ``wait_file`` as queued for host test workers
+    extends the clock, by at most ``timeout`` and ``WAIT_GRACE`` (docs/TESTKIT.md
+    § Host worker budget). Returns the exit code (``None`` on timeout), both streams,
+    and the weaker isolation the run had to fall back to, if any.
     """
     tree = _ProcessTree()
     try:
@@ -346,10 +352,18 @@ def _run_verifier(
             except OSError as exc:
                 raise Refused("VERIFIER_NOT_STARTED", f"could not start candidate verifier: {exc}") from exc
             tree.adopt(process)
-            try:
-                returncode: int | None = process.wait(timeout=timeout)
-            except subprocess.TimeoutExpired:
-                returncode = None
+            started = time.monotonic()
+            returncode: int | None = None
+            while True:
+                queued = min(host_workers.wait_total(wait_file), timeout) if wait_file is not None else 0.0
+                left = started + timeout + (queued + WAIT_GRACE if queued else 0.0) - time.monotonic()
+                if left <= 0:
+                    break
+                try:
+                    returncode = process.wait(timeout=min(left, WAIT_POLL))
+                    break
+                except subprocess.TimeoutExpired:
+                    continue
             tree.terminate(process)
             out.seek(0)
             err.seek(0)
@@ -627,12 +641,31 @@ def _verify_candidate(
         "ATC_REVIEWED_SOURCE_SHA": reviewed,
         "ATC_VERIFICATION_REPORT": str(report_path),
     })
-    returncode, stdout, stderr, warning = _run_verifier(argv, candidate_dir, env, timeout, captures)
+    descriptor, name = tempfile.mkstemp(prefix="verify-wait-", suffix=".txt", dir=captures)
+    os.close(descriptor)
+    wait_file = Path(name)
+    env[host_workers.WAIT_FILE] = str(wait_file)
+    env[host_workers.MAX_WAIT] = f"{timeout:g}"
+    try:
+        returncode, stdout, stderr, warning = _run_verifier(argv, candidate_dir, env, timeout, captures, wait_file)
+        queued = host_workers.wait_total(wait_file)
+    finally:
+        wait_file.unlink(missing_ok=True)
+    if queued:
+        stdout += f"\nqueued for host test workers: {queued:.0f}s (not counted toward the {timeout:g}s budget)\n"
     log = _write_verifier_log(verifier_log(candidate_dir), argv, candidate_dir, returncode, stdout, stderr)
     if returncode is None:
         raise stop(
             "VERIFICATION_TIMEOUT", f"candidate verification timed out after {timeout:g}s for {candidate_sha}; "
             f"{BUDGET_EXCEEDED}",
+            after_candidate=True, extra=_failure_extra(log, stdout, stderr),
+        )
+    if returncode and stderr.lstrip().startswith(host_workers.WAIT_TIMEOUT):
+        lines = stderr.strip().splitlines()
+        raise stop(
+            host_workers.WAIT_TIMEOUT,
+            f"candidate verification for {candidate_sha} waited past its limit for host test workers: "
+            f"{' '.join(lines[1:3])}; the candidate was not judged, run it again when the host is free",
             after_candidate=True, extra=_failure_extra(log, stdout, stderr),
         )
     if returncode:
