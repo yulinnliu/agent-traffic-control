@@ -7,6 +7,19 @@ scope: 'atc test run uses the host at full speed by default: pool- and memory-bo
 governance_source: yulinnliu/agent-traffic-control
 governance_revision: 1d4b0888752c7c5411cab6d519ff03c5eaeb60d8
 branch: worktree-claude+full-speed-tests
+decisions:
+  - 'The Owner ruled every open decision of docs/design/ATC-0023.md § 10 as recommended, option (a) each ("全部照建議", 2026-11-12).'
+  - 'O1: a test worker is counted at 256 MiB by default (PER_WORKER_MIB), measured at about 84 MiB marginal per worker on the root suite.'
+  - 'O2: a pooled stage records its per-worker memory from its Windows Job peak (PeakJobMemoryUsed divided by the workers) or the POSIX children maxrss, per project, in the pool directory; a project''s worker_memory_mib wins over the record, the record over the default.'
+  - 'O3: atc test run without -n takes the elastic default (want = the pool size, floor 2, cut by memory only when it takes its tokens); -n 0 runs serial. Registered projects get parallel runs without -n once they upgrade.'
+  - 'O4: a default run asks for at most one worker per 8 collected tests, at least 2.'
+  - 'O5: atc test run --select skips a selection that holds at least select_full_fraction (default 0.5) of the collected tests, printing SKIPPED_WIDE and exiting 0; --wide runs it anyway, --touched runs the changed test files and the test files that import a changed module directly.'
+  - 'O6: RESERVE stays 1 GiB.'
+  - 'O7: a GNU make jobserver in MAKEFLAGS is detected and named on the workers: line, not joined.'
+  - 'O8: a new read-only command atc test status lists the active runs from the pool rows; this overrides ATC-0018 O4 ("no new command"), and atc doctor keeps its pool lines.'
+  - 'O9: atc doctor gains a WARN status for memory that does not change its exit code.'
+  - 'O10: on Windows atc doctor warns when the kernel nonpaged pool passes max(4 GiB, physical memory / 8); nonpaged_pool_warn_gib in the host file overrides it.'
+  - 'Retro scope (Owner, 2026-11-11 and 2026-11-12): (f) every run prints one workers: line with the granted count and what limited it; (g) atc doctor reports available memory and the kernel nonpaged pool on Windows; (e) the --select skip.'
 authority:
   edit: true
   commit: true
