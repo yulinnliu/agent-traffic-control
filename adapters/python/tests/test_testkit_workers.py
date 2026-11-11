@@ -350,8 +350,11 @@ def test_an_interrupt_while_queued_stops_the_run_with_130(tmp_path: Path, pool_d
 
         monkeypatch.setattr(workers.Budget, "_write_wait", interrupted)
         environ = {**os.environ, workers.POOL_DIRECTORY: str(pool_dir)}
-        code = testrun.run(["--scratch", "q", "--tree", str(small_tree(tmp_path)), "--python", sys.executable,
-                            "--", "tests"], environ)
+        try:
+            code = testrun.run(["--scratch", "q", "--tree", str(small_tree(tmp_path)), "--python", sys.executable,
+                                "--", "tests"], environ)
+        except KeyboardInterrupt:
+            pytest.fail("the interrupt left atc test run as a traceback")
         assert code == testrun.INTERRUPTED_EXIT == 130
         out = capsys.readouterr().out
         assert testrun.QUEUE_INTERRUPTED in out and "PASS" not in out
