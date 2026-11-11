@@ -9,7 +9,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from atc_testkit import locations, stages
+from atc_testkit import locations, stages, workers
 
 pytest_plugins = ("atc_testkit.plugin",)
 
@@ -31,6 +31,21 @@ def pytest_configure(config: pytest.Config) -> None:
 def _no_host_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     """Code a test runs in process reads no ``~/.atc/config.toml`` of the host; a test that needs one supplies it."""
     monkeypatch.setattr(stages, "host_config", lambda: SCRIPTS / "no-host-config.toml")
+
+
+@pytest.fixture(scope="session")
+def _test_worker_pool(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    return tmp_path_factory.mktemp("worker-pool")
+
+
+@pytest.fixture(autouse=True)
+def _no_host_worker_pool(monkeypatch: pytest.MonkeyPatch, _test_worker_pool: Path) -> None:
+    """Code a test runs, in process or in a child, takes tokens from a pool of the session, never the host's, and
+    sizes workers without the host's free memory; a test that needs either supplies it."""
+    monkeypatch.setattr(workers, "available_memory", lambda: None)
+    monkeypatch.setenv(workers.POOL_DIRECTORY, str(_test_worker_pool))
+    for name in (workers.HELD, workers.WAIT_FILE, workers.MAX_WAIT):
+        monkeypatch.delenv(name, raising=False)
 
 
 @pytest.fixture(autouse=True)

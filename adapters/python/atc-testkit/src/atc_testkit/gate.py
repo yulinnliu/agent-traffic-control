@@ -8,7 +8,7 @@ from pathlib import Path
 import subprocess
 import sys
 
-from . import evidence, isolation, locations, scratch, selection, stages, timing
+from . import evidence, isolation, locations, scratch, selection, stages, timing, workers as workers_module
 from .evidence import Decision
 from .git import SelectionError, baseline_deltas, changed_paths, git_env, verify_push_checkout
 from .project import Project, StaticCheck
@@ -96,7 +96,8 @@ def _run_checks(project: Project, checks: Iterable[StaticCheck], isolated: isola
 
 
 def _run_tests(project: Project, push_lines: list[str], pytest_paths: list[str], isolated: isolation.IsolatedRun,
-               logs: Path, git, run: stages.Run, workers: stages.Workers | None = None) -> int:
+               logs: Path, git, run: stages.Run, workers: stages.Workers | None = None,
+               budget: workers_module.Budget | None = None) -> int:
     decisions = _decisions(project, push_lines, pytest_paths, git)
     for decision in decisions:
         print(evidence.describe(decision), flush=True)
@@ -104,12 +105,16 @@ def _run_tests(project: Project, push_lines: list[str], pytest_paths: list[str],
         return 0
     if not decisions:
         print("pre-push: tests RUN (evidence: NO_PUSHED_COMMIT)", flush=True)
-    outcome = stages.run_stages(
-        project.stage_entry(), pytest_paths, cwd=project.root, stage_list=project.stage_list(),
-        env_for=lambda stage: isolated.environment(stage.name),
-        options_for=lambda stage: isolated.run_options(stage.name),
-        log_for=lambda stage: logs / f"prepush-{stage.name}.log", workers=workers, run=run,
-        toolchain=isolated.toolchain)
+    try:
+        outcome = stages.run_stages(
+            project.stage_entry(), pytest_paths, cwd=project.root, stage_list=project.stage_list(),
+            env_for=lambda stage: isolated.environment(stage.name),
+            options_for=lambda stage: isolated.run_options(stage.name),
+            log_for=lambda stage: logs / f"prepush-{stage.name}.log", workers=workers, run=run,
+            toolchain=isolated.toolchain, budget=budget)
+    except workers_module.WaitTimeout as refusal:
+        print(f"{refusal.token} {refusal.detail}", file=sys.stderr)
+        return refusal.code
     if outcome.token == stages.NO_TESTS_COLLECTED:
         print(f"pre-push: {outcome.token}; push aborted (logs: {logs})", file=sys.stderr)
     elif outcome.token:
@@ -129,11 +134,12 @@ def main(project: Project, argv: Sequence[str] | None = None, stdin: Iterable[st
     parser.add_argument("--workers", type=_count, help="the parallel stage's worker count for this run; overrides "
                                                        "test_workers in ~/.atc/config.toml")
     args = parser.parse_args(argv)
-    workers = None
+    workers = budget = None
     if args.run:
         try:
-            workers = stages.resolve_workers(args.workers)
+            workers = stages.resolve_workers(args.workers, root=project.root)
             timing.resolve()
+            budget = stages.open_budget(f"pre-push gate {project.root.name}", root=project.root)
         except locations.Refusal as refusal:
             print(f"{refusal.token} {refusal.detail}", file=sys.stderr)
             return refusal.code
@@ -169,7 +175,7 @@ def main(project: Project, argv: Sequence[str] | None = None, stdin: Iterable[st
                                      data_roots=project.data_root_variables, toolchain=toolchain)
     code = _run_checks(project, checks, isolated, logs, run)
     if not code and pytest_paths is not None:
-        code = _run_tests(project, push_lines, pytest_paths, isolated, logs, git, run, workers)
+        code = _run_tests(project, push_lines, pytest_paths, isolated, logs, git, run, workers, budget)
     if code:
         print(f"pre-push: working directory kept: {work}", file=sys.stderr)
         return code

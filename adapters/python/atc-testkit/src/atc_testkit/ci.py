@@ -135,14 +135,16 @@ def run_all_stages(paths: Sequence[str], workers: int | None, run: stages.Run = 
     if refused:
         return refused
     try:
-        workers = stages.resolve_workers(workers)
+        workers = stages.resolve_workers(workers, root=Path.cwd())
+        budget = stages.open_budget(f"ci --stages {Path.cwd().name}", root=Path.cwd())
+        outcome = stages.run_stages(_self_command(), paths, cwd=Path.cwd(),
+                                    stage_list=stages.stages(config.ignored_paths(Path.cwd())),
+                                    env_for=lambda stage: dict(os.environ), options_for=lambda stage: (),
+                                    log_for=lambda stage: logs / f"ci-{stage.name}.log", workers=workers, run=run,
+                                    budget=budget)
     except locations.Refusal as refusal:
         print(f"{refusal.token} {refusal.detail}", file=sys.stderr, flush=True)
         return refusal.code
-    outcome = stages.run_stages(_self_command(), paths, cwd=Path.cwd(),
-                                stage_list=stages.stages(config.ignored_paths(Path.cwd())),
-                                env_for=lambda stage: dict(os.environ), options_for=lambda stage: (),
-                                log_for=lambda stage: logs / f"ci-{stage.name}.log", workers=workers, run=run)
     if outcome.token:
         print(outcome.token, file=sys.stderr, flush=True)
     return outcome.code

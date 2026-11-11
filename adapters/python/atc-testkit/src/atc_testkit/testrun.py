@@ -18,6 +18,7 @@ import time
 import xml.etree.ElementTree as ElementTree
 
 from . import config, desktop, locations, python_toolchain, scratch, stages, timing, toolchain as toolchains
+from . import workers as host_workers
 from .git import git_env
 from .isolation import drop_hami_variables
 from .locations import Refusal
@@ -115,15 +116,19 @@ def _capture(command: Sequence[str], cwd: Path, env: Mapping[str, str], private:
              timeout: float | None) -> Result:
     """Run ``command`` with its output collected; a timeout ends its tree and returns code ``None``."""
     process, _kind = desktop.start(command, cwd=cwd, env=env, private=private, new_session=timeout is not None)
-    chunks: list[bytes] = []
-    reader = threading.Thread(target=lambda: chunks.extend(process.stdout), daemon=True)
-    reader.start()
-    reader.join(timeout)
-    timed_out = reader.is_alive()
-    if timed_out:
-        desktop.kill_tree(process.pid)
-        reader.join(10.0)
-    code = process.wait()
+    job = host_workers.StageJob(process)
+    try:
+        chunks: list[bytes] = []
+        reader = threading.Thread(target=lambda: chunks.extend(process.stdout), daemon=True)
+        reader.start()
+        reader.join(timeout)
+        timed_out = reader.is_alive()
+        if timed_out:
+            desktop.kill_tree(process.pid)
+            reader.join(10.0)
+        code = process.wait()
+    finally:
+        job.close()
     lines = b"".join(chunks).decode("utf-8", errors="replace").splitlines()
     return Result(None if timed_out else code, lines)
 
@@ -274,14 +279,29 @@ def _apply(tree: Path, mutant: Mapping, touched: set[str], originals: dict[Path,
 
 
 def mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None = None) -> int:
-    """``atc test mutants <scratch> <sha> <worktree> <mutants.json> --python <py> --tests <path>...``."""
+    """``atc test mutants <scratch> <sha> <worktree> <mutants.json> --python <py> --tests <path>...``.
+
+    The command holds one host worker token from before its baseline to its end (docs/TESTKIT.md § Host worker
+    budget).
+    """
+    held: list[tuple[host_workers.Budget, host_workers.Grant]] = []
+    try:
+        return _mutants(argv, environ, held)
+    finally:
+        for budget, grant in held:
+            budget.release(grant)
+
+
+def _mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None,
+             held: list[tuple[host_workers.Budget, host_workers.Grant]]) -> int:
     parser = argparse.ArgumentParser(
         prog="atc test mutants", allow_abbrev=False,
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description="Apply each mutant alone to <scratch>/tree and run the tests on it.",
         epilog="Exit: 0 when every mutant ran and every file is restored, survivors named on the last line; 1 for a\n"
                "red baseline, an aborted run or a restore mismatch; 9 for a refusal before the baseline, 8 for an\n"
-               "import-guard refusal.\nSee: docs/TESTKIT.md § Commands")
+               "import-guard refusal; 124 when the wait for a host worker passes 900 seconds.\n"
+               "See: docs/TESTKIT.md § Commands")
     parser.add_argument("scratch", metavar="NAME", help="scratch name; NAME/tree holds the export of SHA")
     parser.add_argument("sha", metavar="SHA",
                         help="commit the export was made from; touched files are compared with it at the end")
@@ -307,6 +327,11 @@ def mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None = None
     timing.resolve(environ)
     if private_desktop(environ):
         print(EXCLUSION_NOTE, flush=True)
+    budget = stages.open_budget(f"atc test mutants {args.scratch}", environ, root=Path(worktree),
+                                max_wait=MUTANT_SECONDS)
+    held.append((budget, budget.acquire("mutants", 1, 1)))
+    if budget.active:
+        environ[host_workers.HELD] = budget.held_id()
     baseline_tests = list(dict.fromkeys([*args.tests, *(test for entry in entries for test in entry.get("tests", ()))]))
     reports = place / JUNIT
     attempts = 0
@@ -429,6 +454,7 @@ def _logged(command: Sequence[str], cwd: Path, env: Mapping[str, str], private: 
             log: Path, progress: bool) -> Result:
     """Run ``command`` with every line written to ``log`` as it arrives; code ``None`` after a timeout."""
     process, kind = desktop.start(command, cwd=cwd, env=env, private=private, new_session=True)
+    job = host_workers.StageJob(process)
     lines: list[str] = []
 
     def pump() -> None:
@@ -457,7 +483,62 @@ def _logged(command: Sequence[str], cwd: Path, env: Mapping[str, str], private: 
         desktop.kill_tree(process.pid)
         reader.join(10.0)
     code = process.wait()
+    job.close()
     return Result(None if timed_out else code, lines)
+
+
+WORKER_OPTION = re.compile(r"^(?:-n|--numprocesses)(?:=?(.+))?$")
+
+
+def _worker_option(arguments: Sequence[str]) -> tuple[int, int, str] | None:
+    """The last ``-n``/``--numprocesses`` among ``arguments``: its first index, its last index and its value."""
+    found = None
+    for at, argument in enumerate(arguments):
+        match = WORKER_OPTION.match(argument)
+        if match is None:
+            continue
+        if match.group(1):
+            found = (at, at, match.group(1))
+        elif at + 1 < len(arguments):
+            found = (at, at + 1, arguments[at + 1])
+    return found
+
+
+def _worker_request(arguments: Sequence[str], tree: Path,
+                    environ: Mapping[str, str]) -> tuple[int, int, list[str]]:
+    """The tokens a run asks for and its floor, with ``-n K`` cut to the workers memory holds; ``-n auto`` or
+    ``logical`` asks for the default count down to ``workers.FLOOR``; no ``-n`` or ``-n 0`` is one token."""
+    arguments = list(arguments)
+    option = _worker_option(arguments)
+    if option is None:
+        return 1, 1, arguments
+    first, last, value = option
+    if value in ("auto", "logical"):
+        workers = stages.resolve_workers(None, environ, root=tree)
+        return workers.count, workers.floor(), arguments
+    if not value.isdigit():
+        return 1, 1, arguments
+    workers = stages.resolve_workers(int(value), root=tree) if int(value) else stages.Workers(0, stages.SOURCE_FLAG)
+    if workers.clamp:
+        print(workers.line(), flush=True)
+        arguments[first:last + 1] = ["-n", str(workers.count)]
+    return max(1, workers.count), max(1, workers.count), arguments
+
+
+def _granted_arguments(arguments: list[str], grant: host_workers.Grant, want: int) -> list[str]:
+    """``-n auto`` and ``-n logical`` become the granted count; a pool that cut or delayed the run prints why."""
+    option = _worker_option(arguments)
+    if option is None:
+        return arguments
+    first, last, value = option
+    note = grant.note(want)
+    if value in ("auto", "logical"):
+        arguments = [*arguments[:first], "-n", str(grant.count), *arguments[last + 1:]]
+        print(stages.Workers(grant.count, value, want if grant.count != want else None, budget=note).line(),
+              flush=True)
+    elif note:
+        print(f"workers: {grant.count} (host budget: {note.removeprefix('host budget: ')})", flush=True)
+    return arguments
 
 
 def summary(result: Result | None, log: Path) -> tuple[str, int]:
@@ -487,8 +568,9 @@ def run(argv: Sequence[str], environ: MutableMapping[str, str] | None = None) ->
         prog="atc test run", allow_abbrev=False,
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description="One isolated pytest run in a scratch, its output kept in a log.",
-        epilog="Exit: pytest's code; 124 after --timeout, 130 when interrupted; 8 for a guard refusal,\n"
-               "9 for a refusal before the run.\nSee: docs/TESTKIT.md § Commands")
+        epilog="Exit: pytest's code; 124 after --timeout or when the wait for host workers passes its limit,\n"
+               "130 when interrupted; 8 for a guard refusal, 9 for a refusal before the run.\n"
+               "See: docs/TESTKIT.md § Commands")
     parser.add_argument("--scratch", required=True, metavar="NAME",
                         help="scratch name, a direct child of the ATC temporary root")
     parser.add_argument("--tree", metavar="DIR", help="the tree the tests run in (default: the tree the scratch's registry line "
@@ -527,11 +609,20 @@ def run(argv: Sequence[str], environ: MutableMapping[str, str] | None = None) ->
     print(f"LOG {log}", flush=True)
     if private:
         print(EXCLUSION_NOTE, flush=True)
-    command = _pytest_command(python, tree, place, environ, private, pytest_arguments)
+    budget = stages.open_budget(f"atc test run {place.name}", environ, root=tree, max_wait=args.timeout)
+    want, floor, pytest_arguments = _worker_request(pytest_arguments, tree, environ)
+    grant = budget.acquire("tests", want, floor)
     try:
-        result: Result | None = _logged(command, tree, environ, private, args.timeout, log, args.progress)
-    except KeyboardInterrupt:
-        result = None
+        if budget.active:
+            environ[host_workers.HELD] = budget.held_id()
+        pytest_arguments = _granted_arguments(pytest_arguments, grant, want)
+        command = _pytest_command(python, tree, place, environ, private, pytest_arguments)
+        try:
+            result: Result | None = _logged(command, tree, environ, private, args.timeout, log, args.progress)
+        except KeyboardInterrupt:
+            result = None
+    finally:
+        budget.release(grant)
     if result is None or result.code is None or result.code == PYTEST_INTERRUPTED:
         lines = log.read_text(encoding="utf-8", errors="replace").splitlines()
         for line in lines[-TAIL_LINES:]:

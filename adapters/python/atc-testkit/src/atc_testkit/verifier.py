@@ -12,7 +12,7 @@ import re
 import subprocess
 import sys
 
-from . import evidence, isolation, locations, scratch, stages, timing
+from . import evidence, isolation, locations, scratch, stages, timing, workers as workers_module
 from .git import SelectionError, baseline_deltas, changed_paths, git_env
 from .project import Project, StaticCheck
 from .selection import Selection, describe
@@ -199,9 +199,9 @@ class _Checks:
     """Runs one check or the stages of a run, refusing with the row's token."""
 
     def __init__(self, project: Project, work: Path, isolated: isolation.IsolatedRun, run: stages.Run,
-                 workers: stages.Workers | None = None):
+                 workers: stages.Workers | None = None, budget: workers_module.Budget | None = None):
         self.project, self.work, self.isolated, self.run_logged = project, work, isolated, run
-        self.workers = workers
+        self.workers, self.budget = workers, budget
 
     def row(self, row: _Row | StaticCheck, name: str | None = None) -> None:
         log = self.work / f"{(name or row.token).lower()}.log"
@@ -221,12 +221,15 @@ class _Checks:
 
     def stages(self, pytest_paths: list[str], cwd: Path | None = None) -> None:
         project = self.project
-        outcome = stages.run_stages(
-            project.stage_entry(), pytest_paths, cwd=project.root if cwd is None else cwd,
-            stage_list=project.stage_list(), env_for=lambda stage: self.isolated.environment(stage.name),
-            options_for=lambda stage: self.isolated.run_options(stage.name),
-            log_for=lambda stage: self.work / self.isolated.toolchain.stage_log(stage.name), workers=self.workers,
-            run=self.run_logged, toolchain=self.isolated.toolchain)
+        try:
+            outcome = stages.run_stages(
+                project.stage_entry(), pytest_paths, cwd=project.root if cwd is None else cwd,
+                stage_list=project.stage_list(), env_for=lambda stage: self.isolated.environment(stage.name),
+                options_for=lambda stage: self.isolated.run_options(stage.name),
+                log_for=lambda stage: self.work / self.isolated.toolchain.stage_log(stage.name), workers=self.workers,
+                run=self.run_logged, toolchain=self.isolated.toolchain, budget=self.budget)
+        except workers_module.WaitTimeout as refusal:
+            raise VerifyError(refusal.token, *refusal.detail.splitlines()) from refusal
         if outcome.token == stages.NO_TESTS_COLLECTED:
             raise VerifyError(outcome.token, f"selected {' '.join(pytest_paths) or 'the default suite'}; "
                                              f"logs in {self.work}")
@@ -312,8 +315,9 @@ def main(project: Project, environ: Mapping[str, str] | None = None, run: stages
     try:
         isolation.drop_hami_variables(os.environ)
         locations.enter()
-        workers = stages.resolve_workers(environ=environ)
+        workers = stages.resolve_workers(environ=environ, root=project.root)
         timing.resolve(environ)
+        budget = stages.open_budget(f"verifier {project.root.name}", environ, root=project.root)
         toolchain = project.tests_toolchain()
         values = require_env(environ)
         check_candidate(project.root, values, Path.cwd())
@@ -331,7 +335,7 @@ def main(project: Project, environ: Mapping[str, str] | None = None, run: stages
         locations.enter(work)
         isolated = isolation.IsolatedRun(work, credentials=project.credential_variables,
                                          data_roots=project.data_root_variables, toolchain=toolchain)
-        checks = _Checks(project, work, isolated, run, workers)
+        checks = _Checks(project, work, isolated, run, workers, budget)
         if project.select is None:
             doc_only, pytest_paths = _root_checks(project, checks, base, sha, paths)
             check_final_state(project.root, sha)
