@@ -316,11 +316,19 @@ every project.
 - With anchors, a `#fragment` must name a heading, as GitHub numbers a
   repeated one, or an HTML `id` or `name` of the Markdown file it points
   into.
+- A project can exclude Markdown files it must never change, frozen
+  records for example: an excluded file is never read as a link source, in
+  any mode, while links from other files into it still resolve and still
+  have their anchors checked. A glob matches the repository-relative POSIX
+  path with `fnmatch` rules, case-sensitive, `*` also matching `/`. A glob
+  that matches no file is not an error, so a stale one stays in the
+  verifier's argv until a reader removes it.
 - `python -m atc_testkit.docs --range` checks the range the verifier's
   `ATC_EXPECTED_MAIN_SHA` and `ATC_INTEGRATION_SHA` name: the Markdown files
   it adds or changes, or every tracked one when it deletes a path. It prints
   one `path:line: message` per problem and exits 1 on any; `--anchors` and
-  `--allow-outside` turn on the two options, and paths in place of
+  `--allow-outside` turn on the two options, each repeatable
+  `--exclude GLOB` excludes the files it matches, and paths in place of
   `--range` check those files. `docs.DOCUMENTATION_CHECK` is that command
   as a `StaticCheck` with the token `DOCUMENTATION_REFERENCE_FAILED`, the
   documentation check a project's verifier runs for a documentation-only

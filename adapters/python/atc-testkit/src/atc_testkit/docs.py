@@ -8,8 +8,9 @@ from __future__ import annotations
 import argparse
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from fnmatch import fnmatchcase
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import subprocess
 import sys
@@ -78,19 +79,28 @@ def _read(path: Path) -> str:
     return path.read_bytes().decode("utf-8")
 
 
+def excluded(name: str, exclude: Iterable[str]) -> bool:
+    """Whether the repo-relative ``name`` matches a glob of ``exclude``; ``*`` also matches ``/``, case counts."""
+    posix = PurePosixPath(name.replace("\\", "/")).as_posix()
+    return any(fnmatchcase(posix, glob) for glob in exclude)
+
+
 def relative_link_problems(root: Path, files: Iterable[str], *, anchors: bool = False,
-                           allow_outside: bool = False) -> list[str]:
+                           allow_outside: bool = False, exclude: Sequence[str] = ()) -> list[str]:
     """``path:line: message`` for each relative link of ``files`` that leaves ``root`` or names nothing.
 
     ``files`` are relative to ``root``. A link starting with ``/`` is read from ``root``. A file that is missing,
     not UTF-8 or empty is a problem too. With ``anchors``, a ``#fragment`` must name a heading or HTML anchor of the
     Markdown file it points into, the same file for a bare ``#fragment``. With ``allow_outside``, a link that leaves
-    ``root``, into a sibling repository for example, is not checked.
+    ``root``, into a sibling repository for example, is not checked. A file matching a glob of ``exclude`` is not
+    read; links into it are checked as any other.
     """
     root = Path(root).resolve()
     problems: list[str] = []
     cache: dict[Path, set[str]] = {}
     for name in files:
+        if excluded(name, exclude):
+            continue
         path = root / name
         if not path.is_file():
             problems.append(f"{name}: Markdown file is missing")
@@ -152,9 +162,9 @@ def markdown_to_check(root: Path, base: str, head: str) -> list[str]:
 
 
 def documentation_problems(root: Path, base: str, head: str, *, anchors: bool = False,
-                           allow_outside: bool = False) -> list[str]:
+                           allow_outside: bool = False, exclude: Sequence[str] = ()) -> list[str]:
     return relative_link_problems(root, markdown_to_check(root, base, head), anchors=anchors,
-                                  allow_outside=allow_outside)
+                                  allow_outside=allow_outside, exclude=exclude)
 
 
 def main(argv: Sequence[str] | None = None, environ: Mapping[str, str] | None = None) -> int:
@@ -165,13 +175,17 @@ def main(argv: Sequence[str] | None = None, environ: Mapping[str, str] | None = 
                         help="the Markdown the range ATC_EXPECTED_MAIN_SHA..ATC_INTEGRATION_SHA can break")
     parser.add_argument("--anchors", action="store_true", help="also check #fragments against headings")
     parser.add_argument("--allow-outside", action="store_true", help="leave links that leave the tree unchecked")
+    parser.add_argument("--exclude", action="append", default=[], metavar="GLOB",
+                        help="never read a Markdown file whose repo-relative POSIX path matches GLOB (* also matches "
+                             "/) as a link source; links into it are still checked; repeatable; a GLOB that matches "
+                             "no file is not an error, so a stale one stays until a reader removes it")
     parser.add_argument("paths", nargs="*", help="Markdown files relative to the working directory")
     args = parser.parse_args(argv)
     environ = os.environ if environ is None else environ
     root = Path.cwd()
     if args.range == bool(args.paths):
         parser.error("give --range or paths, not both")
-    rules = {"anchors": args.anchors, "allow_outside": args.allow_outside}
+    rules = {"anchors": args.anchors, "allow_outside": args.allow_outside, "exclude": args.exclude}
     if args.range:
         missing = [name for name in RANGE_VARIABLES if not environ.get(name)]
         if missing:

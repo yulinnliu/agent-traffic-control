@@ -77,6 +77,30 @@ def test_anchors_are_checked_only_when_asked(tmp_path: Path) -> None:
         "docs/page.md:3: missing anchor: #gone"]
 
 
+FROZEN = "hyp/H00[1-6]_*.md"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(("name", "expected"), [
+    ("hyp/H001_a.md", True), ("hyp\\H006_b.md", True), ("./hyp/H003_c.md", True),
+    ("hyp/H007_a.md", False), ("HYP/H001_a.md", False), ("other/hyp/H001_a.md", False), ("hyp/H001.md", False),
+])
+def test_an_exclusion_glob_matches_the_repo_relative_posix_path(name: str, expected: bool) -> None:
+    assert docs.excluded(name, ["unused/*.md", FROZEN]) is expected
+    assert docs.excluded(name, []) is False
+
+
+@pytest.mark.unit
+def test_an_excluded_file_is_no_link_source_but_links_into_it_are_checked(tmp_path: Path) -> None:
+    write(tmp_path, {"hyp/H001_a.md": "# Kept\n[gone](gone.md)\n", "hyp/H007_a.md": "[gone](gone.md)\n",
+                     "page.md": "[in](hyp/H001_a.md#kept) [bad](hyp/H001_a.md#gone) [none](hyp/H002_a.md)\n"})
+    files = ["hyp/H001_a.md", "hyp/H002_a.md", "hyp/H007_a.md", "page.md"]
+    assert docs.relative_link_problems(tmp_path, files, anchors=True, exclude=[FROZEN, "stale/*.md"]) == [
+        "hyp/H007_a.md:1: broken relative link: gone.md",
+        "page.md:1: missing anchor: hyp/H001_a.md#gone",
+        "page.md:1: broken relative link: hyp/H002_a.md"]
+
+
 def git(root: Path, *args: str) -> str:
     env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
     return subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.com", *args], cwd=root, env=env,
@@ -129,3 +153,48 @@ def test_the_command_reads_the_verifiers_range(repo: tuple[Path, str]) -> None:
                            text=True, env=env)
     assert usage.returncode == 2 and "ATC_EXPECTED_MAIN_SHA" in usage.stderr
     assert docs.DOCUMENTATION_CHECK.token == "DOCUMENTATION_REFERENCE_FAILED"
+
+
+@pytest.mark.integration
+def test_a_range_skips_excluded_markdown_it_changes(repo: tuple[Path, str]) -> None:
+    root, base = repo
+    write(root, {"a.md": "[gone](gone.md)\n", "hyp/H001_a.md": "[gone](gone.md)\n"})
+    git(root, "add", ".")
+    git(root, "commit", "-qm", "edit")
+    assert docs.documentation_problems(root, base, "HEAD", exclude=[FROZEN]) == [
+        "a.md:1: broken relative link: gone.md"]
+
+
+@pytest.mark.integration
+def test_a_range_that_deletes_a_path_skips_excluded_markdown(repo: tuple[Path, str]) -> None:
+    root, base = repo
+    write(root, {"hyp/H002_a.md": "[old](../old.txt)\n", "d.md": "[h](hyp/H002_a.md)\n"})
+    git(root, "add", ".")
+    git(root, "commit", "-qm", "frozen")
+    middle = git(root, "rev-parse", "HEAD")
+    git(root, "rm", "-q", "old.txt")
+    git(root, "commit", "-qm", "delete")
+    assert "hyp/H002_a.md" in docs.markdown_to_check(root, middle, "HEAD")
+    assert docs.documentation_problems(root, middle, "HEAD", exclude=[FROZEN]) == [
+        "c.md:1: broken relative link: old.txt"]
+    assert docs.documentation_problems(root, base, "HEAD") == [
+        "c.md:1: broken relative link: old.txt", "hyp/H002_a.md:1: broken relative link: ../old.txt"]
+
+
+@pytest.mark.integration
+def test_the_command_passes_each_exclusion_in_both_modes(repo: tuple[Path, str]) -> None:
+    root, base = repo
+    write(root, {"hyp/H001_a.md": "[gone](gone.md)\n"})
+    git(root, "add", ".")
+    git(root, "rm", "-q", "old.txt")
+    git(root, "commit", "-qm", "delete")
+    env = {key: value for key, value in os.environ.items()
+           if not key.startswith("GIT_") and key not in docs.RANGE_VARIABLES}
+    command = [*docs.DOCUMENTATION_CHECK.argv, "--exclude", FROZEN, "--exclude", "c.md", "--exclude", "stale/*.md"]
+    ranged = subprocess.run(command, cwd=root, capture_output=True, text=True,
+                            env={**env, "ATC_EXPECTED_MAIN_SHA": base, "ATC_INTEGRATION_SHA": git(root, "rev-parse",
+                                                                                                    "HEAD")})
+    assert (ranged.returncode, ranged.stdout) == (0, "")
+    files = subprocess.run([sys.executable, "-m", "atc_testkit.docs", "--exclude", FROZEN, "a.md", "hyp/H001_a.md"],
+                           cwd=root, capture_output=True, text=True, env=env)
+    assert (files.returncode, files.stdout) == (0, "")
