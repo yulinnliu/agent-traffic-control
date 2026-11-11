@@ -16,7 +16,7 @@ import sys
 import threading
 import time
 
-from . import config, desktop, locations, python_toolchain, scratch, stages, toolchain as toolchains
+from . import config, desktop, locations, python_toolchain, scratch, stages, timing, toolchain as toolchains
 from .git import git_env
 from .isolation import drop_hami_variables
 from .locations import Refusal
@@ -125,6 +125,7 @@ def _capture(command: Sequence[str], cwd: Path, env: Mapping[str, str], private:
 
 def isolate(tree: Path, place: Path, python: str, environ: MutableMapping[str, str]) -> bool:
     """Steps 2 to 4 of the section; whether the run goes to a private desktop."""
+    timing.resolve(environ)
     drop_hami_variables(environ)
     for name in config.data_root_variables(tree) or (config.DEFAULT_DATA_ROOT,):
         environ[name] = str(place / "qdr")
@@ -418,7 +419,7 @@ def _logged(command: Sequence[str], cwd: Path, env: Mapping[str, str], private: 
                     sys.stdout.buffer.flush()
 
     with log.open("wb") as sink:
-        sink.write(stages.log_header(command, cwd, kind).encode("utf-8"))
+        sink.write(stages.log_header(command, cwd, kind, env).encode("utf-8"))
     reader = threading.Thread(target=pump, daemon=True)
     reader.start()
     try:

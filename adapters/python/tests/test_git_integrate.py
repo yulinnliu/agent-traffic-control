@@ -1019,7 +1019,9 @@ def test_verifier_without_report_integrates_and_writes_no_record(
     "not json",
     json.dumps(REPORT)[:40],
     json.dumps([REPORT]),
+    json.dumps({**REPORT, "schema": "atc-verification-report/3"}),
     json.dumps({**REPORT, "schema": "atc-verification-report/2"}),
+    json.dumps({**REPORT, "schema": "atc-verification-report/2", "time_slack": True}),
     json.dumps({key: value for key, value in REPORT.items() if key != "selection"}),
     json.dumps({**REPORT, "selection": {"full": "yes", "paths": []}}),
     json.dumps({**REPORT, "selection": {"full": True, "paths": [1]}}),
@@ -1027,7 +1029,7 @@ def test_verifier_without_report_integrates_and_writes_no_record(
     json.dumps({**REPORT, "stages": [{"name": "parallel", "marker": "not slow"}]}),
     json.dumps({**REPORT, "dependency_inputs": {"uv.lock": None}}),
     "",
-], ids=["not-json", "truncated", "not-object", "schema", "no-selection", "full-type", "paths-type",
+], ids=["not-json", "truncated", "not-object", "schema", "no-slack", "slack-type", "no-selection", "full-type", "paths-type",
         "selector", "stage-ignore", "input-digest", "empty"])
 def test_invalid_report_integrates_and_writes_no_record(
     repo: Path, capsys: pytest.CaptureFixture[str], text: str,

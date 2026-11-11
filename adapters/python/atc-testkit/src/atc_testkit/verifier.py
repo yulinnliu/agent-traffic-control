@@ -12,7 +12,7 @@ import re
 import subprocess
 import sys
 
-from . import config, evidence, isolation, locations, scratch, stages
+from . import config, evidence, isolation, locations, scratch, stages, timing
 from .git import SelectionError, baseline_deltas, changed_paths, git_env
 from .project import Project, StaticCheck
 from .selection import Selection, describe
@@ -310,6 +310,7 @@ def main(project: Project, environ: Mapping[str, str] | None = None, run: stages
         isolation.drop_hami_variables(os.environ)
         locations.enter()
         workers = stages.resolve_workers(environ=environ)
+        timing.resolve(environ)
         toolchain = project.tests_toolchain()
         values = require_env(environ)
         check_candidate(project.root, values, Path.cwd())

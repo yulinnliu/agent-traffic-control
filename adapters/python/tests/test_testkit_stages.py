@@ -152,7 +152,7 @@ def test_the_parallel_stage_prints_its_count_before_it_starts(tmp_path: Path,
     stages.run_stages(["runner"], [], cwd=tmp_path, stage_list=stages.stages(), env_for=lambda stage: {},
                       options_for=lambda stage: [], log_for=lambda stage: tmp_path / f"{stage.name}.log",
                       workers=stages.Workers(5, "flag"), run=fake)
-    assert printed == ["workers: 5 (flag)\n", "", ""]
+    assert printed == ["workers: 5 (flag)\ntime slack: 2 (default)\n", "", ""]
 
 
 def test_every_stage_passes_its_worker_option_explicitly() -> None:

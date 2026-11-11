@@ -20,7 +20,7 @@ import threading
 
 import pytest
 
-from . import config, desktop_guard, locations, python_toolchain, stages
+from . import config, desktop_guard, locations, python_toolchain, stages, timing
 from .evidence import Stage
 
 REPORT_LIMIT = 4000  # characters of a failing report kept, counted from its end where the exception line sits
@@ -151,6 +151,11 @@ def run_all_stages(paths: Sequence[str], workers: int | None, run: stages.Run = 
 def main(args: Sequence[str] | None = None, *, context: Context | None = None, hints: Hints | None = None,
          init: Callable[[], object] | None = None) -> int:
     arguments = list(sys.argv[1:] if args is None else args)
+    try:
+        timing.resolve()
+    except locations.Refusal as refusal:
+        print(f"{refusal.token} {refusal.detail}", file=sys.stderr, flush=True)
+        return refusal.code
     if arguments[:1] == ["--stages"]:
         rest = arguments[1:]
         workers = None

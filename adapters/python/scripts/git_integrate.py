@@ -41,7 +41,8 @@ CANDIDATE_ID_BYTES = 6
 BUDGET_EXCEEDED = "test budget exceeded: optimise the tests or ask the Owner; a retry does not help"
 WORKTREE_BRANCH = re.compile(r"worktree-[^+]+\+(?P<topic>.+)")
 # Formats: shared/conformance/verification-evidence/README.md
-REPORT_SCHEMA = "atc-verification-report/1"
+# Every report schema a record wraps: /2 adds the compared time_slack, /1 is a project on an earlier testkit.
+REPORT_SCHEMAS = ("atc-verification-report/1", "atc-verification-report/2")
 EVIDENCE_SCHEMA = "atc-verification-evidence/2"
 EVIDENCE_DIR = ("atc", "verification-evidence")
 EVIDENCE_RETENTION_SECONDS = 14 * 24 * 3600
@@ -413,7 +414,10 @@ def _strings(value: object) -> bool:
 
 
 def _valid_report(report: object) -> bool:
-    if not isinstance(report, dict) or report.get("schema") != REPORT_SCHEMA:
+    if not isinstance(report, dict) or report.get("schema") not in REPORT_SCHEMAS:
+        return False
+    slack = report.get("time_slack")
+    if report["schema"] != REPORT_SCHEMAS[0] and (isinstance(slack, bool) or not isinstance(slack, (int, float))):
         return False
     selector, selection, stages, inputs = (
         report.get(key) for key in ("selector", "selection", "stages", "dependency_inputs")

@@ -272,6 +272,17 @@ def test_other_stages_do_not_reuse(repo: Path, verified: str, stages) -> None:
     assert decide(repo, verified, [A], stages).reason == "STAGES_MISMATCH"
 
 
+@pytest.mark.integration
+def test_another_time_slack_does_not_reuse(repo: Path, verified: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    assert json.loads(record_path(repo, verified).read_text(encoding="utf-8"))["report"]["time_slack"] == 2.0
+    monkeypatch.setenv("ATC_TEST_TIME_SLACK", "5")
+    assert decide(repo, verified, [A]).reason == "TIME_SLACK_MISMATCH"
+    monkeypatch.setenv("ATC_TEST_TIME_SLACK", "2")
+    assert decide(repo, verified, [A]).reuse
+    rewrite(repo, verified, lambda record: record["report"].update(time_slack=5))
+    assert decide(repo, verified, [A]).reason == "TIME_SLACK_MISMATCH"
+
+
 def test_dirty_candidate_record_does_not_reuse(repo: Path, verified: str) -> None:
     rewrite(repo, verified, lambda record: record.update(clean=False))
     assert decide(repo, verified, [A]).reason == "NOT_CLEAN"
@@ -307,8 +318,13 @@ def test_damaged_record_does_not_reuse(repo: Path, verified: str, damage, reason
     lambda record: record["report"]["selection"].update(paths="packages/a/tests"),
     lambda record: record["report"].pop("stages"),
     lambda record: record["report"].pop("dependency_inputs"),
+    lambda record: record["report"].update(schema="atc-verification-report/1"),
+    lambda record: record["report"].pop("time_slack"),
+    lambda record: record["report"].update(time_slack=True),
+    lambda record: record["report"].update(time_slack="2"),
 ], ids=["schema-version", "no-schema", "no-sha", "no-tree", "no-clean", "clean-type", "no-argv", "no-platform",
-        "no-report", "no-selector", "no-selection", "no-full", "paths-type", "no-stages", "no-inputs"])
+        "no-report", "no-selector", "no-selection", "no-full", "paths-type", "no-stages", "no-inputs",
+        "report-schema-1", "no-slack", "slack-bool", "slack-text"])
 def test_record_of_another_shape_does_not_reuse(repo: Path, verified: str, change) -> None:
     rewrite(repo, verified, change)
     assert decide(repo, verified, [A]).reason == "SCHEMA_MISMATCH"
@@ -380,7 +396,7 @@ def test_report_carries_the_compared_fields(tmp_path: Path) -> None:
     report = json.loads(target.read_text(encoding="utf-8"))
     assert report.pop("python").count(".") == 2
     assert report == {
-        "schema": "atc-verification-report/1",
+        "schema": "atc-verification-report/2",
         "selector": {"name": "atc-testkit", "version": atc_testkit.__version__},
         "selection": {"full": False, "paths": [A]},
         "stages": [{"name": "parallel", "marker": "not slow and not serial", "ignore": []},
@@ -389,6 +405,7 @@ def test_report_carries_the_compared_fields(tmp_path: Path) -> None:
             "uv.lock": "d8c9f2728aa278ebcd33ccedf3ad309a866870ad5fb93a03526b4b7655c9e911",
             ".python-version": "absent",
         },
+        "time_slack": 2.0,
         "checks": ["RUFF"],
     }
     assert gi._valid_report(report)
@@ -396,5 +413,5 @@ def test_report_carries_the_compared_fields(tmp_path: Path) -> None:
 
 def test_module_version_matches_the_package() -> None:
     assert f"`atc-testkit` {atc_testkit.__version__};" in (TESTKIT_SRC.parent / "README.md").read_text(encoding="utf-8")
-    assert (ev.REPORT_SCHEMA, ev.RECORD_SCHEMA) == (gi.REPORT_SCHEMA, gi.EVIDENCE_SCHEMA)
+    assert (ev.REPORT_SCHEMA, ev.RECORD_SCHEMA) == (gi.REPORT_SCHEMAS[-1], gi.EVIDENCE_SCHEMA)
     assert ev.EVIDENCE_DIR == gi.EVIDENCE_DIR

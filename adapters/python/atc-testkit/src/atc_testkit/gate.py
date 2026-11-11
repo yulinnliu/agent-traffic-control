@@ -8,7 +8,7 @@ from pathlib import Path
 import subprocess
 import sys
 
-from . import evidence, isolation, locations, scratch, selection, stages
+from . import evidence, isolation, locations, scratch, selection, stages, timing
 from .evidence import Decision
 from .git import SelectionError, baseline_deltas, changed_paths, git_env, verify_push_checkout
 from .project import Project, StaticCheck
@@ -133,6 +133,7 @@ def main(project: Project, argv: Sequence[str] | None = None, stdin: Iterable[st
     if args.run:
         try:
             workers = stages.resolve_workers(args.workers)
+            timing.resolve()
         except locations.Refusal as refusal:
             print(f"{refusal.token} {refusal.detail}", file=sys.stderr)
             return refusal.code

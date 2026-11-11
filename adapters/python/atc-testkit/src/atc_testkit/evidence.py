@@ -13,9 +13,10 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import __version__
+from . import __version__, timing
 
-REPORT_SCHEMA = "atc-verification-report/1"
+# /2 adds the compared time_slack; atc integrate also writes a record around a /1 report.
+REPORT_SCHEMA = "atc-verification-report/2"
 RECORD_SCHEMA = "atc-verification-evidence/2"
 # Every record schema a gate reads: /2 names the task and authority where /1 held an authority reference.
 RECORD_SCHEMAS = ("atc-verification-evidence/1", RECORD_SCHEMA)
@@ -82,14 +83,19 @@ def selector_record() -> dict[str, str]:
 
 
 def build_report(root: Path, pytest_paths: Iterable[str] | None, stages: Iterable[Stage], *,
-                 dependency_files: Iterable[str] | None = None, **recorded: object) -> dict:
-    """The verifier's report; ``recorded`` keys (classification, checks, durations) are never compared."""
+                 dependency_files: Iterable[str] | None = None, time_slack: float | None = None,
+                 **recorded: object) -> dict:
+    """The verifier's report; ``recorded`` keys (classification, checks, durations) are never compared.
+
+    ``time_slack`` is the slack the stages ran with, the process environment's by default.
+    """
     return {
         "schema": REPORT_SCHEMA,
         "selector": selector_record(),
         "selection": selection_record(pytest_paths),
         "stages": [stage.record() for stage in stages],
         "dependency_inputs": dependency_digests(root, dependency_files),
+        "time_slack": timing.slack() if time_slack is None else time_slack,
         "python": platform.python_version(),
         **recorded,
     }
@@ -102,6 +108,7 @@ def write_report(environ: Mapping[str, str], root: Path, pytest_paths: Iterable[
     if not target:
         return None
     path = Path(target)
+    options.setdefault("time_slack", timing.slack(environ))
     path.write_text(json.dumps(build_report(root, pytest_paths, stages, **options), indent=2) + "\n",
                     encoding="utf-8")
     return path
@@ -122,9 +129,15 @@ def _strings(value: object) -> bool:
     return isinstance(value, list) and all(isinstance(item, str) for item in value)
 
 
+def _seconds(value: object) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
 def _well_formed(record: Mapping) -> bool:
     report = record.get("report")
     if record.get("schema") not in RECORD_SCHEMAS or not isinstance(report, dict):
+        return False
+    if report.get("schema") != REPORT_SCHEMA or not _seconds(report.get("time_slack")):
         return False
     selection, selector = report.get("selection"), report.get("selector")
     return (
@@ -146,7 +159,8 @@ def _argv_file(path: Path) -> object:
 
 
 def _decide(git: Callable[..., str], root: Path, pushed: str, pytest_paths: Iterable[str] | None,
-            stages: Iterable[Stage], argv_file: Path, dependency_files: Iterable[str]) -> Decision:
+            stages: Iterable[Stage], argv_file: Path, dependency_files: Iterable[str],
+            time_slack: float) -> Decision:
     common = Path(git("rev-parse", "--path-format=absolute", "--git-common-dir").strip())
     path = common.joinpath(*EVIDENCE_DIR) / f"{pushed}.json"
     try:
@@ -174,6 +188,7 @@ def _decide(git: Callable[..., str], root: Path, pushed: str, pytest_paths: Iter
         ("ARGV_MISMATCH", lambda: record["verify_argv"] == _argv_file(argv_file)),
         ("SELECTOR_MISMATCH", lambda: report["selector"] == selector_record()),
         ("STAGES_MISMATCH", lambda: report["stages"] == [stage.record() for stage in stages]),
+        ("TIME_SLACK_MISMATCH", lambda: report["time_slack"] == time_slack),
         ("SELECTION_NOT_COVERED", lambda: covers(report["selection"], selection_record(pytest_paths))),
     )
     for reason, holds in checks:
@@ -184,16 +199,18 @@ def _decide(git: Callable[..., str], root: Path, pushed: str, pytest_paths: Iter
 
 def check(git: Callable[..., str], root: Path, pushed: str, pytest_paths: Iterable[str] | None,
           stages: Iterable[Stage], argv_file: Path, *,
-          dependency_files: Iterable[str] | None = None) -> Decision:
+          dependency_files: Iterable[str] | None = None, time_slack: float | None = None) -> Decision:
     """Whether the gate may reuse the ``atc integrate`` record of commit ``pushed`` instead of testing.
 
     ``git(*args)`` returns stdout for the gate's checkout at ``root``; ``pytest_paths`` and ``stages``
-    are the gate's own selection and stages; ``argv_file`` is the project's verifier argv file. Any
-    failure while checking refuses reuse.
+    are the gate's own selection and stages; ``argv_file`` is the project's verifier argv file;
+    ``time_slack`` is the gate's, the process environment's by default. Any failure while checking
+    refuses reuse.
     """
     try:
         files = default_dependency_files() if dependency_files is None else tuple(dependency_files)
-        return _decide(git, root, pushed, pytest_paths, tuple(stages), argv_file, files)
+        slack = timing.slack() if time_slack is None else time_slack
+        return _decide(git, root, pushed, pytest_paths, tuple(stages), argv_file, files, slack)
     except Exception:  # noqa: BLE001 - an evidence fault must run the tests
         return Decision(False, "CHECK_FAILED")
 

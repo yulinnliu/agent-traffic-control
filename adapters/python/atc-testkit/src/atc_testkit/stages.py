@@ -15,7 +15,7 @@ import sys
 import time
 import tomllib
 
-from . import desktop, locations, toolchain as toolchains
+from . import desktop, locations, timing, toolchain as toolchains
 from .evidence import Stage
 from .toolchain import Toolchain
 
@@ -221,10 +221,18 @@ def private_desktop(stage: Stage) -> bool:
     return stage.name in (PARALLEL.name, SERIAL.name)
 
 
-def log_header(command: Sequence[str], cwd: Path | str, kind: str) -> str:
+def slack_line(env: Mapping[str, str] | None) -> str:
+    """The time slack ``env`` gives a run, or the refusal an entry point makes of it."""
+    try:
+        return timing.resolve(env).line()
+    except locations.Refusal as refusal:
+        return f"time slack: {refusal.token} {refusal.detail}"
+
+
+def log_header(command: Sequence[str], cwd: Path | str, kind: str, env: Mapping[str, str] | None = None) -> str:
     return "\n".join((f"{time.strftime('%Y-%m-%dT%H:%M:%S%z')} {platform.platform()}",
                       f"python: {sys.executable} {sys.version.split()[0]}", f"cwd: {cwd}", f"desktop: {kind}",
-                      f"command: {' '.join(map(str, command))}", "", ""))
+                      f"command: {' '.join(map(str, command))}", slack_line(env), "", ""))
 
 
 def run_logged(command: Sequence[str], *, cwd: Path | str, env: Mapping[str, str], log: Path,
@@ -233,7 +241,7 @@ def run_logged(command: Sequence[str], *, cwd: Path | str, env: Mapping[str, str
     log.parent.mkdir(parents=True, exist_ok=True)
     process, kind = desktop.start(command, cwd=cwd, env=env, private=private)
     with log.open("wb") as sink:
-        sink.write(log_header(command, cwd, kind).encode("utf-8"))
+        sink.write(log_header(command, cwd, kind, env).encode("utf-8"))
         for chunk in iter(process.stdout.readline, b""):
             sink.write(chunk)
             sink.flush()
@@ -276,7 +284,7 @@ def run_stages(runner: Sequence[str], paths: Sequence[str], *, cwd: Path | str, 
     for stage in stage_list:
         log = log_for(stage)
         if stage.name == PARALLEL.name:
-            print(workers.line(), flush=True)
+            print(workers.line(), slack_line(env_for(stage)), sep="\n", flush=True)
         command = toolchain.stage_command(runner, stage, stage_workers(stage, workers.count), options_for(stage), paths)
         code = run(command, cwd=cwd, env=env_for(stage), log=log, private=private_desktop(stage))
         if code not in (0, toolchain.no_tests_exit):
