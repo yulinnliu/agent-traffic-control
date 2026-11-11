@@ -169,6 +169,15 @@ def test_a_records_only_range_runs_the_record_check_not_the_verifier(
     assert main_tip(tasks_repo) == before
 
 
+def test_the_check_of_a_records_only_range_reports_the_record_check_for_reuse(
+    tasks_repo: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    tip = on_branch(tasks_repo, "work", {".atc/tasks/DEMO-0001.yaml": record("DEMO-0001", "work")})
+    status, data, err = run_json(tasks_repo, capsys, tip, "--task", "DEMO-0001", "--owner-words", WORDS, "--check")
+    assert status == 0, err
+    assert data["verification_reuse"] == "RECORDS_ONLY"
+
+
 def test_a_records_only_range_needs_no_verification_section(tasks_repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     put(tasks_repo, {"AGENTS.md": "# AGENTS.md\n\n## Task records\n\n- Task prefix: DEMO\n"})
     tip = on_branch(tasks_repo, "work", {".atc/tasks/DEMO-0001.yaml": record("DEMO-0001", "work", GRANT)})
