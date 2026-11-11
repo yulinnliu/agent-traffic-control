@@ -1,0 +1,16 @@
+task_id: ATC-0019
+repository: yulinnliu/agent-traffic-control
+base_sha: dad8fbd45168996351ee2768450439f64cab90e9
+scope: 'Owner runs integrate and push: root reuses atc verify evidence; coordinator
+  gives one shell-neutral command and detects completion from git state; skills and
+  GIT_WORKFLOW follow'
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: dad8fbd45168996351ee2768450439f64cab90e9
+branch: worktree-claude+owner-run-integrate
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
