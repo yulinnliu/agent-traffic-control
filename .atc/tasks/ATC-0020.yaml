@@ -1,0 +1,17 @@
+task_id: ATC-0020
+repository: yulinnliu/agent-traffic-control
+base_sha: dad8fbd45168996351ee2768450439f64cab90e9
+scope: 'Design only: an ATC task backlog - a planned task gets its record (ID, order,
+  notes) before any branch, so the queue lives in git and atc task list shows it;
+  CURRENT.md shrinks to the task-to-session map. Implementation needs a separate Owner
+  approval.'
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: dad8fbd45168996351ee2768450439f64cab90e9
+branch: worktree-claude+task-backlog
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
