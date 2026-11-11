@@ -1,0 +1,15 @@
+task_id: ATC-0016
+repository: yulinnliu/agent-traffic-control
+base_sha: 1be2f4216bc744ddad67a7f7da43df62c11ebabd
+scope: 'CLI conventions: help grouping and format, global exit codes and --json, naming
+  consistency, version-compat and deprecation rule'
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: 1be2f4216bc744ddad67a7f7da43df62c11ebabd
+branch: worktree-claude+cli-conventions
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
