@@ -5,6 +5,15 @@ scope: atc-testkit host-wide worker budget and shared CPU+memory worker sizing (
 governance_source: yulinnliu/agent-traffic-control
 governance_revision: dad8fbd45168996351ee2768450439f64cab90e9
 branch: worktree-claude+worker-budget
+decisions:
+  - 'The Owner approved the design with changes ("Approve with changes", 2026-11-11). O1: one sentence in shared/governance/VERIFICATION.md § Verifier test budget says time queued for host test workers does not count toward the budget; the Owner authorized this governance change for this topic only, and no other governance text changes.'
+  - 'O2: an explicit --workers is cut by the memory ceiling only, on CI and locally alike, never by the CPU count (the CPU oversubscription of 6950ad4 stays, since the tests are largely subprocess- and timer-bound); a cut count names the reason on the workers: line, and locally it still counts against the pool. The default is min(8, logical CPUs, memory ceiling). The Owner ruled the local memory cut "同意".'
+  - 'O3: the pool is three quarters of the logical CPUs rounded up, a worker is counted at 1 GiB (a project may declare worker_memory_mib), 1 GiB of memory is reserved, and the parallel stage starts with at least 2 workers.'
+  - 'O4: no new command; atc doctor shows the pool (free tokens, holders, waiters) and gains it in its --json once ATC-0016 lands.'
+  - 'O5: atc-review carries one line on the WAIT host workers line, WORKER_WAIT_TIMEOUT and atc doctor.'
+  - 'O6: upgrading hami-quant and hami-quant-trading to atc-testkit 0.11.0 is a separate project task after 0.11.0 is pushed.'
+  - 'Wait limit: queue time stays outside every timeout, and a run whose total wait passes ATC_WORKER_MAX_WAIT (set by atc integrate to the verifier timeout), its own timeout, test_worker_max_wait or 1800 seconds stops with WORKER_WAIT_TIMEOUT naming the runs ahead: exit 124 from the gate, the CI runner, atc test run and atc test mutants; the verifier refuses with it and atc integrate stops without judging the candidate.'
+  - 'Version: atc-testkit 0.11.0; 0.10.2 belongs to ATC-0016. Implementation started before ATC-0016 is integrated on the Owner''s word (2026-11-11) and is rebased onto it afterwards.'
 authority:
   edit: true
   commit: true
