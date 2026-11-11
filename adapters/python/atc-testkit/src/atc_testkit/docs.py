@@ -176,9 +176,11 @@ def main(argv: Sequence[str] | None = None, environ: Mapping[str, str] | None = 
     parser.add_argument("--anchors", action="store_true", help="also check #fragments against headings")
     parser.add_argument("--allow-outside", action="store_true", help="leave links that leave the tree unchecked")
     parser.add_argument("--exclude", action="append", default=[], metavar="GLOB",
-                        help="never read a Markdown file whose repo-relative POSIX path matches GLOB (* also matches "
-                             "/) as a link source; links into it are still checked; repeatable; a GLOB that matches "
-                             "no file is not an error, so a stale one stays until a reader removes it")
+                        help="never read a Markdown file whose repo-relative POSIX path matches GLOB as a link "
+                             "source; links into it are still checked; repeatable; * also matches /, so a broad GLOB "
+                             "such as *.md turns the check off: name exact files or the narrowest directory; a GLOB "
+                             "that matches no file is not an error, so a stale one stays until a reader removes it; "
+                             "a project's integration verifier appends it to docs.DOCUMENTATION_CHECK's argv")
     parser.add_argument("paths", nargs="*", help="Markdown files relative to the working directory")
     args = parser.parse_args(argv)
     environ = os.environ if environ is None else environ

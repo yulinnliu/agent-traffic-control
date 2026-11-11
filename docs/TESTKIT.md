@@ -320,9 +320,11 @@ every project.
   records for example: an excluded file is never read as a link source, in
   any mode, while links from other files into it still resolve and still
   have their anchors checked. A glob matches the repository-relative POSIX
-  path with `fnmatch` rules, case-sensitive, `*` also matching `/`. A glob
-  that matches no file is not an error, so a stale one stays in the
-  verifier's argv until a reader removes it.
+  path with `fnmatch` rules, case-sensitive, `*` also matching `/`, so a
+  broad glob such as `*.md` excludes every file and turns the check off:
+  name the exact files or the narrowest directory pattern. A glob that
+  matches no file is not an error, so a stale one stays in the project's
+  integration verifier until a reader removes it.
 - `python -m atc_testkit.docs --range` checks the range the verifier's
   `ATC_EXPECTED_MAIN_SHA` and `ATC_INTEGRATION_SHA` name: the Markdown files
   it adds or changes, or every tracked one when it deletes a path. It prints
@@ -333,6 +335,16 @@ every project.
   as a `StaticCheck` with the token `DOCUMENTATION_REFERENCE_FAILED`, the
   documentation check a project's verifier runs for a documentation-only
   range.
+- The verifier runs `Project.documentation_check` and passes it no argv of
+  its own, so a project declares `--allow-outside`, `--anchors` and its
+  excludes in the integration verifier that builds its `Project`: it
+  extends `docs.DOCUMENTATION_CHECK`'s argv and sets the result as
+  `documentation_check`, for example:
+
+  ```python
+  documentation_check = dataclasses.replace(docs.DOCUMENTATION_CHECK, argv=(
+      *docs.DOCUMENTATION_CHECK.argv, "--exclude", "packages/hami-quant-research/hypotheses/H00[1-6]_*.md"))
+  ```
 
 ## Child processes
 
