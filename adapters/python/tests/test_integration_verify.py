@@ -298,6 +298,13 @@ def test_ci_runs_the_full_suite_through_the_stages_and_the_verifiers_static_chec
     assert iv.project(WORKSPACE).tests_dir == iv.ADAPTER_DIR
 
 
+def test_the_root_report_digests_the_adapters_dependency_files_by_their_root_paths() -> None:
+    """`atc integrate` digests them in the candidate tree from the repository root (verification-evidence README)."""
+    names = iv.project(WORKSPACE).tests_dependency_files()
+    assert names == ("adapters/python/uv.lock", "adapters/python/.python-version")
+    assert all((WORKSPACE / name).is_file() for name in names)
+
+
 def test_the_selection_gives_the_stages_adapter_paths_the_full_suite_or_none(capsys: pytest.CaptureFixture[str]) -> None:
     test_file = f"{iv.ADAPTER_DIR}/tests/{select_tests.SELF_TEST}"
     assert iv.selected_tests([test_file], WORKSPACE) == [f"tests/{select_tests.SELF_TEST}"]

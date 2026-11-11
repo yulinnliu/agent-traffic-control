@@ -42,6 +42,8 @@ class Project:
 
     The root form's ``test_paths`` maps the range's paths to the pytest paths its stages run, relative to
     ``tests_dir``: ``[]`` for the default suite, ``None`` for no test.
+
+    ``dependency_files`` names the files a report digests, relative to ``root``; the toolchain's by default.
     """
     root: Path
     argv_file: Path
@@ -62,6 +64,7 @@ class Project:
     test_paths: Callable[[Sequence[str]], list[str] | None] | None = None
     tests_dir: str = "."
     documentation_only: Callable[[Sequence[str]], bool] | None = None
+    dependency_files: tuple[str, ...] | None = None
     table: dict = field(init=False, compare=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -93,6 +96,10 @@ class Project:
     def tests_toolchain(self) -> Toolchain:
         """The toolchain this project's tests run with; ``TOOLCHAIN_UNKNOWN`` for a name no toolchain has."""
         return toolchains.for_tree(self.root) if self.toolchain is None else self.toolchain
+
+    def tests_dependency_files(self) -> tuple[str, ...]:
+        """The files a report digests as the tests' dependency inputs, relative to ``root``."""
+        return self.tests_toolchain().dependency_files if self.dependency_files is None else self.dependency_files
 
     def stage_entry(self) -> tuple[str, ...]:
         return tuple(self.tests_toolchain().entry_argv) if self.runner is None else tuple(self.runner)

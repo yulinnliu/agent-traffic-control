@@ -26,7 +26,10 @@ time_slack          number: the seconds of ATC_TEST_TIME_SLACK the stages ran wi
   paths. Worker counts, temporary directories and verbosity are
   not part of a stage.
 - `dependency_inputs` holds the digest of each file that fixes the dependency
-  environment, such as the lock file and the interpreter version file.
+  environment, such as the lock file and the interpreter version file, by its
+  path from the repository root. A project whose toolchain lives in a
+  subdirectory names those files with that directory, as the workspace root
+  names `adapters/python/uv.lock`.
 - `time_slack` is the slack the stages ran with, the default when the
   variable was unset (`docs/TESTKIT.md` § Time slack).
 - Further keys (`python`, `classification`, `checks`, `durations`) are
@@ -162,3 +165,10 @@ note, or `null` when the verifier ran. The result reports
 `verification_reused`, the record path. The progress line on stderr reads
 `verify: candidate <sha> REUSED <path> (verified <at>)` or
 `verify: candidate <sha> RUN (evidence: <reason>) ...`.
+
+`atc integrate --check` runs the same checks against the slot-free main tip
+it reads, writes nothing, and reports the outcome as `verification_reuse`
+in its JSON object and `reuse=<value>` at the end of its `CHECK` line:
+`REUSED`, the reason the verifier would run, or `RECORDS_ONLY` for a
+records-only range, which runs the record check. It computes the time slack
+in its own process, so a run from another environment can differ.

@@ -16,7 +16,7 @@ from pathlib import Path, PurePosixPath
 import os
 import sys
 
-from atc_testkit import stages, verifier
+from atc_testkit import stages, toolchain, verifier
 from atc_testkit.project import Project, StaticCheck
 
 import select_tests
@@ -66,12 +66,17 @@ def selection_predicate(root: Path) -> Callable[[Sequence[str]], list[str] | Non
     return lambda paths: selected_tests(paths, root)
 
 
+def dependency_files(root: Path) -> tuple[str, ...]:
+    """The adapter toolchain's dependency files, relative to the root, as the verifier's report digests them."""
+    return tuple(f"{ADAPTER_DIR}/{name}" for name in toolchain.for_tree(root / ADAPTER_DIR).dependency_files)
+
+
 def project(root: Path = ROOT) -> Project:
     return Project(root=root, argv_file=root / ADAPTER_DIR / "scripts/integration-verify.json",
                    checks=(WORKSPACE_CHECK, POLICY_CHECK), source_roots=SOURCE_ROOTS,
                    product_prefixes=PRODUCT_PREFIXES, credentials=(), data_roots=(),
                    test_paths=selection_predicate(root), tests_dir=ADAPTER_DIR,
-                   documentation_only=documentation_predicate(root))
+                   documentation_only=documentation_predicate(root), dependency_files=dependency_files(root))
 
 
 def main(environ: Mapping[str, str] | None = None, root: Path = ROOT, run: stages.Run = stages.run_logged) -> int:

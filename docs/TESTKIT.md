@@ -292,8 +292,14 @@ working-directory rules bind it as they bind a project's verifier.
   documentation-only; the selector's lines after it say which tests ran.
 - The candidate has no `workspace.yaml`, `projects/`, `worktrees/` or
   `state/`, so the checks read the committed tree only, as CI does.
-- It writes no verification report, so `atc integrate` records no evidence
-  for the root.
+- A pass writes the verification report, as a consumer's does
+  (`shared/conformance/verification-evidence/README.md` § Report), so
+  `atc integrate` reuses the reviewer's `atc verify` record of the same
+  candidate in place of running the verifier again (§ Integration reuse).
+  Its `dependency_inputs` are the adapter toolchain's dependency files,
+  named from the root (`adapters/python/uv.lock`,
+  `adapters/python/.python-version`); its `classification` is
+  `documentation-only` or `impact-selected`.
 - The full suite, and with it the check that fails a session whose tests
   read the root's guidance undeclared (`ROOT_READ_UNDECLARED`), runs only in
   a manually dispatched run of `.github/workflows/validate.yml`

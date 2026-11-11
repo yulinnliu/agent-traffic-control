@@ -248,7 +248,7 @@ def _write_report(environ: Mapping[str, str], project: Project, pytest_paths: li
     """A report that cannot be written leaves the verdict a pass."""
     try:
         path = evidence.write_report(environ, project.root, pytest_paths, project.stage_list(),
-                                     dependency_files=project.tests_toolchain().dependency_files,
+                                     dependency_files=project.tests_dependency_files(),
                                      classification="documentation-only" if doc_only else "impact-selected")
     except Exception as error:  # noqa: BLE001 - the verification already passed
         print(f"verification report: not written ({type(error).__name__}: {error})", flush=True)
@@ -283,8 +283,10 @@ def _consumer_checks(project: Project, checks: _Checks, base: str, sha: str, pat
     return doc_only
 
 
-def _root_checks(project: Project, checks: _Checks, base: str, sha: str, paths: list[str]) -> None:
-    """The root form: its static checks, then the stages over its selection unless the range is documentation-only."""
+def _root_checks(project: Project, checks: _Checks, base: str, sha: str,
+                 paths: list[str]) -> tuple[bool, list[str] | None]:
+    """The root form: its static checks, then the stages over its selection unless the range is documentation-only;
+    whether it was, and the pytest paths the stages ran."""
     doc_only = project.documentation_only(paths)
     print(f"classification: {'documentation-only' if doc_only else 'full'}", flush=True)
     pytest_paths = None
@@ -300,6 +302,7 @@ def _root_checks(project: Project, checks: _Checks, base: str, sha: str, paths: 
         checks.stages(pytest_paths, project.root / project.tests_dir)
     elif not doc_only:
         print("selection: no test selected", flush=True)
+    return doc_only, pytest_paths
 
 
 def main(project: Project, environ: Mapping[str, str] | None = None, run: stages.Run = stages.run_logged) -> int:
@@ -330,8 +333,9 @@ def main(project: Project, environ: Mapping[str, str] | None = None, run: stages
                                          data_roots=project.data_root_variables, toolchain=toolchain)
         checks = _Checks(project, work, isolated, run, workers)
         if project.select is None:
-            _root_checks(project, checks, base, sha, paths)
+            doc_only, pytest_paths = _root_checks(project, checks, base, sha, paths)
             check_final_state(project.root, sha)
+            _write_report(environ, project, pytest_paths, doc_only)
         else:
             doc_only = _consumer_checks(project, checks, base, sha, paths, chosen)
             check_final_state(project.root, sha)

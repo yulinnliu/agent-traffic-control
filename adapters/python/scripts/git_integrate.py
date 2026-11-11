@@ -51,6 +51,7 @@ EVIDENCE_RETENTION_SECONDS = 14 * 24 * 3600
 CANDIDATE_RECORDS = "verify"  # the subdirectory of EVIDENCE_DIR holding `atc verify` records, which no gate reads
 PASS, FAIL = "PASS", "FAIL"
 REUSED = "REUSED"
+RECORDS_ONLY = "RECORDS_ONLY"
 VERIFIER_FAILURES = ("VERIFICATION_FAILED", "VERIFICATION_TIMEOUT", "CANDIDATE_CHANGED")
 INTEGRATIONS = ("atc", "integrations.jsonl")
 CANDIDATE_REFS = "refs/atc/integration-candidates"
@@ -1238,7 +1239,7 @@ def build_and_verify(
             if progress:
                 print(f"verify: candidate {candidate_sha} {RECORD_CHECK}", file=sys.stderr)
             _check_records(candidate_dir, candidate_sha)
-            built.evidence_reason = "RECORDS_ONLY"
+            built.evidence_reason = RECORDS_ONLY
         else:
             if progress:
                 evidence = f" RUN (evidence: {reuse_reason})" if reuse_reason else ""
@@ -1524,13 +1525,17 @@ def render_result(result: dict, binding: Binding, project: str, log: str | None 
     return f"{line} log {log}" if log else line
 
 
-def render_check(verdict: str, reason: str, t: Target, tip: str | None, carried: dict | None = None) -> str:
-    """The `--check` line: `CHECK <verdict> <reason>:` then project, branch, tip and binding; evidence is `--json`."""
+def render_check(verdict: str, reason: str, t: Target, tip: str | None, carried: dict | None = None,
+                 reuse: str | None = None) -> str:
+    """The `--check` line: `CHECK <verdict> <reason>:` then project, branch, tip, binding and the verifier reuse;
+    evidence is `--json`."""
     line = (
         f"CHECK {verdict} {reason}: {t.project} branch={t.branch or '-'} tip={gp.short(tip)} "
         f"{render_binding(t.binding)}"
     )
-    return f"{line} carried_from={gp.short(carried['carried_over_from'])}" if carried else line
+    if carried:
+        line += f" carried_from={gp.short(carried['carried_over_from'])}"
+    return f"{line} reuse={reuse}" if reuse else line
 
 
 class _Human:
@@ -1643,11 +1648,19 @@ def check(t: Target, as_json: bool) -> int:
         except Refused as refusal:
             _print_refusal(refusal, {**payload, "preflight": asdict(report)}, as_json)
             return refusal.code
+    reuse = check_reuse(t, report.verdict, report.evidence["main_tip"])
     if as_json:
-        print(json.dumps({**payload, "preflight": asdict(report), **({"carried_over": carried} if carried else {})}, indent=2))
+        print(json.dumps({**payload, "preflight": asdict(report), **({"carried_over": carried} if carried else {}),
+                          "verification_reuse": reuse}, indent=2))
     else:
-        print(render_check(report.verdict, report.reason, t, report.evidence["topic_tip"], carried))
+        print(render_check(report.verdict, report.reason, t, report.evidence["topic_tip"], carried, reuse))
     return 0
+
+
+def check_reuse(t: Target, verdict: str, main_tip: str) -> str:
+    """What the integration would do in place of the verifier: `REUSED`, the reason it would run, or
+    `RECORDS_ONLY`; read-only, and computed in this process's environment (its time slack)."""
+    return RECORDS_ONLY if t.binding.records_only else reuse_check(t, verdict, main_tip)[1]
 
 
 def main(argv: list[str] | None = None, root: Path = hw.ROOT, cwd: str | None = None) -> int:

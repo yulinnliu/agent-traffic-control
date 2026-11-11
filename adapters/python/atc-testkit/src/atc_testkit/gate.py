@@ -78,7 +78,7 @@ def _decisions(project: Project, push_lines: list[str], pytest_paths: list[str],
             commit = pushed  # an object Git cannot peel to a commit has no record
         decisions.append(evidence.check(git, project.root, commit, pytest_paths, project.stage_list(),
                                         project.argv_file,
-                                        dependency_files=project.tests_toolchain().dependency_files))
+                                        dependency_files=project.tests_dependency_files()))
     return decisions
 
 

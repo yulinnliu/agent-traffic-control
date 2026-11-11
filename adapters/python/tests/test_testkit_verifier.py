@@ -378,7 +378,8 @@ def test_the_root_form_has_no_consumer_rows_and_runs_the_stages(candidate: Candi
     project = root_form(candidate.root, checks=checks)
     assert verifier.main(project, candidate.env(ATC_VERIFICATION_REPORT=str(report)), recorder) == 0
     assert recorder.logs == ["diff_check_failed.log", "workspace.log", *STAGE_LOGS]
-    assert not report.exists(), "the root writes no verification report"
+    written = json.loads(report.read_text(encoding="utf-8"))
+    assert written["classification"] == "impact-selected" and written["selection"] == {"full": True, "paths": []}
     for (command, _log, env, private), stage in zip(recorder.calls[-3:], project.stage_list()):
         assert command[:3] == ["root-runner", "-q", "-m"] and command[3] == stage.marker
         assert Path(command[command.index("--basetemp") + 1]).is_relative_to(env["TEMP"])
@@ -437,6 +438,28 @@ def test_a_root_range_of_markdown_under_docs_skips_the_selection_and_the_stages(
         raise AssertionError("a documentation-only range selects nothing")
     assert verifier.main(root_form(candidate.root, test_paths=unused), candidate.env(), recorder) == 0
     assert recorder.logs == ["diff_check_failed.log"]
+
+
+@pytest.mark.integration
+def test_a_root_documentation_range_writes_a_report_of_no_test(candidate: Candidate, tmp_path: Path) -> None:
+    candidate.advance("docs/a.md")
+    report = tmp_path / "report.json"
+    assert verifier.main(root_form(candidate.root), candidate.env(ATC_VERIFICATION_REPORT=str(report)), Recorder()) == 0
+    written = json.loads(report.read_text(encoding="utf-8"))
+    assert written["classification"] == "documentation-only" and written["selection"] == {"full": False, "paths": []}
+
+
+@pytest.mark.integration
+def test_a_root_report_digests_the_dependency_files_it_names(candidate: Candidate, tmp_path: Path) -> None:
+    (candidate.root / "adapter").mkdir()
+    (candidate.root / "adapter/uv.lock").write_text("lock", encoding="utf-8")
+    candidate.advance()
+    report = tmp_path / "report.json"
+    project = root_form(candidate.root, dependency_files=("adapter/uv.lock", "adapter/.python-version"))
+    assert verifier.main(project, candidate.env(ATC_VERIFICATION_REPORT=str(report)), Recorder()) == 0
+    inputs = json.loads(report.read_text(encoding="utf-8"))["dependency_inputs"]
+    assert set(inputs) == {"adapter/uv.lock", "adapter/.python-version"}
+    assert inputs["adapter/.python-version"] == "absent" and inputs["adapter/uv.lock"] != "absent"
 
 
 @pytest.mark.integration
@@ -595,6 +618,26 @@ def test_atc_verify_runs_the_verifier_on_the_candidate_without_the_slot_or_a_ref
     assert git(integration_repo, "rev-parse", "main") == before and git(integration_repo, "for-each-ref") == refs
     assert git(integration_repo, "worktree", "list", "--porcelain").count("worktree ") == 1
     assert [path.suffix for path in (atc_tmp / "candidates").iterdir()] == [".log"]
+
+
+@pytest.mark.integration
+def test_atc_integrate_reuses_the_root_forms_verify_record(
+        integration_repo: Path, atc_tmp: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    tip = (integration_repo / ".git/atc-test-tip").read_text(encoding="utf-8")
+    check = ["--project", integration_repo.name, "--reviewed", tip, "--task", "test-owner-authorization", "--check"]
+    assert gi.main([*check, "--json"], root=workspace_beside(integration_repo)) == 0
+    assert json.loads(capsys.readouterr().out)["verification_reuse"] == "NO_RECORD"
+    assert verify(integration_repo) == 0, capsys.readouterr()
+    capsys.readouterr()
+    assert gi.main([*check, "--json"], root=workspace_beside(integration_repo)) == 0
+    assert json.loads(capsys.readouterr().out)["verification_reuse"] == "REUSED"
+    assert gi.main(check, root=workspace_beside(integration_repo)) == 0
+    assert capsys.readouterr().out.rstrip().endswith(" reuse=REUSED")
+    assert [path.suffix for path in (atc_tmp / "candidates").iterdir()] == [".log"]
+    assert integrate(integration_repo) == 0, capsys.readouterr()
+    assert " REUSED " in capsys.readouterr().err
+    line = json.loads((integration_repo / ".git/atc/integrations.jsonl").read_text(encoding="utf-8").splitlines()[-1])
+    assert line["reviewed"] == tip and line["verification_evidence"]["candidate_sha"] == tip
 
 
 @pytest.mark.integration
