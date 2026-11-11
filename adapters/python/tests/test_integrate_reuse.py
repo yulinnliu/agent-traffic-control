@@ -33,6 +33,11 @@ def counting_verifier(tmp_path: Path) -> tuple[str, Path, Path]:
     return json.dumps([sys.executable, "-c", script]), runs, failing
 
 
+# The fields of a candidate record `atc integrate` compares before it reuses it (git_integrate.reuse_check).
+REUSE_FIELDS = ("schema", "kind", "result", "clean", "expected_main", "reviewed", "carried_over_from", "verdict",
+                "tree", "verify_argv", "timeout", "platform", "report")
+
+
 def run_count(runs: Path) -> int:
     return len(runs.read_text()) if runs.exists() else 0
 
@@ -273,8 +278,7 @@ def test_a_verify_under_another_worker_grant_is_still_reused(
         assert verify(repo, tip, capsys=capsys) == 0
         second = candidate_record(repo, "FF", base, tip)
         assert grants.read_text() == "41"
-        assert {key: value for key, value in first.items() if key != "verified_at"} == \
-            {key: value for key, value in second.items() if key != "verified_at"}
+        assert {key: second.get(key) for key in REUSE_FIELDS} == {key: first.get(key) for key in REUSE_FIELDS}
         assert integrate(repo, "topic", tip, "--json") == 0
         assert json.loads(capsys.readouterr().out)["verification_reuse"] == "REUSED"
         assert grants.read_text() == "41"
