@@ -36,7 +36,7 @@ def test_init_refuses_to_overwrite_without_force(tmp_path: Path) -> None:
 def test_init_without_remote_needs_explicit_source(tmp_path: Path) -> None:
     root = tmp_path / "root"
     root.mkdir()
-    assert bootstrap.init(root, None, force=False, environ={}) == 1
+    assert bootstrap.init(root, None, force=False, environ={}) == 2
     assert not (root / "workspace.yaml").exists()
 
 
@@ -70,8 +70,8 @@ def test_add_rejects_non_repository_and_bad_names(tmp_path: Path) -> None:
     bootstrap.init(root, "owner/repo", force=True, environ={})
     (root / "projects" / "plain").mkdir(parents=True)
     assert bootstrap.add(root, "plain", None, []) == 1
-    assert bootstrap.add(root, "Bad_Name", None, []) == 1
-    assert bootstrap.add(root, "plain", str(root / "elsewhere"), []) == 1
+    assert bootstrap.add(root, "Bad_Name", None, []) == 2
+    assert bootstrap.add(root, "plain", str(root / "elsewhere"), []) == 2
 
 
 @pytest.mark.integration
@@ -83,7 +83,7 @@ def test_add_refuses_the_reserved_root_name_before_writing(tmp_path: Path) -> No
     project.mkdir(parents=True)
     run_git(project, "init", "-q", "-b", "main")
     before = (root / "workspace.yaml").read_text(encoding="utf-8")
-    assert bootstrap.add(root, "root", None, []) == 1
+    assert bootstrap.add(root, "root", None, []) == 2
     assert (root / "workspace.yaml").read_text(encoding="utf-8") == before
 
 
