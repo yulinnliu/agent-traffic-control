@@ -1,6 +1,6 @@
 task_id: ATC-0021
 repository: yulinnliu/agent-traffic-control
-base_sha: b0c5c2b308b43f7d24993e53ac3c0e4a867f7aa5
+base_sha: 0b1f6836f9e8f2992fcd44b6d71a3d841df7814d
 scope: 'Batch release: atc 0.4.0 and atc-testkit 0.11.0 carrying ATC-0018, ATC-0019
   and ATC-0020'
 governance_source: yulinnliu/agent-traffic-control
