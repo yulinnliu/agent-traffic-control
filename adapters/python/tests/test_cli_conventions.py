@@ -40,10 +40,18 @@ def test_every_argument_has_help_and_a_typed_metavar(subcommand: tuple[str, ...]
                     f"{parser.prog} {action.option_strings or action.dest}: metavar {action.metavar!r}"
 
 
-def test_the_help_pages_checked_cover_every_command_and_testkit_usage() -> None:
+def test_the_help_pages_checked_are_every_parser_and_testkit_usage(
+        parsers: list[argparse.ArgumentParser], capsys: pytest.CaptureFixture[str]) -> None:  # noqa: F811
+    """SUBCOMMANDS equals the parsers each top-level `--help` builds, plus the atc-testkit groups and usages."""
     from atc_testkit import commands
-    assert {(name,) for name in [*atc_cli.COMMANDS, *atc_cli.TESTKIT_COMMANDS]} <= set(SUBCOMMANDS)
-    assert set(commands.USAGES) <= set(SUBCOMMANDS)
+    for name in atc_cli.COMMANDS:
+        assert call([name, "--help"]) == 0
+    capsys.readouterr()
+    built = {tuple(parser.prog.split()[1:]) for parser in parsers}
+    assert all(parser.prog.startswith("atc ") for parser in parsers), [parser.prog for parser in parsers]
+    expected = built | {(group,) for group in commands.GROUPS} | set(commands.USAGES)
+    assert set(SUBCOMMANDS) == expected
+    assert len(SUBCOMMANDS) == len(set(SUBCOMMANDS))
 
 
 @pytest.mark.parametrize("subcommand", SUBCOMMANDS, ids=" ".join)
