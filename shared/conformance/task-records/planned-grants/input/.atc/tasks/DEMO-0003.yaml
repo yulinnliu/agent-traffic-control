@@ -1,0 +1,14 @@
+task_id: DEMO-0003
+repository: example/demo
+scope: 'Plan § B: the gadget'
+governance_source: example/governance
+authority:
+  edit: true
+  commit: false
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
+rank: 0
+after:
+- gadget

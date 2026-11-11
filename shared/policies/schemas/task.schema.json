@@ -2,11 +2,16 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://agent-traffic-control/schemas/task.schema.json",
   "title": "Task record",
-  "description": "One task of one repository, kept in .atc/tasks/<task_id>.yaml (docs/TASKS.md § Record).",
+  "description": "One task of one repository, kept in .atc/tasks/<task_id>.yaml (docs/TASKS.md § Record); a planned record has no branch, base_sha or governance_revision and grants nothing (docs/TASKS.md § Backlog).",
   "type": "object",
-  "required": ["task_id", "repository", "base_sha", "scope", "governance_source", "governance_revision", "branch", "authority"],
+  "required": ["task_id", "repository", "scope", "governance_source", "authority"],
+  "dependentRequired": {
+    "branch": ["base_sha", "governance_revision"],
+    "base_sha": ["branch", "governance_revision"],
+    "governance_revision": ["branch", "base_sha"]
+  },
   "properties": {
-    "task_id": {"type": "string", "pattern": "^[A-Z][A-Z0-9]{1,7}-[0-9]{4}$"},
+    "task_id": {"$ref": "#/$defs/task_id"},
     "repository": {"type": "string", "minLength": 1},
     "repository_identity_status": {"type": "string"},
     "base_sha": {"$ref": "#/$defs/sha"},
@@ -41,23 +46,48 @@
       "type": "array",
       "uniqueItems": true,
       "items": {"enum": ["worktree", "scratches", "reports"]}
-    }
+    },
+    "rank": {"type": "integer", "minimum": 1},
+    "after": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/task_id"}},
+    "notes": {"type": "string", "minLength": 1}
   },
-  "if": {
-    "required": ["authority"],
-    "properties": {
-      "authority": {
-        "anyOf": [
-          {"required": ["push_topic"], "properties": {"push_topic": {"const": true}}},
-          {"required": ["integrate_main"], "properties": {"integrate_main": {"const": true}}},
-          {"required": ["push_main"], "properties": {"push_main": {"const": true}}},
-          {"required": ["deploy"], "properties": {"deploy": {"const": true}}}
-        ]
+  "allOf": [
+    {
+      "if": {
+        "required": ["authority"],
+        "properties": {
+          "authority": {
+            "anyOf": [
+              {"required": ["push_topic"], "properties": {"push_topic": {"const": true}}},
+              {"required": ["integrate_main"], "properties": {"integrate_main": {"const": true}}},
+              {"required": ["push_main"], "properties": {"push_main": {"const": true}}},
+              {"required": ["deploy"], "properties": {"deploy": {"const": true}}}
+            ]
+          }
+        }
+      },
+      "then": {"required": ["authority_basis"]}
+    },
+    {
+      "if": {"not": {"required": ["branch"]}},
+      "then": {
+        "properties": {
+          "authority": {
+            "properties": {
+              "edit": {"const": false},
+              "commit": {"const": false},
+              "push_topic": {"const": false},
+              "integrate_main": {"const": false},
+              "push_main": {"const": false},
+              "deploy": {"const": false}
+            }
+          }
+        }
       }
     }
-  },
-  "then": {"required": ["authority_basis"]},
+  ],
   "$defs": {
-    "sha": {"type": "string", "pattern": "^([0-9a-f]{40}|[0-9a-f]{64})$"}
+    "sha": {"type": "string", "pattern": "^([0-9a-f]{40}|[0-9a-f]{64})$"},
+    "task_id": {"type": "string", "pattern": "^[A-Z][A-Z0-9]{1,7}-[0-9]{4}$"}
   }
 }

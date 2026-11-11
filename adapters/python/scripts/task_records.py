@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Task records: write, list and check `.atc/tasks/<task_id>.yaml` (docs/TASKS.md).
 
-`new` writes a record in the topic worktree holding the working directory. `list` reads the records on `main`
-and every local branch without a checkout and derives each task's status. `check` reports the records and
-declaration in a working tree, one problem per line.
+`plan` commits a planned record to the `backlog` branch, `rank` and `drop` change one there, and `start` moves
+one into the topic worktree holding the working directory; `new` does both for an unplanned task (§ Backlog).
+`list` reads the records on `main` and every local branch without a checkout and derives each task's status.
+`check` reports the records and declaration in a working tree, one problem per line.
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import yaml
@@ -26,14 +28,19 @@ ROOT = Path(__file__).resolve().parents[3]
 SCHEMA = ROOT / "shared" / "policies" / "schemas" / "task.schema.json"
 TASKS_DIR = ".atc/tasks"
 MAIN = "main"
-STATUSES = ("closed", "abandoned", "open", "integrated", "bound", "unknown")
+BACKLOG = "backlog"
+STATUSES = ("closed", "abandoned", "planned", "open", "integrated", "bound", "unknown")
+DONE = ("integrated", "closed")
+NO_AUTHORITY = {"edit": False, "commit": False, "push_topic": False, "integrate_main": False,
+                "push_main": False, "deploy": False}
+CAS_ATTEMPTS = 5
 SCOPE_WIDTH = 60
 REMOTE_URL = re.compile(r"^(?:[a-z][a-z0-9+.-]*://[^/]+/|[^/@:]+@[^/:]+:)(?:.*/)?([^/]+/[^/]+?)(?:\.git)?/?$")
 REPOSITORY_ENV = ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY")
 
 
 # Refusals caused by the invocation or a fault; every other token is a STOP of a valid call (CLI.md § Exit codes).
-ERROR_TOKENS = frozenset({"GIT_FAILED", "UNKNOWN_PROJECT", "RECORD_INVALID"})
+ERROR_TOKENS = frozenset({"GIT_FAILED", "UNKNOWN_PROJECT", "RECORD_INVALID", "UNKNOWN_TASK"})
 
 
 class Refused(Exception):
@@ -49,9 +56,10 @@ def _env() -> dict[str, str]:
     return env
 
 
-def git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess:
-    run = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True,
-                         encoding="utf-8", errors="replace", env=_env(), check=False)
+def git(repo: Path, *args: str, check: bool = True, env: dict[str, str] | None = None,
+        input: str | None = None) -> subprocess.CompletedProcess:
+    run = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, input=input,
+                         encoding="utf-8", errors="replace", env={**_env(), **(env or {})}, check=False)
     if check and run.returncode != 0:
         raise Refused("GIT_FAILED", f"git {' '.join(args)} in {repo}: {(run.stderr or '').strip()}")
     return run
@@ -196,6 +204,9 @@ def taken_numbers(worktree: Path, prefix: str) -> set[int]:
     directory = worktree / TASKS_DIR
     if directory.is_dir():
         stems += [p.stem for p in directory.glob("*.yaml")]
+    if backlog_tip(worktree) is not None:
+        history = git(worktree, "log", "--format=", "--name-only", f"refs/heads/{BACKLOG}", "--", f"{TASKS_DIR}/").stdout
+        stems += [Path(line).name.removesuffix(".yaml") for line in history.splitlines() if line.endswith(".yaml")]
     import git_preflight
     stems += [r["task"] for r in git_preflight.read_integrations(worktree) if isinstance(r.get("task"), str)]
     return {int(m.group(1)) for stem in stems if (m := pattern.match(stem))}
@@ -244,7 +255,8 @@ def new_hint() -> str:
     return "Run it inside the new worktree: atc task new --project <name> --scope <text>, root for the workspace root"
 
 
-def new(root: Path, environ: dict[str, str], cwd: str, scope: str, project: str | None) -> Path:
+def topic_place(root: Path, environ: dict[str, str], cwd: str, project: str | None) -> tuple[Path, str, Path, str, str]:
+    """The topic worktree holding ``cwd`` as (worktree, project name, main checkout, branch, prefix), or a refusal."""
     worktree = toplevel(Path(cwd))
     if worktree is None:
         raise Refused("NOT_IN_REPOSITORY", f"{cwd} is in no Git working tree")
@@ -265,30 +277,176 @@ def new(root: Path, environ: dict[str, str], cwd: str, scope: str, project: str 
         raise Refused("NO_DECLARATION", f"{worktree}/AGENTS.md has no '{task_section.HEADING}' section")
     if (problem := prefix_problem(prefix)) is not None:
         raise Refused("NO_PREFIX", problem)
-    number = max(taken_numbers(worktree, prefix), default=0) + 1
-    if number > 9999:
-        raise Refused("TASK_IDS_EXHAUSTED", f"{prefix} has used every four-digit number")
-    task_id = f"{prefix}-{number:04d}"
+    return worktree, name, main_checkout, branch, prefix
+
+
+def dump(record: dict, prefix: str | None) -> str:
+    """``record`` as YAML, refused unless it passes the record check."""
+    text = yaml.safe_dump(record, sort_keys=False, allow_unicode=True)
+    if found := record_problems(f"{record['task_id']}.yaml", text, prefix, validator()):
+        raise Refused("RECORD_INVALID", "; ".join(found))
+    return text
+
+
+def new(root: Path, environ: dict[str, str], cwd: str, scope: str, project: str | None) -> Path:
+    """An unplanned task: its ID issued through the backlog like a planned one's, then started at once."""
+    worktree, name, main_checkout, branch, prefix = topic_place(root, environ, cwd, project)
+    task_id = reserve(root, name, main_checkout, prefix, scope, scan=worktree)
+    return bind(root, worktree, name, main_checkout, branch, prefix, task_id, None)
+
+
+# backlog
+
+def backlog_tip(repo: Path) -> str | None:
+    run = git(repo, "rev-parse", "--verify", "--quiet", f"refs/heads/{BACKLOG}", check=False)
+    return run.stdout.strip() or None if run.returncode == 0 else None
+
+
+def backlog_record(repo: Path, tip: str | None, task_id: str) -> dict | None:
+    """The record ``task_id`` on the backlog at ``tip``; `None` when absent."""
+    if tip is None:
+        return None
+    shown = git(repo, "show", f"{tip}:{TASKS_DIR}/{task_id}.yaml", check=False)
+    if shown.returncode != 0:
+        return None
+    try:
+        data = yaml.safe_load(shown.stdout)
+    except yaml.YAMLError:
+        data = None
+    if not isinstance(data, dict):
+        raise Refused("RECORD_INVALID", f"{BACKLOG}:{TASKS_DIR}/{task_id}.yaml is not a YAML mapping")
+    return data
+
+
+def planned(repo: Path, tip: str | None, task_id: str) -> dict:
+    """The record ``task_id`` while it is planned on the backlog, or `NOT_PLANNED`."""
+    record = backlog_record(repo, tip, task_id)
+    if record is None:
+        raise Refused("NOT_PLANNED", f"{task_id} has no record on the {BACKLOG} branch; atc task list --status planned")
+    if isinstance(record.get("branch"), str) or isinstance(record.get("closure"), dict):
+        raise Refused("NOT_PLANNED", f"{task_id} on the {BACKLOG} branch is bound or closed, not planned")
+    return record
+
+
+def backlog_commit(repo: Path, tip: str | None, task_id: str, text: str | None, message: str) -> bool:
+    """One commit on the backlog writing (or, for ``text`` `None`, removing) the record of ``task_id``, moved
+    there only while the branch is still at ``tip``; `False` when another writer moved it first."""
+    path = f"{TASKS_DIR}/{task_id}.yaml"
+    with tempfile.TemporaryDirectory() as scratch:
+        index = {"GIT_INDEX_FILE": str(Path(scratch) / "index")}
+        git(repo, "read-tree", *([tip] if tip else ["--empty"]), env=index)
+        if text is None:
+            git(repo, "update-index", "--force-remove", "--", path, env=index)
+        else:
+            stored = subprocess.run(["git", "-C", str(repo), "hash-object", "-w", "--stdin"], input=text.encode("utf-8"),
+                                    capture_output=True, env=_env(), check=False)
+            if stored.returncode != 0:
+                raise Refused("GIT_FAILED", f"git hash-object in {repo}: {stored.stderr.decode('utf-8', 'replace').strip()}")
+            blob = stored.stdout.decode("ascii").strip()
+            git(repo, "update-index", "--add", "--cacheinfo", f"100644,{blob},{path}", env=index)
+        tree = git(repo, "write-tree", env=index).stdout.strip()
+    commit = git(repo, "commit-tree", tree, *(["-p", tip] if tip else []), "-m", message).stdout.strip()
+    return git(repo, "update-ref", "-m", message, f"refs/heads/{BACKLOG}", commit, tip or "", check=False).returncode == 0
+
+
+def backlog_write(repo: Path, change) -> None:
+    """Applies ``change(tip) -> (task_id, text or None, message)`` to the backlog by compare-and-swap, reading the
+    tip again whenever another writer moved it."""
+    for _ in range(CAS_ATTEMPTS):
+        tip = backlog_tip(repo)
+        if backlog_commit(repo, tip, *change(tip)):
+            return
+    raise Refused("BACKLOG_BUSY", f"the {BACKLOG} branch of {repo} moved {CAS_ATTEMPTS} times while writing; run it again")
+
+
+def reserve(root: Path, name: str, repo: Path, prefix: str, scope: str, scan: Path | None = None,
+            rank: int | None = None, after: list[str] | None = None, notes: str | None = None) -> str:
+    """Commits a new planned record to the backlog of ``repo`` and returns its ID: one past every number in use."""
+    identity = repository_identity(scan or repo, repo)
+    source = bound_governance(name, root, scan or repo)[0]
+    issued: list[str] = []
+
+    def change(tip: str | None) -> tuple[str, str, str]:
+        taken = taken_numbers(scan or repo, prefix)
+        unknown = [a for a in after or [] if not (m := re.fullmatch(rf"{re.escape(prefix)}-(\d{{4}})", a))
+                   or int(m.group(1)) not in taken]
+        if unknown:
+            raise Refused("UNKNOWN_TASK", f"--after names {', '.join(unknown)}, which no record or integration of {name} holds")
+        number = max(taken, default=0) + 1
+        if number > 9999:
+            raise Refused("TASK_IDS_EXHAUSTED", f"{prefix} has used every four-digit number")
+        task_id = f"{prefix}-{number:04d}"
+        record = {"task_id": task_id, **identity, "scope": scope, "governance_source": source,
+                  "authority": dict(NO_AUTHORITY)}
+        record.update({k: v for k, v in (("rank", rank), ("after", after), ("notes", notes)) if v})
+        issued[:] = [task_id]
+        return task_id, dump(record, prefix), f"plan {task_id}"
+
+    backlog_write(repo, change)
+    return issued[0]
+
+
+def bind(root: Path, worktree: Path, name: str, main_checkout: Path, branch: str, prefix: str, task_id: str,
+         scope: str | None) -> Path:
+    """Moves the planned record ``task_id`` from the backlog into ``worktree``, bound to its branch with `edit` and
+    `commit`; the record is left uncommitted in the worktree."""
+    if not task_id.startswith(f"{prefix}-"):
+        raise Refused("WRONG_REPOSITORY", f"{task_id} lacks the prefix {prefix} that {worktree}/AGENTS.md declares")
+    path = worktree / TASKS_DIR / f"{task_id}.yaml"
+    if path.exists():
+        raise Refused("RECORD_EXISTS", f"{path} already exists")
+    record = planned(main_checkout, backlog_tip(main_checkout), task_id)
     source, revision = bound_governance(name, root, worktree)
-    record = {
+    rest = {k: v for k, v in record.items() if k not in ("task_id", "repository", "repository_identity_status",
+                                                          "scope", "governance_source", "authority", "rank")}
+    identity = {k: record[k] for k in ("repository", "repository_identity_status") if k in record}
+    bound = {
         "task_id": task_id,
-        **repository_identity(worktree, main_checkout),
+        **identity,
         "base_sha": git(worktree, "merge-base", "HEAD", f"refs/heads/{MAIN}").stdout.strip(),
-        "scope": scope,
+        "scope": scope or record.get("scope"),
         "governance_source": source,
         "governance_revision": revision,
         "branch": branch,
-        "authority": {"edit": True, "commit": True, "push_topic": False, "integrate_main": False,
-                      "push_main": False, "deploy": False},
+        "authority": {**NO_AUTHORITY, "edit": True, "commit": True},
+        **rest,
     }
-    text = yaml.safe_dump(record, sort_keys=False, allow_unicode=True)
-    if found := record_problems(f"{task_id}.yaml", text, prefix, validator()):
-        raise Refused("RECORD_INVALID", "; ".join(found))
-    path = worktree / TASKS_DIR / f"{task_id}.yaml"
+    text = dump(bound, prefix)
+
+    def change(tip: str | None) -> tuple[str, None, str]:
+        planned(main_checkout, tip, task_id)
+        return task_id, None, f"start {task_id} on {branch}"
+
+    backlog_write(main_checkout, change)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("x", encoding="utf-8", newline="\n") as handle:
         handle.write(text)
     return path
+
+
+def plan(root: Path, environ: dict[str, str], cwd: str, scope: str, project: str | None, rank: int | None,
+         after: list[str] | None, notes: str | None) -> str:
+    [(name, repo)] = resolve(root, environ, cwd, project)
+    prefix = main_prefix(repo)
+    if prefix is None:
+        raise Refused("NO_DECLARATION", f"AGENTS.md on {MAIN} of {repo} declares no task prefix")
+    return reserve(root, name, repo, prefix, scope, rank=rank, after=after, notes=notes)
+
+
+def start(root: Path, environ: dict[str, str], cwd: str, task_id: str, project: str | None, scope: str | None) -> Path:
+    worktree, name, main_checkout, branch, prefix = topic_place(root, environ, cwd, project)
+    return bind(root, worktree, name, main_checkout, branch, prefix, task_id, scope)
+
+
+def amend(root: Path, environ: dict[str, str], cwd: str, task_id: str, project: str | None, verb: str, **fields) -> None:
+    """Changes ``fields`` of the planned record ``task_id`` on its backlog (`rank`, `drop`)."""
+    [(name, repo)] = resolve(root, environ, cwd, project, task=task_id)
+
+    def change(tip: str | None) -> tuple[str, str, str]:
+        record = {**planned(repo, tip, task_id), **fields}
+        return task_id, dump(record, main_prefix(repo)), f"{verb} {task_id}"
+
+    backlog_write(repo, change)
 
 
 # list
@@ -358,6 +516,8 @@ def status(repo: Path, task_id: str, main_copy: dict | None, detail: dict, branc
         closure = copy.get("closure")
         if isinstance(closure, dict) and closure.get("state") in ("closed", "abandoned"):
             return closure["state"]
+    if not isinstance(detail.get("branch"), str):
+        return "planned"
     if branch in branches and ahead(repo, branch):
         return "open"
     own = [r for r in integrations if r.get("task") == task_id]
@@ -387,6 +547,7 @@ def tasks(name: str, repo: Path, fold_warnings: bool = False) -> list[dict]:
             branch = next((b for b, c in copies.items() if c.get("branch") == b), None) or next(iter(sorted(bound)), None)
         detail = copies.get(branch) or main_copy or next(iter(copies.values()))
         scope = detail.get("scope")
+        rank, after = detail.get("rank"), detail.get("after")
         rows.append({
             "project": name,
             "task_id": task_id,
@@ -395,8 +556,18 @@ def tasks(name: str, repo: Path, fold_warnings: bool = False) -> list[dict]:
             "scope": scope if isinstance(scope, str) else "",
             "conflict": len(bound) > 1,
             "authority": (main_copy or {}).get("authority"),
+            "rank": rank if isinstance(rank, int) else None,
+            "after": [a for a in after if isinstance(a, str)] if isinstance(after, list) else [],
         })
+    done = {row["task_id"] for row in rows if row["status"] in DONE}
+    for row in rows:
+        row["blocked_by"] = [a for a in row["after"] if a not in done] if row["status"] == "planned" else []
     return rows
+
+
+def by_rank(rows: list[dict]) -> list[dict]:
+    """Planned rows in queue order: ranked first, lowest rank first, then by ID."""
+    return sorted(rows, key=lambda row: (row["rank"] is None, row["rank"] or 0, row["project"], row["task_id"]))
 
 
 def render(rows: list[dict], with_project: bool) -> str:
@@ -407,6 +578,10 @@ def render(rows: list[dict], with_project: bool) -> str:
         scope = " ".join(row["scope"].split())
         cells = [row["project"]] if with_project else []
         cells += [row["task_id"], row["status"], row["branch"] or "-", scope[:SCOPE_WIDTH]]
+        if row["rank"] is not None and row["status"] == "planned":
+            cells.append(f"rank {row['rank']}")
+        if row["blocked_by"]:
+            cells.append(f"BLOCKED by {','.join(row['blocked_by'])}")
         lines.append("  ".join(cells) + ("  CONFLICT" if row["conflict"] else ""))
     return "\n".join(lines)
 
@@ -424,11 +599,44 @@ def build_parser() -> argparse.ArgumentParser:
                                     exit="0 created; 1 STOP (not a topic worktree, no declaration); 2 ERROR",
                                     see="docs/TASKS.md § Commands"))
     new_parser.add_argument("--scope", required=True, metavar="TEXT", help="what the task covers, one sentence")
+    plan_parser = sub.add_parser("plan", allow_abbrev=False, help="queue a planned task on the backlog branch",
+                                 **cli_conventions.form(
+                                     "Commit a planned record, which grants nothing, to the backlog branch.",
+                                     "The ID is issued here, one past every number in use; the working tree is "
+                                     "not touched, so it runs from any checkout.",
+                                     exit="0 planned; 1 STOP (no declaration, backlog busy); 2 ERROR",
+                                     see="docs/TASKS.md § Backlog"))
+    plan_parser.add_argument("--scope", required=True, metavar="TEXT", help="what the task covers, one sentence")
+    plan_parser.add_argument("--rank", type=int, metavar="N", help="queue position; lower comes first")
+    plan_parser.add_argument("--after", nargs="+", metavar="ID", help="tasks that must be integrated or closed first")
+    plan_parser.add_argument("--notes", metavar="TEXT", help="background and conditions for whoever starts it")
+    start_parser = sub.add_parser("start", allow_abbrev=False, help="move a planned record into the current topic worktree",
+                                  **cli_conventions.form(
+                                      "Bind a planned task to the topic worktree holding the working directory.",
+                                      "Writes its record there with the branch, base and governance revision and "
+                                      "edit and commit authority, and removes it from the backlog branch.",
+                                      exit="0 started; 1 STOP (not planned, not a topic worktree); 2 ERROR",
+                                      see="docs/TASKS.md § Backlog"))
+    start_parser.add_argument("task", metavar="ID", help="the planned task")
+    start_parser.add_argument("--scope", metavar="TEXT", help="replace the planned scope")
+    rank_parser = sub.add_parser("rank", allow_abbrev=False, help="move a planned task in the queue",
+                                 **cli_conventions.form("Set the rank of a planned task on the backlog branch.",
+                                                        exit="0 ranked; 1 STOP (not planned, backlog busy); 2 ERROR",
+                                                        see="docs/TASKS.md § Backlog"))
+    rank_parser.add_argument("task", metavar="ID", help="the planned task")
+    rank_parser.add_argument("rank", type=int, metavar="N", help="queue position; lower comes first")
+    drop_parser = sub.add_parser("drop", allow_abbrev=False, help="abandon a planned task",
+                                 **cli_conventions.form("Abandon a planned task on the backlog branch; its ID is "
+                                                        "never issued again.",
+                                                        exit="0 abandoned; 1 STOP (not planned, backlog busy); 2 ERROR",
+                                                        see="docs/TASKS.md § Backlog"))
+    drop_parser.add_argument("task", metavar="ID", help="the planned task")
+    drop_parser.add_argument("--note", required=True, metavar="TEXT", help="why it was dropped")
     list_parser = sub.add_parser("list", allow_abbrev=False, help="list tasks with their derived status",
                                  **cli_conventions.form("List tasks from the records on main and every local branch, "
                                                         "with their derived status.",
                                                         exit="0 listed; 2 ERROR", see="docs/TASKS.md § Status"))
-    for p in (new_parser, list_parser):
+    for p in (new_parser, plan_parser, start_parser, rank_parser, drop_parser, list_parser):
         target = p.add_mutually_exclusive_group()
         cli_conventions.add_project(target, " (default: the working directory's project)")
         if p is list_parser:
@@ -441,7 +649,7 @@ def build_parser() -> argparse.ArgumentParser:
                                                          see="docs/TASKS.md § Record"))
     check_parser.add_argument("directory", nargs="?", type=Path, metavar="DIR",
                               help="the working tree (default: the one holding the working directory)")
-    for p in (new_parser, list_parser, check_parser):
+    for p in (new_parser, plan_parser, start_parser, rank_parser, drop_parser, list_parser, check_parser):
         cli_conventions.add_json(p)
     return parser
 
@@ -469,10 +677,28 @@ def main(argv: list[str] | None = None, root: Path = ROOT, environ: dict[str, st
             print(json.dumps({"verdict": "CREATED", "task_id": path.stem, "path": str(path)}, indent=2)
                   if args.json else f"CREATED {path.stem} {path}")
             return cli_conventions.OK
+        if args.command == "start":
+            path = start(root, environ, cwd, args.task, args.project, args.scope)
+            print(json.dumps({"verdict": "STARTED", "task_id": path.stem, "path": str(path)}, indent=2)
+                  if args.json else f"STARTED {path.stem} {path}")
+            return cli_conventions.OK
+        if args.command == "plan":
+            task_id = plan(root, environ, cwd, args.scope, args.project, args.rank, args.after, args.notes)
+            print(json.dumps({"verdict": "PLANNED", "task_id": task_id}, indent=2) if args.json else f"PLANNED {task_id}")
+            return cli_conventions.OK
+        if args.command in ("rank", "drop"):
+            fields = ({"rank": args.rank} if args.command == "rank"
+                      else {"closure": {"state": "abandoned", "note": args.note}})
+            amend(root, environ, cwd, args.task, args.project, args.command, **fields)
+            verdict = "RANKED" if args.command == "rank" else "ABANDONED"
+            print(json.dumps({"verdict": verdict, "task_id": args.task}, indent=2) if args.json else f"{verdict} {args.task}")
+            return cli_conventions.OK
         targets = resolve(root, environ, cwd, args.project, every=args.all)
         rows = [row for name, repo in targets for row in tasks(name, repo, fold_warnings=not args.json)]
         if args.status:
             rows = [row for row in rows if row["status"] == args.status]
+        if args.status == "planned":
+            rows = by_rank(rows)
         print(json.dumps({"tasks": rows}, indent=2) if args.json else render(rows, with_project=args.all))
         return cli_conventions.OK
     except Refused as refused:

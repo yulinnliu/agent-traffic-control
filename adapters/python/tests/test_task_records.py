@@ -80,6 +80,14 @@ class Workspace:
         return {row["task_id"]: row for row in json.loads(out)["tasks"]}
 
 
+@pytest.fixture(autouse=True)
+def git_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The identity of the backlog commits the tool itself writes."""
+    for key, value in (("GIT_AUTHOR_NAME", "t"), ("GIT_AUTHOR_EMAIL", "t@example.com"),
+                       ("GIT_COMMITTER_NAME", "t"), ("GIT_COMMITTER_EMAIL", "t@example.com")):
+        monkeypatch.setenv(key, value)
+
+
 @pytest.fixture
 def ws(tmp_path: Path) -> Workspace:
     root = tmp_path / "workspace"
@@ -373,3 +381,131 @@ def test_a_record_task_names_its_repository_by_prefix(ws: Workspace, monkeypatch
         with pytest.raises(git_integrate.Refused) as refused:
             resolved(other)
         assert refused.value.token == "USAGE"
+
+
+# backlog (docs/TASKS.md § Backlog)
+
+def backlog(ws: Workspace) -> dict[str, dict]:
+    """The records on the backlog branch of the demo project."""
+    listing = run_git(ws.repo, "ls-tree", "--name-only", "backlog", f"{TASKS_DIR}/")
+    return {Path(p).stem: yaml.safe_load(run_git(ws.repo, "show", f"backlog:{p}")) for p in listing.splitlines()}
+
+
+def plan(ws: Workspace, capsys: pytest.CaptureFixture[str], *argv: str) -> str:
+    status, out, err = ws.cli(capsys, "plan", "--project", PROJECT, *argv, cwd=ws.root)
+    assert status == 0, err
+    assert out.startswith("PLANNED ")
+    return out.split()[1]
+
+
+def test_plan_commits_a_record_that_grants_nothing_to_the_backlog_only(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    head = run_git(ws.repo, "rev-parse", "main")
+    task_id = plan(ws, capsys, "--scope", "the gadget", "--rank", "20", "--notes", "after the widget")
+    assert task_id == "DEMO-0001"
+    assert backlog(ws) == {"DEMO-0001": {
+        "task_id": "DEMO-0001", "repository": PROJECT,
+        "repository_identity_status": "no origin remote; local repository name", "scope": "the gadget",
+        "governance_source": GOVERNANCE_SOURCE,
+        "authority": {"edit": False, "commit": False, "push_topic": False, "integrate_main": False,
+                      "push_main": False, "deploy": False},
+        "rank": 20, "notes": "after the widget"}}
+    assert run_git(ws.repo, "rev-parse", "main") == head
+    assert run_git(ws.repo, "status", "--porcelain") == ""
+    assert run_git(ws.repo, "rev-list", "--count", "backlog") == "1"
+
+
+def test_list_orders_planned_tasks_by_rank_and_marks_unmet_prerequisites(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    first = plan(ws, capsys, "--scope", "unranked")
+    second = plan(ws, capsys, "--scope", "second", "--rank", "20", "--after", first)
+    third = plan(ws, capsys, "--scope", "first", "--rank", "10")
+    status, out, err = ws.cli(capsys, "list", "--project", PROJECT, "--status", "planned", "--json", cwd=ws.root)
+    assert status == 0, err
+    rows = json.loads(out)["tasks"]
+    assert [row["task_id"] for row in rows] == [third, second, first]
+    assert {row["task_id"]: row["blocked_by"] for row in rows} == {third: [], second: [first], first: []}
+    assert all(row["status"] == "planned" and row["branch"] is None for row in rows)
+    assert ws.cli(capsys, "rank", second, "5", "--project", PROJECT, cwd=ws.root)[0] == 0
+    status, out, _ = ws.cli(capsys, "list", "--project", PROJECT, "--status", "planned", cwd=ws.root)
+    assert out.splitlines()[0] == f"{second}  planned  -  second  rank 5  BLOCKED by {first}"
+
+
+def test_start_moves_the_planned_record_into_the_topic_and_off_the_backlog(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    task_id = plan(ws, capsys, "--scope", "the gadget", "--rank", "10", "--notes", "n")
+    topic = ws.worktree(ws.repo, "claude+gadget", "topic-gadget")
+    status, out, err = ws.cli(capsys, "start", task_id, "--scope", "the gadget, narrowed", cwd=topic)
+    assert status == 0, err
+    assert out.startswith(f"STARTED {task_id} ")
+    data = yaml.safe_load((topic / TASKS_DIR / f"{task_id}.yaml").read_text(encoding="utf-8"))
+    assert data["branch"] == "topic-gadget"
+    assert data["base_sha"] == run_git(ws.repo, "rev-parse", "main")
+    assert data["governance_revision"] == PINNED
+    assert data["scope"] == "the gadget, narrowed"
+    assert data["authority"] == {"edit": True, "commit": True, "push_topic": False, "integrate_main": False,
+                                 "push_main": False, "deploy": False}
+    assert data["notes"] == "n" and "rank" not in data
+    assert task_records.problems(topic) == []
+    assert backlog(ws) == {}
+    run_git(topic, "add", TASKS_DIR)
+    run_git(topic, "commit", "-q", "-m", "record")
+    assert ws.listing(capsys)[task_id]["status"] == "open"
+
+
+def test_an_id_stays_taken_once_started_or_dropped(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    started = plan(ws, capsys, "--scope", "a")
+    dropped = plan(ws, capsys, "--scope", "b")
+    topic = ws.worktree(ws.repo, "claude+a", "topic-a")
+    assert ws.cli(capsys, "start", started, cwd=topic)[0] == 0
+    status, out, err = ws.cli(capsys, "drop", dropped, "--note", "Owner dropped it", "--project", PROJECT, cwd=ws.root)
+    assert (status, out.strip()) == (0, f"ABANDONED {dropped}"), err
+    assert backlog(ws)[dropped]["closure"] == {"state": "abandoned", "note": "Owner dropped it"}
+    assert ws.listing(capsys)[dropped]["status"] == "abandoned"
+    (topic / TASKS_DIR / f"{started}.yaml").unlink()
+    assert plan(ws, capsys, "--scope", "c") == "DEMO-0003"
+
+
+def test_new_issues_its_id_through_the_backlog(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    topic = ws.worktree(ws.repo, "claude+widget", "topic-widget")
+    assert ws.cli(capsys, "new", "--scope", "s", cwd=topic)[1].startswith("CREATED DEMO-0001 ")
+    assert backlog(ws) == {}
+    assert run_git(ws.repo, "log", "--format=%s", "backlog").splitlines() == ["start DEMO-0001 on topic-widget",
+                                                                              "plan DEMO-0001"]
+    (topic / TASKS_DIR / "DEMO-0001.yaml").unlink()
+    assert plan(ws, capsys, "--scope", "next") == "DEMO-0002"
+
+
+def test_start_and_rank_refuse_a_task_that_is_not_planned(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    topic = ws.worktree(ws.repo, "claude+gadget", "topic-gadget")
+    status, _, err = ws.cli(capsys, "start", "DEMO-0007", cwd=topic)
+    assert status == 1 and err.startswith("STOP NOT_PLANNED: ")
+    dropped = plan(ws, capsys, "--scope", "b")
+    assert ws.cli(capsys, "drop", dropped, "--note", "n", "--project", PROJECT, cwd=ws.root)[0] == 0
+    status, _, err = ws.cli(capsys, "rank", dropped, "3", "--project", PROJECT, cwd=ws.root)
+    assert status == 1 and err.startswith("STOP NOT_PLANNED: ")
+    planned_id = plan(ws, capsys, "--scope", "c")
+    status, _, err = ws.cli(capsys, "start", planned_id, cwd=ws.repo)
+    assert status == 1 and err.startswith("STOP ON_MAIN: ")
+    assert planned_id in backlog(ws)
+
+
+def test_plan_refuses_an_unknown_prerequisite(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    status, _, err = ws.cli(capsys, "plan", "--project", PROJECT, "--scope", "s", "--after", "DEMO-0042", cwd=ws.root)
+    assert status == 2 and err.startswith("ERROR UNKNOWN_TASK ")
+    assert run_git(ws.repo, "branch", "--list", "backlog") == ""
+
+
+def test_a_backlog_write_against_a_moved_tip_retries_on_the_new_tip(ws: Workspace, capsys: pytest.CaptureFixture[str],
+                                                                    monkeypatch: pytest.MonkeyPatch) -> None:
+    plan(ws, capsys, "--scope", "a")
+    stale = run_git(ws.repo, "rev-parse", "backlog")
+    plan(ws, capsys, "--scope", "b")
+    assert task_records.backlog_commit(ws.repo, stale, "DEMO-0009", None, "late") is False
+    real, calls = task_records.backlog_tip, []
+
+    def first_stale(repo: Path) -> str | None:
+        calls.append(repo)
+        return stale if len(calls) == 1 else real(repo)
+
+    monkeypatch.setattr(task_records, "backlog_tip", first_stale)
+    task_records.backlog_write(ws.repo, lambda tip: ("DEMO-0001", None, "remove a"))
+    assert len(calls) == 2
+    assert set(backlog(ws)) == {"DEMO-0002"}

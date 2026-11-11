@@ -42,7 +42,8 @@ Owner with what was observed:
 
 A coordinator that restarts or has lost its conversation rebuilds its state
 from durable sources, never from memory: the task record and
-`atc task list`, git (the topic branch tip and `main`), `atc worktree audit`,
+`atc task list` (the queue is `atc task list --status planned`), git (the
+topic branch tip and `main`), `atc worktree audit`,
 `<git common dir>/atc/integrations.jsonl`, the previous coordinator
 hand-over and the session list. A truncated notification, or a verdict
 whose full text is missing, is not enough to proceed; obtain the full
@@ -50,7 +51,9 @@ content from its sender first. An integration that `integrations.jsonl`
 does not record has not happened; its command goes to the Owner again.
 
 The task record receives only what the project's `AGENTS.md` lets a topic's
-own commits write; session names belong only in the hand-over.
+own commits write; session names belong only in the hand-over, which keeps
+the map from task ID to session and nothing a record, Git or
+`integrations.jsonl` already holds.
 
 ## Briefs and proposals
 
@@ -61,8 +64,12 @@ own commits write; session names belong only in the hand-over.
   and how each approval reaches the session that acts on it; a peer
   session's relay is not the Owner's approval. Re-read the decisions already
   made before summarizing a plan.
-- Name work by its task ID, or by its title before it has one, never by a
-  list position.
+- Name work by its task ID, never by a list position. Work the Owner
+  queues gets its ID at once: `atc task plan --scope` where the project
+  declares `## Task records`, with `--rank`, `--after` and `--notes` for
+  its place and conditions, `atc task rank` to reorder and `atc task drop`
+  when the Owner drops it (`docs/TASKS.md` § Backlog). The Owner's rulings
+  on queued work go into the record's `decisions`.
 - Findings and small follow-ups fold into the task in progress; a new task
   is for new mainline work only. A LOW that needs no test change is fixed at
   once, others in the next round.
@@ -75,17 +82,19 @@ own commits write; session names belong only in the hand-over.
    it declares (governance `CORE.md` § Task identity), the task records, the
    branches, the worktrees (`atc worktree audit` where they are managed) and
    the titles of running sessions; another coordinator may be opening tasks
-   in the same project. The task ID comes from the issuing source: by
-   default the Owner names it in the instruction that opens the task, and
-   where the project's `AGENTS.md` declares a ticketing system, the ID is
-   that system's. The coordinator never makes up a task ID; an instruction
-   without one is answered by asking the Owner for it. The reads above
-   confirm that neither the given ID nor the branch name is taken; a
-   collision stops the step and is reported to the Owner. Done when the
-   given task ID and the branch name are shown free.
-2. **Open the task record** in the project's form (`atc task new --scope`
-   where the project declares `## Task records`); its scope and authority
-   are the writer's contract. Commit it on the topic branch; it reaches
+   in the same project. The task ID comes from the issuing source: where
+   the project declares `## Task records`, the record `atc task plan` or
+   `atc task new` issues, never a number the coordinator picks; where the
+   project's `AGENTS.md` declares a ticketing system, that system's; in any
+   other project the Owner names it, and an instruction without one is
+   answered by asking the Owner for it. The reads above confirm that neither
+   the task ID nor the branch name is taken; a collision stops the step and
+   is reported to the Owner. Done when the task ID and the branch name are
+   shown free.
+2. **Open the task record** in the project's form where the project
+   declares `## Task records`: `atc task start <ID>` in the topic worktree
+   for a planned task, `atc task new --scope` for work that was never
+   queued. Its scope and authority are the writer's contract. Commit it on the topic branch; it reaches
    `main` with the topic's first integration. A task the Owner
    pre-authorizes is bound on `main` before its work: commit the record alone as the topic's first
    commit and give the Owner that commit's integration command (step 5).

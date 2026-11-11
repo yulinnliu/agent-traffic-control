@@ -13,7 +13,7 @@ from test_atc_cli import SUBCOMMANDS, ascii_stdout, call, parsers  # noqa: F401 
 
 pytestmark = pytest.mark.integration
 
-METAVAR_WORDS = {"NAME", "ID", "EVENT_ID", "SHA", "DIR", "FILE", "PATH", "SECONDS", "TEXT", "QUOTE", "URL", "OWNER",
+METAVAR_WORDS = {"NAME", "ID", "EVENT_ID", "SHA", "DIR", "FILE", "PATH", "SECONDS", "N", "TEXT", "QUOTE", "URL", "OWNER",
                  "REPO", "REF", "TAG", "KEY", "ITEM", "TOPIC", "ARG", "COMMAND"}
 
 

@@ -64,6 +64,7 @@ option takes is named by its type in capitals:
 | `SHA` | a commit: full, or a unique prefix where the help says so |
 | `DIR`, `FILE`, `PATH` | a directory, a file, either or an interpreter |
 | `SECONDS` | a duration |
+| `N` | a positive integer, such as a rank |
 | `TEXT`, `QUOTE` | free text; `QUOTE` is someone's exact words |
 | `URL`, `OWNER/REPO`, `REF`, `TAG`, `KEY`, `ITEM`, `TOPIC`, `ARG` | as named |
 
