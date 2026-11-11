@@ -116,7 +116,8 @@ def test_the_command_reads_the_verifiers_range(repo: tuple[Path, str]) -> None:
     root, base = repo
     git(root, "rm", "-q", "old.txt")
     git(root, "commit", "-qm", "delete")
-    env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    env = {key: value for key, value in os.environ.items()
+           if not key.startswith("GIT_") and key not in docs.RANGE_VARIABLES}
     head = git(root, "rev-parse", "HEAD")
     run = subprocess.run([*docs.DOCUMENTATION_CHECK.argv], cwd=root, capture_output=True, text=True,
                          env={**env, "ATC_EXPECTED_MAIN_SHA": base, "ATC_INTEGRATION_SHA": head})
