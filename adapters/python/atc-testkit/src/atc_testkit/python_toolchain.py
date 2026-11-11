@@ -13,7 +13,7 @@ import shutil
 import subprocess
 import sys
 
-from . import scratch
+from . import config, scratch
 from .evidence import Stage
 from .locations import Refusal
 
@@ -21,6 +21,7 @@ NO_TESTS_EXIT = 5  # pytest's exit code when it collects no test
 LOCK_FILE = "uv.lock"
 VENV = ".venv"
 PYCACHE = "pyc"  # the subdirectory of a run's working directory that every child compiles into
+SYSTEM_TEMP_RUNS = ("pytest-of-*",)  # pytest's own base directories, which pytest itself expires
 SYNC_TAIL = 20
 SYNC_SHADOWING = ("VIRTUAL_ENV", "UV_PROJECT_ENVIRONMENT")
 SyncRun = Callable[[Sequence[str], Path, Mapping[str, str]], subprocess.CompletedProcess]
@@ -77,6 +78,12 @@ def pytest_arguments(*, quiet: bool = True, select: str | None = None, workers: 
     return arguments
 
 
+def ini_options(root: Path) -> dict:
+    """``[tool.pytest.ini_options]`` of the tree at ``root``."""
+    options = config.read_pyproject(root).get("tool", {}).get("pytest", {}).get("ini_options", {})
+    return options if isinstance(options, dict) else {}
+
+
 def _run_sync(argv: Sequence[str], cwd: Path, env: Mapping[str, str]) -> subprocess.CompletedProcess:
     return subprocess.run(list(argv), cwd=cwd, env=dict(env), capture_output=True, text=True, encoding="utf-8",
                           errors="replace", stdin=subprocess.DEVNULL, creationflags=scratch.WINDOW_HIDDEN)
@@ -90,6 +97,18 @@ class PythonToolchain:
     dependency_files: tuple[str, ...] = (LOCK_FILE, ".python-version")
     environment_directories: tuple[str, ...] = (VENV,)
     lock_check_argv: tuple[str, ...] = ("uv", "lock", "--check")
+    system_temp_runs: tuple[str, ...] = SYSTEM_TEMP_RUNS
+
+    def search_path(self, root: Path) -> list[Path]:
+        """The directories pytest puts on ``sys.path``: ``pythonpath`` of the tree's ini options."""
+        return [Path(root) / entry for entry in ini_options(root).get("pythonpath", [])]
+
+    def test_paths(self, root: Path) -> list[str]:
+        """Where the tree's tests live: ``testpaths`` of its ini options."""
+        return list(ini_options(root).get("testpaths", []))
+
+    def stage_log(self, stage: str) -> str:
+        return f"pytest-{stage}.log"
 
     def stage_command(self, entry: Sequence[str], stage: Stage, workers: int | None, options: Sequence[str],
                       paths: Sequence[str]) -> list[str]:

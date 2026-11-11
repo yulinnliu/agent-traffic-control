@@ -92,4 +92,3 @@ def test_atc_test_run_refuses_a_bad_slack(tmp_path: Path, atc_tmp: Path) -> None
                           env={**os.environ, "ATC_TMP": str(atc_tmp), timing.SLACK_VARIABLE: "31"})
     assert done.returncode == 9 and done.stderr.startswith("TIME_SLACK_INVALID ")
     assert not (atc_tmp / "s" / testrun.RUNS).exists()
-

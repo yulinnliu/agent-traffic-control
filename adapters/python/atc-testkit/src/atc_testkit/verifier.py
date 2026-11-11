@@ -12,7 +12,7 @@ import re
 import subprocess
 import sys
 
-from . import config, evidence, isolation, locations, scratch, stages, timing
+from . import evidence, isolation, locations, scratch, stages, timing
 from .git import SelectionError, baseline_deltas, changed_paths, git_env
 from .project import Project, StaticCheck
 from .selection import Selection, describe
@@ -131,9 +131,9 @@ def namespace_violations(project: Project) -> list[str]:
 
 
 def check_imports(project: Project, candidate: str) -> None:
-    """Pytest imports the candidate's code: checked on pytest's search path before any test starts."""
+    """The test runner imports the candidate's code: checked on its search path before any test starts."""
     saved = sys.path[:]
-    sys.path[:0] = [str(project.root / entry) for entry in config.pytest_options(project.root).get("pythonpath", [])]
+    sys.path[:0] = [str(entry) for entry in project.tests_toolchain().search_path(project.root)]
     try:
         violations = [*import_violations(module_names(project), candidate), *namespace_violations(project)]
     finally:
@@ -225,7 +225,7 @@ class _Checks:
             project.stage_entry(), pytest_paths, cwd=project.root if cwd is None else cwd,
             stage_list=project.stage_list(), env_for=lambda stage: self.isolated.environment(stage.name),
             options_for=lambda stage: self.isolated.run_options(stage.name),
-            log_for=lambda stage: self.work / f"pytest-{stage.name}.log", workers=self.workers,
+            log_for=lambda stage: self.work / self.isolated.toolchain.stage_log(stage.name), workers=self.workers,
             run=self.run_logged, toolchain=self.isolated.toolchain)
         if outcome.token == stages.NO_TESTS_COLLECTED:
             raise VerifyError(outcome.token, f"selected {' '.join(pytest_paths) or 'the default suite'}; "
@@ -262,7 +262,7 @@ def _consumer_checks(project: Project, checks: _Checks, base: str, sha: str, pat
     """The rows from the selection to the stages, for a project that carries the testkit; whether documentation-only."""
     pytest_paths = consumer_selection.pytest_paths()
     doc_only = documentation_only(paths, pytest_paths, project.automation_markdown_prefixes)
-    testpaths = config.pytest_options(project.root).get("testpaths", [])
+    testpaths = project.tests_toolchain().test_paths(project.root)
     collect = any(is_test_input(path, testpaths) for path in paths)
     print(describe(consumer_selection), flush=True)
     print(f"classification: {'documentation-only' if doc_only else 'impact-selected'}; "

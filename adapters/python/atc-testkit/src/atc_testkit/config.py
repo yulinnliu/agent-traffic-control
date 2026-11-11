@@ -30,7 +30,3 @@ def ignored_paths(root: Path, platform: str = os.name) -> tuple[str, ...]:
 
 def data_root_variables(root: Path) -> tuple[str, ...]:
     return tuple(tool_table(root).get("data_root_variables", ()))
-
-
-def pytest_options(root: Path) -> dict[str, Any]:
-    return read_pyproject(root).get("tool", {}).get("pytest", {}).get("ini_options", {})

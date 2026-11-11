@@ -486,8 +486,8 @@ def prune(*, say: Callable[[str], None] = print, environ=None, now: datetime | N
     places = locations.locate(environ)
     now = now or datetime.now(UTC)
     code = 0
-    for parent, handle, skip in ((places.systmp, _prune_system_entry, "pytest-of-*"),
-                                 (places.tmp / CANDIDATES, _prune_candidate, None)):
+    for parent, handle, skip in ((places.systmp, _prune_system_entry, toolchain.system_temp_runs()),
+                                 (places.tmp / CANDIDATES, _prune_candidate, ())):
         try:
             parent_status = os.lstat(parent)
         except FileNotFoundError:
@@ -511,7 +511,7 @@ def prune(*, say: Callable[[str], None] = print, environ=None, now: datetime | N
             code = 1
             continue
         for entry in entries:
-            if skip and fnmatch.fnmatch(entry.name, skip):
+            if any(fnmatch.fnmatch(entry.name, pattern) for pattern in skip):
                 continue
             try:
                 status = entry.stat(follow_symlinks=False)

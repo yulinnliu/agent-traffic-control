@@ -122,3 +122,15 @@ def test_a_category_expression_selects_what_pytest_m_selects() -> None:
     for broken in ("", "slow and", "(slow", "slow)", "and slow", "slow - serial"):
         with pytest.raises(ValueError):
             stages.selects(broken, ())
+
+
+@pytest.mark.unit
+def test_the_python_toolchain_reads_pytests_own_settings(tmp_path: Path) -> None:
+    python = python_toolchain.TOOLCHAIN
+    assert python.search_path(tmp_path) == [] and python.test_paths(tmp_path) == []
+    (tmp_path / "pyproject.toml").write_text('[tool.pytest.ini_options]\npythonpath = ["src", "packages/a/src"]\n'
+                                             'testpaths = ["tests"]\n', encoding="utf-8")
+    assert python.search_path(tmp_path) == [tmp_path / "src", tmp_path / "packages/a/src"]
+    assert python.test_paths(tmp_path) == ["tests"]
+    assert python.stage_log("serial") == "pytest-serial.log"
+    assert toolchain.system_temp_runs() == ("pytest-of-*",)

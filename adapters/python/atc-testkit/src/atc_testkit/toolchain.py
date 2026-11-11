@@ -28,6 +28,13 @@ class Toolchain(Protocol):
     dependency_files: tuple[str, ...]
     environment_directories: tuple[str, ...]
     lock_check_argv: tuple[str, ...]
+    system_temp_runs: tuple[str, ...]
+
+    def search_path(self, root: Path) -> list[Path]: ...
+
+    def test_paths(self, root: Path) -> list[str]: ...
+
+    def stage_log(self, stage: str) -> str: ...
 
     def stage_command(self, entry: Sequence[str], stage: Stage, workers: int | None, options: Sequence[str],
                       paths: Sequence[str]) -> list[str]: ...
@@ -60,3 +67,8 @@ def for_tree(root: Path) -> Toolchain:
 def environment_directories() -> frozenset[str]:
     """The environment directory names of every registered toolchain; a scratch may hold a link by any of them."""
     return frozenset(name for key in MODULES for name in resolve(key).environment_directories)
+
+
+def system_temp_runs() -> tuple[str, ...]:
+    """The patterns of ``<tmp>/systmp`` entries that a registered toolchain's runner expires itself."""
+    return tuple(sorted({pattern for key in MODULES for pattern in resolve(key).system_temp_runs}))

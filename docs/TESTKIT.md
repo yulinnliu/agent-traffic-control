@@ -113,6 +113,9 @@ toolchain, is the default. Any other name stops the gate, the verifier and
 | The repository-wide collection of the verifier | `python -m pytest -q -n 0 --collect-only` |
 | The variable pointed at the run's bytecode directory | `PYTHONPYCACHEPREFIX` |
 | The environment `atc tmp checkout` prepares, and its interpreter | `uv sync --locked` into `.venv` |
+| The search path the verifier's import check uses, and the test paths that make a range a collection change | `pythonpath` and `testpaths` of `[tool.pytest.ini_options]` |
+| A stage's log name in the verifier's working directory | `pytest-<stage>.log` |
+| The `<tmp>/systmp` entries its runner expires itself, which `atc tmp prune` leaves | `pytest-of-*` |
 
 A stage's marker is a category expression over the § Markers names with
 `and`, `or`, `not` and parentheses; the toolchain turns it into its runner's

@@ -224,7 +224,8 @@ days. An entry that is a link prints `REFUSED` and is left. A plain file is
 deleted as a file. A directory goes through steps 4 and 5 with no link
 expected, except a working directory of the verifier or of the gate.
 
-- Under `<tmp>/systmp` it takes every entry other than `pytest-of-*`. This
+- Under `<tmp>/systmp` it takes every entry other than the ones a toolchain's
+  runner expires itself, `pytest-of-*` (`TESTKIT.md` § Toolchain). This
   includes the working directory a failed verifier or gate run left for
   inspection, named `w` and six lowercase hexadecimal digits. Links inside a
   base directory, `<work>/<stage>/bt`, are the run's own: they are expected,
