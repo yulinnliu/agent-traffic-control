@@ -549,7 +549,7 @@ the lock. Add the section and the file in the project first, then sync.
 
 ## Governance sync commits
 
-`atc onboard --sync <project>`, `--sync --all` and `atc bootstrap sync`
+`atc onboard --sync --project <project>` and `atc onboard --sync --all`
 commit what they render on each project's `main` and append the commit to
 `<git common dir>/atc/integrations.jsonl` with `kind: sync`. Such a commit
 bypasses `## Integrate`: it needs no review and no `integrate_main` authority
@@ -610,7 +610,8 @@ the cause and the next step, and a usage error prints the usage line, not the
 whole help. A run that did not complete reports `TIMEOUT` or `INTERRUPTED`
 with the last lines of its log, never a pass.
 
-`atc integrate` and `atc preflight` end with one of these exit codes:
+`atc integrate` and `atc preflight` end with one of these exit codes; every
+other command's codes are in `shared/conformance/CLI.md` § Exit codes:
 
 | Exit | Meaning |
 | --- | --- |
