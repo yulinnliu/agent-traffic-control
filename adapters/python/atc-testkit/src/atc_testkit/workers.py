@@ -402,6 +402,7 @@ class Budget:
         want = max(floor, min(want, pool.size))
         row.update(stage=stage, want=want, floor=floor, tokens=[], waiting_since=None, granted_at=None, reserved=0)
         started, reported, turnstile, waited = time.monotonic(), None, False, 0.0
+        taken: list[int] = []
         try:
             while True:
                 if not turnstile:
@@ -410,7 +411,6 @@ class Budget:
                     room = self._memory_room(row.path)
                     wanted = want if room is None else min(want, max(floor, room))
                     free = pool.free()
-                    taken: list[int] = []
                     for index in range(1, pool.size + 1):
                         if len(taken) == wanted:
                             break
@@ -423,8 +423,10 @@ class Budget:
                         active = len(pool.status(row.path).runs)
                         row.update(tokens=taken, granted_at=time.time(), waiting_since=None,
                                    reserved=len(taken) * self.per_worker)
-                        return Grant(len(taken), tuple(taken), waited, free, pool.size, active, True)
+                        granted, taken = tuple(taken), []
+                        return Grant(len(granted), granted, waited, free, pool.size, active, True)
                     pool.give(taken)
+                    taken = []
                 waited = time.monotonic() - started
                 if self.waited + waited > self.max_wait:
                     raise WaitTimeout(self._behind(stage, floor, waited, row.path))
@@ -437,6 +439,9 @@ class Budget:
                 self._write_wait(self.waited + waited)
                 time.sleep(POLL_SECONDS)
         finally:
+            if taken:
+                pool.give(taken)
+                row.update(tokens=[], waiting_since=None)
             if turnstile:
                 pool.give([0])
 

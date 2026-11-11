@@ -603,7 +603,8 @@ log. In order:
 
 Before step 6 the run takes its host worker tokens, and `--timeout` counts
 from then; a wait past its limit stops it with `WORKER_WAIT_TIMEOUT` (exit
-124) before pytest starts (§ Host worker budget).
+124) before pytest starts, and an interrupt during the wait stops it with
+`INTERRUPTED` (exit 130) before pytest starts (§ Host worker budget).
 
 ### `atc test mutants <scratch> <sha> <worktree> <mutants.json> --python <py> [--kill-rule failure|assertion] --tests <path>...`
 
@@ -611,7 +612,9 @@ Applies each mutant alone to `<scratch>/tree`, the export of `<sha>`, through
 the isolation of `atc test run`. Each run is pytest with `-x` and a
 900-second timeout. The command holds one host worker token from before the
 baseline to its end; a wait for it past 900 seconds stops the command with
-`WORKER_WAIT_TIMEOUT` (exit 124) before the baseline (§ Host worker budget).
+`WORKER_WAIT_TIMEOUT` (exit 124) before the baseline, and an interrupt
+during the wait stops it with `INTERRUPTED` (exit 130) (§ Host worker
+budget).
 
 - `<sha>` must name a commit in `<worktree>` (`git rev-parse --verify`):
   `SHA_NOT_FOUND` (exit 9) before the scratch is touched, then

@@ -300,7 +300,8 @@ def _mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None,
         description="Apply each mutant alone to <scratch>/tree and run the tests on it.",
         epilog="Exit: 0 when every mutant ran and every file is restored, survivors named on the last line; 1 for a\n"
                "red baseline, an aborted run or a restore mismatch; 9 for a refusal before the baseline, 8 for an\n"
-               "import-guard refusal; 124 when the wait for a host worker passes 900 seconds.\n"
+               "import-guard refusal; 124 when the wait for a host worker passes 900 seconds, 130 when that wait\n"
+               "is interrupted.\n"
                "See: docs/TESTKIT.md § Commands")
     parser.add_argument("scratch", metavar="NAME", help="scratch name; NAME/tree holds the export of SHA")
     parser.add_argument("sha", metavar="SHA",
@@ -329,7 +330,11 @@ def _mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None,
         print(EXCLUSION_NOTE, flush=True)
     budget = stages.open_budget(f"atc test mutants {args.scratch}", environ, root=Path(worktree),
                                 max_wait=MUTANT_SECONDS)
-    held.append((budget, budget.acquire("mutants", 1, 1)))
+    try:
+        held.append((budget, budget.acquire("mutants", 1, 1)))
+    except KeyboardInterrupt:
+        print(QUEUE_INTERRUPTED, flush=True)
+        return INTERRUPTED_EXIT
     if budget.active:
         environ[host_workers.HELD] = budget.held_id()
     baseline_tests = list(dict.fromkeys([*args.tests, *(test for entry in entries for test in entry.get("tests", ()))]))
@@ -397,6 +402,7 @@ def _mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None,
 
 TIMEOUT_EXIT = 124
 INTERRUPTED_EXIT = 130
+QUEUE_INTERRUPTED = "INTERRUPTED while waiting for host workers; no test ran"
 PYTEST_INTERRUPTED = 2
 PYTEST_NO_TESTS = 5
 RUNS = "runs"
@@ -611,7 +617,11 @@ def run(argv: Sequence[str], environ: MutableMapping[str, str] | None = None) ->
         print(EXCLUSION_NOTE, flush=True)
     budget = stages.open_budget(f"atc test run {place.name}", environ, root=tree, max_wait=args.timeout)
     want, floor, pytest_arguments = _worker_request(pytest_arguments, tree, environ)
-    grant = budget.acquire("tests", want, floor)
+    try:
+        grant = budget.acquire("tests", want, floor)
+    except KeyboardInterrupt:
+        print(QUEUE_INTERRUPTED, flush=True)
+        return INTERRUPTED_EXIT
     try:
         if budget.active:
             environ[host_workers.HELD] = budget.held_id()

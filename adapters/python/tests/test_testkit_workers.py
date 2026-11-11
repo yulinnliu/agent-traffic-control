@@ -316,3 +316,48 @@ def test_test_run_asks_one_token_or_its_n_cut_by_memory(monkeypatch: pytest.Monk
     granted = testrun._granted_arguments(arguments, workers.Grant(2, (1, 2), 0, 2, 18, 1, True), want)
     assert granted == ["-n", "2"]
     assert "workers: 2 (auto 3; host budget: 2 of 18 free, 1 run active)" in capsys.readouterr().out
+
+
+TURNSTILE = ("import sys, time\nfrom pathlib import Path\nfrom atc_testkit import workers\n"
+             "assert workers.Pool(Path(sys.argv[1]), 1).try_take(0)\nprint('TURNSTILE', flush=True)\ntime.sleep(120)\n")
+
+
+def hold_turnstile(tmp_path: Path, pool: Path) -> subprocess.Popen:
+    """A process that holds the pool's turnstile, so every other run waits."""
+    script = tmp_path / "turnstile.py"
+    script.write_text(TURNSTILE, encoding="utf-8")
+    process = subprocess.Popen([sys.executable, str(script), str(pool)], stdout=subprocess.PIPE, text=True)
+    assert process.stdout.readline().startswith("TURNSTILE")
+    return process
+
+
+def small_tree(tmp_path: Path) -> Path:
+    tree = tmp_path / "tree"
+    (tree / "tests").mkdir(parents=True)
+    (tree / "tests" / "test_ok.py").write_text("def test_ok():\n    pass\n", encoding="utf-8")
+    (tree / "pyproject.toml").write_text('[project]\nname = "small"\nversion = "1"\n', encoding="utf-8")
+    return tree
+
+
+@pytest.mark.integration
+def test_an_interrupt_while_queued_stops_the_run_with_130(tmp_path: Path, pool_dir: Path, atc_tmp: Path,
+                                                          monkeypatch: pytest.MonkeyPatch,
+                                                          capsys: pytest.CaptureFixture[str]) -> None:
+    head = hold_turnstile(tmp_path, pool_dir)
+    try:
+        def interrupted(self, total: float) -> None:
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(workers.Budget, "_write_wait", interrupted)
+        environ = {**os.environ, workers.POOL_DIRECTORY: str(pool_dir)}
+        code = testrun.run(["--scratch", "q", "--tree", str(small_tree(tmp_path)), "--python", sys.executable,
+                            "--", "tests"], environ)
+        assert code == testrun.INTERRUPTED_EXIT == 130
+        out = capsys.readouterr().out
+        assert testrun.QUEUE_INTERRUPTED in out and "PASS" not in out
+        pool = workers.Pool(pool_dir, stages.pool_size(stages.host_table(environ)))
+        assert pool.free() == pool.size and all(not row.tokens for row in pool.status().runs)
+    finally:
+        head.kill()
+        head.wait()
+
