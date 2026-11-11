@@ -82,7 +82,7 @@ An argument error prints the usage line, the error, and
 | 3 | PARTIAL | Stopped after the action began: `integrate` after its candidate exists, `close-out` after an item was deleted |
 | 8 | GUARD | An `atc-testkit` guard refused (`docs/TESTKIT.md`) |
 | 9 | REFUSED | `atc-testkit` refused before its run |
-| 124 | TIMEOUT | The run hit its time limit |
+| 124 | TIMEOUT | The run hit its time limit, or its wait for host test workers passed its limit (`WORKER_WAIT_TIMEOUT`, `docs/TESTKIT.md` § Host worker budget) |
 | 130 | INTERRUPTED | The run was interrupted |
 
 `atc test run` exits with pytest's own code (0 to 5), which is why the

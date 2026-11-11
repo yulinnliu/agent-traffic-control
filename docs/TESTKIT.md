@@ -160,7 +160,8 @@ set) use no pool.
   its label, stage, tokens and wait. Only the locks decide who holds a
   token; a row nobody holds is stale, whatever process now has its PID, and
   the next run that reads it removes it. `atc doctor` lists the pool's free
-  tokens, the runs holding tokens and the runs waiting, and removes nothing.
+  tokens, the runs holding tokens and the runs waiting (`--json`: the
+  `worker_pool` field), and removes nothing.
 - On Windows a stage's process tree is in a kill-on-close Job of the process
   holding its tokens, so the tree ends with that process, and what is left of
   it when the stage ends ends with it. Elsewhere a stage's process group

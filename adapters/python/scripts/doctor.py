@@ -55,27 +55,43 @@ def checkout_check(checkout: Path) -> Check:
     return Check("canonical checkout", "READY", f"{checkout} is on main and clean")
 
 
-def worker_pool_checks(environ: dict[str, str]) -> list[Check]:
+def worker_pool(environ: dict[str, str]) -> dict:
     """The host worker pool (docs/TESTKIT.md § Host worker budget): its tokens, the runs holding them and the runs
-    waiting; it reads the pool and removes nothing."""
+    waiting, as the `worker_pool` field of `--json`; it reads the pool and removes nothing."""
+    now = time.time()
+
+    def row(found: host_workers.Row) -> dict:
+        return {"label": found.label, "pid": found.pid, "stage": found.stage, "tokens": found.tokens,
+                "floor": found.floor, "held_seconds": round(now - found.granted_at) if found.granted_at else None,
+                "waiting_seconds": round(now - found.waiting_since) if found.waiting_since else None,
+                "line": found.describe(now)}
+
     try:
         if environ.get("CI"):
-            return [Check("worker pool", "READY", "CI is set: runs take the CPU and memory ceiling, no host pool")]
+            return {"state": "ci", "detail": "CI is set: runs take the CPU and memory ceiling, no host pool"}
         size = stages.pool_size(stages.host_table(environ))
         if size == 0:
-            return [Check("worker pool", "READY", "off (test_worker_pool = 0 in ~/.atc/config.toml)")]
+            return {"state": "off", "detail": "off (test_worker_pool = 0 in ~/.atc/config.toml)"}
         directory = stages.pool_directory(environ)
         if not (directory / host_workers.POOL_FILE).exists():
-            return [Check("worker pool", "READY", f"{size} tokens, no run has used it yet ({directory})")]
+            return {"state": "unused", "directory": str(directory), "size": size, "free": size, "runs": [],
+                    "waiters": [], "detail": f"{size} tokens, no run has used it yet ({directory})"}
         status = host_workers.Pool(directory, size).status(prune=False)
     except locations.Refusal as refusal:
-        return [Check("worker pool", "ERROR", f"{refusal.token} {refusal.detail}")]
-    now = time.time()
-    checks = [Check("worker pool", "READY", f"{status.free} of {status.size} tokens free, {len(status.runs)} run"
-                                            f"{'' if len(status.runs) == 1 else 's'} active, {len(status.waiters)} "
-                                            f"waiting ({directory})")]
-    checks += [Check("worker pool run", "READY", row.describe(now)) for row in status.runs]
-    checks += [Check("worker pool waiter", "READY", row.describe(now)) for row in status.waiters]
+        return {"state": "error", "token": refusal.token, "detail": f"{refusal.token} {refusal.detail}"}
+    runs = len(status.runs)
+    return {"state": "on", "directory": str(directory), "size": status.size, "free": status.free,
+            "runs": [row(found) for found in status.runs], "waiters": [row(found) for found in status.waiters],
+            "detail": f"{status.free} of {status.size} tokens free, {runs} run{'' if runs == 1 else 's'} active, "
+                      f"{len(status.waiters)} waiting ({directory})"}
+
+
+def worker_pool_checks(environ: dict[str, str], pool: dict | None = None) -> list[Check]:
+    """The pool as doctor's lines: the pool, then one line per run holding tokens and per run waiting."""
+    pool = worker_pool(environ) if pool is None else pool
+    checks = [Check("worker pool", "ERROR" if pool["state"] == "error" else "READY", pool["detail"])]
+    checks += [Check("worker pool run", "READY", found["line"]) for found in pool.get("runs", ())]
+    checks += [Check("worker pool waiter", "READY", found["line"]) for found in pool.get("waiters", ())]
     return checks
 
 
@@ -210,7 +226,8 @@ def main(argv: list[str] | None = None, root: Path = ROOT) -> int:
     if args.json:
         print(json.dumps({"verdict": "NOT_READY" if errors else "READY", "errors": errors,
                           "not_initialized": not_initialized,
-                          "checks": [{"name": c.name, "status": c.status, "detail": c.detail} for c in checks]}, indent=2))
+                          "checks": [{"name": c.name, "status": c.status, "detail": c.detail} for c in checks],
+                          "worker_pool": worker_pool(dict(os.environ))}, indent=2))
         return code
     for check in checks:
         print(f"{check.status:15} {check.name}: {check.detail}")

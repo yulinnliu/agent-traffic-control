@@ -65,6 +65,9 @@ def test_doctor_lists_the_runs_holding_and_leaves_no_lock(tmp_path: Path, monkey
         checks = doctor.worker_pool_checks(environ)
         assert checks[0].name == "worker pool" and "1 run active, 0 waiting" in checks[0].detail
         assert checks[1].name == "worker pool run" and checks[1].detail.startswith("atc verify demo pid")
+        field = doctor.worker_pool(environ)
+        assert field["state"] == "on" and field["waiters"] == []
+        assert [(run["label"], run["stage"], run["tokens"]) for run in field["runs"]] == [("atc verify demo", "parallel", 1)]
         size = workers.default_pool_size(__import__("os").cpu_count() or 1)
         assert workers.Pool(pool, size).free() == size - 1
     finally:
