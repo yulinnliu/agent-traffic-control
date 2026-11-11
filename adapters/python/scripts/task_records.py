@@ -40,7 +40,9 @@ REPOSITORY_ENV = ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE"
 
 
 # Refusals caused by the invocation or a fault; every other token is a STOP of a valid call (CLI.md § Exit codes).
-ERROR_TOKENS = frozenset({"GIT_FAILED", "UNKNOWN_PROJECT", "RECORD_INVALID", "UNKNOWN_TASK"})
+ERROR_TOKENS = frozenset({"GIT_FAILED", "UNKNOWN_PROJECT", "RECORD_INVALID", "UNKNOWN_TASK", "WRITE_FAILED"})
+# Refusals after the command changed something it could not undo (CLI.md § Exit codes, 3 PARTIAL).
+PARTIAL_TOKENS = frozenset({"START_INCOMPLETE"})
 
 
 class Refused(Exception):
@@ -378,7 +380,7 @@ def reserve(root: Path, name: str, repo: Path, prefix: str, scope: str, scan: Pa
         task_id = f"{prefix}-{number:04d}"
         record = {"task_id": task_id, **identity, "scope": scope, "governance_source": source,
                   "authority": dict(NO_AUTHORITY)}
-        record.update({k: v for k, v in (("rank", rank), ("after", after), ("notes", notes)) if v})
+        record.update({k: v for k, v in (("rank", rank), ("after", after), ("notes", notes)) if v is not None})
         issued[:] = [task_id]
         return task_id, dump(record, prefix), f"plan {task_id}"
 
@@ -389,7 +391,10 @@ def reserve(root: Path, name: str, repo: Path, prefix: str, scope: str, scan: Pa
 def bind(root: Path, worktree: Path, name: str, main_checkout: Path, branch: str, prefix: str, task_id: str,
          scope: str | None) -> Path:
     """Moves the planned record ``task_id`` from the backlog into ``worktree``, bound to its branch with `edit` and
-    `commit`; the record is left uncommitted in the worktree."""
+    `commit`; the record is left uncommitted in the worktree.
+
+    The worktree copy is written first and the backlog copy removed after it. When the removal fails, the written
+    copy is deleted again and the removal's refusal stands; a copy that cannot be deleted is `START_INCOMPLETE`."""
     if not task_id.startswith(f"{prefix}-"):
         raise Refused("WRONG_REPOSITORY", f"{task_id} lacks the prefix {prefix} that {worktree}/AGENTS.md declares")
     path = worktree / TASKS_DIR / f"{task_id}.yaml"
@@ -417,10 +422,27 @@ def bind(root: Path, worktree: Path, name: str, main_checkout: Path, branch: str
         planned(main_checkout, tip, task_id)
         return task_id, None, f"start {task_id} on {branch}"
 
-    backlog_write(main_checkout, change)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("x", encoding="utf-8", newline="\n") as handle:
-        handle.write(text)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("x", encoding="utf-8", newline="\n") as handle:
+            handle.write(text)
+    except FileExistsError:
+        raise Refused("RECORD_EXISTS", f"{path} already exists") from None
+    except OSError as exc:
+        path.unlink(missing_ok=True)
+        raise Refused("WRITE_FAILED", f"{path}: {exc}") from None
+    try:
+        backlog_write(main_checkout, change)
+    except (Refused, OSError) as failure:
+        refused = failure if isinstance(failure, Refused) else Refused("WRITE_FAILED", f"{BACKLOG} branch: {failure}")
+        try:
+            path.unlink()
+        except OSError as exc:
+            raise Refused("START_INCOMPLETE", f"{path} is written but {task_id} is still planned on the {BACKLOG} "
+                                              f"branch ({refused.token} {refused.detail}) and the written copy "
+                                              f"could not be deleted ({exc}); delete it and run atc task start "
+                                              f"{task_id} again") from None
+        raise refused from None
     return path
 
 
@@ -596,7 +618,8 @@ def build_parser() -> argparse.ArgumentParser:
     new_parser = sub.add_parser("new", allow_abbrev=False, help="write a record in the current topic worktree",
                                 **cli_conventions.form(
                                     "Write a record for the topic worktree holding the working directory.",
-                                    exit="0 created; 1 STOP (not a topic worktree, no declaration); 2 ERROR",
+                                    exit="0 created; 1 STOP (not a topic worktree, no declaration); 2 ERROR; "
+                                           "3 PARTIAL (record written, still planned on the backlog)",
                                     see="docs/TASKS.md § Commands"))
     new_parser.add_argument("--scope", required=True, metavar="TEXT", help="what the task covers, one sentence")
     plan_parser = sub.add_parser("plan", allow_abbrev=False, help="queue a planned task on the backlog branch",
@@ -615,7 +638,8 @@ def build_parser() -> argparse.ArgumentParser:
                                       "Bind a planned task to the topic worktree holding the working directory.",
                                       "Writes its record there with the branch, base and governance revision and "
                                       "edit and commit authority, and removes it from the backlog branch.",
-                                      exit="0 started; 1 STOP (not planned, not a topic worktree); 2 ERROR",
+                                      exit="0 started; 1 STOP (not planned, not a topic worktree); 2 ERROR; "
+                                           "3 PARTIAL (record written, still planned on the backlog)",
                                       see="docs/TASKS.md § Backlog"))
     start_parser.add_argument("task", metavar="ID", help="the planned task")
     start_parser.add_argument("--scope", metavar="TEXT", help="replace the planned scope")
@@ -707,9 +731,9 @@ def main(argv: list[str] | None = None, root: Path = ROOT, environ: dict[str, st
             code = cli_conventions.ERROR
         else:
             print(f"STOP {refused.token}: {refused.detail}", file=sys.stderr)
-            code = cli_conventions.STOP
+            code = cli_conventions.PARTIAL if refused.token in PARTIAL_TOKENS else cli_conventions.STOP
         if args.json:
-            print(json.dumps({"refusal": {"verdict": "ERROR" if code == cli_conventions.ERROR else "STOP",
+            print(json.dumps({"refusal": {"verdict": cli_conventions.EXIT_NAMES[code],
                                           "reason": refused.token, "detail": refused.detail, "next": None}}, indent=2))
         return code
 

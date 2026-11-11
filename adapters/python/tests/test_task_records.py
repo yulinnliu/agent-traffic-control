@@ -509,3 +509,88 @@ def test_a_backlog_write_against_a_moved_tip_retries_on_the_new_tip(ws: Workspac
     task_records.backlog_write(ws.repo, lambda tip: ("DEMO-0001", None, "remove a"))
     assert len(calls) == 2
     assert set(backlog(ws)) == {"DEMO-0002"}
+
+
+def test_start_refuses_a_record_the_worktree_already_holds(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    task_id = plan(ws, capsys, "--scope", "a")
+    topic = ws.worktree(ws.repo, "claude+a", "topic-a")
+    (topic / TASKS_DIR).mkdir(parents=True)
+    (topic / TASKS_DIR / f"{task_id}.yaml").write_text("kept\n", encoding="utf-8")
+    status, _, err = ws.cli(capsys, "start", task_id, cwd=topic)
+    assert status == 1 and err.startswith("STOP RECORD_EXISTS: ")
+    assert (topic / TASKS_DIR / f"{task_id}.yaml").read_text(encoding="utf-8") == "kept\n"
+    assert task_id in backlog(ws)
+
+
+def test_a_backlog_write_gives_up_after_every_attempt_meets_a_moved_tip(ws: Workspace, capsys: pytest.CaptureFixture[str],
+                                                                       monkeypatch: pytest.MonkeyPatch) -> None:
+    attempts = []
+    monkeypatch.setattr(task_records, "backlog_commit", lambda *args: attempts.append(args) and False)
+    status, _, err = ws.cli(capsys, "plan", "--project", PROJECT, "--scope", "s", cwd=ws.root)
+    assert status == 1 and err.startswith("STOP BACKLOG_BUSY: ")
+    assert len(attempts) == task_records.CAS_ATTEMPTS
+    assert run_git(ws.repo, "branch", "--list", "backlog") == ""
+
+
+@pytest.mark.parametrize("argv", [("--rank", "0"), ("--notes", "")], ids=["rank-0", "empty-notes"])
+def test_plan_refuses_a_value_the_schema_refuses(ws: Workspace, capsys: pytest.CaptureFixture[str], argv: tuple[str, str]) -> None:
+    status, _, err = ws.cli(capsys, "plan", "--project", PROJECT, "--scope", "s", *argv, cwd=ws.root)
+    assert status == 2 and err.startswith("ERROR RECORD_INVALID ")
+    assert run_git(ws.repo, "branch", "--list", "backlog") == ""
+
+
+def test_rank_refuses_zero(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    task_id = plan(ws, capsys, "--scope", "s", "--rank", "10")
+    status, _, err = ws.cli(capsys, "rank", task_id, "0", "--project", PROJECT, cwd=ws.root)
+    assert status == 2 and err.startswith("ERROR RECORD_INVALID ")
+    assert backlog(ws)[task_id]["rank"] == 10
+
+
+def test_start_undoes_the_written_record_when_the_backlog_removal_fails(
+        ws: Workspace, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
+    task_id = plan(ws, capsys, "--scope", "a")
+    topic = ws.worktree(ws.repo, "claude+a", "topic-a")
+    written = topic / TASKS_DIR / f"{task_id}.yaml"
+    seen = []
+
+    def busy(repo: Path, change) -> None:
+        seen.append(written.is_file())
+        raise task_records.Refused("BACKLOG_BUSY", "moved")
+
+    monkeypatch.setattr(task_records, "backlog_write", busy)
+    status, _, err = ws.cli(capsys, "start", task_id, cwd=topic)
+    assert status == 1 and err.startswith("STOP BACKLOG_BUSY: ")
+    assert seen == [True]
+    assert not written.exists()
+    assert task_id in backlog(ws)
+
+    def broken(repo: Path, change) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(task_records, "backlog_write", broken)
+    status, _, err = ws.cli(capsys, "start", task_id, cwd=topic)
+    assert status == 2 and err.startswith("ERROR WRITE_FAILED ")
+    assert not written.exists()
+
+
+def test_start_is_partial_when_the_written_record_cannot_be_undone(
+        ws: Workspace, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
+    task_id = plan(ws, capsys, "--scope", "a")
+    topic = ws.worktree(ws.repo, "claude+a", "topic-a")
+    written = topic / TASKS_DIR / f"{task_id}.yaml"
+
+    def busy(repo: Path, change) -> None:
+        raise task_records.Refused("BACKLOG_BUSY", "moved")
+
+    def stuck(self: Path, missing_ok: bool = False) -> None:
+        raise PermissionError("in use")
+
+    monkeypatch.setattr(task_records, "backlog_write", busy)
+    monkeypatch.setattr(Path, "unlink", stuck)
+    status, out, err = ws.cli(capsys, "start", task_id, "--json", cwd=topic)
+    assert status == 3
+    assert err.startswith("STOP START_INCOMPLETE: ")
+    assert str(written) in err and "BACKLOG_BUSY" in err
+    assert json.loads(out)["refusal"]["verdict"] == "PARTIAL"
+    assert written.is_file()
+    assert task_id in backlog(ws)
