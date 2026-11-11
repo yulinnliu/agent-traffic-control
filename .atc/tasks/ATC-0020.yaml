@@ -26,3 +26,4 @@ decisions:
   - 'D2: metavar N (a positive integer) joins CLI.md § Help and METAVAR_WORDS'
   - 'D3: backlog loss is documented in TASKS.md § Backlog (consequence and reflog recovery), not detected'
   - 'D4: atc task start drops rank and keeps the other planned fields'
+  - 'D5: an after ID that reads abandoned no longer blocks; atc task list marks it after <ID> (dropped)'
