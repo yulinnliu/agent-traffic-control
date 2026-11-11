@@ -158,10 +158,11 @@ diff against your last round's findings.
    gives, from the scratch copy's root; never with `python -I`, which
    drops the script's directory from the import path. Before a PASS on a diff that changes tests or behaviour, run
    `atc verify` with the target arguments of the integrate command below
-   (`--project`, `--reviewed`, and `--rebased` when the integrate command
-   has it): it runs the integration verifier on the
+   (`--project`, `--reviewed`, `--task`, and `--rebased` when the integrate
+   command has it): it runs the integration verifier on the
    candidate `atc integrate` would build, without a slot, a ref update or
-   the Owner's word. Run it while no integration runs. Quote its last line
+   the Owner's word, and records a PASS that `atc integrate` reuses in place of
+   rerunning the verifier. Run it while no integration runs. Quote its last line
    in the verified line; a refusal is a blocker finding.
    One single-string mutant per guard, one at a time, restored after
    each run.

@@ -55,6 +55,9 @@ platform             {"system": str, "machine": str}
 verified_at          UTC timestamp, ISO 8601
 duration_seconds     verifier wall clock
 report               the report above, verbatim
+reused               present only when the integration reused a candidate record in place of
+                     the verifier: {"record": path, "candidate_sha": str, "verified_at": str};
+                     verified_at, duration_seconds and report then come from that record
 ```
 
 The adapter also wraps an `atc-verification-report/1` report, which has no
@@ -98,3 +101,64 @@ the gate's selection is not `full` and each of its paths equals a recorded
 path or lies below a recorded directory. Any failure while checking gives
 `RUN: CHECK_FAILED`. Static checks run under either verdict, and the gate
 prints the verdict.
+
+## Candidate record
+
+`atc verify` builds the candidate `atc integrate` would build and runs the
+same verifier. It writes the outcome to
+`<git-common-dir>/atc/verification-evidence/verify/<verdict>-<expected_main>-<reviewed>.json`.
+The key holds the first 12 characters of each SHA. It names the base, the
+reviewed SHA and the topology rather than the candidate SHA, because a NO_FF
+merge gets a new SHA each time it is built. The record has the fields of an
+integration record plus:
+
+```text
+kind                 "verify"
+result               "PASS" | "FAIL"
+timeout              the verifier timeout in seconds
+```
+
+A `PASS` record holds the report. A `FAIL` record, written on
+`VERIFICATION_FAILED`, `VERIFICATION_TIMEOUT` or `CANDIDATE_CHANGED`, holds
+`report: null` and `clean: false` and replaces the record under the same key,
+so only a latest `PASS` counts. A fresh `atc integrate` whose verifier fails
+writes the same `FAIL` record. No candidate record is written when a passing
+run leaves no valid report, nor for a records-only range. `atc verify` takes
+the integrate command's target arguments, `--task` included. `--task` only
+resolves the target and checks no authority, so the record names `task` and
+`tasks` for audit and no check compares them. Writes are atomic, and the
+14-day cutoff covers this directory too. The pre-push gate never reads it.
+
+## Integration reuse
+
+Within the active slot, after preflight, authority and the main read-back,
+`atc integrate` reads the candidate record under its own key. It reuses the
+record in place of running the verifier only when every row holds, checked in
+this order. The first row that fails gives the reason, and the verifier runs.
+
+| Check | Reason |
+| --- | --- |
+| The record exists | `NO_RECORD` |
+| It is readable JSON holding an object | `UNREADABLE` |
+| `schema` is `atc-verification-evidence/2`, `kind` is `verify`, and every field the checks read has its type | `SCHEMA_MISMATCH` |
+| `result` is `PASS` | `NOT_PASS` |
+| `report` is a valid report | `SCHEMA_MISMATCH` |
+| `clean` is `true` | `NOT_CLEAN` |
+| `expected_main`, `reviewed` and `carried_over_from` equal the slot's main tip, reviewed SHA and carried-over source | `BASE_MISMATCH` |
+| `verdict` matches, and `tree` equals the candidate tree: the reviewed tree for FF, the `git merge-tree --write-tree` result for NO_FF | `TREE_MISMATCH` |
+| `verify_argv` equals the resolved verifier argv | `ARGV_MISMATCH` |
+| `timeout` equals the resolved timeout | `TIMEOUT_MISMATCH` |
+| `platform` equals the integrating host's platform | `PLATFORM_MISMATCH` |
+| `report.dependency_inputs` equals the digests of those files as a checkout of the candidate tree writes them, `absent` for a missing one | `DEPENDENCY_MISMATCH` |
+| When the candidate tree holds `vendor/atc-testkit.json`, `report.selector.version` equals its version | `SELECTOR_MISMATCH` |
+| `report.time_slack` equals the integrating process's time slack; a `/1` report has none | `TIME_SLACK_MISMATCH` |
+
+On reuse an FF integration builds no candidate worktree. A NO_FF integration
+builds the merge and stops with `CANDIDATE_CHANGED` when its tree differs
+from the record's. The integration record then carries `reused`. Its
+`integrations.jsonl` line carries `verification_evidence`, which is the same
+note, or `null` when the verifier ran. The result reports
+`verification_reuse`, which is `REUSED` or the reason, and on reuse
+`verification_reused`, the record path. The progress line on stderr reads
+`verify: candidate <sha> REUSED <path> (verified <at>)` or
+`verify: candidate <sha> RUN (evidence: <reason>) ...`.

@@ -137,7 +137,7 @@ them in one table.
 | `atc worktree` | Creates, resumes, audits and cleans up per-topic worktrees; `--project root` for this repository's own | skill `atc-worktree` |
 | `atc task` | `new` writes a task record, `list` lists tasks, `check` checks records | `docs/TASKS.md` |
 | `atc integrate` | Fast-forwards `main` to a reviewed SHA once the verifier passes; `--check` only resolves and preflights | `docs/WORKFLOW.md` § 6–7, governance `GIT_WORKFLOW.md` |
-| `atc verify` | Runs the integration verifier on the candidate `atc integrate` would build, moving no ref | `docs/WORKFLOW.md` § 5 |
+| `atc verify` | Runs the integration verifier on the candidate `atc integrate` would build, moving no ref, and records a PASS that `atc integrate` reuses | `docs/WORKFLOW.md` § 5 |
 | `atc close-out` | Removes a task's worktree, scratches and reports | `docs/TASKS.md` § Close-out |
 | `atc preflight` | `push` lists what `origin/main..main` would publish, by integration; reads only | `docs/WORKFLOW.md` § 8 |
 | `atc test` | Runs tests on a scratch copy into a log; `mutants` checks guards; `private` runs a command on a private desktop | `docs/TESTKIT.md` § Commands |

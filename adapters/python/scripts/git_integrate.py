@@ -7,6 +7,7 @@ and § Command results; options: `--help`.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import platform
@@ -24,7 +25,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
-from atc_testkit import locations, stages
+from atc_testkit import locations, stages, timing
 import git_preflight as gp
 import hami_worktree as hw
 import task_authority as ta
@@ -46,6 +47,10 @@ REPORT_SCHEMAS = ("atc-verification-report/1", "atc-verification-report/2")
 EVIDENCE_SCHEMA = "atc-verification-evidence/2"
 EVIDENCE_DIR = ("atc", "verification-evidence")
 EVIDENCE_RETENTION_SECONDS = 14 * 24 * 3600
+CANDIDATE_RECORDS = "verify"  # the subdirectory of EVIDENCE_DIR holding `atc verify` records, which no gate reads
+PASS, FAIL = "PASS", "FAIL"
+REUSED = "REUSED"
+VERIFIER_FAILURES = ("VERIFICATION_FAILED", "VERIFICATION_TIMEOUT", "CANDIDATE_CHANGED")
 INTEGRATIONS = ("atc", "integrations.jsonl")
 CANDIDATE_REFS = "refs/atc/integration-candidates"
 TAIL_LINES = 20
@@ -453,23 +458,157 @@ def _read_report(path: Path) -> tuple[dict | None, str | None]:
     return (report, None) if _valid_report(report) else (None, "INVALID_REPORT")
 
 
-def _write_evidence(repo: Path, record: dict) -> Path:
-    """Store the record under the Git common directory and drop expired ones."""
+def _evidence_dir(repo: Path) -> Path:
     common = Path(_git_ok(repo, "rev-parse", "--path-format=absolute", "--git-common-dir"))
-    directory = common.joinpath(*EVIDENCE_DIR)
-    directory.mkdir(parents=True, exist_ok=True)
-    target = directory / f"{record['candidate_sha']}.json"
-    partial = directory / f".{record['candidate_sha']}.{uuid.uuid4().hex}.tmp"
+    return common.joinpath(*EVIDENCE_DIR)
+
+
+def _store(target: Path, record: dict) -> Path:
+    """Write ``record`` to ``target`` atomically, then drop the expired records of both evidence directories."""
+    target.parent.mkdir(parents=True, exist_ok=True)
+    partial = target.with_name(f".{uuid.uuid4().hex[:SHORT_SHA]}.tmp")
     partial.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
     os.replace(partial, target)
+    directory = target.parent if target.parent.name != CANDIDATE_RECORDS else target.parent.parent
     cutoff = time.time() - EVIDENCE_RETENTION_SECONDS
-    for old in directory.glob("*.json"):
+    for old in [*directory.glob("*.json"), *(directory / CANDIDATE_RECORDS).glob("*.json")]:
         try:
             if old != target and old.stat().st_mtime < cutoff:
                 old.unlink()
         except OSError:
             pass
     return target
+
+
+def _write_evidence(repo: Path, record: dict) -> Path:
+    """Store the record under the Git common directory and drop expired ones."""
+    return _store(_evidence_dir(repo) / f"{record['candidate_sha']}.json", record)
+
+
+def candidate_record_path(repo: Path, verdict: str, expected_main: str, reviewed: str) -> Path:
+    """Where `atc verify` keeps the latest result for one candidate: its topology, base and reviewed SHA, each SHA
+    by its first 12 characters; the record holds both in full and a reuse compares them."""
+    name = f"{verdict}-{expected_main[:SHORT_SHA]}-{reviewed[:SHORT_SHA]}.json"
+    return _evidence_dir(repo) / CANDIDATE_RECORDS / name
+
+
+def _platform() -> dict:
+    return {"system": sys.platform, "machine": platform.machine()}
+
+
+def _candidate_record(t: "Target", verdict: str, expected_main: str, built: "Built", result: str) -> dict:
+    """The record `atc verify` writes for its candidate (shared/conformance/verification-evidence/README.md)."""
+    return {
+        "schema": EVIDENCE_SCHEMA,
+        "kind": "verify",
+        "result": result,
+        "candidate_sha": built.candidate_sha,
+        "tree": _git_ok(t.repo, "rev-parse", f"{built.candidate_sha}^{{tree}}"),
+        "clean": result == PASS,
+        "expected_main": expected_main,
+        "reviewed": t.reviewed,
+        **({"carried_over_from": t.carried_from} if t.carried_from else {}),
+        "verdict": verdict,
+        "task": t.binding.tasks[0] if len(t.binding.tasks) == 1 else None,
+        "tasks": t.binding.tasks,
+        "verify_argv": t.verify_argv,
+        "timeout": t.timeout,
+        "platform": _platform(),
+        "verified_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "duration_seconds": built.seconds,
+        "report": built.report if result == PASS else None,
+    }
+
+
+def _record_candidate(t: "Target", verdict: str, expected_main: str, built: "Built", result: str) -> str | None:
+    """Write the candidate record; its path, or ``None`` when it could not be written."""
+    try:
+        return str(_store(candidate_record_path(t.repo, verdict, expected_main, t.reviewed),
+                          _candidate_record(t, verdict, expected_main, built, result)))
+    except (OSError, GitError):
+        return None
+
+
+def _checkout_digest(repo: Path, tree: str, name: str) -> str:
+    """The digest of ``name`` as a checkout of ``tree`` writes it, ``absent`` when the tree has none."""
+    done = subprocess.run(["git", "cat-file", "--filters", f"{tree}:{name}"], cwd=repo, capture_output=True,
+                          env={key: value for key, value in os.environ.items() if not key.startswith("GIT_")},
+                          stdin=subprocess.DEVNULL)
+    return hashlib.sha256(done.stdout).hexdigest() if done.returncode == 0 else "absent"
+
+
+def _vendored_selector(repo: Path, tree: str) -> str | None:
+    done = git(repo, "cat-file", "-p", f"{tree}:vendor/atc-testkit.json", check=False)
+    if done.returncode:
+        return None
+    try:
+        version = json.loads(done.stdout).get("version")
+    except (json.JSONDecodeError, AttributeError):
+        return None
+    return version if isinstance(version, str) else None
+
+
+def candidate_tree(repo: Path, verdict: str, expected_main: str, reviewed: str) -> str | None:
+    """The tree the candidate will hold: the reviewed tree on `FF`, the merge's on `NO_FF`."""
+    if verdict != "NO_FF":
+        done = git(repo, "rev-parse", "--verify", "--quiet", f"{reviewed}^{{tree}}", check=False)
+        return done.stdout.strip() or None if done.returncode == 0 else None
+    done = git(repo, "merge-tree", "--write-tree", expected_main, reviewed, check=False)
+    return done.stdout.split()[0] if done.returncode == 0 and done.stdout.split() else None
+
+
+def reuse_check(t: "Target", verdict: str, expected_main: str) -> tuple[dict | None, str, Path | None]:
+    """The candidate record `atc integrate` reuses in place of the verifier, or the first reason it cannot."""
+    try:
+        path = candidate_record_path(t.repo, verdict, expected_main, t.reviewed)
+        raw = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None, "NO_RECORD", None
+    except (OSError, GitError):
+        return None, "UNREADABLE", None
+    try:
+        record = json.loads(raw)
+    except json.JSONDecodeError:
+        return None, "UNREADABLE", path
+    if not isinstance(record, dict):
+        return None, "UNREADABLE", path
+    if (record.get("schema") != EVIDENCE_SCHEMA or record.get("kind") != "verify"
+            or record.get("result") not in (PASS, FAIL) or not isinstance(record.get("tree"), str)
+            or not _strings(record.get("verify_argv")) or not isinstance(record.get("platform"), dict)
+            or isinstance(record.get("timeout"), bool) or not isinstance(record.get("timeout"), (int, float))):
+        return None, "SCHEMA_MISMATCH", path
+    if record["result"] != PASS:
+        return None, "NOT_PASS", path
+    report = record.get("report")
+    if not _valid_report(report):
+        return None, "SCHEMA_MISMATCH", path
+    if record.get("clean") is not True:
+        return None, "NOT_CLEAN", path
+    if (record.get("expected_main"), record.get("reviewed"), record.get("carried_over_from")) != (
+            expected_main, t.reviewed, t.carried_from):
+        return None, "BASE_MISMATCH", path
+    tree = candidate_tree(t.repo, verdict, expected_main, t.reviewed)
+    if record.get("verdict") != verdict or tree is None or record["tree"] != tree:
+        return None, "TREE_MISMATCH", path
+    if record["verify_argv"] != t.verify_argv:
+        return None, "ARGV_MISMATCH", path
+    if record["timeout"] != t.timeout:
+        return None, "TIMEOUT_MISMATCH", path
+    if record["platform"] != _platform():
+        return None, "PLATFORM_MISMATCH", path
+    inputs = report["dependency_inputs"]
+    if any(_checkout_digest(t.repo, tree, name) != digest for name, digest in inputs.items()):
+        return None, "DEPENDENCY_MISMATCH", path
+    vendored = _vendored_selector(t.repo, tree)
+    if vendored is not None and report["selector"]["version"] != vendored:
+        return None, "SELECTOR_MISMATCH", path
+    try:
+        slack = timing.slack(os.environ)
+    except locations.Refusal:
+        slack = None
+    if report.get("time_slack") != slack:
+        return None, "TIME_SLACK_MISMATCH", path
+    return {**record, "path": str(path)}, REUSED, path
 
 
 
@@ -552,6 +691,7 @@ def _binding_keys(binding: Binding) -> dict:
 def _note_integration(
     repo: Path, result: dict, candidate_sha: str, reviewed: str, binding: Binding,
     carried_from: str | None = None, main_before: str | None = None, verifier: dict | None = None,
+    verification_evidence: dict | None = None,
 ) -> None:
     """One line per task; `main_before` is present on every line, `None` only after a recovery.
 
@@ -568,6 +708,7 @@ def _note_integration(
             "authority": binding.authority,
             "records_only": binding.records_only,
             "verifier": verifier,
+            "verification_evidence": verification_evidence,
             "integrated_at": at,
         } for task in binding.tasks]))
     except (OSError, GitError) as exc:
@@ -876,6 +1017,10 @@ def integrate(t: Target, progress: bool = True) -> tuple[int, dict]:
         if rev(repo, main) != main_before or rev(repo, "HEAD") != main_before:
             return STOP_BEFORE_CANDIDATE, {**result, "refusal": stop("REF_DRIFT", f"{main} moved after preflight; main unchanged")}
 
+        reuse, reuse_reason = None, None
+        if not t.binding.records_only:
+            reuse, reuse_reason, _path = reuse_check(t, report.verdict, main_before)
+            result["verification_reuse"] = reuse_reason
         built = Built()
         candidate_ref: str | None = None
         integration_updated = False
@@ -883,7 +1028,7 @@ def integrate(t: Target, progress: bool = True) -> tuple[int, dict]:
             with build_and_verify(
                 repo, main_before, reviewed, report.verdict, t.verify_argv, t.timeout, built,
                 branch=branch, records_only=t.binding.records_only, timeout_source=t.timeout_source,
-                progress=progress,
+                progress=progress, reuse=reuse, reuse_reason=None if reuse else reuse_reason,
             ):
                 built.fill(result)
                 candidate_sha = built.candidate_sha
@@ -916,7 +1061,8 @@ def integrate(t: Target, progress: bool = True) -> tuple[int, dict]:
                 if main_after == candidate_sha:
                     # main holds the candidate, so the integration happened even
                     # when its checkout needs recovery below.
-                    _note_integration(repo, result, candidate_sha, reviewed, t.binding, t.carried_from, main_before, t.verifier)
+                    _note_integration(repo, result, candidate_sha, reviewed, t.binding, t.carried_from, main_before,
+                                      t.verifier, _reuse_note(reuse))
                 if main_after != candidate_sha or rev(repo, "HEAD") != candidate_sha:
                     raise stop(
                         "RECOVERY_REQUIRED",
@@ -945,10 +1091,12 @@ def integrate(t: Target, progress: bool = True) -> tuple[int, dict]:
                             "tasks": t.binding.tasks,
                             "authority": t.binding.authority,
                             "verify_argv": t.verify_argv,
-                            "platform": {"system": sys.platform, "machine": platform.machine()},
-                            "verified_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-                            "duration_seconds": result["verification_seconds"],
+                            "platform": _platform(),
+                            "verified_at": reuse["verified_at"] if reuse else
+                            datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                            "duration_seconds": reuse["duration_seconds"] if reuse else result["verification_seconds"],
                             "report": verifier_report,
+                            **({"reused": _reuse_note(reuse)} if reuse else {}),
                         }))
                     except (OSError, GitError):
                         result["evidence_reason"] = "WRITE_FAILED"
@@ -963,6 +1111,9 @@ def integrate(t: Target, progress: bool = True) -> tuple[int, dict]:
             result["refusal"] = exc
             if integration_updated:
                 result["recovery_required"] = True
+            elif built.candidate_sha and reuse is None and exc.token in VERIFIER_FAILURES \
+                    and not t.binding.records_only:
+                _record_candidate(t, report.verdict, main_before, built, FAIL)
             code = exc.code
         finally:
             if built.cleanup_warning:
@@ -980,6 +1131,13 @@ def integrate(t: Target, progress: bool = True) -> tuple[int, dict]:
         return code, result
 
 
+def _reuse_note(reuse: dict | None) -> dict | None:
+    """What an evidence record and an integration line say about a reused `atc verify` record."""
+    if reuse is None:
+        return None
+    return {"record": reuse["path"], "candidate_sha": reuse["candidate_sha"], "verified_at": reuse["verified_at"]}
+
+
 @dataclass
 class Built:
     """What `build_and_verify` built and found; filled as it goes, so a stop still reports it."""
@@ -995,6 +1153,7 @@ class Built:
     log: str | None = None
     report: dict | None = None
     cleanup_warning: str | None = None
+    reused: dict | None = None
 
     def fill(self, result: dict) -> None:
         result.update(
@@ -1002,6 +1161,8 @@ class Built:
             message=self.message, verification=self.verification, verification_seconds=self.seconds,
             evidence_reason=self.evidence_reason,
         )
+        if self.reused is not None:
+            result["verification_reused"] = self.reused["path"]
         if self.warning:
             result["verification_warning"] = self.warning
         if self.log:
@@ -1012,10 +1173,19 @@ class Built:
 def build_and_verify(
     repo: Path, main_before: str, reviewed: str, verdict: str, argv: list[str], timeout: float, built: Built, *,
     branch: str, records_only: bool, timeout_source: str = "", progress: bool = False,
+    reuse: dict | None = None, reuse_reason: str | None = None,
 ):
     """Build the candidate `atc integrate` would build in a detached worktree under `<tmp>/candidates` (the
     reviewed commit on `FF`, the merge on `NO_FF`), verify it with the verifier, or the record check for a
-    records-only range, and remove it when the block ends. It takes no slot and creates no ref (plan D.27)."""
+    records-only range, and remove it when the block ends. It takes no slot and creates no ref (plan D.27).
+
+    With ``reuse``, a passing `atc verify` record of the same candidate stands in for the verifier: an `FF`
+    candidate is the reviewed commit and needs no worktree, a `NO_FF` one is built and must hold its tree."""
+    if reuse is not None and verdict != "NO_FF":
+        built.candidate_sha = reviewed
+        _reused(built, reuse, progress)
+        yield built
+        return
     places = locations.locate()
     candidate_root = places.tmp / locations.CANDIDATES
     try:
@@ -1054,6 +1224,15 @@ def build_and_verify(
             raise stop("CANDIDATE_CHANGED", f"FF candidate is {candidate_sha}, expected reviewed SHA {reviewed}", after_candidate=True)
 
         started = time.monotonic()
+        if reuse is not None:
+            tree = _git_ok(candidate_dir, "rev-parse", f"{candidate_sha}^{{tree}}")
+            if tree != reuse["tree"]:
+                raise stop("CANDIDATE_CHANGED",
+                           f"candidate tree {tree} differs from the reused record's {reuse['tree']}",
+                           after_candidate=True)
+            _reused(built, reuse, progress)
+            yield built
+            return
         if records_only:
             if progress:
                 print(f"verify: candidate {candidate_sha} {RECORD_CHECK}", file=sys.stderr)
@@ -1061,7 +1240,9 @@ def build_and_verify(
             built.evidence_reason = "RECORDS_ONLY"
         else:
             if progress:
-                print(f"verify: candidate {candidate_sha} timeout {timeout:g}s ({timeout_source})", file=sys.stderr)
+                evidence = f" RUN (evidence: {reuse_reason})" if reuse_reason else ""
+                print(f"verify: candidate {candidate_sha}{evidence} timeout {timeout:g}s ({timeout_source})",
+                      file=sys.stderr)
             warning, log = _verify_candidate(
                 argv, candidate_dir, candidate_sha, main_before, reviewed, timeout, places.systmp, report_path,
             )
@@ -1075,6 +1256,16 @@ def build_and_verify(
         report_path.unlink(missing_ok=True)
         if created:
             built.cleanup_warning = _remove_candidate(repo, candidate_dir)
+
+
+def _reused(built: Built, reuse: dict, progress: bool) -> None:
+    built.reused = reuse
+    built.report = reuse["report"]
+    built.verification = "PASS"
+    built.seconds = 0.0
+    if progress:
+        print(f"verify: candidate {built.candidate_sha} {REUSED} {reuse['path']} (verified {reuse['verified_at']})",
+              file=sys.stderr)
 
 
 def resolve_repo(args: argparse.Namespace, root: Path, cwd: str) -> tuple[str, Path]:
@@ -1206,6 +1397,8 @@ def resolve_binding(
         # and its authority is resolved here as for any other run.
         if args.task is None:
             raise Refused("USAGE", "the reviewed SHA is already on main; name the integration's task with --task")
+        if getattr(args, "verify_only", False):
+            return Binding([args.task], dict(NOT_CHECKED))
         if record_task is not None and branch is not None:
             ta.check_record(repo, record_task, reviewed, branch)
         return Binding([args.task], _authority(args, repo, main, main_tip, record_task, [args.task], words))
@@ -1219,7 +1412,7 @@ def resolve_binding(
     else:
         tasks = [] if args.task is None else [args.task]
     ta.check_range(repo, rng, main_tip, reviewed, may_change=rng.records_only and words is not None)
-    if args.task is None:  # `atc verify` names no task and checks no authority
+    if args.task is None or getattr(args, "verify_only", False):  # `atc verify` checks no authority
         return Binding(tasks, dict(NOT_CHECKED), rng.records_only)
     return Binding(tasks, _authority(args, repo, main, main_tip, record_task, tasks, words), rng.records_only)
 
@@ -1506,6 +1699,10 @@ def _main(args: argparse.Namespace, root: Path, cwd: str | None) -> int:
     report = result.pop("report", None)
     refusal = result.pop("refusal", None)
     if not args.json:
+        if result.get("verification_reuse") == REUSED:
+            print(f"verify: {REUSED} {result.get('verification_reused')}", file=sys.stderr)
+        elif result.get("verification_reuse") and result.get("verification") == "PASS":
+            print(f"verify: RUN (evidence: {result['verification_reuse']})", file=sys.stderr)
         for key in ("verification_warning", "candidate_cleanup_warning", "integration_record_warning", "push_warning"):
             if result.get(key):
                 print(f"WARNING {result[key]}", file=sys.stderr)
@@ -1543,6 +1740,10 @@ def build_verify_parser() -> argparse.ArgumentParser:
                         "root (default: the task's declared prefix, else the working directory's project)")
     parser.add_argument("--reviewed", required=True, help="SHA named by the review: " + SHA_FORM)
     parser.add_argument("--rebased", help="SHA of the topic rebased onto main, as `atc integrate --rebased` takes it")
+    parser.add_argument("--task", help="the task as `atc integrate --task` takes it; it resolves the target (the "
+                        "record's branch, a records-only range, the project) and no authority is checked")
+    parser.add_argument("--verify-timeout", type=float,
+                        help="maximum verifier runtime in seconds, as `atc integrate --verify-timeout` takes it")
     parser.add_argument("--json", action="store_true", help="print the result as JSON")
     return parser
 
@@ -1583,10 +1784,14 @@ def verify(t: Target, as_json: bool) -> int:
             pass
     except Refused as refusal:
         built.fill(result)
+        if built.candidate_sha and refusal.token in VERIFIER_FAILURES and not t.binding.records_only:
+            result["candidate_record"] = _record_candidate(t, report.verdict, main_before, built, FAIL)
         log = result.pop(LOG_KEY, None)
         _print_refusal(refusal, {**payload, **result, "log": log}, as_json)
         return refusal.code
     built.fill(result)
+    if built.report is not None and not t.binding.records_only:
+        result["candidate_record"] = _record_candidate(t, report.verdict, main_before, built, PASS)
     log = result.pop(LOG_KEY, None)
     if built.cleanup_warning:
         print(f"WARNING {built.cleanup_warning}", file=sys.stderr)
@@ -1610,8 +1815,8 @@ def verify_main(argv: list[str] | None = None, root: Path = hw.ROOT, cwd: str | 
     except Refused as refusal:
         print("\n".join(refusal.lines()), file=sys.stderr)
         return refusal.code
-    args.task = args.owner_words = args.verify_timeout = None
-    args.check = True
+    args.owner_words = None
+    args.check = args.verify_only = True
     streams = sys.stdout, sys.stderr
     if not args.json:
         sys.stdout, sys.stderr = _Human(streams[0]), _Human(streams[1])

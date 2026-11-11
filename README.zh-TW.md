@@ -131,7 +131,7 @@ render 出來的檔案都帶有 `managed-by: agent-traffic-control` 標記；沒
 | `atc worktree` | 建立、接續、檢查、清理每個 topic 的 worktree；`--project root` 用在這個 repository 自己的 topic | skill `atc-worktree` |
 | `atc task` | `new` 寫任務紀錄，`list` 列出任務，`check` 檢查紀錄 | `docs/TASKS.md` |
 | `atc integrate` | verifier 通過後，把 `main` fast-forward 到審過的 SHA；加 `--check` 只做解析和預檢 | `docs/WORKFLOW.md` § 6–7、governance `GIT_WORKFLOW.md` |
-| `atc verify` | 在 `atc integrate` 會建出的 candidate 上跑 integration verifier，不移動任何 ref | `docs/WORKFLOW.md` § 5 |
+| `atc verify` | 在 `atc integrate` 會建出的 candidate 上跑 integration verifier，不移動任何 ref；PASS 會留下紀錄，供 `atc integrate` 沿用 | `docs/WORKFLOW.md` § 5 |
 | `atc close-out` | 移除任務的 worktree、scratch 和報告 | `docs/TASKS.md` § Close-out |
 | `atc preflight` | `push` 依 integration 列出 `origin/main..main` 會發布哪些內容，只讀不寫 | `docs/WORKFLOW.md` § 8 |
 | `atc test` | 在 scratch 副本上跑測試並寫成 log；`mutants` 檢查 guard 有沒有效；`private` 在私有桌面上執行指令 | `docs/TESTKIT.md` § Commands |

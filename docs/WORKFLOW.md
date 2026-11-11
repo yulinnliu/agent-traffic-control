@@ -98,10 +98,14 @@ build, and quotes its last line in the verified line
 (`VERIFICATION.md` § Independent review):
 
 ```text
-atc verify --project <project> --reviewed <sha>
+atc verify --project <project> --reviewed <sha> --task <ID>
 ```
 
-`atc verify` takes no slot, moves no ref and needs no Owner's word. Run it
+`atc verify` takes no slot, moves no ref and needs no Owner's word; `--task`
+only resolves the target. Its PASS is recorded, and `atc integrate` reuses it
+in place of rerunning the verifier while the candidate and its inputs are
+unchanged (`shared/conformance/verification-evidence/README.md`
+§ Integration reuse). Run it
 while no integration runs: the two share a fetch and the CPU. A refusal is a
 blocker finding. The verdict goes to
 `~/.atc/reports/<ID>-<short sha>-review.md`. `atc tmp list` shows the

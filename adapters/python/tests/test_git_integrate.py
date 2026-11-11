@@ -867,7 +867,7 @@ def test_failed_merge_is_aborted(repo: Path, monkeypatch: pytest.MonkeyPatch, ca
 
 
 def test_json_fields(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    keys = {"command", "project", "task", "tasks", "authority", "records_only", "verdict", "reason", "main_before", "main_after", "reviewed", "source_before", "candidate_sha", "first_parent", "second_parent", "message", "verification", "verification_seconds", "evidence", "evidence_reason", "candidate_ref", "integration_record", "warnings", "push"}
+    keys = {"command", "project", "task", "tasks", "authority", "records_only", "verdict", "reason", "main_before", "main_after", "reviewed", "source_before", "candidate_sha", "first_parent", "second_parent", "message", "verification", "verification_seconds", "evidence", "evidence_reason", "candidate_ref", "integration_record", "warnings", "push", "verification_reuse"}
     before = main_tip(repo)
     tip = topic(repo, {"a.txt": "a2\n"}, branch="first")
     assert integrate(repo, "first", tip, "--json") == 0
@@ -881,7 +881,7 @@ def test_json_fields(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
         "tasks": ["test-owner-authorization"], "authority": {"kind": "owner_words", "quote": OWNER}, "records_only": False, "verdict": "FF", "reason": "FAST_FORWARD", "main_before": before,
         "main_after": tip, "reviewed": tip, "source_before": tip, "candidate_sha": tip,
         "first_parent": None, "second_parent": None, "message": None, "verification": "PASS",
-        "evidence": None, "evidence_reason": "NO_REPORT", "candidate_ref": None,
+        "evidence": None, "evidence_reason": "NO_REPORT", "candidate_ref": None, "verification_reuse": "NO_RECORD",
     }
 
     second = topic(repo, {"b.txt": "b2\n"}, branch="topic/next")
@@ -938,7 +938,8 @@ def evidence_dir(repo: Path) -> Path:
 
 
 def records(repo: Path) -> list[str]:
-    return sorted(path.name for path in evidence_dir(repo).glob("*")) if evidence_dir(repo).is_dir() else []
+    """The records the pre-push gate reads; `atc verify` records live in a subdirectory no gate reads."""
+    return sorted(path.name for path in evidence_dir(repo).glob("*.json")) if evidence_dir(repo).is_dir() else []
 
 
 def leftover_reports() -> list[Path]:
@@ -1042,6 +1043,8 @@ def test_failed_verification_writes_no_record(repo: Path, capsys: pytest.Capture
     assert main_tip(repo) == before
     assert records(repo) == []
     assert leftover_reports() == []
+    failed = json.loads(gi.candidate_record_path(repo, "FF", before, tip).read_text(encoding="utf-8"))
+    assert (failed["result"], failed["clean"], failed["report"]) == ("FAIL", False, None)
 
 
 def test_record_write_failure_keeps_the_integration(
@@ -1069,7 +1072,7 @@ def test_expired_records_are_removed_after_a_write(repo: Path) -> None:
     declare_verifier(repo, report_command(json.dumps(REPORT)))
     tip = topic(repo, {"a.txt": "a2\n"})
     assert integrate_with(repo, "topic", tip) == 0
-    assert records(repo) == sorted([recent.name, foreign.name, f"{tip}.json"])
+    assert records(repo) == sorted([recent.name, f"{tip}.json"]) and foreign.is_file()
 
 
 # Declarations, refusal forms and target inference (`shared/governance/GIT_WORKFLOW.md` § Integrate, § Integration verifier source with § Authority reference, and § Command results).
@@ -1093,7 +1096,7 @@ def test_the_resolved_values_are_the_first_stderr_line(repo: Path, capsys: pytes
     assert f"branch=topic (inferred) reviewed={tip} " in lines[0]
     assert 'task="test-owner-authorization" authority=owner_words ' in lines[0]
     assert lines[0].endswith("(AGENTS.md verify.json) timeout=300s (default)")
-    assert f"verify: candidate {tip} timeout 300s (default)" in lines
+    assert f"verify: candidate {tip} RUN (evidence: NO_RECORD) timeout 300s (default)" in lines
 
 
 @pytest.mark.integration
@@ -1211,7 +1214,9 @@ def test_every_integration_appends_its_record(repo: Path) -> None:
     lines = (repo / ".git" / "atc" / "integrations.jsonl").read_text(encoding="utf-8").splitlines()
     records = [json.loads(line) for line in lines]
     assert [set(record) for record in records] == [
-        {"candidate_sha", "reviewed", "main_before", "task", "authority", "records_only", "verifier", "integrated_at"}] * 2
+        {"candidate_sha", "reviewed", "main_before", "task", "authority", "records_only", "verifier",
+         "verification_evidence", "integrated_at"}] * 2
+    assert [record["verification_evidence"] for record in records] == [None, None]
     assert [record["verifier"] for record in records] == [
         {"argv_file": "verify.json", "timeout": 300, "timeout_overridden": False}] * 2
     assert records[1]["main_before"] == run_git(repo, "rev-parse", "main^1")
@@ -1462,7 +1467,7 @@ def test_the_default_integration_output_is_one_line_naming_the_log(
     log = Path(match["log"])
     assert log.parent == atc_tmp / "candidates"
     assert "exit: 0\n--- stdout ---\n" in log.read_text(encoding="utf-8")
-    assert not_warnings(captured.err) == []
+    assert not_warnings(captured.err) == ["verify: RUN (evidence: NO_RECORD)"]
 
 
 @pytest.fixture
