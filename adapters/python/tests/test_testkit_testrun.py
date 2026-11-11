@@ -256,11 +256,11 @@ class Export:
         self.worktree, self.sha, self.place = worktree, sha, place
         self.file = place / "tree/src/fixture_pkg/__init__.py"
 
-    def run(self, tmp_path: Path, mutants: list[dict], **env: str) -> subprocess.CompletedProcess[str]:
+    def run(self, tmp_path: Path, mutants: list[dict], *options: str, **env: str) -> subprocess.CompletedProcess[str]:
         listing = tmp_path / "mutants.json"
         listing.write_text(json.dumps(mutants), encoding="utf-8")
         return run_command("test", "mutants", self.place.name, self.sha, str(self.worktree), str(listing),
-                           "--python", sys.executable, "--tests", "tests", **env)
+                           "--python", sys.executable, *options, "--tests", "tests", **env)
 
 
 @pytest.fixture()
@@ -299,6 +299,65 @@ def test_mutants_are_killed_or_survive_and_files_are_restored(export: Export, tm
     assert lines[3] == "restored-ok src/fixture_pkg/__init__.py"
     assert lines[-1] == "done: 2 mutants, 1 survived S two"
     assert b"return 1" in export.file.read_bytes()
+
+
+ERRORING = {"label": "E three", "edits": [{"path": "src/fixture_pkg/__init__.py", "old": "return 1", "new": "return 1 / 0"}]}
+
+
+def mutant_lines(run: subprocess.CompletedProcess[str]) -> list[str]:
+    return [line for line in run.stdout.splitlines() if line != testrun.EXCLUSION_NOTE]
+
+
+@pytest.mark.integration
+def test_the_assertion_rule_kills_only_by_assertion(export: Export, tmp_path: Path) -> None:
+    run = export.run(tmp_path, [KILLED, ERRORING], "--kill-rule", "assertion")
+    lines = mutant_lines(run)
+    assert run.returncode == 1, run.stdout + run.stderr
+    assert lines[1].startswith("KILLED") and "K one" in lines[1]
+    assert lines[2].startswith("INCONCLUSIVE E three -> failed by") and "not by an assertion" in lines[2]
+    assert lines[-1] == "done: 2 of 2 mutants, 0 survived"
+    assert sorted(path.name for path in (export.place / "junit").iterdir()) == [
+        "000-baseline.xml", "001-K_one.xml", "002-E_three.xml"]
+
+
+@pytest.mark.integration
+def test_the_failure_rule_kills_on_any_failed_test(export: Export, tmp_path: Path) -> None:
+    run = export.run(tmp_path, [ERRORING])
+    assert run.returncode == 0 and mutant_lines(run)[1].startswith("KILLED"), run.stdout + run.stderr
+    assert not (export.place / "junit").exists()
+
+
+@pytest.mark.integration
+def test_a_mutants_own_tests_judge_it_and_join_the_baseline(export: Export, tmp_path: Path) -> None:
+    (export.place / "tree/tests/test_other.py").write_text("def test_other():\n    pass\n", encoding="utf-8")
+    run = export.run(tmp_path, [{**KILLED, "tests": ["tests/test_other.py"]}])
+    assert run.returncode == 0 and mutant_lines(run)[1].startswith("SURVIVED K one"), run.stdout + run.stderr
+    (export.place / "tree/tests/test_other.py").write_text("def test_other():\n    assert 0\n", encoding="utf-8")
+    run = export.run(tmp_path, [{**KILLED, "tests": ["tests/test_other.py"]}])
+    assert run.returncode == 1 and mutant_lines(run)[0].startswith("BASELINE-RED")
+
+
+def junit_report(tmp_path: Path, body: str) -> Path:
+    path = tmp_path / "r.xml"
+    path.write_text(f'<testsuites><testsuite><testcase name="t">{body}</testcase></testsuite></testsuites>',
+                    encoding="utf-8")
+    return path
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(("body", "verdict"), [
+    ('<failure message="assert 2 == 1"/>', testrun.KILLED),
+    ('<failure message="AssertionError: x"/>', testrun.KILLED),
+    ('<failure message="Failed: DID NOT RAISE &lt;class \'ValueError\'&gt;"/>', testrun.KILLED),
+    ('<failure message="Failed: boom"/>', testrun.INCONCLUSIVE),
+    ('<failure message="ZeroDivisionError: division by zero"/>', testrun.INCONCLUSIVE),
+    ('<failure message="assert 0"/></testcase><testcase name="u"><error message="fixture"/>', testrun.INCONCLUSIVE),
+])
+def test_the_assertion_rule_reads_the_junit_report(tmp_path: Path, body: str, verdict: str) -> None:
+    failed = testrun.Result(1, ["FAILED tests/test_value.py::test_value - x"])
+    assert testrun._verdict(failed, junit_report(tmp_path, body))[0] == verdict
+    assert testrun._verdict(failed)[0] == testrun.KILLED
+    assert testrun._verdict(failed, tmp_path / "absent.xml") == (testrun.INCONCLUSIVE, "no junit report (FileNotFoundError)")
 
 
 def test_a_red_baseline_applies_no_mutant(export: Export, tmp_path: Path) -> None:

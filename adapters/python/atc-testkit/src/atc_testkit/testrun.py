@@ -15,6 +15,7 @@ import subprocess
 import sys
 import threading
 import time
+import xml.etree.ElementTree as ElementTree
 
 from . import config, desktop, locations, python_toolchain, scratch, stages, timing, toolchain as toolchains
 from .git import git_env
@@ -31,6 +32,10 @@ INTERACTIVE_EXCLUSION = "not interactive_desktop"
 EXCLUSION_NOTE = (f"NOTE private desktop: interactive_desktop tests are excluded; {PRIVATE_DESKTOP_VARIABLE}=0 "
                   "runs on the interactive desktop with them")
 KILLED, SURVIVED, INCONCLUSIVE = "KILLED", "SURVIVED", "INCONCLUSIVE"
+KILL_FAILURE, KILL_ASSERTION = "failure", "assertion"
+# The start of a junit failure message that kills a mutant under the assertion rule.
+ASSERTION_FAILURE = re.compile(r"(?:AssertionError|assert |Failed: DID NOT RAISE)")
+JUNIT = "junit"
 IMPORT_GUARD = r"""
 import glob, importlib, os, sys
 tree = os.path.normcase(os.path.realpath(sys.argv[1])) + os.sep
@@ -156,20 +161,20 @@ def private_desktop(environ: Mapping[str, str]) -> bool:
 
 
 def _pytest_command(python: str, tree: Path, place: Path, environ: Mapping[str, str], private: bool,
-                    pytest_arguments: Sequence[str]) -> list[str]:
+                    pytest_arguments: Sequence[str], junit: Path | None = None) -> list[str]:
     """The run's pytest command; a private run adds ``not interactive_desktop`` to the caller's ``-m``."""
     has_xdist = _capture([python, "-c", "import xdist"], tree, environ, False, None).code == 0
     expression, rest = python_toolchain.split_marker(pytest_arguments)
     if private:
         expression = python_toolchain.combine(expression, INTERACTIVE_EXCLUSION)
     options = python_toolchain.pytest_arguments(select=expression, xdist=has_xdist, no_cache=True,
-                                                basetemp=place / "bt")
+                                                basetemp=place / "bt", junit=junit)
     return [python, "-m", "pytest", *options, *rest]
 
 
 def execute(tree_argument: str, scratch_argument: str, python_argument: str, label: str,
             pytest_arguments: Sequence[str], environ: MutableMapping[str, str], *, quiet: bool = False,
-            timeout: float | None = None) -> Result:
+            timeout: float | None = None, junit: Path | None = None) -> Result:
     """Steps 1 to 5 of the section; a refusal raises ``Refusal`` with its token and exit code."""
     tree = resolve_tree(tree_argument)
     python = resolve_python(python_argument)
@@ -184,7 +189,7 @@ def execute(tree_argument: str, scratch_argument: str, python_argument: str, lab
         if private:
             print(EXCLUSION_NOTE, flush=True)
         print(f"== {label} ==", flush=True)
-    command = _pytest_command(python, tree, place, environ, private, pytest_arguments)
+    command = _pytest_command(python, tree, place, environ, private, pytest_arguments, junit)
     result = _capture(command, tree, environ, private, timeout)
     if not quiet:
         for line in result.lines[-TAIL_LINES:]:
@@ -225,12 +230,35 @@ def _digest(data: bytes) -> str:
     return hashlib.sha256(data.replace(b"\r", b"")).hexdigest()
 
 
-def _verdict(result: Result) -> tuple[str, str]:
-    """``SURVIVED`` on a pass, ``KILLED`` on a failed test, and ``INCONCLUSIVE`` on any other ending of the run."""
+def _unasserted(junit: Path) -> str | None:
+    """Why the junit report shows a run that did not fail by assertion alone; ``None`` when it did."""
+    try:
+        cases = list(ElementTree.parse(junit).getroot().iter("testcase"))
+    except (OSError, ElementTree.ParseError) as error:
+        return f"no junit report ({type(error).__name__})"
+    errored = [case for case in cases if case.find("error") is not None]
+    if errored:
+        return f"errored: {errored[0].find('error').get('message', '')}"
+    for case in cases:
+        failure = case.find("failure")
+        if failure is not None and not ASSERTION_FAILURE.match(failure.get("message", "")):
+            return f"failed by {failure.get('message', '')!r}, not by an assertion"
+    return None
+
+
+def _verdict(result: Result, junit: Path | None = None) -> tuple[str, str]:
+    """``SURVIVED`` on a pass, ``KILLED`` on a failed test, and ``INCONCLUSIVE`` on any other ending of the run.
+
+    With ``junit``, the assertion rule: a failed run kills only when every failure in that report is an assertion
+    and no test errored.
+    """
     if result.code is None:
         return INCONCLUSIVE, f"timed out after {MUTANT_SECONDS:.0f} seconds"
     failed = next((line for line in result.lines if line.startswith("FAILED")), None)
     if result.code == 1 and failed:
+        why = _unasserted(junit) if junit is not None else None
+        if why is not None:
+            return INCONCLUSIVE, why[:SUMMARY_WIDTH]
         return KILLED, failed[:SUMMARY_WIDTH]
     last = next((line for line in reversed(result.lines) if line.strip()), "")
     if result.code == 0:
@@ -275,15 +303,20 @@ def mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None = None
     parser = argparse.ArgumentParser(
         prog="atc test mutants", allow_abbrev=False,
         description="Apply each mutant alone to <scratch>/tree and run the tests on it (docs/TESTKIT.md § Commands).",
-        epilog="Exit: 0 with no survivor and every file restored; 1 for a red baseline, a survivor, an aborted run "
-               "or a restore mismatch; 9 for a refusal before the baseline, 8 for an import-guard refusal.")
+        epilog="Exit: 0 when every mutant ran and every file is restored, survivors named on the last line; 1 for a "
+               "red baseline, an aborted run or a restore mismatch; 9 for a refusal before the baseline, 8 for an "
+               "import-guard refusal.")
     parser.add_argument("scratch", help="scratch name; <scratch>/tree holds the export of <sha>")
     parser.add_argument("sha", help="commit the export was made from; touched files are compared with it at the end")
     parser.add_argument("worktree", help="repository that holds <sha>")
     parser.add_argument("mutants", metavar="mutants.json",
-                        help="JSON list of mutants: {label, edits: [{path, old, new}]}, paths relative to the tree")
+                        help="JSON list of mutants: {label, edits: [{path, old, new}], tests?: [...]}, paths "
+                             "relative to the tree; a mutant's own tests replace --tests for it")
     parser.add_argument("--python", required=True, help="interpreter that runs pytest: a path, or a name on PATH")
     parser.add_argument("--tests", nargs="+", required=True, help="pytest arguments naming the tests that judge a mutant")
+    parser.add_argument("--kill-rule", choices=(KILL_FAILURE, KILL_ASSERTION), default=KILL_FAILURE,
+                        help="failure (default): any failed test kills; assertion: only a run whose every failure "
+                             "is an assertion, with no test errored, kills")
     args = parser.parse_args(argv)
     environ = os.environ if environ is None else environ
     worktree = os.path.abspath(args.worktree)
@@ -292,15 +325,26 @@ def mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None = None
     entries = json.loads(Path(args.mutants).read_text(encoding="utf-8-sig"))
     _root, place = prepare_scratch(args.scratch, environ)
     tree = place / "tree"
-    pytest_arguments = ["-x", *args.tests]
+    timing.resolve(environ)
     if private_desktop(environ):
         print(EXCLUSION_NOTE, flush=True)
+    baseline_tests = list(dict.fromkeys([*args.tests, *(test for entry in entries for test in entry.get("tests", ()))]))
+    reports = place / JUNIT
+    attempts = 0
 
-    def attempt(label: str) -> Result:
-        return execute(str(tree), str(place), python, label, pytest_arguments, environ, quiet=True,
-                       timeout=MUTANT_SECONDS)
+    def attempt(label: str, tests: Sequence[str]) -> tuple[str, str]:
+        nonlocal attempts
+        junit = None
+        if args.kill_rule == KILL_ASSERTION:
+            reports.mkdir(exist_ok=True)
+            junit = reports / f"{attempts:03d}-{LABEL_CHARACTERS.sub('_', label)[:40]}.xml"
+            junit.unlink(missing_ok=True)
+        attempts += 1
+        result = execute(str(tree), str(place), python, label, ["-x", *tests], environ, quiet=True,
+                         timeout=MUTANT_SECONDS, junit=junit)
+        return _verdict(result, junit)
 
-    verdict, summary = _verdict(attempt("baseline"))
+    verdict, summary = attempt("baseline", baseline_tests)
     passed = verdict == SURVIVED
     print(f"{'BASELINE-OK' if passed else 'BASELINE-RED'} {summary}", flush=True)
     if not passed:
@@ -314,7 +358,7 @@ def mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None = None
             originals: dict[Path, bytes] = {}
             try:
                 _apply(tree, mutant, touched, originals)
-                verdict, summary = _verdict(attempt(mutant["label"]))
+                verdict, summary = attempt(mutant["label"], mutant.get("tests") or args.tests)
                 print(f"{verdict:<8} {mutant['label']} -> {summary}", flush=True)
                 finished += 1
                 if verdict == SURVIVED:
