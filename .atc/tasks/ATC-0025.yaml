@@ -1,0 +1,29 @@
+task_id: ATC-0025
+repository: yulinnliu/agent-traffic-control
+base_sha: a5e63b945c51ab75d243dd24a3499b91a1cb2e4d
+scope: 'Coordinator rules and skill text: session naming, decision prompts, design-phase
+  rule, model and effort per role, reviewer form, writer-brief template, amend after
+  a FAIL verdict'
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: a5e63b945c51ab75d243dd24a3499b91a1cb2e4d
+branch: worktree-dsh+coordinator-rules
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
+decisions:
+  - 'Governance changes for this topic are authorized by the Owner: the coordinator-skill rules ("Owner authorized its governance change", 2026-11-11) and GIT_WORKFLOW § After formal review ("同意審核 FAIL 之後可以amend", 2026-11-11).'
+  - 'Session naming: title "[<task ID>] <topic>", session name "<task id lowercased>-<topic>", task record opened first.'
+  - 'Decision prompts: tool-neutral rule in atc-coordinator SKILL.md; the Claude part (wrap_up box for one decision, AskUserQuestion for two to four, recommended option first) in adapters/claude.md.'
+  - 'Design phase: design is the writer''s first step under atc-review; the design doc and release notes are committed to the repo, since close-out deletes ~/.atc/reports; Owner decisions go into the task record; no new status or role.'
+  - 'Model and effort per role: Opus for design writers and first reviews; Sonnet for verify-only reruns, mechanical writers and close-out; Haiku for research and reading only; a fix-only re-review continues the original reviewer on its own model ("沿用原 reviewer", 2026-11-12).'
+  - 'Reviewer form: atc-coordinator step 4 states, as VERIFICATION.md § Independent review does, that the reviewer is a fresh subagent or a separate session.'
+  - 'adapters/claude.md: on Claude desktop the wrap_up recap and the closing message are both atc-review step 5''s one line.'
+  - 'Writer-brief template (references/briefs.md): step 5 one-line reply; targeted tests by explicit file list; the reviewer''s verify is the one full run; amend before review, new commits after review except after a FAIL verdict; no background shells or polling; no version bump; the Owner''s hard rules; Owner commands as GIT_WORKFLOW § Owner-run commands with no env prefix.'
+  - 'Amend after FAIL: after a FAIL verdict the writer may amend or squash fixes into the reviewed commits (re-review by git range-diff, verify on the new tip); not when another branch stacks on it or it was pushed; after a PASS history stays frozen. atc-review updated to match.'
+  - 'This topic''s own FAIL fixes may be amended into the reviewed commits before the rule reaches main (Owner, 2026-11-12).'
+  - 'The writer-brief template keeps the "Read first" field and the "Reply in the Owner''s language" line (Owner, 2026-11-12).'
+  - 'The decision-7 line stays in atc-review''s adapters/claude.md (Owner, 2026-11-12).'
