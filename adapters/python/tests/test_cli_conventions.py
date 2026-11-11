@@ -165,22 +165,20 @@ def test_friction_exits_2_on_an_unknown_event_and_1_on_a_resolved_one(tmp_path: 
     assert "STOP ALREADY_RESOLVED: " in capsys.readouterr().err
 
 
-def test_the_forms_deprecated_in_0_3_0_are_usage_errors(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    import bootstrap
-    import onboard_project
-    for run, argv in (
-        (call, ["worktree", "cleanup", "--owner", "claude", "--topic", "t"]),
-        (lambda a: onboard_project.main(a, root=tmp_path), ["--check", "demo"]),
-        (lambda a: onboard_project.main(a, root=tmp_path), ["--sync", "demo"]),
-        (lambda a: bootstrap.main(a, root=tmp_path), ["add", "demo"]),
-        (lambda a: bootstrap.main(a, root=tmp_path), ["sync", "demo"]),
-    ):
-        try:
-            code = run(argv)
-        except SystemExit as stop:
-            code = stop.code
-        assert code == 2, argv
-    assert "DEPRECATED" not in capsys.readouterr().err
+@pytest.mark.parametrize("argv", [
+    ["worktree", "cleanup", "--owner", "claude", "--topic", "t"],
+    ["onboard", "--check", "demo"],
+    ["onboard", "--sync", "demo"],
+    ["bootstrap", "add", "demo"],
+    ["bootstrap", "sync", "demo"],
+], ids=" ".join)
+def test_the_forms_deprecated_in_0_3_0_are_argparse_usage_errors(argv: list[str],
+                                                                capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as stop:
+        atc_cli.main(argv)
+    assert stop.value.code == 2
+    err = capsys.readouterr().err
+    assert "usage:" in err and "DEPRECATED" not in err
 
 
 def test_doctor_takes_json_and_refuses_unknown_arguments(monkeypatch: pytest.MonkeyPatch,
