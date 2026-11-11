@@ -1,10 +1,10 @@
 task_id: ATC-0020
 repository: yulinnliu/agent-traffic-control
 base_sha: dad8fbd45168996351ee2768450439f64cab90e9
-scope: 'Design only: an ATC task backlog - a planned task gets its record (ID, order,
+scope: 'An ATC task backlog - a planned task gets its record (ID, order,
   notes) before any branch, so the queue lives in git and atc task list shows it;
-  CURRENT.md shrinks to the task-to-session map. Implementation needs a separate Owner
-  approval.'
+  CURRENT.md shrinks to the task-to-session map. Owner decisions below;
+  implementation authorized by the Owner 2026-11-11.'
 governance_source: yulinnliu/agent-traffic-control
 governance_revision: dad8fbd45168996351ee2768450439f64cab90e9
 branch: worktree-claude+task-backlog
@@ -15,3 +15,10 @@ authority:
   integrate_main: false
   push_main: false
   deploy: false
+decisions:
+  - 'O1: planned records live on a machine-local backlog branch (refs/heads/backlog), never on main by themselves'
+  - 'O2: backlog is not pushed to origin'
+  - 'O3: a planned record grants nothing (authority all false); atc task start grants edit and commit'
+  - 'O4: order is rank (gapped integers) plus after (prerequisite task IDs)'
+  - 'O5: atc task new also issues its ID through the backlog compare-and-swap'
+  - 'O6: coordinator-skill steps 1-2, Recovery and Briefs (S1-S4) fold into ATC-0020; the coordinator-skill task follows and rewords "no new status"'
