@@ -1,7 +1,7 @@
 task_id: ATC-0018
 repository: yulinnliu/agent-traffic-control
 base_sha: c8c552f5dfc28debf64b447d209cff67804b1085
-scope: atc-testkit host-wide worker budget and shared CPU+memory worker sizing (0.11.0)
+scope: atc-testkit host-wide worker budget and shared CPU+memory worker sizing
 governance_source: yulinnliu/agent-traffic-control
 governance_revision: dad8fbd45168996351ee2768450439f64cab90e9
 branch: worktree-claude+worker-budget
@@ -11,10 +11,10 @@ decisions:
   - 'O3: the pool is three quarters of the logical CPUs rounded up, a worker is counted at 1 GiB (a project may declare worker_memory_mib), 1 GiB of memory is reserved, and the parallel stage starts with at least 2 workers.'
   - 'O4: no new command; atc doctor shows the pool (free tokens, holders, waiters) and gains it in its --json once ATC-0016 lands.'
   - 'O5: atc-review carries one line on the WAIT host workers line, WORKER_WAIT_TIMEOUT and atc doctor.'
-  - 'O6: upgrading hami-quant and hami-quant-trading to atc-testkit 0.11.0 is a separate project task after 0.11.0 is pushed.'
+  - 'O6: upgrading hami-quant and hami-quant-trading to the atc-testkit release that carries this work is a separate project task after that release is pushed.'
   - 'Wait limit: queue time stays outside every timeout, and a run whose total wait passes ATC_WORKER_MAX_WAIT (set by atc integrate to the verifier timeout), its own timeout, test_worker_max_wait or 1800 seconds stops with WORKER_WAIT_TIMEOUT naming the runs ahead: exit 124 from the gate, the CI runner, atc test run and atc test mutants; the verifier refuses with it and atc integrate stops without judging the candidate.'
   - 'Flag above the pool (Owner ruling, 2026-11-11, on review finding 1): locally a flag''s want and floor are min(memory-cut flag, pool size), the run starts that many workers, the workers: line names the cut (workers: 2 (flag 8, host pool: 2)), and atc test run rewrites -n K to the granted count; on CI, outside the pool, only the memory ceiling cuts a flag.'
-  - 'Version: atc-testkit 0.11.0 is proposed and waits for the Owner''s approval, which every version number needs; 0.10.2 belongs to ATC-0016. Implementation started before ATC-0016 was integrated on the Owner''s word (2026-11-11) and was rebased onto it afterwards.'
+  - 'Version: this task sets no version; atc_testkit.__version__ stays 0.10.2. One release commit follows the batch of ATC-0018, ATC-0019 and ATC-0020 after ATC-0020 is integrated, at most one release a day (Owner rule, 2026-11-11), and the Owner approves its numbers.'
 authority:
   edit: true
   commit: true
