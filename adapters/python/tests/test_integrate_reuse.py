@@ -240,3 +240,44 @@ def test_the_gate_never_reads_a_verify_record_and_old_ones_expire(repo: Path, co
     assert verify(repo, tip) == 0
     assert not stale.exists()
     assert records(repo) == [] and not (evidence_dir(repo) / f"{tip}.json").exists()
+
+
+def test_a_verify_under_another_worker_grant_is_still_reused(
+        repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    """docs/TESTKIT.md § Host worker budget: the grant a verifier gets is no part of the candidate record."""
+    from atc_testkit import workers
+    from test_testkit_workers import start_holder
+    pool, grants = tmp_path / "pool", tmp_path / "grants.txt"
+    monkeypatch.setenv(workers.POOL_DIRECTORY, str(pool))
+    monkeypatch.delenv("ATC_TEST_TIME_SLACK", raising=False)
+    script = tmp_path / "granting.py"
+    script.write_text(
+        "import json, os, pathlib, sys\nfrom atc_testkit import workers\n"
+        "budget = workers.Budget(workers.Pool(pathlib.Path(os.environ[workers.POOL_DIRECTORY]), 4), label='verifier',"
+        " per_worker=1)\n"
+        "grant = budget.acquire('parallel', 4, 1)\n"
+        f"grants = pathlib.Path({str(grants)!r})\n"
+        "grants.write_text((grants.read_text() if grants.exists() else '') + str(grant.count))\n"
+        "report = {'schema': 'atc-verification-report/2', 'selector': {'name': 'atc-testkit', 'version': '0.11.0'},"
+        " 'selection': {'full': True, 'paths': []}, 'stages': [], 'dependency_inputs': {'uv.lock': 'absent'},"
+        " 'time_slack': 2.0}\n"
+        "pathlib.Path(os.environ['ATC_VERIFICATION_REPORT']).write_text(json.dumps(report), encoding='utf-8')\n"
+        "budget.release(grant)\n", encoding="utf-8")
+    declare_verifier(repo, json.dumps([sys.executable, str(script)]))
+    base = main_tip(repo)
+    tip = topic(repo, {"a.txt": "a2\n"})
+    assert verify(repo, tip, capsys=capsys) == 0
+    first = candidate_record(repo, "FF", base, tip)
+    holder = start_holder(tmp_path, pool, 4, 3, 120, label="busy")
+    try:
+        assert verify(repo, tip, capsys=capsys) == 0
+        second = candidate_record(repo, "FF", base, tip)
+        assert grants.read_text() == "41"
+        assert {key: value for key, value in first.items() if key != "verified_at"} == \
+            {key: value for key, value in second.items() if key != "verified_at"}
+        assert integrate(repo, "topic", tip, "--json") == 0
+        assert json.loads(capsys.readouterr().out)["verification_reuse"] == "REUSED"
+        assert grants.read_text() == "41"
+    finally:
+        holder.kill()
+        holder.wait()

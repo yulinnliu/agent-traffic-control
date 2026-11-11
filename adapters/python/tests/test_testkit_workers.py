@@ -361,3 +361,24 @@ def test_an_interrupt_while_queued_stops_the_run_with_130(tmp_path: Path, pool_d
         head.kill()
         head.wait()
 
+
+@pytest.mark.integration
+def test_a_cli_run_past_its_wait_limit_exits_124_with_the_token(tmp_path: Path, pool_dir: Path,
+                                                                atc_tmp: Path) -> None:
+    head = hold_turnstile(tmp_path, pool_dir)
+    try:
+        home = tmp_path / "home"
+        home.mkdir()
+        environment = {key: value for key, value in os.environ.items() if not key.startswith("PYTEST_")}
+        environment.update({workers.POOL_DIRECTORY: str(pool_dir), workers.MAX_WAIT: "1", "HOME": str(home),
+                            "USERPROFILE": str(home), "PYTHONIOENCODING": "utf-8"})
+        run = subprocess.run([sys.executable, "-m", "atc_testkit.commands", "test", "run", "--scratch", "w",
+                              "--tree", str(small_tree(tmp_path)), "--python", sys.executable, "--", "tests"],
+                             env=environment, capture_output=True, text=True, encoding="utf-8",
+                             stdin=subprocess.DEVNULL, timeout=SETTLE * 3)
+        assert run.returncode == 124, run.stdout + run.stderr
+        assert run.stderr.startswith(f"{workers.WAIT_TIMEOUT} "), run.stderr
+        assert "next: atc doctor" in run.stderr and "PASS" not in run.stdout
+    finally:
+        head.kill()
+        head.wait()
