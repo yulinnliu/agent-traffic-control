@@ -5,7 +5,7 @@
 `state/`, and prints how to put the `atc` command on PATH. `add` registers one project: clones `--url` into
 `projects/NAME` or expects a checkout there, appends the entry to `workspace.yaml`, creates its worktree and
 state directories, installs the requested opt-in skills, runs onboarding's apply step and validates. `status`
-runs doctor and `atc onboard --check --all`. `sync` is the deprecated spelling of `atc onboard --sync`.
+runs doctor and `atc onboard --check --all`.
 Project-owned files are never rewritten.
 """
 
@@ -167,13 +167,6 @@ def add(root: Path, name: str, url: str | None, skills: list[str]) -> int:
     return validate(root)
 
 
-def sync(root: Path, name: str | None, prune: bool) -> int:
-    args = ["--sync", *(["--prune"] if prune else []), *(["--all"] if name is None else ["--project", name])]
-    cli_conventions.deprecated("atc bootstrap sync", "atc onboard " + " ".join(args))
-    code = onboard_project.main(args, root=root)
-    return validate(root) or code
-
-
 def status(root: Path, as_json: bool = False) -> int:
     checks = doctor.diagnose(root)
     errors = sum(check.status == "ERROR" for check in checks)
@@ -210,18 +203,9 @@ def build_parser() -> argparse.ArgumentParser:
                                                   exit="0 registered and onboarded; 1 STOP from onboard or "
                                                        "validate; 2 ERROR (invalid name or URL, a failed clone)",
                                                   see="README.md § Installation"))
-    targets = p_add.add_mutually_exclusive_group(required=True)
-    cli_conventions.add_project(targets, help="the project's name in workspace.yaml and under projects/")
-    targets.add_argument("legacy_name", nargs="?", metavar="NAME", help="deprecated: use --project NAME")
+    cli_conventions.add_project(p_add, help="the project's name in workspace.yaml and under projects/", required=True)
     p_add.add_argument("--url", metavar="URL", help="git URL to clone into projects/NAME")
     p_add.add_argument("--skills", default="", metavar="NAME,...", help="comma-separated opt-in skills to install")
-    p_sync = sub.add_parser("sync", allow_abbrev=False, help="deprecated: use atc onboard --sync",
-                            **cli_conventions.form("Deprecated: runs `atc onboard --sync --all` or "
-                                                   "`atc onboard --sync --project NAME`, then validates.",
-                                                   exit="as atc onboard, then 1 for validation problems",
-                                                   see="shared/conformance/CLI.md § Deprecated forms"))
-    p_sync.add_argument("name", nargs="?", metavar="NAME", help="one project (default: every project)")
-    p_sync.add_argument("--prune", action="store_true", help="delete orphaned managed adapters")
     p_status = sub.add_parser("status", allow_abbrev=False, help="run doctor and atc onboard --check --all",
                               **cli_conventions.form("Run doctor and `atc onboard --check --all`; changes nothing.",
                                                      exit="0 ready and current; 1 an error or drift; 2 usage error",
@@ -235,12 +219,7 @@ def main(argv: list[str] | None = None, root: Path = ROOT) -> int:
     if args.command == "init":
         return init(root, args.governance_source, args.force)
     if args.command == "add":
-        name = args.project or args.legacy_name
-        if args.legacy_name:
-            cli_conventions.deprecated(f"atc bootstrap add {name}", f"atc bootstrap add --project {name}")
-        return add(root, name, args.url, [s for s in args.skills.split(",") if s])
-    if args.command == "sync":
-        return sync(root, args.name, args.prune)
+        return add(root, args.project, args.url, [s for s in args.skills.split(",") if s])
     return status(root, args.json)
 
 

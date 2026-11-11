@@ -165,36 +165,22 @@ def test_friction_exits_2_on_an_unknown_event_and_1_on_a_resolved_one(tmp_path: 
     assert "STOP ALREADY_RESOLVED: " in capsys.readouterr().err
 
 
-def test_a_deprecated_bootstrap_sync_warns_and_runs_onboard(monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
-                                                             capsys: pytest.CaptureFixture[str]) -> None:
+def test_the_forms_deprecated_in_0_3_0_are_usage_errors(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     import bootstrap
-    seen: list[list[str]] = []
-    monkeypatch.setattr(bootstrap.onboard_project, "main", lambda argv, root: seen.append(argv) or 0)
-    monkeypatch.setattr(bootstrap, "validate", lambda root: 0)
-    assert bootstrap.main(["sync", "demo", "--prune"], root=tmp_path) == 0
-    assert seen == [["--sync", "--prune", "--project", "demo"]]
-    assert capsys.readouterr().err.startswith(
-        "WARNING DEPRECATED atc bootstrap sync: use atc onboard --sync --prune --project demo; removed in atc 0.4.0")
-
-
-def test_a_positional_onboard_project_warns_and_names_the_project(monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
-                                                                  capsys: pytest.CaptureFixture[str]) -> None:
     import onboard_project
-    monkeypatch.setattr(onboard_project, "load_projects", lambda root: {"demo": {"repo": "projects/demo"}})
-    seen: list = []
-    monkeypatch.setattr(onboard_project, "run", lambda mode, targets, *args, **kwargs: seen.append(targets) or 0)
-    assert onboard_project.main(["--check", "demo"], root=tmp_path) == 0
-    assert [name for name, _ in seen[0]] == ["demo"]
-    assert "WARNING DEPRECATED atc onboard --check demo: use atc onboard --check --project demo" in capsys.readouterr().err
-
-
-def test_worktree_cleanup_is_the_deprecated_spelling_of_clean(capsys: pytest.CaptureFixture[str]) -> None:
-    import managed_worktree
-    parser = managed_worktree.build_parser()
-    assert parser.parse_args(["clean", "--owner", "claude", "--topic", "t"]).command == "clean"
-    assert parser.parse_args(["cleanup", "--owner", "claude", "--topic", "t"]).command == "cleanup"
-    assert call(["worktree", "cleanup", "--owner", "claude", "--topic", "t", "--retained-ref", "x"]) == 2
-    assert "WARNING DEPRECATED atc worktree cleanup: use atc worktree clean" in capsys.readouterr().err
+    for run, argv in (
+        (call, ["worktree", "cleanup", "--owner", "claude", "--topic", "t"]),
+        (lambda a: onboard_project.main(a, root=tmp_path), ["--check", "demo"]),
+        (lambda a: onboard_project.main(a, root=tmp_path), ["--sync", "demo"]),
+        (lambda a: bootstrap.main(a, root=tmp_path), ["add", "demo"]),
+        (lambda a: bootstrap.main(a, root=tmp_path), ["sync", "demo"]),
+    ):
+        try:
+            code = run(argv)
+        except SystemExit as stop:
+            code = stop.code
+        assert code == 2, argv
+    assert "DEPRECATED" not in capsys.readouterr().err
 
 
 def test_doctor_takes_json_and_refuses_unknown_arguments(monkeypatch: pytest.MonkeyPatch,
@@ -209,12 +195,3 @@ def test_doctor_takes_json_and_refuses_unknown_arguments(monkeypatch: pytest.Mon
     with pytest.raises(SystemExit) as stop:
         doctor.main(["--bogus"])
     assert stop.value.code == 2
-
-
-def test_cli_md_lists_every_deprecated_form_and_names_the_next_release() -> None:
-    root = Path(atc_cli.__file__).resolve().parents[4]
-    text = (root / "shared" / "conformance" / "CLI.md").read_text(encoding="utf-8")
-    for form in ("atc worktree cleanup", "atc onboard --check\\|--sync NAME", "atc bootstrap add NAME",
-                 "atc bootstrap sync"):
-        assert form in text
-    assert f"| {cli_conventions.NEXT_RELEASE} |" in text

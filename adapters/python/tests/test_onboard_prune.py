@@ -71,11 +71,11 @@ def test_prune_requires_sync_mode(tmp_path: Path) -> None:
         onboard_project.main(["--check", "--prune", "--project", "demo"], root=root)
 
 
-def test_bootstrap_sync_converges_every_project(tmp_path: Path) -> None:
+def test_onboard_sync_all_converges_every_project(tmp_path: Path) -> None:
     root, project = _orphaned_project(tmp_path)
     (project / ".claude/skills/demo-skill").mkdir(parents=True, exist_ok=True)
     (project / ".claude/skills/demo-skill/SKILL.md").unlink(missing_ok=True)
-    assert bootstrap.sync(root, None, prune=True) == 0
+    assert onboard_project.main(["--sync", "--all", "--prune"], root=root) == 0
     assert (project / ".claude/skills/demo-skill/SKILL.md").is_file()
     assert not (project / ".agents/skills/old-skill").exists()
 

@@ -1026,8 +1026,7 @@ def build_parser() -> argparse.ArgumentParser:
     }
     commands = {}
     for name, summary in summaries.items():
-        aliases = ["cleanup"] if name == "clean" else []
-        commands[name] = sub.add_parser(name, aliases=aliases, allow_abbrev=False, help=summary,
+        commands[name] = sub.add_parser(name, allow_abbrev=False, help=summary,
                                         **cli_conventions.form(summary[0].upper() + summary[1:] + ".",
                                                                exit=WORKTREE_EXIT, see="shared/skills/atc-worktree/SKILL.md § Commands"))
     for name, p in commands.items():
@@ -1196,10 +1195,7 @@ def main(argv: list[str] | None = None, root: Path = ROOT, environ: dict[str, st
         sys.stdout.reconfigure(errors="backslashreplace")
     parser = build_parser()
     args = parser.parse_args(argv)
-    if args.command == "cleanup":
-        import cli_conventions
-        cli_conventions.deprecated("atc worktree cleanup", "atc worktree clean")
-    if args.command in ("clean", "cleanup"):
+    if args.command == "clean":
         args.command = "cleanup"
         cleanup_mode(parser, args)
     environ = dict(os.environ) if environ is None else environ

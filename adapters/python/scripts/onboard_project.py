@@ -647,7 +647,6 @@ def build_parser() -> argparse.ArgumentParser:
                        help="write the owned files and commit them on each project's main")
     targets = parser.add_mutually_exclusive_group(required=True)
     cli_conventions.add_project(targets, help="registered project name from workspace.yaml")
-    targets.add_argument("legacy_project", nargs="?", metavar="NAME", help="deprecated: use --project NAME")
     targets.add_argument("--all", action="store_true", help="every project registered in workspace.yaml")
     targets.add_argument("--root-only", action="store_true",
                          help="render only the adapters of the ATC checkout holding the working directory; commits nothing")
@@ -664,10 +663,6 @@ def main(argv: list[str] | None = None, root: Path = ROOT) -> int:
     args = parser.parse_args(argv)
     if args.prune and args.mode != "sync":
         parser.error("--prune only applies with --sync")
-    if args.legacy_project:
-        cli_conventions.deprecated(f"atc onboard --{args.mode} {args.legacy_project}",
-                                   f"atc onboard --{args.mode} --project {args.legacy_project}")
-        args.project = args.legacy_project
     if not args.json:
         return _run(args, root)
     EVENTS = []

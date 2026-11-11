@@ -170,9 +170,4 @@ contract also goes through governance `GOVERNANCE_CHANGES.md`.
 
 ## Deprecated forms
 
-| Form | Use | Removed in |
-| --- | --- | --- |
-| `atc worktree cleanup` | `atc worktree clean` | 0.4.0 |
-| `atc onboard --check\|--sync NAME` | `atc onboard --check\|--sync --project NAME` | 0.4.0 |
-| `atc bootstrap add NAME` | `atc bootstrap add --project NAME` | 0.4.0 |
-| `atc bootstrap sync [NAME] [--prune]` | `atc onboard --sync --all\|--project NAME [--prune]` | 0.4.0 |
+No form is deprecated.

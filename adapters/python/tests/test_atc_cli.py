@@ -21,7 +21,7 @@ SUBCOMMANDS = [
     ("integrate",), ("verify",), ("close-out",),
     ("task",), ("task", "new"), ("task", "plan"), ("task", "start"), ("task", "rank"), ("task", "drop"), ("task", "list"),
     ("task", "check"), ("validate",), ("onboard",),
-    ("bootstrap",), ("bootstrap", "init"), ("bootstrap", "add"), ("bootstrap", "sync"), ("bootstrap", "status"),
+    ("bootstrap",), ("bootstrap", "init"), ("bootstrap", "add"), ("bootstrap", "status"),
     ("doctor",), ("policies",), ("policies", "check"), ("enforce",), ("classify",),
     ("friction",), ("friction", "add"), ("friction", "list"), ("friction", "summary"), ("friction", "resolve"),
     ("test",), ("test", "run"), ("test", "mutants"), ("test", "private"),

@@ -22,7 +22,7 @@ then a command that imports a new dependency stops with
 
 | `atc` command | Script | Does |
 | --- | --- | --- |
-| `bootstrap` | `bootstrap.py` | `init`, `add --project NAME [--url URL] [--skills NAME,...]`, `status [--json]`: the quickstart path over the tools below; `sync` is the deprecated spelling of `onboard --sync` |
+| `bootstrap` | `bootstrap.py` | `init`, `add --project NAME [--url URL] [--skills NAME,...]`, `status [--json]`: the quickstart path over the tools below |
 | `validate` | `validate_workspace.py` | canonical skills versus rendered adapters, root contract, task records and their declaration, `--projects` for registered checkouts (adapters, the `AGENTS.md` pointer line, `.atc/` with its lock, task records, one prefix per repository), `--root DIR --adapters-only` for a fixture; `--json` (§ validate) |
 | `onboard` | `onboard_project.py` | `--check`, `--sync [--prune]` the managed files of `--project NAME` or `--all`; `--root-only` re-renders this checkout's adapters; never touches project-owned files |
 | `doctor` | `doctor.py` | local readiness: `READY`, `NOT_INITIALIZED`, `ERROR`, with the host worker pool's free tokens, holders and waiters; `--json` |
