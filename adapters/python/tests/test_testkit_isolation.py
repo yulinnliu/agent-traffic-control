@@ -63,7 +63,7 @@ def test_temporary_variables_carry_what_the_entry_point_resolved(tmp_path: Path)
 
 
 def test_pytest_options_place_the_base_and_cache_in_the_working_directory(tmp_path: Path) -> None:
-    assert run_of(tmp_path, caller()).pytest_options("serial") == [
+    assert run_of(tmp_path, caller()).run_options("serial") == [
         "--basetemp", str(tmp_path / "serial/bt"), "-o", f"cache_dir={tmp_path / 'serial/cache'}"]
 
 

@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 import atc_cli
-from atc_testkit import commands, scratch, testrun
+from atc_testkit import commands, python_toolchain, scratch, testrun
 from atc_testkit.locations import Refusal
 
 MODULE = ("from pathlib import Path\nimport os, tempfile\n"
@@ -233,9 +233,12 @@ def test_zero_runs_on_the_interactive_desktop_and_another_value_is_refused(tree:
 
 
 def test_the_exclusion_joins_a_given_marker_expression() -> None:
-    assert testrun._with_exclusion(["tests"]) == ["-m", "not interactive_desktop", "tests"]
-    assert testrun._with_exclusion(["-m", "slow", "tests"]) == ["-m", "(slow) and not interactive_desktop", "tests"]
-    assert testrun._with_exclusion(["-munit", "-x"]) == ["-m", "(unit) and not interactive_desktop", "-x"]
+    def excluded(arguments):
+        expression, rest = python_toolchain.split_marker(arguments)
+        return python_toolchain.combine(expression, "not interactive_desktop"), rest
+    assert excluded(["tests"]) == ("not interactive_desktop", ["tests"])
+    assert excluded(["-m", "slow", "tests"]) == ("(slow) and not interactive_desktop", ["tests"])
+    assert excluded(["-munit", "-x"]) == ("(unit) and not interactive_desktop", ["-x"])
 
 
 def test_a_run_needs_its_four_arguments() -> None:

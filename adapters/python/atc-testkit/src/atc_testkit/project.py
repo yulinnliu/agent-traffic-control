@@ -4,12 +4,12 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-import sys
 
-from . import config, stages
+from . import config, stages, toolchain as toolchains
 from .evidence import Stage
 from .git import BaselineDelta
 from .selection import Selection
+from .toolchain import Toolchain
 
 Select = Callable[[Sequence[str], Mapping[str, BaselineDelta] | None], Selection]
 
@@ -37,6 +37,9 @@ class StaticCheck:
 class Project:
     """One repository's data; a project with no ``select`` is the workspace root of the verifier's root form.
 
+    ``toolchain`` defaults to the one the tree's ``[tool.atc-testkit] toolchain`` names; ``runner`` is the argv that
+    starts a stage, the toolchain's entry by default.
+
     The root form's ``test_paths`` maps the range's paths to the pytest paths its stages run, relative to
     ``tests_dir``: ``[]`` for the default suite, ``None`` for no test.
     """
@@ -47,7 +50,8 @@ class Project:
     missing_remote: str = "full"
     checks: tuple[StaticCheck, ...] = ()
     documentation_check: StaticCheck | None = None
-    runner: tuple[str, ...] = (sys.executable, "-m", "atc_testkit.ci")
+    runner: tuple[str, ...] | None = None
+    toolchain: Toolchain | None = None
     source_roots: tuple[str, ...] = ("packages/*/src", "src")
     product_prefixes: tuple[str, ...] | None = None
     credentials: tuple[str, ...] | None = None
@@ -85,6 +89,13 @@ class Project:
     @property
     def lint_paths(self) -> tuple[str, ...]:
         return self._data(self.lint_scope, "lint_scope")
+
+    def tests_toolchain(self) -> Toolchain:
+        """The toolchain this project's tests run with; ``TOOLCHAIN_UNKNOWN`` for a name no toolchain has."""
+        return toolchains.for_tree(self.root) if self.toolchain is None else self.toolchain
+
+    def stage_entry(self) -> tuple[str, ...]:
+        return tuple(self.tests_toolchain().entry_argv) if self.runner is None else tuple(self.runner)
 
     def stage_list(self) -> tuple[Stage, ...]:
         """The stage definition the gate and the verifier share."""

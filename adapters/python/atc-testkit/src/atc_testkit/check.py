@@ -25,6 +25,7 @@ REQUIRED_STRINGS = ("gate", "hook", "workflow", "ci_job", "unmarked_baseline", "
 REQUIRED_LISTS = ("product_module_prefixes",)
 OPTIONAL_LISTS = ("credential_variables", "data_root_variables", "automation_markdown_prefixes", "lint_scope",
                   "hook_uv_options", "ci_platforms")
+TOOLCHAINS = ("python",)  # the names atc_testkit.toolchain registers; this file also loads outside the package
 INITIALIZATION = re.compile(r"[A-Za-z_][\w.]*:[A-Za-z_]\w*")
 
 
@@ -54,6 +55,8 @@ def _data_problems(root: Path, project: dict, config: dict, workflow: dict) -> l
     ignore = config.get('ignore', {})
     if not isinstance(ignore, dict) or not all(key in ('nt', 'posix') and _strings(value) for key, value in ignore.items()):
         problems.append('[tool.atc-testkit] ignore must map nt and posix to lists of paths')
+    if 'toolchain' in config and config['toolchain'] not in TOOLCHAINS:
+        problems.append(f'[tool.atc-testkit] toolchain must be one of {", ".join(TOOLCHAINS)}')
     if 'ci_init' in config and not (isinstance(config['ci_init'], str) and INITIALIZATION.fullmatch(config['ci_init'])):
         problems.append('[tool.atc-testkit] ci_init must be module:function')
     if isinstance(config.get('unmarked_baseline'), str) and not _inside(root, config['unmarked_baseline']).is_file():

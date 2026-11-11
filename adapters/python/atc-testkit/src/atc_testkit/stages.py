@@ -1,7 +1,11 @@
-"""The three stages and the runner with logging (docs/TESTKIT.md § Stages, § Running and logging)."""
+"""The three stages and the runner with logging (docs/TESTKIT.md § Stages, § Running and logging).
+
+A stage's ``marker`` is a category expression: category names joined by ``and``, ``or`` and ``not``. The toolchain
+turns it into its own test filter; the Python toolchain passes it to ``pytest -m``.
+"""
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 import os
 from pathlib import Path
@@ -11,8 +15,9 @@ import sys
 import time
 import tomllib
 
-from . import desktop, locations
+from . import desktop, locations, toolchain as toolchains
 from .evidence import Stage
+from .toolchain import Toolchain
 
 PARALLEL = Stage("parallel", "not slow and not serial and not interactive_desktop")
 SERIAL = Stage("serial", "serial and not slow and not interactive_desktop")
@@ -22,7 +27,6 @@ STAGE_ORDER = (PARALLEL, SERIAL, INTERACTIVE)
 TEST_COMMAND_STAGE = "tests"
 BASE_DIRECTORY_STAGES = frozenset({TEST_COMMAND_STAGE, *(stage.name for stage in STAGE_ORDER)})
 MAX_WORKERS = 8
-PYTEST_NO_TESTS_COLLECTED = 5
 TESTS_FAILED = "TESTS_FAILED"
 NO_TESTS_COLLECTED = "NO_TESTS_COLLECTED"
 FAILURE_LINE = re.compile(r"^(?:FAILED|ERROR)\b")
@@ -39,6 +43,67 @@ SOURCE_HOST = "~/.atc/config.toml"
 SOURCE_DEFAULT = "default"
 
 Run = Callable[..., int]
+
+
+CATEGORY_TOKEN = re.compile(r"\s*(\(|\)|[A-Za-z_][A-Za-z0-9_]*)")
+
+
+def selects(expression: str, categories: Iterable[str]) -> bool:
+    """Whether a test carrying ``categories`` is in a stage whose category expression is ``expression``.
+
+    The expression holds category names, ``and``, ``or``, ``not`` and parentheses, with pytest's precedence.
+    """
+    held, tokens, at = frozenset(categories), [], 0
+    while at < len(expression.rstrip()):
+        match = CATEGORY_TOKEN.match(expression, at)
+        if match is None:
+            raise ValueError(f"not a category expression: {expression!r}")
+        tokens.append(match.group(1))
+        at = match.end()
+    position = 0
+
+    def peek() -> str | None:
+        return tokens[position] if position < len(tokens) else None
+
+    def take() -> str:
+        nonlocal position
+        if position >= len(tokens):
+            raise ValueError(f"not a category expression: {expression!r}")
+        position += 1
+        return tokens[position - 1]
+
+    def either() -> bool:
+        value = both()
+        while peek() == "or":
+            take()
+            value = both() or value
+        return value
+
+    def both() -> bool:
+        value = negated()
+        while peek() == "and":
+            take()
+            value = negated() and value
+        return value
+
+    def negated() -> bool:
+        if peek() == "not":
+            take()
+            return not negated()
+        token = take()
+        if token == "(":
+            value = either()
+            if take() != ")":
+                raise ValueError(f"not a category expression: {expression!r}")
+            return value
+        if token in ("and", "or", ")"):
+            raise ValueError(f"not a category expression: {expression!r}")
+        return token in held
+
+    value = either()
+    if position != len(tokens):
+        raise ValueError(f"not a category expression: {expression!r}")
+    return value
 
 
 def refuse_log_directory(logs: Path) -> int:
@@ -145,13 +210,11 @@ def resolve_workers(flag: int | None = None, environ: Mapping[str, str] | None =
     return Workers(default_workers(), SOURCE_DEFAULT)
 
 
-def pytest_arguments(stage: Stage, workers: int | None = None) -> list[str]:
-    """The options of one invocation; each stage passes its worker option explicitly."""
-    if stage.name == PARALLEL.name:
-        selected = ["-n", str(default_workers() if workers is None else workers), "--dist", "loadgroup"]
-    else:
-        selected = ["-n", "0"]
-    return ["-q", "-m", stage.marker, *selected, *(f"--ignore={path}" for path in stage.ignore)]
+def stage_workers(stage: Stage, workers: int | None = None) -> int | None:
+    """The parallel stage's worker count; ``None`` for every other stage, which runs without workers."""
+    if stage.name != PARALLEL.name:
+        return None
+    return default_workers() if workers is None else workers
 
 
 def private_desktop(stage: Stage) -> bool:
@@ -200,12 +263,13 @@ class Outcome:
 def run_stages(runner: Sequence[str], paths: Sequence[str], *, cwd: Path | str, stage_list: Sequence[Stage],
                env_for: Callable[[Stage], Mapping[str, str]], options_for: Callable[[Stage], Sequence[str]],
                log_for: Callable[[Stage], Path], workers: Workers | int | None = None,
-               run: Run = run_logged) -> Outcome:
+               run: Run = run_logged, toolchain: Toolchain | None = None) -> Outcome:
     """Run each stage in order until one fails; a stage that collects no test passes, a run of only those is refused.
 
     ``workers`` is the caller's resolved count, an explicit integer, or ``None`` for ``resolve_workers()``; the
-    parallel stage prints it before it starts.
+    parallel stage prints it before it starts. ``toolchain`` builds each command, the Python one by default.
     """
+    toolchain = toolchains.resolve() if toolchain is None else toolchain
     if not isinstance(workers, Workers):
         workers = resolve_workers(workers)
     collected = False
@@ -213,11 +277,11 @@ def run_stages(runner: Sequence[str], paths: Sequence[str], *, cwd: Path | str, 
         log = log_for(stage)
         if stage.name == PARALLEL.name:
             print(workers.line(), flush=True)
-        command = [*runner, *pytest_arguments(stage, workers.count), *options_for(stage), *paths]
+        command = toolchain.stage_command(runner, stage, stage_workers(stage, workers.count), options_for(stage), paths)
         code = run(command, cwd=cwd, env=env_for(stage), log=log, private=private_desktop(stage))
-        if code not in (0, PYTEST_NO_TESTS_COLLECTED):
+        if code not in (0, toolchain.no_tests_exit):
             return Outcome(TESTS_FAILED, stage, code, log)
         collected = collected or code == 0
     if not collected:
-        return Outcome(NO_TESTS_COLLECTED, code=PYTEST_NO_TESTS_COLLECTED)
+        return Outcome(NO_TESTS_COLLECTED, code=toolchain.no_tests_exit)
     return Outcome()

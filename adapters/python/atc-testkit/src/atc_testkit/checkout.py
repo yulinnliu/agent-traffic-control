@@ -6,20 +6,16 @@ from collections.abc import Callable, Mapping, Sequence
 import os
 from pathlib import Path
 import re
-import shutil
 import subprocess
 import tarfile
 
-from . import locations, scratch
+from . import locations, scratch, toolchain as toolchains
 from .git import git_env
 from .locations import Refusal
 
 TASK_ID = re.compile(r"[A-Z][A-Z0-9]*-[0-9]+")
 SHORT_SHA = 7
-SYNC_TAIL = 20
 TREE = "tree"
-LOCK_FILE = "uv.lock"
-ENVIRONMENT_VARIABLES = ("VIRTUAL_ENV", "UV_PROJECT_ENVIRONMENT")
 SyncRun = Callable[[Sequence[str], Path, Mapping[str, str]], subprocess.CompletedProcess]
 
 
@@ -63,26 +59,9 @@ def export(worktree: Path, commit: str, tree: Path) -> None:
         raise Refusal("EXPORT_FAILED", f"{commit} into {tree}: {errors}")
 
 
-def _run_sync(argv: Sequence[str], cwd: Path, env: Mapping[str, str]) -> subprocess.CompletedProcess:
-    return subprocess.run(list(argv), cwd=cwd, env=dict(env), capture_output=True, text=True, encoding="utf-8",
-                          errors="replace", stdin=subprocess.DEVNULL, creationflags=scratch.WINDOW_HIDDEN)
-
-
 def sync(directory: Path, environ: Mapping[str, str], run: SyncRun | None = None) -> Path:
-    """``uv sync --locked`` in ``directory``; the environment's directory, or a refusal naming the preparation."""
-    if not (directory / LOCK_FILE).is_file():
-        raise Refusal("LOCK_MISSING", f"{directory} has no {LOCK_FILE}; prepare the tree's environment as the "
-                                      "project's AGENTS.md says, or name the directory that holds it with --lock-dir")
-    uv = shutil.which("uv", path=environ.get("PATH"))
-    if uv is None:
-        raise Refusal("UV_NOT_FOUND", "uv is not on PATH")
-    env = {key: value for key, value in environ.items() if key not in ENVIRONMENT_VARIABLES}
-    done = (run or _run_sync)([uv, "sync", "--locked"], directory, env)
-    if done.returncode != 0:
-        tail = (done.stdout + done.stderr).strip().splitlines()[-SYNC_TAIL:]
-        raise Refusal("SYNC_FAILED", "\n".join([f"uv sync --locked in {directory} exited {done.returncode}:", *tail]),
-                      1)
-    return directory / ".venv"
+    """The environment of the tree's toolchain built in ``directory``; its directory, or the toolchain's refusal."""
+    return toolchains.for_tree(directory).prepare(directory, environ, run)
 
 
 def checkout(argv: Sequence[str], environ: Mapping[str, str] | None = None, run: SyncRun | None = None,
@@ -91,7 +70,8 @@ def checkout(argv: Sequence[str], environ: Mapping[str, str] | None = None, run:
     parser = argparse.ArgumentParser(
         prog="atc tmp checkout", allow_abbrev=False,
         description="Export <sha> into <tmp>/<scratch>/tree, register the scratch with its task, source worktree "
-                    "and commit, and build its environment with `uv sync --locked` (docs/ATC_HOME.md § Checkout).",
+                    "and commit, and build its environment with the tree's toolchain, `uv sync --locked` for Python "
+                    "(docs/ATC_HOME.md § Checkout).",
         epilog="Exit: 0 when the environment is built; 1 for a failed sync; 9 for a refusal.")
     parser.add_argument("sha", help="the commit to export: a full SHA or a unique prefix")
     parser.add_argument("--task", required=True, help="the task ID the scratch belongs to, for example ATC-0008")

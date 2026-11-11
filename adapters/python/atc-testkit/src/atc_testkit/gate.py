@@ -77,7 +77,8 @@ def _decisions(project: Project, push_lines: list[str], pytest_paths: list[str],
         except SelectionError:
             commit = pushed  # an object Git cannot peel to a commit has no record
         decisions.append(evidence.check(git, project.root, commit, pytest_paths, project.stage_list(),
-                                        project.argv_file))
+                                        project.argv_file,
+                                        dependency_files=project.tests_toolchain().dependency_files))
     return decisions
 
 
@@ -104,10 +105,11 @@ def _run_tests(project: Project, push_lines: list[str], pytest_paths: list[str],
     if not decisions:
         print("pre-push: tests RUN (evidence: NO_PUSHED_COMMIT)", flush=True)
     outcome = stages.run_stages(
-        project.runner, pytest_paths, cwd=project.root, stage_list=project.stage_list(),
+        project.stage_entry(), pytest_paths, cwd=project.root, stage_list=project.stage_list(),
         env_for=lambda stage: isolated.environment(stage.name),
-        options_for=lambda stage: isolated.pytest_options(stage.name),
-        log_for=lambda stage: logs / f"prepush-{stage.name}.log", workers=workers, run=run)
+        options_for=lambda stage: isolated.run_options(stage.name),
+        log_for=lambda stage: logs / f"prepush-{stage.name}.log", workers=workers, run=run,
+        toolchain=isolated.toolchain)
     if outcome.token == stages.NO_TESTS_COLLECTED:
         print(f"pre-push: {outcome.token}; push aborted (logs: {logs})", file=sys.stderr)
     elif outcome.token:
@@ -155,6 +157,7 @@ def main(project: Project, argv: Sequence[str] | None = None, stdin: Iterable[st
         return 0
     isolation.drop_hami_variables(os.environ)
     try:
+        toolchain = project.tests_toolchain()
         locations.enter()
         work = isolation.create_working_directory()
         locations.enter(work)
@@ -162,7 +165,7 @@ def main(project: Project, argv: Sequence[str] | None = None, stdin: Iterable[st
         print(f"{refusal.token} {refusal.detail}", file=sys.stderr)
         return refusal.code
     isolated = isolation.IsolatedRun(work, credentials=project.credential_variables,
-                                     data_roots=project.data_root_variables)
+                                     data_roots=project.data_root_variables, toolchain=toolchain)
     code = _run_checks(project, checks, isolated, logs, run)
     if not code and pytest_paths is not None:
         code = _run_tests(project, push_lines, pytest_paths, isolated, logs, git, run, workers)

@@ -7,7 +7,8 @@ from pathlib import Path
 import re
 import secrets
 
-from . import locations
+from . import locations, toolchain as toolchains
+from .toolchain import Toolchain
 
 CREDENTIAL_SUFFIXES = ("_API_KEY", "_API_SECRET", "_SECRET", "_TOKEN", "_PASSWORD")
 WORK_NAME_BOUND = 8
@@ -15,8 +16,6 @@ WORK_NAME = re.compile(r"w[0-9a-f]{6}")
 GITCONFIG = "[user]\n\tname = ATC Test\n\temail = atc-test@example.invalid\n[core]\n\tlongpaths = true\n"
 CHILD_ENCODING = ("PYTHONIOENCODING", "utf-8")  # docs/TESTKIT.md § Isolated environment
 XDG_VARIABLES = ("XDG_CACHE_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME")
-PROFILE_VARIABLES = frozenset({"HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", *XDG_VARIABLES,
-                               "PYTHONPYCACHEPREFIX"})
 
 
 def drop_hami_variables(environ: MutableMapping[str, str]) -> None:
@@ -42,11 +41,13 @@ def _removed(name: str, credentials: frozenset[str]) -> bool:
 
 
 class IsolatedRun:
-    """One run's working directory and the environment each process in it gets."""
+    """One run's working directory and the environment each process in it gets; ``toolchain`` adds the variables
+    it points into the directory and builds the options of each test command, the Python one by default."""
 
     def __init__(self, work: Path, *, environ: Mapping[str, str] | None = None, credentials: Iterable[str] = (),
-                 data_roots: Iterable[str] = ()):
+                 data_roots: Iterable[str] = (), toolchain: Toolchain | None = None):
         self.work = Path(work)
+        self.toolchain = toolchains.resolve() if toolchain is None else toolchain
         self.caller = dict(os.environ if environ is None else environ)
         self.credentials = frozenset(name.upper() for name in credentials)
         self.data_roots = tuple(data_roots)
@@ -67,7 +68,7 @@ class IsolatedRun:
         data = self.data_root(stage)
         pointed = {"HOME": self.home, "USERPROFILE": self.home,
                    "APPDATA": self.home / "AppData" / "Roaming", "LOCALAPPDATA": self.home / "AppData" / "Local",
-                   "PYTHONPYCACHEPREFIX": self.work / "pyc",
+                   **self.toolchain.pointed_variables(self.work),
                    **{name: self.work / name.lower() for name in XDG_VARIABLES},
                    **{name: data for name in self.data_roots}}
         for path in pointed.values():
@@ -81,6 +82,6 @@ class IsolatedRun:
         env[CHILD_ENCODING[0]] = CHILD_ENCODING[1]
         return env
 
-    def pytest_options(self, stage: str) -> list[str]:
-        """The base directory and ``cache_dir`` of one pytest invocation."""
-        return ["--basetemp", str(self.base_directory(stage)), "-o", f"cache_dir={self.work / stage / 'cache'}"]
+    def run_options(self, stage: str) -> list[str]:
+        """The toolchain's options that place one test command's base directory and cache in the stage's directory."""
+        return self.toolchain.run_options(self.base_directory(stage), self.work / stage / "cache")

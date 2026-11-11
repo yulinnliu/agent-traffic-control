@@ -16,7 +16,7 @@ import time
 import tomllib
 from typing import NamedTuple
 
-from . import isolation, locations, stages
+from . import isolation, locations, stages, toolchain
 from .git import git_env
 from .locations import CANDIDATES, Refusal, SYSTMP, is_link as _is_link
 
@@ -217,17 +217,17 @@ def remove_tree(directory: str | os.PathLike[str], expected: Callable[[str], boo
 
 
 def scratch_links(directory: str) -> Callable[[str], bool]:
-    """The links a scratch may hold: ``.venv``, ``tree/.venv``, a ``.venv`` beside a ``pyproject.toml`` below
-    ``tree`` and any inside ``bt``."""
-    venv = os.path.normcase(os.path.join(directory, ".venv"))
+    """The links a scratch may hold: a toolchain's environment directory (``.venv`` for Python) in the scratch, in
+    ``tree`` or beside a ``pyproject.toml`` below ``tree``, and any inside ``bt``."""
+    names = {os.path.normcase(name) for name in toolchain.environment_directories()}
     tree = os.path.normcase(os.path.join(directory, "tree"))
-    tree_venv = os.path.join(tree, ".venv")
+    tops = {os.path.normcase(os.path.join(place, name)) for place in (directory, tree) for name in names}
     bt = os.path.normcase(os.path.join(directory, "bt")) + os.sep
 
     def expected(link: str) -> bool:
         name = os.path.normcase(link)
-        return (name in (venv, tree_venv) or name.startswith(bt)
-                or (name.startswith(tree + os.sep) and os.path.basename(name) == ".venv"
+        return (name in tops or name.startswith(bt)
+                or (name.startswith(tree + os.sep) and os.path.basename(name) in names
                     and _project_file(os.path.join(os.path.dirname(link), "pyproject.toml"))))
     return expected
 

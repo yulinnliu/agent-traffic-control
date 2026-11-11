@@ -226,7 +226,7 @@ def test_record_from_another_platform_does_not_reuse(repo: Path, verified: str,
     assert decide(repo, verified, [A]).reason == "PLATFORM_MISMATCH"
 
 
-@pytest.mark.parametrize("name", ev.DEPENDENCY_FILES)
+@pytest.mark.parametrize("name", ev.default_dependency_files())
 def test_changed_dependency_input_does_not_reuse(repo: Path, verified: str, name: str) -> None:
     (repo / name).write_text("changed\n", encoding="utf-8")
     assert decide(repo, verified, [A]).reason == "DEPENDENCY_MISMATCH"

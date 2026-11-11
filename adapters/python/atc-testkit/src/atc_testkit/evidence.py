@@ -21,7 +21,6 @@ RECORD_SCHEMA = "atc-verification-evidence/2"
 RECORD_SCHEMAS = ("atc-verification-evidence/1", RECORD_SCHEMA)
 REPORT_ENV = "ATC_VERIFICATION_REPORT"
 SELECTOR_NAME = "atc-testkit"
-DEPENDENCY_FILES = ("uv.lock", ".python-version")
 ABSENT = "absent"
 EVIDENCE_DIR = ("atc", "verification-evidence")
 
@@ -57,9 +56,16 @@ def selection_record(pytest_paths: Iterable[str] | None) -> dict:
     return {"full": not paths, "paths": paths}
 
 
-def dependency_digests(root: Path, names: Iterable[str] = DEPENDENCY_FILES) -> dict[str, str]:
+def default_dependency_files() -> tuple[str, ...]:
+    """The Python toolchain's dependency files, for a caller that names none."""
+    from . import toolchain
+    return tuple(toolchain.resolve().dependency_files)
+
+
+def dependency_digests(root: Path, names: Iterable[str] | None = None) -> dict[str, str]:
+    """The digest of each dependency file under ``root``, ``absent`` for a missing one."""
     digests = {}
-    for name in names:
+    for name in default_dependency_files() if names is None else names:
         try:
             digests[name] = hashlib.sha256((root / name).read_bytes()).hexdigest()
         except FileNotFoundError:
@@ -76,7 +82,7 @@ def selector_record() -> dict[str, str]:
 
 
 def build_report(root: Path, pytest_paths: Iterable[str] | None, stages: Iterable[Stage], *,
-                 dependency_files: Iterable[str] = DEPENDENCY_FILES, **recorded: object) -> dict:
+                 dependency_files: Iterable[str] | None = None, **recorded: object) -> dict:
     """The verifier's report; ``recorded`` keys (classification, checks, durations) are never compared."""
     return {
         "schema": REPORT_SCHEMA,
@@ -178,7 +184,7 @@ def _decide(git: Callable[..., str], root: Path, pushed: str, pytest_paths: Iter
 
 def check(git: Callable[..., str], root: Path, pushed: str, pytest_paths: Iterable[str] | None,
           stages: Iterable[Stage], argv_file: Path, *,
-          dependency_files: Iterable[str] = DEPENDENCY_FILES) -> Decision:
+          dependency_files: Iterable[str] | None = None) -> Decision:
     """Whether the gate may reuse the ``atc integrate`` record of commit ``pushed`` instead of testing.
 
     ``git(*args)`` returns stdout for the gate's checkout at ``root``; ``pytest_paths`` and ``stages``
@@ -186,7 +192,8 @@ def check(git: Callable[..., str], root: Path, pushed: str, pytest_paths: Iterab
     failure while checking refuses reuse.
     """
     try:
-        return _decide(git, root, pushed, pytest_paths, tuple(stages), argv_file, tuple(dependency_files))
+        files = default_dependency_files() if dependency_files is None else tuple(dependency_files)
+        return _decide(git, root, pushed, pytest_paths, tuple(stages), argv_file, files)
     except Exception:  # noqa: BLE001 - an evidence fault must run the tests
         return Decision(False, "CHECK_FAILED")
 

@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from atc_testkit import ci, stages
+from atc_testkit import ci, python_toolchain, stages
 
 CONFTEST = 'pytest_plugins = ("atc_testkit.plugin",)\n'
 PYPROJECT = '[tool.pytest.ini_options]\ntestpaths = ["tests"]\n[tool.atc-testkit]\nci_init = "setup_hook:prepare"\n'
@@ -202,7 +202,7 @@ def test_a_linked_log_directory_stops_the_stages_and_its_target_keeps_its_files(
 def test_stages_that_collect_nothing_are_refused(project: Path) -> None:
     (project / "tests/test_a.py").write_text(SLOW, encoding="utf-8")
     run = runner(project, "--stages")
-    assert run.returncode == stages.PYTEST_NO_TESTS_COLLECTED and "NO_TESTS_COLLECTED" in run.stderr
+    assert run.returncode == python_toolchain.NO_TESTS_EXIT and "NO_TESTS_COLLECTED" in run.stderr
 
 
 def test_the_slow_invocation_runs_slow_tests_and_passes_when_it_collects_none(project: Path) -> None:

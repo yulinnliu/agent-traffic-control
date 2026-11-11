@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from atc_testkit import stages
+from atc_testkit import python_toolchain, stages
 from atc_testkit.evidence import Stage
 
 
@@ -157,11 +157,15 @@ def test_the_parallel_stage_prints_its_count_before_it_starts(tmp_path: Path,
 
 def test_every_stage_passes_its_worker_option_explicitly() -> None:
     parallel, serial, interactive = stages.stages(("tests/x.py",))
-    assert stages.pytest_arguments(parallel, 3) == ["-q", "-m", parallel.marker, "-n", "3", "--dist", "loadgroup",
-                                                    "--ignore=tests/x.py"]
-    assert stages.pytest_arguments(serial) == ["-q", "-m", serial.marker, "-n", "0", "--ignore=tests/x.py"]
-    assert stages.pytest_arguments(interactive) == ["-q", "-m", interactive.marker, "-n", "0", "--ignore=tests/x.py"]
-    assert stages.pytest_arguments(stages.SLOW) == ["-q", "-m", "slow", "-n", "0"]
+    command = python_toolchain.TOOLCHAIN.stage_command
+
+    def options(stage, workers=None):
+        return command(["r"], stage, stages.stage_workers(stage, workers), [], [])[1:]
+    assert options(parallel, 3) == ["-q", "-m", parallel.marker, "-n", "3", "--dist", "loadgroup",
+                                    "--ignore=tests/x.py"]
+    assert options(serial, 3) == ["-q", "-m", serial.marker, "-n", "0", "--ignore=tests/x.py"]
+    assert options(interactive) == ["-q", "-m", interactive.marker, "-n", "0", "--ignore=tests/x.py"]
+    assert options(stages.SLOW) == ["-q", "-m", "slow", "-n", "0"]
 
 
 def test_a_stage_record_is_name_marker_and_ignored_paths() -> None:

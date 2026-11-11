@@ -20,7 +20,7 @@ import threading
 
 import pytest
 
-from . import config, desktop_guard, locations, stages
+from . import config, desktop_guard, locations, python_toolchain, stages
 from .evidence import Stage
 
 REPORT_LIMIT = 4000  # characters of a failing report kept, counted from its end where the exception line sits
@@ -166,12 +166,12 @@ def main(args: Sequence[str] | None = None, *, context: Context | None = None, h
         saved = os.environ.get(desktop_guard.GUARD_VARIABLE)
         os.environ.setdefault(desktop_guard.GUARD_VARIABLE, "0")
         try:
-            code = run_pytest([*stages.pytest_arguments(slow), *arguments[1:]], context=context, hints=hints,
-                              init=init)
+            options = python_toolchain.pytest_arguments(select=slow.marker, ignore=slow.ignore)
+            code = run_pytest([*options, *arguments[1:]], context=context, hints=hints, init=init)
         finally:
             if saved is None:
                 os.environ.pop(desktop_guard.GUARD_VARIABLE, None)
-        return 0 if code == stages.PYTEST_NO_TESTS_COLLECTED else code
+        return 0 if code == python_toolchain.NO_TESTS_EXIT else code
     return run_pytest(arguments, context=context, hints=hints, init=init)
 
 

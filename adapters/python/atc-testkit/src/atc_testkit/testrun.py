@@ -16,7 +16,7 @@ import sys
 import threading
 import time
 
-from . import config, desktop, locations, scratch, stages
+from . import config, desktop, locations, python_toolchain, scratch, stages, toolchain as toolchains
 from .git import git_env
 from .isolation import drop_hami_variables
 from .locations import Refusal
@@ -26,7 +26,6 @@ GUARD_EXIT = 8
 LOCATION_EXIT = 9
 MUTANT_SECONDS = 900.0
 SUMMARY_WIDTH = 150
-PYCACHE = "pyc"  # the scratch subdirectory every child of a run compiles into, never the tree
 PRIVATE_DESKTOP_VARIABLE = "ATC_PRIVATE_DESKTOP"
 INTERACTIVE_EXCLUSION = "not interactive_desktop"
 EXCLUSION_NOTE = (f"NOTE private desktop: interactive_desktop tests are excluded; {PRIVATE_DESKTOP_VARIABLE}=0 "
@@ -124,31 +123,13 @@ def _capture(command: Sequence[str], cwd: Path, env: Mapping[str, str], private:
     return Result(None if timed_out else code, lines)
 
 
-def _with_exclusion(arguments: Sequence[str]) -> list[str]:
-    """``arguments`` with ``interactive_desktop`` tests excluded from the marker expression pytest applies."""
-    result, expression, index = [], None, 0
-    arguments = list(arguments)
-    while index < len(arguments):
-        argument = arguments[index]
-        if argument == "-m" and index + 1 < len(arguments):
-            expression = arguments[index + 1]
-            index += 2
-            continue
-        if argument.startswith("-m") and not argument.startswith("--") and len(argument) > 2:
-            expression = argument[2:].removeprefix("=")
-        else:
-            result.append(argument)
-        index += 1
-    combined = f"({expression}) and {INTERACTIVE_EXCLUSION}" if expression else INTERACTIVE_EXCLUSION
-    return ["-m", combined, *result]
-
-
 def isolate(tree: Path, place: Path, python: str, environ: MutableMapping[str, str]) -> bool:
     """Steps 2 to 4 of the section; whether the run goes to a private desktop."""
     drop_hami_variables(environ)
     for name in config.data_root_variables(tree) or (config.DEFAULT_DATA_ROOT,):
         environ[name] = str(place / "qdr")
-    environ["PYTHONPYCACHEPREFIX"] = str(place / PYCACHE)
+    for name, path in toolchains.for_tree(tree).pointed_variables(place).items():
+        environ[name] = str(path)
     locations.enter(place, environ)
 
     directories = pythonpath_directories(tree)
@@ -175,10 +156,14 @@ def private_desktop(environ: Mapping[str, str]) -> bool:
 
 def _pytest_command(python: str, tree: Path, place: Path, environ: Mapping[str, str], private: bool,
                     pytest_arguments: Sequence[str]) -> list[str]:
+    """The run's pytest command; a private run adds ``not interactive_desktop`` to the caller's ``-m``."""
     has_xdist = _capture([python, "-c", "import xdist"], tree, environ, False, None).code == 0
-    arguments = _with_exclusion(pytest_arguments) if private else list(pytest_arguments)
-    return [python, "-m", "pytest", "-p", "no:cacheprovider", *(["-n", "0"] if has_xdist else []), "-q",
-            "--basetemp", str(place / "bt"), *arguments]
+    expression, rest = python_toolchain.split_marker(pytest_arguments)
+    if private:
+        expression = python_toolchain.combine(expression, INTERACTIVE_EXCLUSION)
+    options = python_toolchain.pytest_arguments(select=expression, xdist=has_xdist, no_cache=True,
+                                                basetemp=place / "bt")
+    return [python, "-m", "pytest", *options, *rest]
 
 
 def execute(tree_argument: str, scratch_argument: str, python_argument: str, label: str,
@@ -192,9 +177,9 @@ def execute(tree_argument: str, scratch_argument: str, python_argument: str, lab
     private = isolate(tree, place, python, environ)
 
     if not quiet:
-        if not (tree / ".venv").exists():
-            print(f"NOTE no .venv in {tree}: tests that launch source children need one; "
-                  "prepare it as the project's AGENTS.md says.", flush=True)
+        note = toolchains.for_tree(tree).environment_note(tree)
+        if note:
+            print(note, flush=True)
         if private:
             print(EXCLUSION_NOTE, flush=True)
         print(f"== {label} ==", flush=True)
@@ -371,15 +356,6 @@ COUNTS = re.compile(r"\b\d+ (?:passed|failed|errors?|skipped|deselected|xfailed|
 SELECTOR_KEY = "selector"
 
 
-def venv_python(tree: Path) -> str:
-    """The tree's ``.venv`` interpreter; ``VENV_MISSING`` names how to make one."""
-    python = tree / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-    if not python.is_file():
-        raise Refusal("VENV_MISSING", f"{tree} has no .venv; make the scratch with `atc tmp checkout`, prepare the "
-                                      "environment as the project's AGENTS.md says, or name one with --python")
-    return str(python)
-
-
 def _registered_row(root: Path, place: Path) -> scratch.Row | None:
     return next((row for row in scratch.registered(root) if locations.same_path(row.scratch, place)), None)
 
@@ -507,7 +483,7 @@ def run_flags(argv: Sequence[str], environ: MutableMapping[str, str] | None = No
         tree = Path(os.path.realpath(row.tree))
     else:
         raise Refusal("TREE_NOT_FOUND", f"the scratch {place.name} names no tree; pass --tree")
-    python = resolve_python(args.python) if args.python else venv_python(tree)
+    python = resolve_python(args.python) if args.python else toolchains.for_tree(tree).interpreter(tree)
     scratch.register(root, place, tree)
     paths = changed_paths(tree, args.select, row) if args.select else None
     environ["PYTHONUNBUFFERED"] = "1"

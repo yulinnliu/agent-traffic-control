@@ -216,18 +216,17 @@ class _Checks:
                 self.row(check, check.name)
 
     def collection(self) -> None:
-        options = self.isolated.pytest_options("collection")
-        self.row(_Row("COLLECTION_FAILED", (sys.executable, "-m", "pytest", "--collect-only", "-q", "-n", "0",
-                                            "-p", "no:cacheprovider", *options)))
+        options = self.isolated.run_options("collection")
+        self.row(_Row("COLLECTION_FAILED", tuple(self.isolated.toolchain.collect_command(options))))
 
     def stages(self, pytest_paths: list[str], cwd: Path | None = None) -> None:
         project = self.project
         outcome = stages.run_stages(
-            project.runner, pytest_paths, cwd=project.root if cwd is None else cwd, stage_list=project.stage_list(),
-            env_for=lambda stage: self.isolated.environment(stage.name),
-            options_for=lambda stage: self.isolated.pytest_options(stage.name),
+            project.stage_entry(), pytest_paths, cwd=project.root if cwd is None else cwd,
+            stage_list=project.stage_list(), env_for=lambda stage: self.isolated.environment(stage.name),
+            options_for=lambda stage: self.isolated.run_options(stage.name),
             log_for=lambda stage: self.work / f"pytest-{stage.name}.log", workers=self.workers,
-            run=self.run_logged)
+            run=self.run_logged, toolchain=self.isolated.toolchain)
         if outcome.token == stages.NO_TESTS_COLLECTED:
             raise VerifyError(outcome.token, f"selected {' '.join(pytest_paths) or 'the default suite'}; "
                                              f"logs in {self.work}")
@@ -249,6 +248,7 @@ def _write_report(environ: Mapping[str, str], project: Project, pytest_paths: li
     """A report that cannot be written leaves the verdict a pass."""
     try:
         path = evidence.write_report(environ, project.root, pytest_paths, project.stage_list(),
+                                     dependency_files=project.tests_toolchain().dependency_files,
                                      classification="documentation-only" if doc_only else "impact-selected")
     except Exception as error:  # noqa: BLE001 - the verification already passed
         print(f"verification report: not written ({type(error).__name__}: {error})", flush=True)
@@ -268,7 +268,7 @@ def _consumer_checks(project: Project, checks: _Checks, base: str, sha: str, pat
     print(f"classification: {'documentation-only' if doc_only else 'impact-selected'}; "
           f"repository-wide collection: {'check' if collect else 'skip'}", flush=True)
     checks.static((check for check in project.checks if check.first), paths)
-    checks.row(_Row("UV_LOCK_CHECK_FAILED", ("uv", "lock", "--check")))
+    checks.row(_Row("UV_LOCK_CHECK_FAILED", checks.isolated.toolchain.lock_check_argv))
     checks.row(_Row("DIFF_CHECK_FAILED", ("git", "diff", "--check", f"{base}..{sha}")))
     checks.row(_Row("TESTKIT_CONTRACT_FAILED", (sys.executable, "-m", "atc_testkit.check", "--installed")))
     checks.row(_Row("RUFF_CHECK_FAILED", (sys.executable, "-m", "ruff", "check", *project.lint_paths)))
@@ -310,6 +310,7 @@ def main(project: Project, environ: Mapping[str, str] | None = None, run: stages
         isolation.drop_hami_variables(os.environ)
         locations.enter()
         workers = stages.resolve_workers(environ=environ)
+        toolchain = project.tests_toolchain()
         values = require_env(environ)
         check_candidate(project.root, values, Path.cwd())
         check_imports(project, values["ATC_CANDIDATE_DIR"])
@@ -325,7 +326,7 @@ def main(project: Project, environ: Mapping[str, str] | None = None, run: stages
         work = isolation.create_working_directory()
         locations.enter(work)
         isolated = isolation.IsolatedRun(work, credentials=project.credential_variables,
-                                         data_roots=project.data_root_variables)
+                                         data_roots=project.data_root_variables, toolchain=toolchain)
         checks = _Checks(project, work, isolated, run, workers)
         if project.select is None:
             _root_checks(project, checks, base, sha, paths)
