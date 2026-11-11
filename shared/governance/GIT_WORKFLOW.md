@@ -450,8 +450,8 @@ Who runs which form is split by flag:
 - `--owner-words` carries the Owner's words quoted exactly: the coordinator
   passes the words it heard, or relays them with the reviewed full SHA to the
   task's writer, who passes them for that SHA only. A writer whose session
-  refuses the relayed words stops and reports `BLOCKED`; the Owner then
-  approves in the writer's session.
+  refuses the relayed words replies that it refused; the coordinator then
+  runs the integration and the close-out itself with the words it heard.
 
 In a paste-only setup with no coordinator session, the user who runs the
 instruction with their own words counts as the coordinator for

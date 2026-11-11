@@ -580,8 +580,8 @@ review, one implementation review and one integration:
        coordinator integrates and never forwards `--owner-words`.
      - A relayed quote is the coordinator's copy of the Owner's words.
    - Mitigations:
-     - A refused writer stops and reports `BLOCKED`; the Owner then
-       approves in the writer's session. No permission rule changes.
+     - A refused writer stops and replies `refused`; the coordinator
+       integrates with the words it heard. No permission rule changes.
      - The Integration Slot serialises runs; a moved `main` stops with
        `REBASE_REQUIRED` or `OVERLAP` and takes the existing route.
      - Close-out reports that worktree `SKIPPED` and the coordinator
@@ -1034,8 +1034,8 @@ review, one implementation review and one integration:
         selects it: `README.md`, `README.zh-TW.md`, `GLOSSARY.md` and
         `SCOPE.md` are not documentation-only and run that one test file.
       - `.github/workflows/validate.yml` stays `workflow_dispatch` only.
-        Root `AGENTS.md` § Integration verification states what the local
-        verification covers: the static checks, the selection, the
+        `docs/TESTKIT.md` § The workspace root's verifier states what the
+        local verification covers: the static checks, the selection, the
         documentation-only classes above, and that the skeleton's line
         `classification: full` names every range that is not
         documentation-only, the selector's lines after it saying what ran,

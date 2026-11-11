@@ -252,7 +252,7 @@ other action need their own instruction. Who may run which form of
    integration checkout by absolute path. Run `--owner-words` only with the
    Owner's exact words and the reviewed full SHA the holder relayed, for
    that SHA. When your session refuses to run it on relayed words, stop and
-   report `BLOCKED` to the holder; the Owner then approves in your session.
+   reply `refused` to the holder; the holder runs it and the close-out.
    Check the result. `FF`
    matches when `main_after` equals the reviewed SHA; `NO_FF` matches when
    `second_parent` equals the reviewed SHA and `first_parent` equals

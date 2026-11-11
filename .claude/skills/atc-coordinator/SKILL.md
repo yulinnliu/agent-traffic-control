@@ -136,10 +136,11 @@ own commits write; session names belong only in the hand-over.
    integration, and the full SHA the word names; the writer integrates and
    closes out as `atc-review` "Writer: after integration" says.
    `atc integrate` records the task, its authority, the reviewed SHA and any
-   `carried_over_from` in `<git common dir>/atc/integrations.jsonl`. A
-   writer that reports `BLOCKED` waits for the Owner to approve in its
-   session; when the writer's session is gone, run the instruction
-   yourself. Check the result the writer reports as that section says.
+   `carried_over_from` in `<git common dir>/atc/integrations.jsonl`. When
+   the writer replies `refused`, or its session is gone, run the
+   instruction yourself with the words you heard, from outside the task's
+   worktree, then `atc close-out --task <task>`. Check the result as that
+   section says.
    Done when the result matches.
 6. **Close** under governance `DELIVERY.md` § Close-out, after the writer's
    close-out; the push waits for the Owner's word (`DELIVERY.md` § 10) and is

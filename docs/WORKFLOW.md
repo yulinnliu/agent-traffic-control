@@ -39,7 +39,9 @@ atc task new --project <project> --scope "<plan section>"
 
 It writes `.atc/tasks/<ID>.yaml` granting `edit` and `commit`; commit it on
 the topic branch. A record's `keep` list names what close-out keeps
-permanently (`docs/TASKS.md` § Record).
+permanently (`docs/TASKS.md` § Record). `atc task check` checks the records
+in a working tree and `atc task list` lists the tasks (`docs/TASKS.md`
+§ Commands).
 
 - `CHECKOUT_CANONICAL`: the working directory is the canonical checkout; run
   it inside the new worktree, as the refusal says.
@@ -61,7 +63,11 @@ workspace root, whose tests run in `adapters/python`, add
 `--lock-dir adapters/python`. `atc test run`
 prints `LOG <path>` and one summary line; the log holds the rest
 (`docs/TESTKIT.md` § Commands). The root's own suite also runs through
-`python -m atc_testkit.ci --stages` from `adapters/python`.
+`python -m atc_testkit.ci --stages` from `adapters/python`. A command that
+opens windows runs under `atc test private` (`docs/TESTKIT.md` § Private
+desktop). A root writer also runs `atc validate`,
+`atc onboard --sync --root-only` and `atc policies check` as root
+`AGENTS.md` § Changing this repo says.
 
 - `VENV_MISSING`: the tree has no `.venv`; make the scratch with
   `atc tmp checkout`.
@@ -97,13 +103,17 @@ atc verify --project <project> --reviewed <sha>
 `atc verify` takes no slot, moves no ref and needs no Owner's word. Run it
 while no integration runs: the two share a fetch and the CPU. A refusal is a
 blocker finding. The verdict goes to
-`~/.atc/reports/<ID>-<short sha>-review.md`.
+`~/.atc/reports/<ID>-<short sha>-review.md`. `atc tmp list` shows the
+scratches, and `atc tmp clean` and `atc tmp prune` delete them (`atc-review`
+"Reviewer: after integration", `docs/TESTKIT.md` § Commands).
 
 ## 6. The Owner's word
 
 The coordinator runs `atc integrate --check` on the reviewed SHA, asks the
 Owner for the integration word, and relays the Owner's exact words with the
-full SHA to the writer (`GIT_WORKFLOW.md` § Task and authority).
+full SHA to the writer (`GIT_WORKFLOW.md` § Task and authority). When the
+writer replies `refused`, the coordinator runs § 7 itself, from outside the
+task's worktree, with the words it heard.
 
 ## 7. Writer: integrate and close out
 
@@ -130,8 +140,8 @@ names it where the prefix is not declared on `main`.
 
 - `VERIFICATION_FAILED`: the verifier's log names the failing tests; fix,
   and the change goes back to review.
-- A session that refuses to run on relayed words reports `BLOCKED`; the
-  Owner approves in that session.
+- A session that refuses to run on relayed words stops and replies
+  `refused`; the coordinator runs both commands (§ 6).
 
 ## 8. Coordinator: push and archive
 
