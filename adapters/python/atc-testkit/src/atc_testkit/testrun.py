@@ -532,7 +532,8 @@ def _worker_request(arguments: Sequence[str], tree: Path,
 
 
 def _granted_arguments(arguments: list[str], grant: host_workers.Grant, want: int) -> list[str]:
-    """``-n auto`` and ``-n logical`` become the granted count; a pool that cut or delayed the run prints why."""
+    """``-n auto``, ``-n logical`` and an ``-n K`` above the pool size become the granted count; a pool that cut or
+    delayed the run prints why."""
     option = _worker_option(arguments)
     if option is None:
         return arguments
@@ -542,6 +543,9 @@ def _granted_arguments(arguments: list[str], grant: host_workers.Grant, want: in
         arguments = [*arguments[:first], "-n", str(grant.count), *arguments[last + 1:]]
         print(stages.Workers(grant.count, value, want if grant.count != want else None, budget=note).line(),
               flush=True)
+    elif grant.count < want:
+        arguments = [*arguments[:first], "-n", str(grant.count), *arguments[last + 1:]]
+        print(stages.Workers(want, stages.SOURCE_FLAG).granted(grant).line(), flush=True)
     elif note:
         print(f"workers: {grant.count} (host budget: {note.removeprefix('host budget: ')})", flush=True)
     return arguments

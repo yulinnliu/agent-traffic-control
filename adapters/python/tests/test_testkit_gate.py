@@ -233,7 +233,9 @@ def test_the_worker_flag_sets_the_parallel_stage(repo: Path, capsys: pytest.Capt
 def test_the_worker_flag_goes_to_eight_on_a_two_cpu_host(repo: Path, monkeypatch: pytest.MonkeyPatch,
                                                          capsys: pytest.CaptureFixture[str], value: str,
                                                          accepted: bool) -> None:
+    """On CI, outside the host pool, a flag runs whole; locally the pool caps it (test_testkit_workers)."""
     monkeypatch.setattr(os, "cpu_count", lambda: 2)
+    monkeypatch.setenv("CI", "1")
     base = git(repo, "rev-parse", "HEAD")
     sha = commit(repo, "a.py")
     recorder = Recorder()

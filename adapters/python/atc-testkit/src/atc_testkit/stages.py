@@ -6,7 +6,6 @@ turns it into its own test filter; the Python toolchain passes it to ``pytest -m
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping, Sequence
-import dataclasses
 from dataclasses import dataclass
 import os
 from pathlib import Path
@@ -148,16 +147,19 @@ class Workers:
         return f"workers: {self.count} ({text})"
 
     def granted(self, grant: host_workers.Grant) -> Workers:
-        """This count as the host pool granted it; a flag's count stands whole, its tokens capped at the pool size."""
-        if self.source == SOURCE_FLAG:
-            grant = dataclasses.replace(grant, count=self.count)
+        """This count as the host pool granted it; a flag above the pool size runs the pool size and names it."""
+        if self.source == SOURCE_FLAG and grant.pooled and grant.count < self.count:
+            clamp = ", ".join(part for part in (self.clamp, f"host pool: {grant.size}") if part)
+            note = grant.note(grant.count)
+            return Workers(grant.count, self.source, self.requested or self.count, clamp, note)
         note = grant.note(self.count)
         if not note:
             return self
         return Workers(grant.count, self.source, self.requested or self.count, self.clamp, note)
 
     def floor(self) -> int:
-        """The fewest workers the parallel stage starts with: a flag's whole count, otherwise ``FLOOR``."""
+        """The fewest workers the parallel stage starts with: a flag's whole count (the pool caps it at its size),
+        otherwise ``FLOOR``."""
         return self.count if self.source == SOURCE_FLAG else min(host_workers.FLOOR, self.count)
 
 

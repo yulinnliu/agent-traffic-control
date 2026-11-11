@@ -128,10 +128,12 @@ set) use no pool.
   it ends: the parallel stage its count, down to a floor of 2, or the whole
   count of a flag; the serial and interactive stages one each. `atc test
   run` takes one token, or its pytest `-n K` (cut by the memory ceiling and
-  rewritten when cut; `-n auto` and `-n logical` take the default count down
-  to 2 and become the granted count); `atc test mutants` takes one token for
-  the whole command. Static checks take none. A flag's count is the count
-  that runs; its tokens stop at the pool size.
+  the pool size and rewritten when cut; `-n auto` and `-n logical` take the
+  default count down to 2 and become the granted count); `atc test mutants`
+  takes one token for the whole command. Static checks take none. A flag
+  above the pool size runs the pool size, and its line names the pool,
+  `workers: 2 (flag 8, host pool: 2)`; on CI, outside the pool, only the
+  memory ceiling cuts a flag.
 - A run takes the tokens free when it asks, never more than memory holds at
   that moment, counting the runs granted in the last 60 seconds at their
   full size. Fewer free than its floor, it waits: it holds the pool's

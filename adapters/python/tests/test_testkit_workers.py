@@ -382,3 +382,30 @@ def test_a_cli_run_past_its_wait_limit_exits_124_with_the_token(tmp_path: Path, 
     finally:
         head.kill()
         head.wait()
+
+
+@pytest.mark.integration
+def test_a_flag_above_the_pool_runs_the_pool_size_and_names_it(tmp_path: Path, pool_dir: Path,
+                                                               capsys: pytest.CaptureFixture[str]) -> None:
+    budget = workers.Budget(workers.Pool(pool_dir, 2), label="flag")
+    flag = stages.Workers(8, stages.SOURCE_FLAG)
+    grant = budget.acquire("parallel", flag.count, flag.floor())
+    assert grant.count == 2
+    assert flag.granted(grant).line() == "workers: 2 (flag 8, host pool: 2)"
+    cut = stages.Workers(6, stages.SOURCE_FLAG, 8, "memory ceiling: 7.0 GiB available")
+    assert cut.granted(grant).line() == "workers: 2 (flag 8, memory ceiling: 7.0 GiB available, host pool: 2)"
+    assert testrun._granted_arguments(["-n", "8", "tests"], grant, 8) == ["-n", "2", "tests"]
+    assert "workers: 2 (flag 8, host pool: 2)" in capsys.readouterr().out
+    budget.release(grant)
+    seen: list[list[str]] = []
+
+    def fake(command, *, cwd, env, log, private=False) -> int:
+        seen.append(list(command))
+        return 0
+
+    outcome = stages.run_stages(["runner"], [], cwd=tmp_path, stage_list=[Stage("parallel", "a")],
+                                env_for=lambda stage: {}, options_for=lambda stage: (),
+                                log_for=lambda stage: tmp_path / stage.name, workers=flag, run=fake, budget=budget)
+    assert outcome.token is None and seen and seen[0][seen[0].index("-n") + 1] == "2"
+    assert "workers: 2 (flag 8, host pool: 2)" in capsys.readouterr().out
+    assert stages.Workers(8, stages.SOURCE_FLAG).granted(workers.Grant(8)).line() == "workers: 8 (flag)"
