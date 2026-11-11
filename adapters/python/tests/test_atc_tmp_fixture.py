@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import secrets
 import shutil
 
 import pytest
@@ -11,8 +12,13 @@ from atc_testkit import locations
 pytestmark = pytest.mark.integration
 
 
-def _caller_root(length: int, monkeypatch: pytest.MonkeyPatch) -> Path:
+def _caller_root(length: int, monkeypatch: pytest.MonkeyPatch, *, own_parent: bool = False) -> Path:
+    """A caller's root of ``length`` characters below the host's ``<tmp>``; with ``own_parent`` it lies in a
+    directory of its own, so a listing beside it sees no other run's directories."""
     base = Path(os.path.realpath(os.environ.get("ATC_TMP") or Path.home() / ".atc" / "tmp"))
+    if own_parent:
+        base.mkdir(parents=True, exist_ok=True)
+        base = _short_directory(base)
     room = length - len(str(base)) - 1
     if room < 1:
         pytest.skip(f"{base} leaves no room for a name in a root of {length} characters")
@@ -20,6 +26,16 @@ def _caller_root(length: int, monkeypatch: pytest.MonkeyPatch) -> Path:
     root.mkdir(parents=True)
     monkeypatch.setenv("ATC_TMP", str(root))
     return root
+
+
+def _short_directory(base: Path) -> Path:
+    while True:
+        directory = base / secrets.token_hex(2)
+        try:
+            directory.mkdir()
+        except FileExistsError:
+            continue
+        return directory
 
 
 @pytest.fixture()
@@ -31,9 +47,9 @@ def caller_root(restored_process, monkeypatch: pytest.MonkeyPatch):
 
 @pytest.fixture()
 def caller_root_at_the_bound(restored_process, monkeypatch: pytest.MonkeyPatch):
-    root = _caller_root(locations.TMP_NAME_BOUND, monkeypatch)
+    root = _caller_root(locations.TMP_NAME_BOUND, monkeypatch, own_parent=True)
     yield root
-    shutil.rmtree(root)
+    shutil.rmtree(root.parent)
 
 
 def test_a_caller_root_gives_an_accepted_root_inside_it_with_room_for_a_test_s_own_root(caller_root: Path, request) -> None:

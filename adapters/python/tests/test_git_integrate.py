@@ -13,6 +13,8 @@ import pytest
 from atc_testkit import locations
 import git_integrate as gi
 
+SETTLE = 20.0  # seconds a process gets to reach a state on a loaded host
+
 CANDIDATE_PATH_BOUND = 64
 
 
@@ -482,80 +484,109 @@ def test_missing_verifier_is_reported_without_traceback(
     assert run_git(repo, "worktree", "list").count("\n") == 0
 
 
-def pid_alive(pid: int) -> bool:
-    if sys.platform == "win32":
-        listing = subprocess.run(
-            ["tasklist", "/FI", f"PID eq {pid}", "/NH"], capture_output=True, text=True, check=False,
-        ).stdout
-        return str(pid) in listing.split()
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    return True
+SLEEPER = """import os, sys, time
+lock = open(sys.argv[1], "r+b")
+if os.name == "nt":
+    import msvcrt
+    msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+else:
+    import fcntl
+    fcntl.lockf(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+open(sys.argv[2], "w").close()
+time.sleep(60)
+"""
 
 
-def descendant_verifier(pid_file: Path, *, reparent: bool, wrapper_exits: bool) -> str:
-    """A verifier whose deepest descendant records its pid and then sleeps.
+def descendant_alive(lock_file: Path) -> bool:
+    """Whether the sleeper still holds its lock on ``lock_file``: the lock ends with the process, and unlike its
+    PID, which a loaded host hands to a new process within seconds, it names that one process only."""
+    with lock_file.open("r+b") as handle:
+        try:
+            if os.name == "nt":
+                import msvcrt
+                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+                fcntl.lockf(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                fcntl.lockf(handle, fcntl.LOCK_UN)
+        except OSError:
+            return True
+    return False
+
+
+def descendant_verifier(sleeper: Path, *, reparent: bool, wrapper_exits: bool) -> str:
+    """A verifier whose deepest descendant locks ``sleeper``, then creates ``<sleeper>.ready`` and sleeps.
 
     reparent: an intermediate process starts the sleeper and exits, so the
     sleeper's parent pid no longer names a live process.
     wrapper_exits: the verifier itself returns 0 right away instead of sleeping.
     """
-    sleeper = "import os,time,sys; open(sys.argv[1],'w').write(str(os.getpid())); time.sleep(60)"
-    spawn_sleeper = f"subprocess.Popen([sys.executable,'-c',{sleeper!r},{str(pid_file)!r}])"
+    sleeper.write_bytes(b"0")
+    ready = ready_file(sleeper)
+    spawn_sleeper = f"subprocess.Popen([sys.executable,'-c',{SLEEPER!r},{str(sleeper)!r},{str(ready)!r}])"
     if reparent:
         middle = f"import subprocess,sys; {spawn_sleeper}"
         spawn = f"subprocess.run([sys.executable,'-c',{middle!r}])"
     else:
         spawn = spawn_sleeper
-    # The verifier only ends after the sleeper has recorded its pid, so the
-    # test observes a descendant that was alive when the verifier returned.
-    wait_for_sleeper = f"\nwhile not os.path.exists({str(pid_file)!r}): time.sleep(0.05)\n"
+    # The verifier only ends after the sleeper holds its lock, so the test
+    # observes a descendant that was alive when the verifier returned.
+    wait_for_sleeper = f"\nwhile not os.path.exists({str(ready)!r}): time.sleep(0.05)\n"
     tail = "" if wrapper_exits else "time.sleep(60)"
     return json.dumps([sys.executable, "-c", f"import os,subprocess,sys,time; {spawn}{wait_for_sleeper}{tail}"])
 
 
-def wait_for_pid(pid_file: Path) -> int:
-    deadline = time.monotonic() + 5
-    while not pid_file.exists() and time.monotonic() < deadline:
+def ready_file(sleeper: Path) -> Path:
+    return sleeper.with_name(sleeper.name + ".ready")
+
+
+def wait_until(condition, what: str) -> None:
+    """Poll ``condition`` until it holds; ``SETTLE`` seconds is the ceiling on a loaded host, not a timing."""
+    deadline = time.monotonic() + SETTLE
+    while not condition():
+        assert time.monotonic() < deadline, what
         time.sleep(0.05)
-    return int(pid_file.read_text())
 
 
-def assert_pid_ends(pid: int) -> None:
-    deadline = time.monotonic() + 5
-    while pid_alive(pid) and time.monotonic() < deadline:
-        time.sleep(0.1)
-    assert not pid_alive(pid), "verifier descendant survived"
+def assert_descendant_ends(sleeper: Path) -> None:
+    assert ready_file(sleeper).exists(), "the sleeper never started"
+    wait_until(lambda: not descendant_alive(sleeper), "verifier descendant survived")
 
 
 @pytest.mark.parametrize("reparent", [False, True], ids=["direct-child", "reparented"])
 def test_verifier_timeout_kills_descendant_processes(
-    repo: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str], reparent: bool
+    repo: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, reparent: bool
 ) -> None:
-    pid_file = tmp_path / "sleeper.pid"
-    declare_verifier(repo, descendant_verifier(pid_file, reparent=reparent, wrapper_exits=False))
+    sleeper = tmp_path / "sleeper.lock"
+    declare_verifier(repo, descendant_verifier(sleeper, reparent=reparent, wrapper_exits=False))
     tip = topic(repo, {"a.txt": "a2\n"})
     before = main_tip(repo)
-    started = time.monotonic()
+    terminate, killed = gi._ProcessTree.terminate, []
+
+    def once_the_sleeper_runs(tree, process) -> None:
+        wait_until(ready_file(sleeper).exists, "the sleeper never started")
+        killed.append(time.monotonic())
+        terminate(tree, process)
+
+    monkeypatch.setattr(gi._ProcessTree, "terminate", once_the_sleeper_runs)
     assert integrate(repo, "topic", tip, "--verify-timeout", "1") == 3
-    elapsed = time.monotonic() - started
+    elapsed = time.monotonic() - killed[0]
     assert "candidate verification timed out" in capsys.readouterr().err
     assert elapsed < 20, f"timeout was not enforced while a descendant held the verifier open ({elapsed:.1f}s)"
     assert main_tip(repo) == before
-    assert_pid_ends(wait_for_pid(pid_file))
+    assert_descendant_ends(sleeper)
 
 
 def test_verifier_descendants_end_when_verifier_returns(
     repo: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    pid_file = tmp_path / "sleeper.pid"
-    declare_verifier(repo, descendant_verifier(pid_file, reparent=True, wrapper_exits=True))
+    sleeper = tmp_path / "sleeper.lock"
+    declare_verifier(repo, descendant_verifier(sleeper, reparent=True, wrapper_exits=True))
     tip = topic(repo, {"a.txt": "a2\n"})
     assert integrate(repo, "topic", tip) == 0
     assert main_tip(repo) == tip
-    assert_pid_ends(wait_for_pid(pid_file))
+    assert_descendant_ends(sleeper)
     assert "candidate worktree retained" not in capsys.readouterr().err
 
 

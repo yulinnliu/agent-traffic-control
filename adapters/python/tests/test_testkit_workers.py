@@ -1,6 +1,7 @@
 """The host worker budget (docs/TESTKIT.md § Host worker budget): memory sizing, the pool, waits and crash reclaim."""
 from __future__ import annotations
 
+import ctypes
 import json
 import os
 import subprocess
@@ -15,6 +16,8 @@ from atc_testkit.evidence import Stage
 
 GIB = workers.GIB
 SETTLE = 20.0  # seconds a child gets to reach a state on a loaded host
+SYNCHRONIZE = 0x00100000
+WAIT_OBJECT_0 = 0
 
 HOLDER = """
 import sys, time
@@ -303,18 +306,25 @@ def test_a_stage_tree_ends_with_the_process_holding_its_tokens(tmp_path: Path, p
         "job = workers.StageJob(process)\nprint('CHILD', process.pid, flush=True)\ntime.sleep(120)\n",
         encoding="utf-8")
     holder = subprocess.Popen([sys.executable, str(script), str(pool_dir)], stdout=subprocess.PIPE, text=True)
-    child = int(holder.stdout.readline().split()[1])
-    holder.kill()
-    holder.wait()
-    deadline = time.monotonic() + SETTLE
-    while time.monotonic() < deadline and _alive(child):
-        time.sleep(0.2)
-    assert not _alive(child)
+    child = _handle(int(holder.stdout.readline().split()[1]))
+    try:
+        holder.kill()
+        holder.wait()
+        assert _ends_within(child, SETTLE)
+    finally:
+        ctypes.windll.kernel32.CloseHandle(child)
 
 
-def _alive(pid: int) -> bool:
-    found = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"], capture_output=True, text=True)
-    return str(pid) in found.stdout
+def _handle(pid: int) -> int:
+    """A handle to the live process ``pid``: it names that process only, where a PID a loaded host hands to a new
+    process within seconds."""
+    handle = ctypes.windll.kernel32.OpenProcess(SYNCHRONIZE, False, pid)
+    assert handle, f"process {pid} is not running"
+    return handle
+
+
+def _ends_within(handle: int, seconds: float) -> bool:
+    return ctypes.windll.kernel32.WaitForSingleObject(handle, int(seconds * 1000)) == WAIT_OBJECT_0
 
 
 # atc test run
