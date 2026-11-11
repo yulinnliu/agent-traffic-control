@@ -18,7 +18,7 @@ Everything you send is a **cold read**: the receiving session has this skill
 and the message, nothing else.
 
 The **Owner** is the person who holds the task's authority. Only the Owner
-gives the word that approves an integration.
+approves an integration, by running its command.
 
 Integration runs through `atc integrate` in every project. Project specifics
 (the checkout a session works in, stricter integration gates, required
@@ -194,11 +194,11 @@ file is `~/.atc/reports/<task>-<short sha>-review.md`.
 - The verified line: test counts, mutant results, `atc verify`'s last line,
   read-only host evidence.
 - On a PASS, when the project's adopted process lets a PASS carry an
-  integration instruction, the integration instruction. The Owner's word on
-  the exact reviewed SHA approves integration. The holder of that word, a
+  integration instruction, the integration instruction. The Owner runs it
+  on the exact reviewed SHA, which approves the integration; the holder, a
   coordinator or, in a paste-only setup with no coordinator session, the user
-  who counts as one, runs the instruction or forwards it to the writer as
-  governance `GIT_WORKFLOW.md` § Task and authority splits the forms by flag.
+  who counts as one, gives it to the Owner and never to the writer
+  (governance `GIT_WORKFLOW.md` § Owner-run commands).
   Before writing it, run `atc integrate --check --json` (governance
   `GIT_WORKFLOW.md` § Integrate) with the same arguments as the integrate
   command below. The PASS carries the instruction only when the result has no
@@ -217,8 +217,8 @@ file is `~/.atc/reports/<task>-<short sha>-review.md`.
   after `switch main` assesses a dirty checkout and `FF` or `NO_FF`.
 
   When `main` has moved, the topic follows governance `GIT_WORKFLOW.md`
-  § Integrate and § After formal review, and the word is asked for again on
-  the SHA being integrated: the rebased tip, or for `NO_FF` the reviewed
+  § Integrate and § After formal review, and the Owner gets the command again
+  for the SHA being integrated: the rebased tip, or for `NO_FF` the reviewed
   SHA.
 
   The instruction is the verdict's last line, every value filled in:
@@ -227,9 +227,9 @@ file is `~/.atc/reports/<task>-<short sha>-review.md`.
   (governance `GIT_WORKFLOW.md` § Integrate). A task identity string in place
   of a record ID adds `--project <name>`, `--project root` for the workspace
   root. When the record on `main` does not grant the integration,
-  the holder adds `--owner-words` with the Owner's words quoted exactly and
-  relays the filled instruction to the writer with the reviewed full SHA
-  (governance `GIT_WORKFLOW.md` § Task and authority). The command names no branch, verifier or timeout: the tool
+  the holder adds `--owner-words "Owner run: approve integration"` and gives
+  the filled instruction to the Owner (governance `GIT_WORKFLOW.md`
+  § Task and authority). The command names no branch, verifier or timeout: the tool
   takes the branch from the record's `branch` (a task identity string: the
   one local branch at the reviewed SHA) and reads the verifier from the
   `## Integration verification` section of `AGENTS.md` at `main`. In a
@@ -242,57 +242,26 @@ file is `~/.atc/reports/<task>-<short sha>-review.md`.
 - Anything needing the Owner's decision (version numbers, spec semantics,
   risk limits, remote deletes) stops for the Owner.
 
-## Writer: after integration
+## Writer: after a PASS
 
-A PASS authorizes only the commands it carries; build, install, push and any
-other action need their own instruction. Who may run which form of
-`atc integrate` is governance `GIT_WORKFLOW.md` § Task and authority.
+A PASS ends the writer's work on the reviewed SHA. The Owner runs the
+integration and the push, and the holder closes the task out (governance
+`GIT_WORKFLOW.md` § Owner-run commands, `DELIVERY.md` § Close-out); the
+writer runs neither and is sent neither.
 
-1. Run the `atc integrate` command the holder relayed, with `--json` added
-   (after `switch main`, when the block carries it), against the
-   integration checkout by absolute path. Run `--owner-words` only with the
-   Owner's exact words and the reviewed full SHA the holder relayed, for
-   that SHA. When your session refuses to run it on relayed words, stop and
-   reply `refused` to the holder; the holder runs it and the close-out.
-   Check the result. `FF`
-   matches when `main_after` equals the reviewed SHA; `NO_FF` matches when
-   `second_parent` equals the reviewed SHA and `first_parent` equals
-   `main_before`.
-   - When it stops with a `next` that names a rebase, rebase the topic
-     branch onto `main` and give the holder the rebased tip, so the word is
-     asked for on it; the same command with `--rebased <rebased tip>` added
-     is then run as step 1 says. `FF` then matches when `main_after`
-     equals the rebased tip and `carried_over.carried_over_from` is the
-     reviewed SHA. `CARRY_OVER_REFUSED` sends the rebased tip to the
-     reviewer for a fresh review.
-   - `push.commits` lists every commit a push of `main` would carry; give
-     the holder each entry whose `push_approval` is `false`, with its `sha`,
-     `task` and `authority`, with any push request.
-     `atc preflight push --project <name> --json` gives the same list
-     before a later push.
-2. Close out (governance `DELIVERY.md` § Close-out) with
-   `atc close-out --task <task>`, run from outside the task's worktree when
-   you can: it removes the task's worktree through `atc worktree clean`'s
-   checks, its scratches with their dependent runs, and its report files
-   `~/.atc/reports/<task>-*.md` (the writer's and the reviewer's), leaves
-   what the record's `keep` lists and what `--skip <item>` names for an
-   intermediate batch, and reports the worktree that holds your working
-   directory as `SKIPPED (working directory)`. A repository without managed
-   worktrees keeps the topic branch for the holder.
-3. Run the hami-handoff-reminder check and report the integration result,
-   every close-out line and the check's result lines to the holder only; the
-   reviewer gets no relay.
+- When the holder reports that `main` moved and the check's `next` names a
+  rebase, rebase the topic branch onto `main` and give the holder the
+  rebased tip; `CARRY_OVER_REFUSED` sends that tip to the reviewer for a
+  fresh review.
+- When the verdict or the holder sends work back, the fix goes in new
+  commits and a new step report.
 
-Stop on a `switch` failure or a result mismatch: leave `main` and the branch
-as they are and hand the result lines to the holder for the reviewer.
-
-Done when the result matches, close-out ran and the handoff check ran, or
-the stop is with the holder.
+Done when the holder has the rebased tip or the new step report, or nothing
+is sent back.
 
 ## Reviewer: after integration
 
-The session that integrates the task removes its scratches and report files
-at close-out (governance `DELIVERY.md` § Close-out).
+The coordinator removes the task's scratches and report files at close-out (governance `DELIVERY.md` § Close-out).
 
 A failing verifier or gate run leaves its working directory under
 `<tmp>/systmp` for inspection; it stays until `atc tmp prune` deletes it,

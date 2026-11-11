@@ -6,6 +6,5 @@
 - The report or verdict is written inline in the reply, in full, in the
   one code block the user pastes ("Every block you write").
 - In a paste-only setup with no coordinator session, the user counts as the
-  coordinator: an instruction carrying `--owner-words` is run by the user,
-  or pasted to the writer with the Owner's exact words and the reviewed full
-  SHA (governance `GIT_WORKFLOW.md` § Task and authority).
+  coordinator and runs an instruction carrying `--owner-words` themselves
+  (governance `GIT_WORKFLOW.md` § Task and authority).

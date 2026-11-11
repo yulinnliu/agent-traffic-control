@@ -112,26 +112,35 @@ blocker finding. The verdict goes to
 scratches, and `atc tmp clean` and `atc tmp prune` delete them (`atc-review`
 "Reviewer: after integration", `docs/TESTKIT.md` § Commands).
 
-## 6. The Owner's word
+## 6. The Owner runs the integration
 
-The coordinator runs `atc integrate --check` on the reviewed SHA, asks the
-Owner for the integration word, and relays the Owner's exact words with the
-full SHA to the writer (`GIT_WORKFLOW.md` § Task and authority). When the
-writer replies `refused`, the coordinator runs § 7 itself, from outside the
-task's worktree, with the words it heard.
-
-## 7. Writer: integrate and close out
-
-The writer, after the relay:
+The coordinator runs `atc integrate --check --json` on the reviewed SHA and
+gives the Owner one command to run (`GIT_WORKFLOW.md` § Owner-run
+commands):
 
 ```text
-atc integrate --task <ID> --reviewed <sha> --owner-words "<the relayed words>"
-atc close-out --task <ID>
+atc integrate --task <ID> --reviewed <40-character sha> --owner-words "Owner run: approve integration"
 ```
 
 The record ID names the repository by its prefix and the branch by the
 record's `branch`; `--project <project>` (`root` for the workspace root)
-names it where the prefix is not declared on `main`.
+names it where the prefix is not declared on `main`. The check's
+`verification_reuse` tells the Owner how long it takes: `REUSED` reuses the
+reviewer's `atc verify` record and takes seconds, any other value runs the
+verifier. Neither the coordinator nor the writer runs it.
+
+The coordinator reads completion from Git at its next turn: the task's line
+in `<git common dir>/atc/integrations.jsonl` with the reviewed SHA, and
+`main` at or past its `candidate_sha`. A stop the Owner shows follows its
+`next`; `VERIFICATION_FAILED` names the failing tests in the verifier's log,
+and the fix goes back to review.
+
+## 7. Coordinator: close out
+
+```text
+atc close-out --task <ID>
+```
+
 `atc close-out` removes the worktree, the task's scratches and its reports
 (`docs/TASKS.md` § Close-out):
 
@@ -139,18 +148,20 @@ names it where the prefix is not declared on `main`.
   each item the next batch needs, for example `--skip worktree`; it writes
   nothing. The final batch runs it without `--skip`. The record's `keep` is
   for items kept permanently.
-- The worktree that holds the session's working directory ends
-  `SKIPPED (working directory)`. The writer leaves its working directory as
-  it is; the coordinator removes the worktree after that session ends.
-
-- `VERIFICATION_FAILED`: the verifier's log names the failing tests; fix,
-  and the change goes back to review.
-- A session that refuses to run on relayed words stops and replies
-  `refused`; the coordinator runs both commands (§ 6).
+- The worktree that holds a session's working directory ends
+  `SKIPPED (working directory)`; the coordinator removes it after that
+  session ends.
 
 ## 8. Coordinator: push and archive
 
-The coordinator asks the Owner's push word once for whatever is integrated,
-checks with `atc preflight push --project <project>`, pushes, archives the task's
-sessions and runs `atc close-out` for what the writer skipped
+For whatever is integrated and unpushed, the coordinator runs
+`atc preflight push --project <project> --json`, gives the Owner every
+commit it lists and the push command with the listed `main` tip:
+
+```text
+git -C "<main checkout>" push origin <40-character sha>:refs/heads/main
+```
+
+The push is done when `git ls-remote origin refs/heads/main` names that SHA
+or a descendant. The coordinator archives the task's sessions
 (`DELIVERY.md` § Close-out and § 10).

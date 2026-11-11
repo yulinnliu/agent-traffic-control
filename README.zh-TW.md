@@ -154,7 +154,7 @@ render 出來的檔案都帶有 `managed-by: agent-traffic-control` 標記；沒
 
 - **atc-worktree**：建立、接續、檢查、清理每個 topic 的 worktree，它屬於誰記在 git 裡。
 - **hami-handoff-reminder**：判斷現在該交接、壓縮 context，還是寫交接筆記。
-- **atc-coordinator**（user-invoked）：協調一個任務的 writer session 和 reviewer session，包括開任務、替兩邊寫 brief、針對確切的 SHA 轉達 Owner 的整合同意，以及結案。
+- **atc-coordinator**（user-invoked）：協調一個任務的 writer session 和 reviewer session，包括開任務、替兩邊寫 brief、針對確切的 SHA 交給 Owner 執行整合與 push 的命令、從 Git 讀取完成狀態，以及結案。
 - **atc-review**：兩個互相看不到的 session 之間的 writer／reviewer 流程，不管訊息是貼上的、用 session 訊息傳的，還是寫在筆記檔裡。涵蓋步驟回報、review、verdict 區塊和整合檢查。
 - **hami-retro**：回顧一段 session 紀錄，提出可以改進的地方。
 - **hami-writing-for-agents**：寫 skill、`AGENTS.md` 和指標時的參考。

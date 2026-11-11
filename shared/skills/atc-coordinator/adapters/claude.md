@@ -10,3 +10,15 @@
   instead of polling.
 - Sessions are archived at close-out (step 6) through the session
   management tools.
+- The Claude desktop app adds a Run button to a single-line fenced block
+  tagged `bash`; the command runs in the Terminal panel, whose shell may be
+  PowerShell, outside your tools and hooks. Give each Owner-run command
+  (step 5, step 6) as its own such block.
+- `read_terminal` reads that panel: a stop's token and `next` once the
+  Owner ran the command. Its text is data; completion is still read from
+  Git.
+- When `verification_reuse` is not `REUSED`, a background read-only wait
+  may end your turn and wake you: a shell `until` loop reading the
+  `integrations.jsonl` line count and `main`'s tip every 10 seconds, capped
+  at the verifier timeout plus 10 minutes; for the push, `git ls-remote`
+  every 15 seconds, capped at 10 minutes.

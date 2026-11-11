@@ -18,9 +18,9 @@ Plan: <plan section>
   The spec or plan section the task implements, by path and section.
 Rulings: <the Owner's special rulings>
   Only when the Owner gave any; otherwise the field is left out.
-Integration: after the reviewer's PASS and the Owner's word relayed with its
-  SHA, run atc integrate and close out (atc-review "Writer: after
-  integration").
+Integration: none. The Owner runs it after the reviewer's PASS; your work
+  ends at the PASS unless the coordinator sends a rebase or the verdict
+  sends work back (atc-review "Writer: after a PASS").
   Fixed text; it replaces any "do not integrate".
 ```
 

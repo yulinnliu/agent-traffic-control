@@ -1,14 +1,14 @@
 ---
 name: atc-coordinator
-description: Coordinating one task across a writer session and a reviewer session - open the task record, start and brief both sessions, carry the Owner's integration word for an exact SHA, close the task. Not for doing the writing or the review yourself, nor for a single-session task.
+description: Coordinating one task across a writer session and a reviewer session - open the task record, start and brief both sessions, hand the Owner the integration and push commands for an exact SHA and read their completion from Git, close the task. Not for doing the writing or the review yourself, nor for a single-session task.
 invocation: user
 ---
 
 # Coordinator
 
 A coordinator opens one task, starts a **writer** session and a **reviewer**
-session, carries messages between them and holds the **Owner's word** for
-integration. It is the holder of the carrier the `atc-review` skill,
+session, carries messages between them and hands the **Owner** the commands
+the Owner runs for integration and push. It is the holder of the carrier the `atc-review` skill,
 installed beside this one, describes; that skill defines the step report,
 the review and the verdict block. The coordinator does not run the review
 steps and keeps them out of its own context: it reads a verdict, it never
@@ -17,8 +17,9 @@ produces one.
 The writer and the reviewer are different sessions. The reviewer has not
 seen the writer's conversation, and neither session is the coordinator.
 
-The coordinator never gives the word in the Owner's place. Only the Owner
-gives it, against an exact SHA.
+The coordinator never runs the integration or the push of `main` in the
+Owner's place. The Owner runs each command against an exact SHA (governance
+`GIT_WORKFLOW.md` § Owner-run commands).
 
 ## Stops
 
@@ -26,10 +27,10 @@ Each of these stops the task until it is resolved, and is reported to the
 Owner with what was observed:
 
 - **SHA mismatch.** The tip the writer reported, the SHA the verdict names
-  and the SHA the Owner's word names must be one SHA, or, after a rebase,
-  the Owner's word names the rebased tip whose `carried_over` names the
-  reviewed SHA; the `--json` check or result must show the full SHA the word
-  names. Any other difference stops the task.
+  and the SHA the Owner's command names must be one SHA, or, after a rebase,
+  the command names the rebased tip whose `carried_over` names the
+  reviewed SHA; the `--json` check and the `integrations.jsonl` line must
+  show the full SHA the command names. Any other difference stops the task.
 - **Incomplete verdict.** A verdict without its verdict token, its verified
   line or the integration instruction it says it carries stops the task. A
   truncated notification (a short note, a preview) is a pointer: obtain the
@@ -44,8 +45,8 @@ from durable sources, never from memory: the task record and
 `<git common dir>/atc/integrations.jsonl`, the previous coordinator
 hand-over and the session list. A truncated notification, or a verdict
 whose full text is missing, is not enough to proceed; obtain the full
-content from its sender first. An Owner's word that `integrations.jsonl`
-does not record is asked for again after recovery.
+content from its sender first. An integration that `integrations.jsonl`
+does not record has not happened; its command goes to the Owner again.
 
 The task record receives only what the project's `AGENTS.md` lets a topic's
 own commits write; session names belong only in the hand-over.
@@ -86,7 +87,7 @@ own commits write; session names belong only in the hand-over.
    are the writer's contract. Commit it on the topic branch; it reaches
    `main` with the topic's first integration. A task the Owner
    pre-authorizes is bound on `main` before its work: commit the record alone as the topic's first
-   commit and integrate that commit with `--owner-words` quoting the grant.
+   commit and give the Owner that commit's integration command (step 5).
    Such a records-only range needs no review (governance `VERIFICATION.md`
    § Documentation-only verification). Done when the record is written, and
    bound on `main` when the Owner pre-authorized the task.
@@ -102,54 +103,60 @@ own commits write; session names belong only in the hand-over.
    `VERIFICATION.md` § Independent review states. Relay findings to the
    writer verbatim as the verdict's path; never review the work yourself.
    Done when the verdict is received whole.
-5. **Carry the Owner's word.** A PASS does not by itself trigger an
+5. **Hand the Owner the integration.** A PASS does not by itself trigger an
    integration. On a PASS that carries an integration instruction, run
    `atc integrate --check --json` with the instruction's arguments; it
-   needs no authority, and an authority of kind `missing` means the word is
-   still to be asked (governance `GIT_WORKFLOW.md` § Integrate).
+   needs no authority, and an authority of kind `missing` means the Owner's
+   decision is still to come (governance `GIT_WORKFLOW.md` § Integrate).
    - On `preflight.verdict` `FF` or `NO_FF` with no `refusal`, or a
      `CHECKOUT_NOT_ON_MAIN` refusal for a root checkout, give the Owner the
-     reviewed SHA, that verdict and the instruction, and ask for the word on
-     that exact SHA; only the Owner gives it. A record on `main` that grants
-     `integrate_main` already holds the word for `FF` (governance
-     `GIT_WORKFLOW.md` § Task and authority).
+     reviewed SHA, that verdict, `verification_reuse` (`REUSED` takes
+     seconds; any other value runs the verifier, up to its timeout) and the
+     command of governance `GIT_WORKFLOW.md` § Owner-run commands, filled
+     in. A record on `main` that grants `integrate_main` drops
+     `--owner-words` for `FF` (§ Task and authority).
    - On a `refusal` whose `next` names a rebase (`REBASE_REQUIRED`, or
      `OVERLAP` or `CONFLICT` of an unpublished topic), the writer rebases
      and reports the new tip.
      Run
      `atc integrate --check --json --reviewed <reviewed SHA> --rebased <rebased tip>`
      as governance `GIT_WORKFLOW.md` § After formal review states. When the
-     carry-over holds, ask the Owner for the word on the rebased tip, naming
-     the carried-from SHA and the `main` commits in between; on
+     carry-over holds, give the Owner the command for the rebased tip,
+     naming the carried-from SHA and the `main` commits in between; on
      `CARRY_OVER_REFUSED`, the reviewer re-reviews the rebased tip first.
    - On any other `refusal`, follow its `next` (`GIT_WORKFLOW.md`
      § Command results); a `next` that names a re-review goes back to the
-     reviewer before any word is asked for.
+     reviewer before the Owner gets a command.
 
-   The Owner's word is an explicit integration instruction given against
-   the exact SHA. A vague reply ("looks fine", "go on") is not the word, and
-   the coordinator asks again; the word for one SHA never extends to
-   another. Relay the instruction to the writer with the Owner's exact
-   words as `--owner-words`, unless the record on `main` grants the
-   integration, and the full SHA the word names; the writer integrates and
-   closes out as `atc-review` "Writer: after integration" says.
+   The Owner runs the command; you never run it and never send it to the
+   writer. A reply that the command ran is not its completion: at your next
+   turn read Git as § Owner-run commands states. Then:
+   - Done: compare the line. `FF` matches when `candidate_sha` equals the
+     reviewed SHA; `NO_FF` when the candidate's second parent is the
+     reviewed SHA and its first parent `main_before`. Run
+     `atc close-out --task <task>` from outside the task's worktree.
+   - Not run, `main` unchanged: the command waits on the Owner; keep it
+     ready to copy and ask for nothing else. A stop the Owner shows you
+     follows its token's `next`; a corrected command for the same SHA needs
+     no new decision, a new SHA does.
+   - `main` moved without the line: run the check again and give the
+     command the new check calls for.
    `atc integrate` records the task, its authority, the reviewed SHA and any
-   `carried_over_from` in `<git common dir>/atc/integrations.jsonl`. When
-   the writer replies `refused`, or its session is gone, run the
-   instruction yourself with the words you heard, from outside the task's
-   worktree, then `atc close-out --task <task>`. Check the result as that
-   section says. The coordinator acts on the Owner's word it heard itself; a
-   writer's `refused` is no new decision, so the coordinator runs the
-   instruction without asking the Owner again.
-   Done when the result matches.
-6. **Close** under governance `DELIVERY.md` § Close-out, after the writer's
-   close-out; the push waits for the Owner's word (`DELIVERY.md` § 10) and is
-   not a precondition. Ask that word once for whatever is integrated and
-   unpushed, then push:
+   `carried_over_from` in `<git common dir>/atc/integrations.jsonl`.
+   Done when the line matches and close-out ran.
+6. **Close** under governance `DELIVERY.md` § Close-out, after close-out;
+   the push is the Owner's (`DELIVERY.md` § 10) and is not a precondition.
+   For whatever is integrated and unpushed, run
+   `atc preflight push --project <name> --json`, give the Owner every
+   commit it lists with its `task`, `authority` and `push_approval`, and the
+   push command of `GIT_WORKFLOW.md` § Owner-run commands with the listed
+   `main` tip; the push is done when `git ls-remote origin refs/heads/main`
+   names that SHA or a descendant. Then:
    - Confirm `main` at the integrated SHA and the task record at its
      post-integration state.
    - Archive the task's sessions.
-   - Remove what the writer's close-out skipped: run
+   - Remove what step 5's close-out skipped, such as the worktree a
+     session's working directory held, once that session is archived: run
      `atc close-out --task <task>` from outside the task's worktree, with
      the same `--skip` items on an intermediate batch of a multi-batch
      topic, or in a

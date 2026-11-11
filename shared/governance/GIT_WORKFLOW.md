@@ -239,6 +239,10 @@ Owner is asked:
 atc integrate --check --project <project> --reviewed <sha> --task <task> [--owner-words <quote>]
 ```
 
+Its `verification_reuse` says whether the integration will reuse the
+reviewer's `atc verify` record of the same candidate or run the verifier
+(`shared/conformance/verification-evidence/README.md` § Integration reuse).
+
 The Python integration adapter acquires the repository Integration Slot before
 preflight, prepares the integration revision in an isolated candidate worktree,
 and requires a passing verification command before updating `main`. Name the
@@ -438,7 +442,8 @@ exactly one source.
   (`root` for the workspace root); it integrates the one local branch at the
   reviewed SHA.
 - The authority is either the record on `main` with `integrate_main: true`,
-  or `--owner-words <quote>`, the Owner's words quoted.
+  or `--owner-words <quote>`: the Owner's words quoted, or the decision
+  label of a command the Owner runs.
 - A range whose changed paths all lie under `.atc/tasks/` is records-only: the
   record check runs in place of the verifier.
 - Recovering an interrupted integration takes `--task`.
@@ -453,15 +458,14 @@ Who runs which form is split by flag:
 - whoever the project's rules let integrate runs `atc integrate --task <ID>`
   on the record's authority;
 - only the coordinator, who hears the Owner, writes a record's `authority`;
-- `--owner-words` carries the Owner's words quoted exactly: the coordinator
-  passes the words it heard, or relays them with the reviewed full SHA to the
-  task's writer, who passes them for that SHA only. A writer whose session
-  refuses the relayed words replies `refused`; the coordinator then runs
-  the integration and the close-out itself with the words it heard.
+- `--owner-words` carries the Owner's decision: the Owner runs the
+  integration command the coordinator gives (§ Owner-run commands), with
+  the decision label `Owner run: approve integration` as the quote. The
+  coordinator never runs it and never relays it to a writer. The Owner
+  running the command is the authority; no local artifact attests it.
 
-In a paste-only setup with no coordinator session, the user who runs the
-instruction with their own words counts as the coordinator for
-`--owner-words`.
+In a paste-only setup with no coordinator session, the user writes the
+instruction and runs it, with their own words as the quote.
 
 The writer keeps the record's `delivery.status`. A grant ends the moment the
 Owner narrows or revokes it, whatever the record on `main` still reads. A
@@ -476,6 +480,36 @@ governance sync commit; `{"kind": "unclassified"}` remains a value readers
 accept in existing logs. A records-only integration that binds several tasks
 writes one line per task with the same candidate, and every records-only line
 carries `main_before`.
+
+### Owner-run commands
+
+After the reviewer's PASS and the check above, the coordinator gives the
+Owner each command to run, one at a time: the integration, and after
+`atc preflight push` the push of `main` (§ Publication boundary). Each is one
+line that runs unchanged in PowerShell and in a POSIX shell:
+
+- one command, with no `cd`, `&&`, `;`, pipe, redirection or variable;
+- a checkout named by `git -C "<drive>:/<path>"`, the Windows drive path
+  with forward slashes in double quotes;
+- quoted text of letters, digits, spaces and `._:/-` only;
+- every SHA in full, 40 characters.
+
+```text
+atc integrate --task <task> --reviewed <40-character SHA> --owner-words "Owner run: approve integration"
+git -C "<main checkout>" push origin <40-character SHA>:refs/heads/main
+```
+
+A task identity string adds `--project <name>`; a record on `main` that
+grants `integrate_main` for `FF` drops `--owner-words`. A records-only range
+takes the same form.
+
+The coordinator reads completion from Git, never from a report that the
+command ran: the integration is done when `<git common dir>/atc/integrations.jsonl`
+holds a line with the task and the reviewed SHA whose `candidate_sha` is
+`main` or its ancestor; the push is done when `git ls-remote origin
+refs/heads/main` names the pushed SHA or a descendant of it. Until then the
+command waits on the Owner; a stop's token and `next` (§ Command results)
+decide what follows, and the Owner's decision binds the SHA it named.
 
 ## Integration verifier source
 
@@ -654,4 +688,7 @@ Publishing a ref/revision is separately governed by `DELIVERY.md`.
 `origin/main..main`, including commits other topics integrated. List them
 before the push with `atc preflight push`, which fetches `origin` first; the
 `push:` lines of `atc integrate` give the same list and flag each commit
-outside that integration as lacking push approval.
+outside that integration as lacking push approval. The Owner runs the push
+with the SHA `atc preflight push` listed as `main`'s tip
+(§ Owner-run commands), so the push carries exactly the commits the
+preflight listed.
