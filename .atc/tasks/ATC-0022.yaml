@@ -1,0 +1,15 @@
+task_id: ATC-0022
+repository: yulinnliu/agent-traffic-control
+base_sha: b0c5c2b308b43f7d24993e53ac3c0e4a867f7aa5
+scope: Remove the CLI forms deprecated in 0.3.0 (worktree cleanup, positional onboard/bootstrap
+  add project, bootstrap sync) as CLI.md promises for 0.4.0
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: b0c5c2b308b43f7d24993e53ac3c0e4a867f7aa5
+branch: worktree-claude+remove-deprecated-forms
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
