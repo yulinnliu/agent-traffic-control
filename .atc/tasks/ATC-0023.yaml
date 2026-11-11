@@ -1,0 +1,16 @@
+task_id: ATC-0023
+repository: yulinnliu/agent-traffic-control
+base_sha: c91d31806bc7eaf061cc514489bf937a6e15a5a4
+scope: 'atc test run uses the host at full speed by default: pool- and memory-bounded
+  elastic default, measured per-worker memory, and a read-only view of active test
+  runs'
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: 1d4b0888752c7c5411cab6d519ff03c5eaeb60d8
+branch: worktree-claude+full-speed-tests
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
