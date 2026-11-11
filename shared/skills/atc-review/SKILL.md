@@ -163,7 +163,11 @@ diff against your last round's findings.
    candidate `atc integrate` would build, without a slot, a ref update or
    the Owner's word, and records a PASS that `atc integrate` reuses in place of
    rerunning the verifier. Run it while no integration runs. Quote its last line
-   in the verified line; a refusal is a blocker finding.
+   in the verified line; a refusal is a blocker finding, except
+   `WORKER_WAIT_TIMEOUT`. A `WAIT host workers` line means the run is queued
+   for the host's test workers, not stuck; the queue is outside the timeout,
+   a wait past its limit stops with `WORKER_WAIT_TIMEOUT` naming the runs
+   ahead, and `atc doctor` shows the pool. Rerun it once they finish.
    One single-string mutant per guard, one at a time, restored after
    each run.
    Done when every file in the copy is proven equal to its Git object again

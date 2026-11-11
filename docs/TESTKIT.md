@@ -61,20 +61,33 @@ order. Each is one pytest invocation over the selected paths.
   package-scoped one, so such a fixture is built once as under
   `loadscope`. A test that already carries `xdist_group` keeps its own.
 - `<workers>` is, in order: the `--workers N` of the command that starts the
-  stages (the CI runner's `--stages`, the gate's `--run`); `test_workers` in
+  stages (the CI runner's `--stages`, the gate's `--run`); 1 in a run nested
+  in one that holds host workers (§ Host worker budget); `test_workers` in
   the host file `~/.atc/config.toml` (`ATC_HOME.md` § Host settings), read
-  only when `CI` is not set; `min(8, cpu count)`. The verifier takes no flag,
-  so the host file is its override. A count is an integer: ASCII digits on
-  the flag, from 1 to the larger of 8 and the logical CPU count (a runner of
-  fewer CPUs may oversubscribe up to 8); a TOML integer in the key, from 1 to
-  the logical CPU count. A
-  bad flag stops with `USAGE`, a host file that cannot be read or decoded
-  as UTF-8 or a bad key with `ATC_CONFIG_INVALID` (exit 9), before any check
-  or stage runs; a count is never clamped. The
-  parallel stage prints `workers: <n> (<flag|~/.atc/config.toml|default>)`
-  before it starts; the evidence record holds no count, so a record covers
-  a push whatever count ran it. A project that carries the testkit has `pytest-xdist`
-  installed.
+  only when `CI` is not set; the default, `min(8, logical CPU count, memory
+  ceiling)`. The verifier takes no flag, so the host file is its override. A
+  count is an integer: ASCII digits on the flag, from 1 to the larger of 8
+  and the logical CPU count (a runner of fewer CPUs may oversubscribe up to
+  8, since the tests are largely subprocess- and timer-bound); a TOML integer
+  in the key, from 1 to the logical CPU count. A bad flag stops with `USAGE`,
+  a host file that cannot be read or decoded as UTF-8 or a bad key with
+  `ATC_CONFIG_INVALID` (exit 9), before any check or stage runs.
+- The memory ceiling is the workers available physical memory holds after a
+  1 GiB reserve, at least 1, each worker counted at the project's
+  `worker_memory_mib` (§ What a project supplies), 1024 by default. The
+  available memory is read on Windows and on Linux, where a cgroup v2 limit
+  lowers it; elsewhere it is unknown and nothing is cut. The ceiling cuts the
+  flag and the default, on CI as elsewhere; the CPU count never cuts a flag,
+  and the host file's count is not cut.
+- The parallel stage prints its count before it starts:
+  `workers: <n> (<source>)`, the source being `flag`,
+  `~/.atc/config.toml`, `default` or `nested in a budgeted run`. A count
+  that memory cut names the count asked for and the ceiling,
+  `workers: 6 (flag 8, memory ceiling: 7.0 GiB available)`; one the host
+  pool cut, delayed or shares adds the pool's part,
+  `workers: 3 (default 8; host budget: 3 of 18 free, 2 runs active)`. The
+  evidence record holds no count, so a record covers a push whatever count
+  ran it. A project that carries the testkit has `pytest-xdist` installed.
 - A stage that collects no test passes. A run in which every stage collects
   no test is refused with `NO_TESTS_COLLECTED`.
 - A project may append `--ignore` arguments to a stage, for a platform for
@@ -82,7 +95,7 @@ order. Each is one pytest invocation over the selected paths.
   expression and ignored paths, as the evidence format defines.
 - Each stage has its own data root (§ Isolated environment).
 - CI runs the same stages through the same runner and passes its own worker
-  count.
+  count or takes the default; it uses no host pool.
 - `slow` tests run in CI only, as one further invocation through the same
   runner with the marker expression `slow` and `-n 0`, whatever other
   markers a test carries. The `interactive` stage excludes `slow`, so this
@@ -95,6 +108,63 @@ order. Each is one pytest invocation over the selected paths.
 - No project has a test that is both `slow` and `interactive_desktop`, so no
   run has shown that a hosted Windows CI runner's job desktop serves one. The
   first such test's first CI run of this invocation shows it.
+
+## Host worker budget
+
+The runs on one host share a pool of worker tokens, so concurrent full
+suites do not add up to more workers than the host holds. CI runs (`CI`
+set) use no pool.
+
+- The pool is `~/.atc/run/workers.lock` of the user the entry point runs
+  as, `ATC_WORKER_POOL_DIR` when that names an absolute directory. It holds
+  `test_worker_pool` tokens (`ATC_HOME.md` § Host settings), three quarters
+  of the logical CPUs rounded up by default; `0` turns the pool off. A token
+  is a lock on one byte of the file, so the operating system frees it when
+  the process holding it ends, however it ends. A pool directory that is a
+  link or not a directory stops the run with `WORKER_POOL_UNSUITABLE`, one
+  the run cannot open or lock with `WORKER_POOL_UNAVAILABLE` (exit 9, before
+  any stage).
+- Each stage takes its tokens before it starts and gives them all back when
+  it ends: the parallel stage its count, down to a floor of 2, or the whole
+  count of a flag; the serial and interactive stages one each. `atc test
+  run` takes one token, or its pytest `-n K` (cut by the memory ceiling and
+  rewritten when cut; `-n auto` and `-n logical` take the default count down
+  to 2 and become the granted count); `atc test mutants` takes one token for
+  the whole command. Static checks take none. A flag's count is the count
+  that runs; its tokens stop at the pool size.
+- A run takes the tokens free when it asks, never more than memory holds at
+  that moment, counting the runs granted in the last 60 seconds at their
+  full size. Fewer free than its floor, it waits: it holds the pool's
+  turnstile and no token until its floor is free, and no later run takes a
+  token meanwhile. It prints
+  `WAIT host workers: <stage> needs <floor> (wants <n>), <free> of <size> free; <k> runs active, oldest <label> pid <pid> for <time>`
+  when it starts waiting and every 30 seconds after.
+- A run that holds tokens sets `ATC_TEST_WORKERS_HELD` for its stages. A run
+  started with it set, a test's gate or verifier for example, takes no token
+  and never waits, and its parallel stage takes one worker unless a flag
+  names a count.
+- The wait is not part of any timeout: `atc test run --timeout` and the
+  mutant timeout start once the tokens are held, and the verifier writes its
+  total wait to `ATC_WORKER_WAIT_FILE`, which `atc integrate` and `atc
+  verify` add to its clock, by at most the verifier timeout. The total wait
+  of a run has its own limit: `ATC_WORKER_MAX_WAIT` (which `atc integrate`
+  sets to the verifier timeout), else the run's own timeout (`atc test run
+  --timeout`, 900 seconds for `atc test mutants`), else
+  `test_worker_max_wait`, else 1800 seconds. A run past it stops with
+  `WORKER_WAIT_TIMEOUT`, the time it waited, the runs it waited behind and
+  `next: atc doctor`: exit 124 from the gate, the CI runner, `atc test run`
+  and `atc test mutants`; the verifier refuses with it (§ Integration
+  verifier), and `atc integrate` stops with it without judging the
+  candidate.
+- Each process keeps one row in `~/.atc/run/workers/`, locked for its life:
+  its label, stage, tokens and wait. Only the locks decide who holds a
+  token; a row nobody holds is stale, whatever process now has its PID, and
+  the next run that reads it removes it. `atc doctor` lists the pool's free
+  tokens, the runs holding tokens and the runs waiting, and removes nothing.
+- On Windows a stage's process tree is in a kill-on-close Job of the process
+  holding its tokens, so the tree ends with that process, and what is left of
+  it when the stage ends ends with it. Elsewhere a stage's process group
+  outlives a killed holder until it exits.
 
 ## Toolchain
 
@@ -239,7 +309,7 @@ this order:
 | `ruff check` over the project's lint scope | `RUFF_CHECK_FAILED` |
 | Repository-wide collection, when the range changes a test, test helper, fixture or `conftest.py` | `COLLECTION_FAILED` |
 | The project's other static checks | the project's tokens |
-| The stages | `TESTS_FAILED`, `NO_TESTS_COLLECTED` |
+| The stages | `TESTS_FAILED`, `NO_TESTS_COLLECTED`, `WORKER_WAIT_TIMEOUT` (§ Host worker budget) |
 | `HEAD` is still `ATC_INTEGRATION_SHA` | `CANDIDATE_HEAD_MOVED` |
 | The tree is clean, untracked files included | `CANDIDATE_DIRTY` |
 
@@ -530,11 +600,17 @@ log. In order:
    caller interrupts prints them and `INTERRUPTED` (exit 130). Neither ever
    reports a pass. Otherwise the exit code is pytest's.
 
+Before step 6 the run takes its host worker tokens, and `--timeout` counts
+from then; a wait past its limit stops it with `WORKER_WAIT_TIMEOUT` (exit
+124) before pytest starts (§ Host worker budget).
+
 ### `atc test mutants <scratch> <sha> <worktree> <mutants.json> --python <py> [--kill-rule failure|assertion] --tests <path>...`
 
 Applies each mutant alone to `<scratch>/tree`, the export of `<sha>`, through
 the isolation of `atc test run`. Each run is pytest with `-x` and a
-900-second timeout.
+900-second timeout. The command holds one host worker token from before the
+baseline to its end; a wait for it past 900 seconds stops the command with
+`WORKER_WAIT_TIMEOUT` (exit 124) before the baseline (§ Host worker budget).
 
 - `<sha>` must name a commit in `<worktree>` (`git rev-parse --verify`):
   `SHA_NOT_FOUND` (exit 9) before the scratch is touched, then
@@ -618,6 +694,7 @@ In `[tool.atc-testkit]`; the first seven keys are required:
 | `ignore` | `--ignore` paths appended to a stage, under `nt` and `posix` |
 | `selector` | the argv of the command `atc test run --select` runs (§ Commands) |
 | `toolchain` | the toolchain's name, `python` when absent (§ Toolchain) |
+| `worker_memory_mib` | the memory one test worker is counted to need, an integer from 1 to 65536, 1024 when absent (§ Stages); any other value stops a run with `ATC_CONFIG_INVALID` (exit 9) |
 
 Elsewhere in the project:
 

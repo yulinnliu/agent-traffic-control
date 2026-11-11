@@ -55,6 +55,9 @@ whole directory loses nothing. Persistent state lives elsewhere
     systmp/                     stand-in for the system temporary directory
       pytest-of-<user>/         pytest runs started without a scratch
     candidates/                 candidate trees, verifier reports and logs of `atc integrate` and `atc verify`
+  run/                          the host worker pool (`TESTKIT.md` § Host worker budget); never deleted
+    workers.lock                the pool's tokens, one locked byte each
+    workers/                    one row per process using the pool, locked for its life
   cache/                        regenerable
     uv/                         UV_CACHE_DIR
     python/                     UV_PYTHON_INSTALL_DIR
@@ -69,7 +72,9 @@ missing file or key means the default.
 
 | Key | Meaning |
 | --- | --- |
-| `test_workers` | the testkit's parallel-stage worker count (`TESTKIT.md` § Stages), a TOML integer from 1 to the logical CPU count (the `--workers` flag takes up to the larger of 8 and that count) |
+| `test_workers` | the testkit's parallel-stage worker count (`TESTKIT.md` § Stages), a TOML integer from 1 to the logical CPU count (the `--workers` flag takes up to the larger of 8 and that count); the host pool may cut it |
+| `test_worker_pool` | the tokens of the host worker pool (`TESTKIT.md` § Host worker budget), a TOML integer from 0 to the logical CPU count; three quarters of the logical CPUs rounded up when absent; `0` turns the pool off |
+| `test_worker_max_wait` | the seconds a run without a timeout of its own may wait for host workers in total, a TOML integer from 1 to 86400; 1800 when absent |
 
 With `CI` set the file is not read. An entry point reads it in its own
 process, before a run's environment points `HOME` into the run's working
@@ -189,6 +194,10 @@ Scratches are classified by the `project` column, never by a directory level,
 so classification costs no path length.
 
 ## Deleting
+
+`~/.atc/run` is outside `<tmp>`, and no ATC command deletes it: a new
+`workers.lock` beside a process still holding the old one would split the
+pool. A stale row in `run/workers/` is removed by the next run that reads it.
 
 `atc tmp clean <dir>...` deletes scratches. Every directory passes through
 the same checks, and the single recursive delete in ATC's temporary tooling runs only at the end of them.

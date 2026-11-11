@@ -46,6 +46,13 @@ repositories. Their cases are the Python suites `tests/test_git_preflight.py`,
 each repository in code; a second implementation ports those suites until
 fixtures with an `init.json` repository description exist here.
 
+The host worker budget (`docs/TESTKIT.md` § Host worker budget: two runs
+sharing a pool, a killed holder's tokens coming back, a stale row, the
+floor and the turnstile, the wait limit, nested runs, the memory ceiling on
+CI and elsewhere) needs live processes holding locks. Its cases are
+`tests/test_testkit_workers.py` and `tests/test_integrate_worker_wait.py`,
+which a second implementation ports.
+
 Verification evidence (the report a verifier hands to `atc integrate`, the
 record the adapter writes, and the reuse verdicts `REUSE` and `RUN: <reason>`)
 is specified in `verification-evidence/README.md`. Writing needs a live
