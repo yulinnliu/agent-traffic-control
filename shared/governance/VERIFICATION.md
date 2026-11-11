@@ -195,7 +195,9 @@ section) is its integration verifier's test budget: at most 1800 seconds. The
 budget is fixed; it is not derived from a measured run and not scaled by the
 worker count. A verifier run that exceeds it is a signal to optimise the tests
 or for the Owner to decide; a retry does not help, and nothing raises the
-budget automatically.
+budget automatically. Time a verifier spends queued for host test workers
+does not count toward the budget; the wait has its own limit
+(`docs/TESTKIT.md` § Host worker budget).
 
 A project needing a larger budget declares it in its `AGENTS.md` as its
 `Verifier timeout`, with this line beside it:
