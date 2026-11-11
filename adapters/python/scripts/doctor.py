@@ -95,6 +95,49 @@ def worker_pool_checks(environ: dict[str, str], pool: dict | None = None) -> lis
     return checks
 
 
+NONPAGED_KEY = "nonpaged_pool_warn_gib"
+MOST_NONPAGED_GIB = 1024
+
+
+def memory(environ: dict[str, str], figures: host_workers.Performance | None = None) -> dict | None:
+    """Windows memory as the `memory` field of `--json` (docs/TESTKIT.md § Host worker budget): physical total and
+    available, the kernel nonpaged pool, its warning threshold and the warnings; ``None`` where unknown."""
+    figures = host_workers.performance() if figures is None else figures
+    if figures is None:
+        return None
+    try:
+        override = stages._host_integer(stages.host_table(environ), NONPAGED_KEY, 1, MOST_NONPAGED_GIB, None)
+    except locations.Refusal as refusal:
+        return {"error": f"{refusal.token} {refusal.detail}"}
+    threshold = host_workers.nonpaged_threshold(figures.total, override)
+    floor = host_workers.RESERVE + host_workers.FLOOR * host_workers.PER_WORKER_MIB * host_workers.MIB
+    gib = host_workers.GIB
+    warnings = []
+    if figures.nonpaged > threshold:
+        warnings.append(f"kernel nonpaged pool {figures.nonpaged / gib:.1f} GiB (above {threshold / gib:.1f} GiB): "
+                        "a driver is leaking kernel memory; test workers are cut by the memory ceiling until a "
+                        "reboot frees it")
+    if figures.available < floor:
+        cap = host_workers.memory_cap(figures.available, host_workers.PER_WORKER_MIB * host_workers.MIB)
+        warnings.append(f"{figures.available / gib:.1f} GiB available: test runs get {cap} worker"
+                        f"{'' if cap == 1 else 's'} at {host_workers.PER_WORKER_MIB} MiB each")
+    return {"total": figures.total, "available": figures.available, "nonpaged": figures.nonpaged,
+            "nonpaged_threshold": threshold, "warnings": warnings,
+            "detail": f"{figures.available / gib:.1f} of {figures.total / gib:.1f} GiB available; kernel nonpaged "
+                      f"pool {figures.nonpaged / gib:.1f} GiB"}
+
+
+def memory_checks(environ: dict[str, str], found: dict | None = None) -> list[Check]:
+    """Memory as doctor's lines: one READY line, or a WARN line per warning; WARN leaves the exit code alone."""
+    if found is None:
+        return []
+    if "error" in found:
+        return [Check("memory", "ERROR", found["error"])]
+    if not found["warnings"]:
+        return [Check("memory", "READY", found["detail"])]
+    return [Check("memory", "WARN", warning) for warning in found["warnings"]]
+
+
 def diagnose(root: Path = ROOT, environ: dict[str, str] | None = None, checkout: Path = ROOT) -> list[Check]:
     environ = environ if environ is not None else dict(os.environ)
     checks = [Check("workspace root", "READY", str(root.resolve())), checkout_check(checkout)]
@@ -115,6 +158,7 @@ def diagnose(root: Path = ROOT, environ: dict[str, str] | None = None, checkout:
         )
     )
     checks += worker_pool_checks(environ)
+    checks += memory_checks(environ, memory(environ))
 
     workspace_file = root / "workspace.yaml"
     validator.FAILURES.clear()
@@ -211,7 +255,7 @@ def diagnose(root: Path = ROOT, environ: dict[str, str] | None = None, checkout:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="atc doctor", allow_abbrev=False, **cli_conventions.form(
         "Diagnose local Agent Traffic Control runtime readiness; changes nothing.",
-        exit="0 every check READY or NOT_INITIALIZED; 1 a check reports ERROR; 2 usage error",
+        exit="0 every check READY, WARN or NOT_INITIALIZED; 1 a check reports ERROR; 2 usage error",
         see="README.md § Commands"))
     cli_conventions.add_json(parser)
     return parser
@@ -227,11 +271,13 @@ def main(argv: list[str] | None = None, root: Path = ROOT) -> int:
         print(json.dumps({"verdict": "NOT_READY" if errors else "READY", "errors": errors,
                           "not_initialized": not_initialized,
                           "checks": [{"name": c.name, "status": c.status, "detail": c.detail} for c in checks],
-                          "worker_pool": worker_pool(dict(os.environ))}, indent=2))
+                          "worker_pool": worker_pool(dict(os.environ)),
+                          "memory": memory(dict(os.environ))}, indent=2))
         return code
     for check in checks:
         print(f"{check.status:15} {check.name}: {check.detail}")
-    print(f"\nDoctor: {errors} error(s), {not_initialized} not initialized.")
+    warnings = sum(check.status == "WARN" for check in checks)
+    print(f"\nDoctor: {errors} error(s), {warnings} warning(s), {not_initialized} not initialized.")
     return code
 
 

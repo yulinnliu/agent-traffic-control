@@ -227,7 +227,8 @@ class _Checks:
                 stage_list=project.stage_list(), env_for=lambda stage: self.isolated.environment(stage.name),
                 options_for=lambda stage: self.isolated.run_options(stage.name),
                 log_for=lambda stage: self.work / self.isolated.toolchain.stage_log(stage.name), workers=self.workers,
-                run=self.run_logged, toolchain=self.isolated.toolchain, budget=self.budget)
+                run=self.run_logged, toolchain=self.isolated.toolchain, budget=self.budget,
+                count=stages.collected_items if self.run_logged is stages.run_logged else None)
         except workers_module.WaitTimeout as refusal:
             raise VerifyError(refusal.token, *refusal.detail.splitlines()) from refusal
         if outcome.token == stages.NO_TESTS_COLLECTED:
@@ -315,9 +316,9 @@ def main(project: Project, environ: Mapping[str, str] | None = None, run: stages
     try:
         isolation.drop_hami_variables(os.environ)
         locations.enter()
-        workers = stages.resolve_workers(environ=environ, root=project.root)
+        workers = stages.resolve_workers(environ=environ, root=project.root / project.tests_dir)
         timing.resolve(environ)
-        budget = stages.open_budget(f"verifier {project.root.name}", environ, root=project.root)
+        budget = stages.open_budget(f"verifier {project.root.name}", environ, root=project.root / project.tests_dir)
         toolchain = project.tests_toolchain()
         values = require_env(environ)
         check_candidate(project.root, values, Path.cwd())

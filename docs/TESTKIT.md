@@ -64,8 +64,14 @@ order. Each is one pytest invocation over the selected paths.
   stages (the CI runner's `--stages`, the gate's `--run`); 1 in a run nested
   in one that holds host workers (§ Host worker budget); `test_workers` in
   the host file `~/.atc/config.toml` (`ATC_HOME.md` § Host settings), read
-  only when `CI` is not set; the default, `min(8, logical CPU count, memory
-  ceiling)`. The verifier takes no flag, so the host file is its override. A
+  only when `CI` is not set; the default. In the host pool the default asks
+  for the pool size, and memory cuts it only when the stage takes its tokens
+  (§ Host worker budget); outside it (CI, `test_worker_pool = 0`) the default
+  is `min(logical CPU count, memory ceiling)`. Before the parallel stage of a
+  pooled Python run takes its tokens it collects its tests with
+  `--collect-only -q`, and the default asks for at most one worker per 8
+  collected tests, at least 2; a flag and the host file's count are not cut
+  by it. The verifier takes no flag, so the host file is its override. A
   count is an integer: ASCII digits on the flag, from 1 to the larger of 8
   and the logical CPU count (a runner of fewer CPUs may oversubscribe up to
   8, since the tests are largely subprocess- and timer-bound); a TOML integer
@@ -73,21 +79,31 @@ order. Each is one pytest invocation over the selected paths.
   a host file that cannot be read or decoded as UTF-8 or a bad key with
   `ATC_CONFIG_INVALID` (exit 9), before any check or stage runs.
 - The memory ceiling is the workers available physical memory holds after a
-  1 GiB reserve, at least 1, each worker counted at the project's
-  `worker_memory_mib` (§ What a project supplies), 1024 by default. The
-  available memory is read on Windows and on Linux, where a cgroup v2 limit
-  lowers it; elsewhere it is unknown and nothing is cut. The ceiling cuts the
-  flag and the default, on CI as elsewhere; the CPU count never cuts a flag,
-  and the host file's count is not cut.
-- The parallel stage prints its count before it starts:
-  `workers: <n> (<source>)`, the source being `flag`,
-  `~/.atc/config.toml`, `default` or `nested in a budgeted run`. A count
-  that memory cut names the count asked for and the ceiling,
-  `workers: 6 (flag 8, memory ceiling: 7.0 GiB available)`; one the host
-  pool cut, delayed or shares adds the pool's part,
-  `workers: 3 (default 8; host budget: 3 of 18 free, 2 runs active)`. The
-  evidence record holds no count, so a record covers a push whatever count
-  ran it. A project that carries the testkit has `pytest-xdist` installed.
+  1 GiB reserve, at least 1, each worker counted at, in order: the project's
+  `worker_memory_mib` (§ What a project supplies); the project's recorded
+  cost, the largest of its last 10 recorded runs times 1.25 and at least
+  128 MiB (§ Host worker budget), read only when `CI` is not set; 256 MiB.
+  The available memory is read on Windows and on Linux, where a cgroup v2
+  limit lowers it; elsewhere it is unknown and nothing is cut. The ceiling
+  cuts the flag and the default, on CI as elsewhere; the CPU count never cuts
+  a flag, and the host file's count is not cut.
+- The parallel stage prints its count once it holds its tokens, and writes
+  the same line into its log's header:
+  `workers: <n>[ of <pool>] (<source>[ <asked>][, <cut>][; <limit>])`, the
+  source being `flag`, `~/.atc/config.toml`, `default` or `nested in a
+  budgeted run`, `of <pool>` naming the host pool's size when the run is in
+  it. A count that was cut names the count asked for and what cut it:
+  `workers: 6 (flag 8, memory ceiling: 7.0 GiB available, 256 MiB/worker
+  default)`, the per-worker cost's source being `pyproject`, `recorded` or
+  `default`; `workers: 4 of 18 (default 18, 31 tests collected, 8 per
+  worker)`. One that memory or the host pool cut, delayed or shares when it
+  took its tokens adds that part, `workers: 6 of 18 (default 18; host
+  budget: 6 of 18 free, 2 runs active)`. With `--jobserver-auth` in
+  `MAKEFLAGS` the line adds `make jobserver present, not joined`: the
+  testkit is no jobserver client, and make's tokens and the host pool's are
+  counted apart. The evidence record holds no count, so a record covers a
+  push whatever count ran it. A project that carries the testkit has
+  `pytest-xdist` installed.
 - A stage that collects no test passes. A run in which every stage collects
   no test is refused with `NO_TESTS_COLLECTED`.
 - A project may append `--ignore` arguments to a stage, for a platform for
@@ -127,10 +143,11 @@ set) use no pool.
 - Each stage takes its tokens before it starts and gives them all back when
   it ends: the parallel stage its count, down to a floor of 2, or the whole
   count of a flag; the serial and interactive stages one each. `atc test
-  run` takes one token, or its pytest `-n K` (cut by the memory ceiling and
-  the pool size and rewritten when cut; `-n auto` and `-n logical` take the
-  default count down to 2 and become the granted count); `atc test mutants`
-  takes one token for the whole command. Static checks take none. A flag
+  run` takes its pytest `-n K` (cut by the memory ceiling and the pool size
+  and rewritten when cut), one token for `-n 0`, and otherwise the default
+  count down to 2 (§ Commands), its `-n` becoming the granted count;
+  `atc test mutants` takes one token for the whole command. Static checks
+  take none. A flag
   above the pool size runs the pool size, and its line names the pool,
   `workers: 2 (flag 8, host pool: 2)`; on CI, outside the pool, only the
   memory ceiling cuts a flag.
@@ -159,15 +176,33 @@ set) use no pool.
   verifier), and `atc integrate` stops with it without judging the
   candidate.
 - Each process keeps one row in `~/.atc/run/workers/`, locked for its life:
-  its label, stage, tokens and wait. Only the locks decide who holds a
+  its label, stage, tokens and wait, and while a stage or run holds tokens
+  its log and its `workers:` line. Only the locks decide who holds a
   token; a row nobody holds is stale, whatever process now has its PID, and
   the next run that reads it removes it. `atc doctor` lists the pool's free
   tokens, the runs holding tokens and the runs waiting (`--json`: the
-  `worker_pool` field), and removes nothing.
+  `worker_pool` field), and `atc test status` each run's progress
+  (§ Commands); neither removes anything.
 - On Windows a stage's process tree is in a kill-on-close Job of the process
   holding its tokens, so the tree ends with that process, and what is left of
   it when the stage ends ends with it. Elsewhere a stage's process group
   outlives a killed holder until it exits.
+- A pooled stage of 4 workers or more records its memory cost per worker in
+  `~/.atc/run/memory/<project>.json`, `<project>` being the `[project]`
+  name of the tested tree's `pyproject.toml`, else its directory name: on
+  Windows the Job's committed peak (`PeakJobMemoryUsed`) divided by its
+  workers, elsewhere the largest child's peak resident size. The file keeps
+  the last 10 values; the memory ceiling counts a worker at their largest
+  times 1.25, at least 128 MiB, unless the project declares
+  `worker_memory_mib` (§ Stages).
+- On Windows `atc doctor` reports the physical memory available and the
+  kernel nonpaged pool: `READY memory: 17.4 of 31.8 GiB available; kernel
+  nonpaged pool 1.0 GiB`. A nonpaged pool above `max(4 GiB, physical
+  memory / 8)`, or `nonpaged_pool_warn_gib` of the host file (`ATC_HOME.md`
+  § Host settings), is a driver leaking kernel memory and gives a `WARN`
+  line, as does less memory available than the reserve and 2 workers at
+  256 MiB. `WARN` leaves the exit code alone; `--json` carries the figures
+  in its `memory` field.
 
 ## Toolchain
 
@@ -545,7 +580,7 @@ that imports a module the installed `atc` lacks stops with
 `ERROR MISSING_DEPENDENCY` (exit 2) naming the module and the reinstall
 command of the root's `AGENTS.md`.
 
-### `atc test run --scratch <name> [--tree <tree>] [--python <py>] [--select <base>] [--label <label>] [--timeout <s>] [--progress] [-- <pytest args>]`
+### `atc test run --scratch <name> [--tree <tree>] [--python <py>] [--select <base> [--wide | --touched]] [--label <label>] [--timeout <s>] [--progress] [-- <pytest args>]`
 
 One isolated pytest run inside a tree, a worktree or an exported copy, in
 the scratch `<name>` (`ATC_HOME.md` § Test scratch), its output kept in a
@@ -576,6 +611,20 @@ log. In order:
    `SELECT <base>: <n> changed paths, <k> test paths` follows; with none
    selected, `NO_TESTS no test selected` ends the command with exit 0. The
    selected paths come before the pytest arguments.
+   A selection that holds at least `select_full_fraction` of the tree's
+   tests (§ What a project supplies), counted as collected items of the
+   selected paths and of the whole tree, is the reviewer's verify run, and
+   the command runs none of it: it ends the `SELECT` line with
+   `, <a> of <b> tests (<pct>%) >= select_full_fraction <f>`, prints
+   `SKIPPED_WIDE the reviewer's atc verify runs these; run them here with --wide, or the touched files with --touched`
+   and exits 0. A step report states that line as it is, never as a pass.
+   `--wide` runs the whole selection. `--touched` runs, whatever its share,
+   the changed test files and the test files that import a changed module
+   directly, one edge and no closure: the selector's argv with the changed
+   paths and `--direct`, which prints them as a JSON array; a selector that
+   fails with it gives the changed test files of the tree. Its line is
+   `SELECT <base> --touched: ...`. Each of the two takes `--select`, and
+   they exclude each other (usage error, exit 2).
 3. Remove every `HAMI_*` variable. Point each data-root variable the tree's
    `[tool.atc-testkit]` names, and `QUANT_DATA_ROOT` when it names none, at
    `<scratch>/qdr`. Point the toolchain's bytecode variable,
@@ -590,12 +639,21 @@ log. In order:
    namespace directories, and require each to load from inside the tree:
    `COPY_IMPORT_MISMATCH` (exit 8). This guard is what proves the copy, not
    an installed checkout, is what runs.
-6. Run pytest with `PYTHONUNBUFFERED=1`, `-q`, `-n 0` when xdist is
-   installed, `-p no:cacheprovider` and `--basetemp <scratch>/bt`, its output
-   written as it arrives to `<scratch>/runs/<UTC time>-<label>.log` after
-   the § Running and logging header. The console shows `LOG <path>` first,
-   then the private desktop's exclusion line (§ Private desktop), and, with
-   `--progress`, the output too.
+6. Run pytest with `PYTHONUNBUFFERED=1`, `-q`, `-p no:cacheprovider`,
+   `--basetemp <scratch>/bt` and, when xdist is installed, the run's worker
+   option, its output written as it arrives to
+   `<scratch>/runs/<UTC time>-<label>.log` after the § Running and logging
+   header. With xdist installed, pytest arguments without `-n` run the
+   default count of § Stages, as `-n auto` and `-n logical` do: in the host
+   pool up to the pool size, at most one worker per 8 collected tests, down
+   to 2 workers, and a grant of 1 runs in-process as `-n 0`. `-n 0` runs
+   serially, and `-n K` runs K, cut by memory and the pool (§ Host worker
+   budget). A project's own `-n` in `addopts` comes before the run's option,
+   so the run's option wins. The console shows `LOG <path>` first, then the
+   private desktop's exclusion line (§ Private desktop), the `workers:` line
+   of a parallel run (§ Stages), and, with `--progress`, the output too.
+   A run of a registered project that used to be serial without `-n` is
+   parallel once it upgrades to this testkit; `-n 0` keeps it serial.
 7. One summary line ends the command: `PASS`, `FAIL`, `NO_TESTS`,
    `INTERRUPTED` or `ERROR exit <code>`, pytest's counts, the failed and
    errored tests by node ID, and the log path. A run that `--timeout` ends
@@ -607,6 +665,20 @@ Before step 6 the run takes its host worker tokens, and `--timeout` counts
 from then; a wait past its limit stops it with `WORKER_WAIT_TIMEOUT` (exit
 124) before pytest starts, and an interrupt during the wait stops it with
 `INTERRUPTED` (exit 130) before pytest starts (§ Host worker budget).
+
+### `atc test status [--json]`
+
+The host's test runs, read from the pool's rows (§ Host worker budget); it
+removes no row and takes no lock. Each run holding tokens is one line,
+`RUN <label> pid <pid> <stage> <tokens>/<want> workers held <time> progress <pct>% log <path>`,
+followed by its `workers:` line indented; progress is the last `[ NN%]` in
+the last 8 KiB of its log, `-` when there is none. A waiting run is
+`WAIT <label> pid <pid> <stage> waiting <time> for <floor>`. The first line
+is `worker pool: <free> of <size> free`; with no run it is the only one,
+`IDLE worker pool: <free> of <size> free`. With `CI` set or
+`test_worker_pool = 0` it prints `CI ...` or `OFF ...`. `--json` prints the
+same as an object with `state`, `size`, `free`, `runs` and `waiters`. It
+exits 0.
 
 ### `atc test mutants <scratch> <sha> <worktree> <mutants.json> --python <py> [--kill-rule failure|assertion] --tests <path>...`
 
@@ -700,9 +772,10 @@ In `[tool.atc-testkit]`; the first seven keys are required:
 | `ci_platforms` | the CI platform matrix |
 | `ci_init` | the CI runner's initialization function, as `module:function` |
 | `ignore` | `--ignore` paths appended to a stage, under `nt` and `posix` |
-| `selector` | the argv of the command `atc test run --select` runs (§ Commands) |
+| `selector` | the argv of the command `atc test run --select` runs; with `--direct` after the changed paths it prints only the changed test files and the test files one import from a changed module, which `--touched` runs (§ Commands) |
+| `select_full_fraction` | the share of the tree's tests, a number from 0 to 1, at which `atc test run --select` skips the selection with `SKIPPED_WIDE`; 0.5 when absent, 1 skips only a selection of every test (§ Commands); any other value stops the run with `ATC_CONFIG_INVALID` (exit 9) |
 | `toolchain` | the toolchain's name, `python` when absent (§ Toolchain) |
-| `worker_memory_mib` | the memory one test worker is counted to need, an integer from 1 to 65536, 1024 when absent (§ Stages); any other value stops a run with `ATC_CONFIG_INVALID` (exit 9) |
+| `worker_memory_mib` | the memory one test worker is counted to need, an integer from 1 to 65536; when absent, the project's recorded cost on a host, else 256 (§ Stages); any other value stops a run with `ATC_CONFIG_INVALID` (exit 9) |
 
 Elsewhere in the project:
 

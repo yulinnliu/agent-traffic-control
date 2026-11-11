@@ -24,7 +24,7 @@ SUBCOMMANDS = [
     ("bootstrap",), ("bootstrap", "init"), ("bootstrap", "add"), ("bootstrap", "status"),
     ("doctor",), ("policies",), ("policies", "check"), ("enforce",), ("classify",),
     ("friction",), ("friction", "add"), ("friction", "list"), ("friction", "summary"), ("friction", "resolve"),
-    ("test",), ("test", "run"), ("test", "mutants"), ("test", "private"),
+    ("test",), ("test", "run"), ("test", "mutants"), ("test", "status"), ("test", "private"),
     ("tmp",), ("tmp", "checkout"), ("tmp", "list"), ("tmp", "clean"), ("tmp", "prune"),
 ]
 

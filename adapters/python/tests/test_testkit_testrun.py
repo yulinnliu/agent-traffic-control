@@ -56,7 +56,7 @@ def tree(tmp_path: Path) -> Path:
 
 @pytest.mark.integration
 def test_a_run_isolates_the_temporary_and_data_directories(tree: Path, atc_tmp: Path) -> None:
-    run = run_tests(tree, "s1", sys.executable, "-s", "tests", HAMI_X="set", ATC_PRIVATE_DESKTOP="0")
+    run = run_tests(tree, "s1", sys.executable, "-s", "-n", "0", "tests", HAMI_X="set", ATC_PRIVATE_DESKTOP="0")
     assert run.returncode == 0, run.stdout + run.stderr
     lines = run.stdout.splitlines()
     scratch_dir = atc_tmp / "s1"
@@ -75,13 +75,15 @@ def test_the_exit_code_is_pytests(tree: Path, atc_tmp: Path) -> None:
 
 def test_the_tree_names_its_data_roots(tree: Path, atc_tmp: Path) -> None:
     (tree / "pyproject.toml").write_text('[tool.atc-testkit]\ndata_root_variables = ["OTHER_ROOT"]\n', encoding="utf-8")
-    run = run_tests(str(tree), "s", sys.executable, "-s", "tests", QUANT_DATA_ROOT="ambient")
+    run = run_tests(str(tree), "s", sys.executable, "-s", "-n", "0", "tests", QUANT_DATA_ROOT="ambient")
     assert f"DATA ambient {atc_tmp / 's/qdr'}" in run.stdout
 
 
-def test_xdist_is_turned_off_when_installed_and_the_cache_provider_always(tree: Path, atc_tmp: Path) -> None:
+@pytest.mark.integration
+def test_the_runs_worker_option_wins_over_addopts_and_the_cache_provider_is_off(tree: Path,
+                                                                               atc_tmp: Path) -> None:
     (tree / "pyproject.toml").write_text('[tool.pytest.ini_options]\naddopts = "-n 2"\n', encoding="utf-8")
-    run = run_tests(str(tree), "s", sys.executable, "-s", "tests")
+    run = run_tests(str(tree), "s", sys.executable, "-s", "-n", "0", "tests")
     assert run.returncode == 0 and "created:" not in run.stdout and "BASE" in run.stdout
     assert not (tree / ".pytest_cache").exists()
 
@@ -205,8 +207,8 @@ def test_a_private_desktop_run_excludes_interactive_tests(tree: Path, atc_tmp: P
     (tree / "tests/test_desktop.py").write_text(body, encoding="utf-8")
     (tree / "pyproject.toml").write_text('[tool.pytest.ini_options]\nmarkers = ["interactive_desktop: x"]\n', encoding="utf-8")
     for value in ("1", ""):
-        run = run_tests(str(tree), "s", sys.executable, "tests/test_desktop.py",
-                          ATC_PRIVATE_DESKTOP=value)
+        run = run_tests(str(tree), "s", sys.executable, "-n", "0", "tests/test_desktop.py",
+                        ATC_PRIVATE_DESKTOP=value)
         assert run.returncode == 0, run.stdout + run.stderr
         assert "1 passed, 1 deselected" in run.stdout and testrun.EXCLUSION_NOTE in run.stdout
 

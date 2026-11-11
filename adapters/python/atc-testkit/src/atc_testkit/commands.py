@@ -9,7 +9,7 @@ from collections.abc import Sequence
 import os
 import sys
 
-from . import checkout, desktop, scratch, testrun
+from . import checkout, desktop, scratch, status, testrun
 from .locations import Refusal
 
 USAGE_EXIT = 2
@@ -18,7 +18,8 @@ WITH_RUNS_OPTION = "--with-runs"
 
 USAGES = {
     ("test", "run"): "usage: atc test run --scratch NAME [--tree DIR] [--python PATH] [--select SHA] "
-                     "[--label NAME] [--timeout SECONDS] [--progress] [-- PYTEST_ARG...]",
+                     "[--label NAME] [--timeout SECONDS] [--progress] [--wide | --touched] [-- PYTEST_ARG...]",
+    ("test", "status"): "usage: atc test status [--json]",
     ("test", "mutants"): "usage: atc test mutants NAME SHA DIR FILE --python PATH --tests ARG...",
     ("test", "private"): "usage: atc test private [--] COMMAND [ARG...]",
     ("tmp", "checkout"): "usage: atc tmp checkout SHA --task ID [--worktree DIR] [--scratch NAME] [--lock-dir DIR]",
@@ -29,6 +30,7 @@ USAGES = {
 SUMMARIES = {
     ("test", "run"): "one isolated pytest run in a scratch, its output kept in a log",
     ("test", "mutants"): "apply each mutant alone to a scratch's tree and run the judging tests",
+    ("test", "status"): "list the active test runs of the host pool; changes nothing",
     ("test", "private"): "run one command on a private desktop",
     ("tmp", "checkout"): "export a commit into a new scratch and build its environment",
     ("tmp", "list"): "list registered scratches; deletes nothing",
@@ -37,6 +39,15 @@ SUMMARIES = {
 }
 GROUP_SUMMARIES = {"test": "Isolated pytest runs.", "tmp": "Scratch checkouts under the ATC temporary root."}
 DESCRIPTIONS = {
+    ("test", "status"): """List the runs holding or waiting for host test workers, from the pool's ledger rows:
+one RUN line per run (label, pid, stage, workers held of wanted, time held, the last
+pytest progress percentage in its log, its log) with its workers: line under it, one WAIT
+line per waiting run, or IDLE when none. Removes no row and takes no token.
+
+  --json          the pool's state, size, free tokens, runs and waiters
+
+Exit: 0 listed; 2 usage error; 9 a host file or pool that cannot be read.
+See: docs/TESTKIT.md § Commands""",
     ("test", "private"): """Run one command on a private desktop from the current directory with the current
 environment; print `desktop: private` (or `desktop: interactive` where none can be
 created), stream its merged output and exit with its code.
@@ -66,7 +77,7 @@ See: docs/ATC_HOME.md § Deleting""",
 Exit: 0 nothing refused; 1 an entry refused; 2 usage error.
 See: docs/ATC_HOME.md § Deleting""",
 }
-GROUPS = {"test": ("run", "mutants", "private"), "tmp": ("checkout", "list", "clean", "prune")}
+GROUPS = {"test": ("run", "mutants", "status", "private"), "tmp": ("checkout", "list", "clean", "prune")}
 
 
 def _group_usage(group: str) -> str:
@@ -145,6 +156,10 @@ def _dispatch(arguments: Sequence[str]) -> int:
         if not rest:
             return _usage(USAGES[command])
         return desktop.run(rest, cwd=os.getcwd(), env=os.environ)
+    if command == ("test", "status"):
+        if rest not in ([], ["--json"]):
+            return _usage(USAGES[command])
+        return status.show(as_json=bool(rest))
     if command == ("tmp", "clean"):
         return _clean(rest)
     if command == ("tmp", "list") and rest in ([], ["--json"]):

@@ -20,9 +20,10 @@ def test_the_stages_are_the_table_of_the_section() -> None:
     assert stages.SLOW.marker == "slow" and not stages.private_desktop(stages.SLOW)
 
 
-def test_workers_are_at_most_eight(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.unit
+def test_the_default_outside_the_pool_is_the_logical_cpus(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(os, "cpu_count", lambda: 32)
-    assert stages.default_workers() == 8
+    assert stages.default_workers() == 32
     monkeypatch.setattr(os, "cpu_count", lambda: 3)
     assert stages.default_workers() == 3
     monkeypatch.setattr(os, "cpu_count", lambda: None)
@@ -42,8 +43,8 @@ def test_the_flag_wins_over_the_host_file_and_the_host_file_over_the_default(tmp
     host = host_file(tmp_path, "other = 'kept for later keys'\ntest_workers = 16\n")
     assert stages.resolve_workers(4, {}, host) == stages.Workers(4, "flag")
     assert stages.resolve_workers(None, {}, host) == stages.Workers(16, "~/.atc/config.toml")
-    assert stages.resolve_workers(None, {}, tmp_path / "absent.toml") == stages.Workers(8, "default")
-    assert stages.resolve_workers(None, {}, host_file(tmp_path, "other = 1\n")) == stages.Workers(8, "default")
+    assert stages.resolve_workers(None, {}, tmp_path / "absent.toml") == stages.Workers(24, "default")
+    assert stages.resolve_workers(None, {}, host_file(tmp_path, "other = 1\n")) == stages.Workers(24, "default")
     assert stages.Workers(16, "~/.atc/config.toml").line() == "workers: 16 (~/.atc/config.toml)"
 
 

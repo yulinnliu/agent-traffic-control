@@ -141,7 +141,7 @@ def run_all_stages(paths: Sequence[str], workers: int | None, run: stages.Run = 
                                     stage_list=stages.stages(config.ignored_paths(Path.cwd())),
                                     env_for=lambda stage: dict(os.environ), options_for=lambda stage: (),
                                     log_for=lambda stage: logs / f"ci-{stage.name}.log", workers=workers, run=run,
-                                    budget=budget)
+                                    budget=budget, count=stages.collected_items if run is stages.run_logged else None)
     except locations.Refusal as refusal:
         print(f"{refusal.token} {refusal.detail}", file=sys.stderr, flush=True)
         return refusal.code

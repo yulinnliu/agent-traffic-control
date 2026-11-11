@@ -64,7 +64,7 @@ def test_a_run_prints_its_log_and_one_summary_line(tree: Path, atc_tmp: Path) ->
     log = Path(first.removeprefix("LOG "))
     assert log.parent == atc_tmp / "f1" / testrun.RUNS and log.name.endswith("-my_run.log")
     assert last == f"PASS 1 passed; log: {log}"
-    assert len(run.stdout.splitlines()) == 2
+    assert len(run.stdout.splitlines()) == 3 and run.stdout.splitlines()[1].startswith("workers: ")
     text = log.read_text(encoding="utf-8")
     assert "desktop: " in text and "1 passed" in text
     assert bytecode(tree) == []
@@ -113,7 +113,8 @@ def test_select_runs_what_the_declared_selector_prints(tree: Path, atc_tmp: Path
     assert bytecode(tree) == []
     (tree / "src/flagged_pkg/new.py").write_text("Y = 2\n", encoding="utf-8")
     (tree / "tests/test_value.py").write_text(PASSING + "\n", encoding="utf-8")
-    run = run_command("--scratch", "f6", "--tree", str(tree), "--python", sys.executable, "--select", "HEAD")
+    run = run_command("--scratch", "f6", "--tree", str(tree), "--python", sys.executable, "--select", "HEAD",
+                      "--wide")
     assert run.returncode == 0, run.stdout + run.stderr
     assert run.stdout.splitlines()[0] == "SELECT HEAD: 2 changed paths, 1 test paths"
     assert summary_line(run).startswith("PASS 1 passed; log: ")
@@ -135,7 +136,7 @@ def test_select_in_an_export_reads_its_source_commit(tree: Path, atc_tmp: Path, 
     run = run_command("--scratch", "f7x", "--python", sys.executable, "--tree", str(export), "--select", "HEAD~1")
     assert run.returncode == 9 and run.stderr.startswith("SELECTION_SOURCE_UNKNOWN ")
     scratch.register(atc_tmp, atc_tmp / "f7", export, task="ATC-0008", source=str(tree), commit=head)
-    run = run_command("--scratch", "f7", "--python", sys.executable, "--select", "HEAD~1")
+    run = run_command("--scratch", "f7", "--python", sys.executable, "--select", "HEAD~1", "--wide")
     assert run.returncode == 0, run.stdout + run.stderr
     assert run.stdout.splitlines()[0] == "SELECT HEAD~1: 1 changed paths, 1 test paths"
 
@@ -182,3 +183,49 @@ def test_the_summary_line(lines: list[str], code: int, expected: str) -> None:
     assert testrun.summary(testrun.Result(code, lines), Path("L")) == (expected, code)
     assert testrun.summary(testrun.Result(None, lines), Path("L")) == ("TIMEOUT log: L", testrun.TIMEOUT_EXIT)
     assert testrun.summary(None, Path("L")) == ("INTERRUPTED log: L", testrun.INTERRUPTED_EXIT)
+
+
+@pytest.mark.integration
+def test_a_wide_selection_is_skipped_and_touched_runs_the_changed_tests(tree: Path, atc_tmp: Path) -> None:
+    git(tree, "init", "-q", "-b", "main")
+    git(tree, "add", ".")
+    git(tree, "commit", "-q", "-m", "x")
+    (tree / "src/flagged_pkg/__init__.py").write_text("X = 2\n", encoding="utf-8")
+    run = run_command("--scratch", "f8", "--tree", str(tree), "--python", sys.executable, "--select", "HEAD")
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert run.stdout.splitlines() == [
+        "SELECT HEAD: 1 changed paths, 1 test paths, 1 of 2 tests (50%) >= select_full_fraction 0.5",
+        f"{testrun.SKIPPED_WIDE} the reviewer's atc verify runs these; run them here with --wide, or the touched "
+        "files with --touched"]
+    (tree / "pyproject.toml").write_text('[project]\nname = "flagged"\nversion = "1"\n[tool.atc-testkit]\n'
+                                         'selector = ["sel.py"]\nselect_full_fraction = 0.75\n', encoding="utf-8")
+    run = run_command("--scratch", "f8", "--tree", str(tree), "--python", sys.executable, "--select", "HEAD")
+    assert run.returncode == 0 and run.stdout.splitlines()[0] == "SELECT HEAD: 2 changed paths, 1 test paths"
+    (tree / "pyproject.toml").write_text('[project]\nname = "flagged"\nversion = "1"\n[tool.atc-testkit]\n'
+                                         'selector = ["sel.py"]\nselect_full_fraction = 2\n', encoding="utf-8")
+    run = run_command("--scratch", "f8", "--tree", str(tree), "--python", sys.executable, "--select", "HEAD")
+    assert run.returncode == 9 and run.stderr.startswith("ATC_CONFIG_INVALID ") and "select_full_fraction" in run.stderr
+
+
+@pytest.mark.integration
+def test_touched_runs_the_changed_test_files_when_the_selector_has_no_direct_form(tree: Path,
+                                                                                    atc_tmp: Path) -> None:
+    (tree / "sel.py").write_text("import sys\nsys.exit(2 if '--direct' in sys.argv else 0)\n", encoding="utf-8")
+    git(tree, "init", "-q", "-b", "main")
+    git(tree, "add", ".")
+    git(tree, "commit", "-q", "-m", "x")
+    (tree / "tests/test_value.py").write_text(PASSING + "\n", encoding="utf-8")
+    run = run_command("--scratch", "f9", "--tree", str(tree), "--python", sys.executable, "--select", "HEAD",
+                      "--touched")
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert run.stdout.splitlines()[0] == "SELECT HEAD --touched: 1 changed paths, 1 test paths"
+    assert summary_line(run).startswith("PASS 1 passed; log: ")
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("arguments", [["--wide"], ["--touched"], ["--select", "HEAD", "--wide", "--touched"]])
+def test_wide_and_touched_take_select_and_exclude_each_other(tmp_path: Path, arguments: list[str],
+                                                             capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as stopped:
+        testrun.run(["--scratch", "x", *arguments], {})
+    assert stopped.value.code == 2 and ("--wide" in capsys.readouterr().err)

@@ -67,14 +67,31 @@ def test_the_pool_is_three_quarters_of_the_logical_cpus(cpus: int, size: int) ->
 
 
 @pytest.mark.unit
-def test_memory_cuts_the_default_and_says_why(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_memory_cuts_the_default_outside_the_pool_and_says_why(monkeypatch: pytest.MonkeyPatch,
+                                                               tmp_path: Path) -> None:
     monkeypatch.setattr(os, "cpu_count", lambda: 24)
-    memory(monkeypatch, int(5.4 * GIB))
-    resolved = stages.resolve_workers(None, {}, tmp_path / "absent.toml")
-    assert resolved == stages.Workers(4, "default", 8, "memory ceiling: 5.4 GiB available")
-    assert resolved.line() == "workers: 4 (default 8, memory ceiling: 5.4 GiB available)"
+    memory(monkeypatch, int(2.4 * GIB))
+    resolved = stages.resolve_workers(None, {"CI": "true"}, tmp_path / "absent.toml")
+    assert resolved == stages.Workers(5, "default", 24, "memory ceiling: 2.4 GiB available, 256 MiB/worker default")
+    assert resolved.line() == "workers: 5 (default 24, memory ceiling: 2.4 GiB available, 256 MiB/worker default)"
     memory(monkeypatch, 64 * GIB)
-    assert stages.resolve_workers(None, {}, tmp_path / "absent.toml") == stages.Workers(8, "default")
+    assert stages.resolve_workers(None, {"CI": "true"}, tmp_path / "absent.toml") == stages.Workers(24, "default")
+
+
+@pytest.mark.unit
+def test_the_default_in_the_pool_wants_the_pool_and_memory_waits_for_the_grant(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path, pool_dir: Path) -> None:
+    """An early low reading never shrinks the count or its floor (the verifier that ran on one worker)."""
+    monkeypatch.setattr(os, "cpu_count", lambda: 24)
+    memory(monkeypatch, int(2.1 * GIB))
+    resolved = stages.resolve_workers(None, {workers.POOL_DIRECTORY: str(pool_dir)}, tmp_path / "absent.toml")
+    assert resolved == stages.Workers(18, "default") and resolved.floor() == workers.FLOOR
+    budget = workers.Budget(workers.Pool(pool_dir, 18), label="late")
+    grant = budget.acquire("parallel", resolved.count, resolved.floor())
+    assert grant.count == 4 and grant.memory == "memory ceiling: 2.1 GiB available, 256 MiB/worker default"
+    assert resolved.granted(grant).line() == \
+        "workers: 4 of 18 (default 18; memory ceiling: 2.1 GiB available, 256 MiB/worker default)"
+    budget.release(grant)
 
 
 @pytest.mark.unit
@@ -84,9 +101,9 @@ def test_a_flag_is_cut_by_memory_and_never_by_cpus(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(os, "cpu_count", lambda: 2)
     memory(monkeypatch, 64 * GIB)
     assert stages.resolve_workers(8, environ, tmp_path / "absent.toml") == stages.Workers(8, "flag")
-    memory(monkeypatch, 7 * GIB)
+    memory(monkeypatch, int(2.5 * GIB))
     resolved = stages.resolve_workers(8, environ, tmp_path / "absent.toml")
-    assert resolved.line() == "workers: 6 (flag 8, memory ceiling: 7.0 GiB available)"
+    assert resolved.line() == "workers: 6 (flag 8, memory ceiling: 2.5 GiB available, 256 MiB/worker default)"
     memory(monkeypatch, None)
     assert stages.resolve_workers(8, environ, tmp_path / "absent.toml") == stages.Workers(8, "flag")
 
@@ -105,10 +122,11 @@ def test_a_project_declares_its_worker_memory(monkeypatch: pytest.MonkeyPatch, t
     monkeypatch.setattr(os, "cpu_count", lambda: 24)
     memory(monkeypatch, 5 * GIB)
     (tmp_path / "pyproject.toml").write_text("[tool.atc-testkit]\nworker_memory_mib = 512\n", encoding="utf-8")
-    assert stages.resolve_workers(None, {}, tmp_path / "absent.toml", root=tmp_path).count == 8
+    resolved = stages.resolve_workers(None, {"CI": "true"}, tmp_path / "absent.toml", root=tmp_path)
+    assert resolved.count == 8 and resolved.clamp.endswith("512 MiB/worker pyproject")
     (tmp_path / "pyproject.toml").write_text("[tool.atc-testkit]\nworker_memory_mib = 0\n", encoding="utf-8")
     with pytest.raises(locations.Refusal) as refused:
-        stages.resolve_workers(None, {}, tmp_path / "absent.toml", root=tmp_path)
+        stages.resolve_workers(None, {"CI": "true"}, tmp_path / "absent.toml", root=tmp_path)
     assert refused.value.token == stages.CONFIG_INVALID and "worker_memory_mib" in refused.value.detail
 
 
@@ -168,7 +186,7 @@ def test_two_runs_share_the_pool(tmp_path: Path, pool_dir: Path) -> None:
         grant = budget.acquire("parallel", 3, 1)
         assert grant.count == 1 and grant.active == 1
         granted = stages.Workers(3, "default").granted(grant)
-        assert granted.line() == "workers: 1 (default 3; host budget: 1 of 4 free, 1 run active)"
+        assert granted.line() == "workers: 1 of 4 (default 3; host budget: 1 of 4 free, 1 run active)"
         budget.release(grant)
     finally:
         holder.kill()
@@ -302,20 +320,28 @@ def _alive(pid: int) -> bool:
 # atc test run
 
 @pytest.mark.unit
-def test_test_run_asks_one_token_or_its_n_cut_by_memory(monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
-                                                        capsys: pytest.CaptureFixture[str]) -> None:
-    assert testrun._worker_request(["tests"], tmp_path, {}) == (1, 1, ["tests"])
-    assert testrun._worker_request(["-n", "0"], tmp_path, {}) == (1, 1, ["-n", "0"])
-    memory(monkeypatch, 4 * GIB)
-    assert testrun._worker_request(["-n", "8", "x"], tmp_path, {}) == (3, 3, ["-n", "3", "x"])
-    assert "workers: 3 (flag 8, memory ceiling: 4.0 GiB available)" in capsys.readouterr().out
-    assert testrun._worker_request(["--numprocesses=2"], tmp_path, {}) == (2, 2, ["--numprocesses=2"])
+def test_test_run_asks_the_default_or_its_n_cut_by_memory(monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+                                                           capsys: pytest.CaptureFixture[str]) -> None:
     monkeypatch.setattr(os, "cpu_count", lambda: 24)
-    want, floor, arguments = testrun._worker_request(["-nauto"], tmp_path, {})
-    assert (want, floor) == (3, 2)
-    granted = testrun._granted_arguments(arguments, workers.Grant(2, (1, 2), 0, 2, 18, 1, True), want)
+    pooled = {workers.POOL_DIRECTORY: str(tmp_path / "run")}
+    assert testrun._worker_request(["tests"], tmp_path, pooled) == (stages.Workers(18, "default"),
+                                                                   ["tests", "-n", "auto"])
+    assert testrun._worker_request(["tests"], tmp_path, pooled, xdist=False) == (None, ["tests"])
+    assert testrun._worker_request(["-n", "0"], tmp_path, pooled) == (None, ["-n", "0"])
+    memory(monkeypatch, int(1.75 * GIB))
+    cut, arguments = testrun._worker_request(["-n", "8", "x"], tmp_path, pooled)
+    assert (cut.count, cut.floor(), arguments) == (3, 3, ["-n", "3", "x"])
+    assert testrun._worker_request(["--numprocesses=2"], tmp_path, pooled) == (stages.Workers(2, "flag"),
+                                                                              ["--numprocesses=2"])
+    default, arguments = testrun._worker_request(["-nauto"], tmp_path, pooled)
+    assert (default.count, default.floor()) == (18, 2)
+    granted, line = testrun._granted_arguments(arguments, workers.Grant(2, (1, 2), 0, 2, 18, 1, True), 18, default)
     assert granted == ["-n", "2"]
-    assert "workers: 2 (auto 3; host budget: 2 of 18 free, 1 run active)" in capsys.readouterr().out
+    assert line == "workers: 2 of 18 (default 18; host budget: 2 of 18 free, 1 run active)"
+    assert testrun._granted_arguments(["-n", "0"], workers.Grant(1), 1, None) == (["-n", "0"], "")
+    one = workers.Grant(1, (1, 1), 0, 1, 18, 1, True)
+    assert testrun._granted_arguments(["-n", "auto", "tests"], one, 18, default)[0] == ["-n", "0", "tests"]
+    assert testrun._granted_arguments(["-n", "4", "tests"], one, 4, default)[0] == ["-n", "1", "tests"]
 
 
 TURNSTILE = ("import sys, time\nfrom pathlib import Path\nfrom atc_testkit import workers\n"
@@ -394,11 +420,12 @@ def test_a_flag_above_the_pool_runs_the_pool_size_and_names_it(tmp_path: Path, p
     flag = stages.Workers(8, stages.SOURCE_FLAG)
     grant = budget.acquire("parallel", flag.count, flag.floor())
     assert grant.count == 2
-    assert flag.granted(grant).line() == "workers: 2 (flag 8, host pool: 2)"
+    assert flag.granted(grant).line() == "workers: 2 of 2 (flag 8, host pool: 2)"
     cut = stages.Workers(6, stages.SOURCE_FLAG, 8, "memory ceiling: 7.0 GiB available")
-    assert cut.granted(grant).line() == "workers: 2 (flag 8, memory ceiling: 7.0 GiB available, host pool: 2)"
-    assert testrun._granted_arguments(["-n", "8", "tests"], grant, 8) == ["-n", "2", "tests"]
-    assert "workers: 2 (flag 8, host pool: 2)" in capsys.readouterr().out
+    assert cut.granted(grant).line() == \
+        "workers: 2 of 2 (flag 8, memory ceiling: 7.0 GiB available, host pool: 2)"
+    assert testrun._granted_arguments(["-n", "8", "tests"], grant, 8, flag) == \
+        (["-n", "2", "tests"], "workers: 2 of 2 (flag 8, host pool: 2)")
     budget.release(grant)
     seen: list[list[str]] = []
 
@@ -410,5 +437,109 @@ def test_a_flag_above_the_pool_runs_the_pool_size_and_names_it(tmp_path: Path, p
                                 env_for=lambda stage: {}, options_for=lambda stage: (),
                                 log_for=lambda stage: tmp_path / stage.name, workers=flag, run=fake, budget=budget)
     assert outcome.token is None and seen and seen[0][seen[0].index("-n") + 1] == "2"
-    assert "workers: 2 (flag 8, host pool: 2)" in capsys.readouterr().out
+    assert "workers: 2 of 2 (flag 8, host pool: 2)" in capsys.readouterr().out
     assert stages.Workers(8, stages.SOURCE_FLAG).granted(workers.Grant(8)).line() == "workers: 8 (flag)"
+
+
+# Calibration and visibility (ATC-0023)
+
+@pytest.mark.unit
+def test_a_project_record_beats_the_default_and_a_declaration_beats_the_record(tmp_path: Path,
+                                                                                pool_dir: Path) -> None:
+    root = tmp_path / "project"
+    root.mkdir()
+    (root / "pyproject.toml").write_text('[project]\nname = "recorded-project"\n', encoding="utf-8")
+    environ = {workers.POOL_DIRECTORY: str(pool_dir)}
+    assert stages.worker_memory_source(root, environ) == (256 * workers.MIB, "default")
+    for value in (100, 160, 120):
+        workers.record_memory(pool_dir, "recorded-project", value * workers.MIB)
+    assert stages.worker_memory_source(root, environ) == (200 * workers.MIB, "recorded")
+    assert stages.worker_memory_source(root, {**environ, "CI": "true"}) == (256 * workers.MIB, "default")
+    workers.record_memory(pool_dir, "recorded-project", 10 * workers.MIB)
+    for _ in range(workers.RECORDED_RUNS):
+        workers.record_memory(pool_dir, "recorded-project", 10 * workers.MIB)
+    assert stages.worker_memory_source(root, environ) == (workers.RECORD_LEAST_MIB * workers.MIB, "recorded")
+    (root / "pyproject.toml").write_text('[project]\nname = "recorded-project"\n[tool.atc-testkit]\n'
+                                         'worker_memory_mib = 300\n', encoding="utf-8")
+    assert stages.worker_memory_source(root, environ) == (300 * workers.MIB, "pyproject")
+
+
+@pytest.mark.unit
+def test_a_pooled_stage_records_its_peak_per_worker_from_four_workers(monkeypatch: pytest.MonkeyPatch,
+                                                                     pool_dir: Path) -> None:
+    peaks = iter([3 * 400 * workers.MIB, 4 * 150 * workers.MIB])
+    monkeypatch.setattr(workers, "take_peak", lambda: next(peaks))
+    monkeypatch.setattr(os, "name", "nt")
+    budget = workers.Budget(workers.Pool(pool_dir, 6), label="calibrate", memory_key="calibrated")
+    for count in (3, 4):
+        budget.release(budget.acquire("parallel", count, count))
+    assert json.loads((pool_dir / workers.MEMORY / "calibrated.json").read_text(encoding="utf-8")) == \
+        {"per_worker": [150 * workers.MIB]}
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(os.name != "nt", reason="the stage Job is Windows only")
+def test_a_stage_job_keeps_the_trees_committed_peak(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(workers, "holding", lambda: True)
+    process = subprocess.Popen([sys.executable, "-c", "b = bytearray(200 * 2 ** 20)"])
+    job = workers.StageJob(process)
+    process.wait()
+    job.close()
+    assert workers.take_peak() >= 200 * workers.MIB
+    assert workers.take_peak() is None
+
+
+@pytest.mark.unit
+def test_the_default_asks_one_worker_per_eight_collected_tests_and_a_flag_is_never_cut() -> None:
+    default = stages.Workers(18, "default")
+    assert default.capped(None) == default and default.capped(400) == default
+    assert default.capped(31) == stages.Workers(4, "default", 18, "31 tests collected, 8 per worker")
+    assert default.capped(3).count == workers.FLOOR
+    assert stages.Workers(8, "flag").capped(3) == stages.Workers(8, "flag")
+
+
+@pytest.mark.unit
+def test_collected_items_reads_pytests_count(tmp_path: Path) -> None:
+    def printing(text: str) -> list[str]:
+        return [sys.executable, "-c", f"print({text!r})"]
+
+    assert stages.collected_items(printing("a\n1851 tests collected in 1.44s"), tmp_path, os.environ) == 1851
+    assert stages.collected_items(printing("12/40 tests collected (28 deselected) in 0.5s"), tmp_path,
+                                  os.environ) == 12
+    assert stages.collected_items(printing("no tests collected in 0.1s"), tmp_path, os.environ) == 0
+    assert stages.collected_items(printing("ERROR"), tmp_path, os.environ) is None
+
+
+@pytest.mark.unit
+def test_the_workers_line_goes_into_the_logs_header_and_names_a_jobserver(monkeypatch: pytest.MonkeyPatch) -> None:
+    header = stages.log_header(["pytest"], ".", "private", {stages.WORKERS_LINE: "workers: 4 of 18 (default 18)"})
+    assert "\nworkers: 4 of 18 (default 18)\ntime slack: " in header
+    assert "workers:" not in stages.log_header(["pytest"], ".", "private", {})
+    monkeypatch.setenv("MAKEFLAGS", " -j8 --jobserver-auth=fifo:/tmp/j")
+    assert stages.Workers(4, "flag").line() == "workers: 4 (flag; make jobserver present, not joined)"
+    monkeypatch.setenv("MAKEFLAGS", "-k")
+    assert stages.Workers(4, "flag").line() == "workers: 4 (flag)"
+
+
+@pytest.mark.integration
+def test_the_stages_collect_first_and_note_the_log_and_limit_on_the_row(tmp_path: Path, pool_dir: Path,
+                                                                       capsys: pytest.CaptureFixture[str]) -> None:
+    budget = workers.Budget(workers.Pool(pool_dir, 6), label="stages")
+    seen: list[tuple[list[str], dict, list]] = []
+
+    def fake(command, *, cwd, env, log, private=False) -> int:
+        rows = [(row.log, row.limit) for row in budget.pool.rows()]
+        own = workers._read_row(budget.row.path)
+        seen.append((list(command), dict(env), [(own.log, own.limit), *rows]))
+        return 0
+
+    outcome = stages.run_stages(["runner"], [], cwd=tmp_path, stage_list=[Stage("parallel", "a")],
+                                env_for=lambda stage: {}, options_for=lambda stage: (),
+                                log_for=lambda stage: tmp_path / stage.name, workers=stages.Workers(6, "default"),
+                                run=fake, budget=budget, count=lambda command, cwd, env: 9)
+    assert outcome.token is None
+    command, env, rows = seen[0]
+    assert command[command.index("-n") + 1] == "2"
+    line = env[stages.WORKERS_LINE]
+    assert line.startswith("workers: 2 of 6 (default 6, 9 tests collected, 8 per worker")
+    assert rows[0] == (str(tmp_path / "parallel"), line) and line in capsys.readouterr().out

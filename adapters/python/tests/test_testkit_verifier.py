@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from collections.abc import Sequence
@@ -491,7 +492,7 @@ def test_the_stages_take_the_host_files_workers(candidate: Candidate, tmp_path: 
     assert verifier.main(root_form(candidate.root), candidate.env(), recorder) == 0
     parallel = next(call[0] for call in recorder.calls if call[1] == "pytest-parallel.log")
     assert parallel[parallel.index("-n") + 1] == "3"
-    assert "workers: 3 (~/.atc/config.toml)" in capsys.readouterr().out
+    assert re.search(r"workers: 3( of \d+)? \(~/\.atc/config\.toml\)", capsys.readouterr().out)
 
 
 @pytest.mark.integration

@@ -186,10 +186,12 @@ def test_doctor_takes_json_and_refuses_unknown_arguments(monkeypatch: pytest.Mon
     import doctor
     monkeypatch.setattr(doctor, "diagnose", lambda root: [doctor.Check("x", "ERROR", "d")])
     monkeypatch.setattr(doctor, "worker_pool", lambda environ: {"state": "off", "detail": "off"})
+    monkeypatch.setattr(doctor, "memory", lambda environ: None)
     assert doctor.main(["--json"]) == 1
     assert json.loads(capsys.readouterr().out) == {"verdict": "NOT_READY", "errors": 1, "not_initialized": 0,
                                                    "checks": [{"name": "x", "status": "ERROR", "detail": "d"}],
-                                                   "worker_pool": {"state": "off", "detail": "off"}}
+                                                   "worker_pool": {"state": "off", "detail": "off"},
+                                                   "memory": None}
     with pytest.raises(SystemExit) as stop:
         doctor.main(["--bogus"])
     assert stop.value.code == 2

@@ -28,8 +28,14 @@ else:
 GIB = 1024 ** 3
 MIB = 1024 ** 2
 RESERVE = GIB
-PER_WORKER_MIB = 1024
+PER_WORKER_MIB = 256
 FLOOR = 2
+MEMORY = "memory"
+RECORDED_RUNS = 10
+RECORD_MARGIN = 1.25
+RECORD_LEAST_MIB = 128
+RECORD_LEAST_WORKERS = 4
+NONPAGED_WARN_GIB = 4
 RAMP_SECONDS = 60
 MAX_WAIT_SECONDS = 1800
 POLL_SECONDS = 1.0
@@ -108,8 +114,97 @@ def memory_cap(available: int | None, per_worker: int) -> int | None:
     return max(1, (available - RESERVE) // per_worker)
 
 
-def memory_note(available: int) -> str:
-    return f"memory ceiling: {available / GIB:.1f} GiB available"
+def memory_note(available: int, per_worker: int | None = None, source: str = "") -> str:
+    each = f", {per_worker // MIB} MiB/worker {source}".rstrip() if per_worker else ""
+    return f"memory ceiling: {available / GIB:.1f} GiB available{each}"
+
+
+@dataclass(frozen=True)
+class Performance:
+    """Windows memory figures in bytes: physical total and available, and the kernel's nonpaged pool."""
+    total: int
+    available: int
+    nonpaged: int
+
+
+def performance() -> Performance | None:
+    """``GetPerformanceInfo`` on Windows; ``None`` elsewhere or when the call fails."""
+    if os.name != "nt":
+        return None
+    import ctypes
+    from ctypes import wintypes
+
+    class Info(ctypes.Structure):
+        _fields_ = [("cb", wintypes.DWORD),
+                    *((name, ctypes.c_size_t) for name in (
+                        "CommitTotal", "CommitLimit", "CommitPeak", "PhysicalTotal", "PhysicalAvailable",
+                        "SystemCache", "KernelTotal", "KernelPaged", "KernelNonpaged", "PageSize")),
+                    ("HandleCount", wintypes.DWORD), ("ProcessCount", wintypes.DWORD),
+                    ("ThreadCount", wintypes.DWORD)]
+
+    info = Info()
+    info.cb = ctypes.sizeof(Info)
+    try:
+        if not ctypes.WinDLL("psapi").GetPerformanceInfo(ctypes.byref(info), info.cb):
+            return None
+    except OSError:
+        return None
+    page = info.PageSize
+    return Performance(info.PhysicalTotal * page, info.PhysicalAvailable * page, info.KernelNonpaged * page)
+
+
+def nonpaged_threshold(total: int, override_gib: int | None = None) -> int:
+    """Bytes of kernel nonpaged pool above which ``atc doctor`` warns: the override, else max(4 GiB, total / 8)."""
+    return override_gib * GIB if override_gib else max(NONPAGED_WARN_GIB * GIB, total // 8)
+
+
+def _memory_file(directory: Path, key: str) -> Path:
+    return directory / MEMORY / f"{''.join(c if c.isalnum() or c in '-_.' else '_' for c in key)[:80]}.json"
+
+
+def recorded_memory(directory: Path, key: str) -> int | None:
+    """Bytes a worker of project ``key`` is counted at from its recorded runs: their largest value times
+    ``RECORD_MARGIN``, at least ``RECORD_LEAST_MIB``; ``None`` with no readable record."""
+    try:
+        values = json.loads(_memory_file(directory, key).read_text(encoding="utf-8"))["per_worker"]
+        largest = max(int(value) for value in values)
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    return max(RECORD_LEAST_MIB * MIB, int(largest * RECORD_MARGIN))
+
+
+def record_memory(directory: Path, key: str, per_worker: int) -> None:
+    """Add one run's bytes per worker to project ``key``'s record, keeping the last ``RECORDED_RUNS``."""
+    path = _memory_file(directory, key)
+    try:
+        values = json.loads(path.read_text(encoding="utf-8"))["per_worker"]
+        values = [int(value) for value in values]
+    except (OSError, ValueError, KeyError, TypeError):
+        values = []
+    values = [*values, int(per_worker)][-RECORDED_RUNS:]
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+        temporary.write_text(json.dumps({"per_worker": values}), encoding="utf-8")
+        os.replace(temporary, path)
+    except OSError:
+        pass
+
+
+_LAST_PEAK: list[int] = []
+
+
+def take_peak() -> int | None:
+    """The memory peak of the last stage process tree this process ran: on Windows its Job's committed peak;
+    elsewhere the largest resident size of any child so far. ``None`` when unknown."""
+    if os.name == "nt":
+        return _LAST_PEAK.pop() if _LAST_PEAK else None
+    try:
+        import resource
+        largest = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
+    except (ImportError, OSError):
+        return None
+    return largest if sys.platform == "darwin" else largest * 1024
 
 
 def default_pool_size(cpus: int) -> int:
@@ -182,6 +277,8 @@ class Row:
     waiting_since: float | None
     reserved: int
     path: Path
+    log: str = ""
+    limit: str = ""
 
     def held_for(self, now: float) -> str:
         return _minutes(now - (self.granted_at or now))
@@ -201,7 +298,8 @@ def _read_row(path: Path) -> Row | None:
         with path.open("rb") as handle:
             data = json.loads(handle.read(ROW_BYTES).decode("utf-8").strip() or "null")
         return Row(int(data["pid"]), str(data["label"]), str(data["stage"]), len(data["tokens"]), int(data["want"]),
-                   int(data["floor"]), data.get("granted_at"), data.get("waiting_since"), int(data["reserved"]), path)
+                   int(data["floor"]), data.get("granted_at"), data.get("waiting_since"), int(data["reserved"]), path,
+                   str(data.get("log") or ""), str(data.get("limit") or ""))
     except (OSError, ValueError, KeyError, TypeError):
         return None
 
@@ -235,7 +333,7 @@ class _OwnRow:
         if not _try_lock(self.fd, ROW_LOCK_OFFSET):
             raise OSError(f"{self.path} is locked by another process")
         self.data: dict = {"pid": os.getpid(), "label": label, "stage": "", "tokens": [], "want": 0, "floor": 0,
-                           "granted_at": None, "waiting_since": None, "reserved": 0}
+                           "granted_at": None, "waiting_since": None, "reserved": 0, "log": "", "limit": ""}
         atexit.register(self.remove)
 
     @property
@@ -339,27 +437,35 @@ class Grant:
     size: int = 0
     active: int = 0
     pooled: bool = False
+    memory: str = ""
 
     def note(self, wanted: int) -> str:
-        """``host budget: ...`` when the pool cut the count, made the run wait, or another run holds tokens."""
-        if not self.pooled or (self.count >= wanted and not self.waited and not self.active):
+        """What cut or delayed the grant: ``memory ceiling: ...`` when memory held fewer than ``wanted``, and
+        ``host budget: ...`` when the pool cut the count, made the run wait, or another run holds tokens."""
+        if not self.pooled:
             return ""
-        parts = []
-        if self.waited:
-            parts.append(f"waited {self.waited:.0f}s")
-        if self.count < wanted:
-            parts.append(f"{self.free} of {self.size} free")
-        parts.append(f"{self.active} run{'' if self.active == 1 else 's'} active")
-        return "host budget: " + ", ".join(parts)
+        notes = [self.memory] if self.memory and self.count < wanted else []
+        pool_cut = self.count < wanted and not notes
+        if pool_cut or self.waited or self.active:
+            parts = []
+            if self.waited:
+                parts.append(f"waited {self.waited:.0f}s")
+            if pool_cut:
+                parts.append(f"{self.free} of {self.size} free")
+            parts.append(f"{self.active} run{'' if self.active == 1 else 's'} active")
+            notes.append("host budget: " + ", ".join(parts))
+        return "; ".join(notes)
 
 
 class Budget:
     """One entry point's share of the pool: ``pool`` ``None`` is a run outside it (CI, nested, turned off)."""
 
     def __init__(self, pool: Pool | None, *, label: str, max_wait: float = MAX_WAIT_SECONDS,
-                 wait_file: Path | None = None, per_worker: int = PER_WORKER_MIB * MIB):
+                 wait_file: Path | None = None, per_worker: int = PER_WORKER_MIB * MIB,
+                 per_worker_source: str = "default", memory_key: str | None = None):
         self.pool, self.label, self.max_wait = pool, label, max_wait
         self.wait_file, self.per_worker = wait_file, per_worker
+        self.per_worker_source, self.memory_key = per_worker_source, memory_key
         self.waited = 0.0
         self.row: _OwnRow | None = None
 
@@ -379,15 +485,21 @@ class Budget:
                 raise unavailable(self.pool.directory, error) from error
         return self.row
 
-    def _memory_room(self, own: Path) -> int | None:
-        """Workers memory holds now, after the reservations of runs granted within ``RAMP_SECONDS``."""
+    def _memory_room(self, own: Path) -> tuple[int | None, int]:
+        """Workers memory holds now, after the reservations of runs granted within ``RAMP_SECONDS``, and the bytes
+        that count as available; ``(None, 0)`` when memory is unknown."""
         available = available_memory()
         if available is None:
-            return None
+            return None, 0
         now = time.time()
         ramping = sum(row.reserved for row in self.pool.rows(own)
                       if row.granted_at is not None and now - row.granted_at < RAMP_SECONDS)
-        return memory_cap(available - ramping, self.per_worker)
+        return memory_cap(available - ramping, self.per_worker), available - ramping
+
+    def annotate(self, **values) -> None:
+        """Add ``log`` or ``limit`` to this run's ledger row, for ``atc test status``."""
+        if self.row is not None:
+            self.row.update(**values)
 
     def acquire(self, stage: str, want: int, floor: int) -> Grant:
         """At least ``floor`` and at most ``want`` tokens, waiting in turn when fewer are free.
@@ -408,8 +520,10 @@ class Budget:
                 if not turnstile:
                     turnstile = pool.try_take(0)
                 if turnstile:
-                    room = self._memory_room(row.path)
+                    room, available = self._memory_room(row.path)
                     wanted = want if room is None else min(want, max(floor, room))
+                    memory = memory_note(available, self.per_worker, self.per_worker_source) \
+                        if room is not None and room < want else ""
                     free = pool.free()
                     for index in range(1, pool.size + 1):
                         if len(taken) == wanted:
@@ -424,7 +538,7 @@ class Budget:
                         row.update(tokens=taken, granted_at=time.time(), waiting_since=None,
                                    reserved=len(taken) * self.per_worker)
                         granted, taken = tuple(taken), []
-                        return Grant(len(granted), granted, waited, free, pool.size, active, True)
+                        return Grant(len(granted), granted, waited, free, pool.size, active, True, memory)
                     pool.give(taken)
                     taken = []
                 waited = time.monotonic() - started
@@ -449,7 +563,16 @@ class Budget:
         if self.pool is not None and grant.tokens:
             self.pool.give(grant.tokens)
             if self.row is not None:
-                self.row.update(tokens=[], reserved=0)
+                self.row.update(tokens=[], reserved=0, log="", limit="")
+            self._record(grant.count)
+
+    def _record(self, count: int) -> None:
+        """Record the per-worker memory of the stage that just ended, when it ran at least
+        ``RECORD_LEAST_WORKERS`` workers so the fixed cost of its main process stays small beside them."""
+        peak = take_peak()
+        if self.memory_key is None or peak is None or count < RECORD_LEAST_WORKERS:
+            return
+        record_memory(self.pool.directory, self.memory_key, peak // count if os.name == "nt" else peak)
 
     def _record_wait(self, waited: float) -> None:
         self.waited += waited
@@ -500,8 +623,13 @@ class StageJob:
             self.handle = None
 
     def close(self) -> None:
+        """End what is left of the tree, keeping the Job's committed memory peak for ``take_peak``."""
         if self.handle is not None:
             import ctypes
+            peak = _job_peak(self.handle)
+            _LAST_PEAK.clear()
+            if peak:
+                _LAST_PEAK.append(peak)
             ctypes.windll.kernel32.CloseHandle(self.handle)
             self.handle = None
 
@@ -513,7 +641,7 @@ def _process_handle(process) -> int:
     return int(handle)
 
 
-def _kill_on_close_job(process_handle: int) -> int:
+def _limit_structure():
     import ctypes
     from ctypes import wintypes
 
@@ -529,6 +657,27 @@ def _kill_on_close_job(process_handle: int) -> int:
                     ("ProcessMemoryLimit", ctypes.c_size_t), ("JobMemoryLimit", ctypes.c_size_t),
                     ("PeakProcessMemoryUsed", ctypes.c_size_t), ("PeakJobMemoryUsed", ctypes.c_size_t)]
 
+    return Extended
+
+
+def _job_peak(job: int) -> int | None:
+    """The committed memory peak of every process the Job has held (``PeakJobMemoryUsed``)."""
+    import ctypes
+    from ctypes import wintypes
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.QueryInformationJobObject.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD,
+                                                 ctypes.c_void_p]
+    limits = _limit_structure()()
+    if not kernel.QueryInformationJobObject(job, 9, ctypes.byref(limits), ctypes.sizeof(limits), None):
+        return None
+    return int(limits.PeakJobMemoryUsed)
+
+
+def _kill_on_close_job(process_handle: int) -> int:
+    import ctypes
+    from ctypes import wintypes
+
+    Extended = _limit_structure()
     kernel = ctypes.WinDLL("kernel32", use_last_error=True)
     kernel.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
     kernel.CreateJobObjectW.restype = wintypes.HANDLE

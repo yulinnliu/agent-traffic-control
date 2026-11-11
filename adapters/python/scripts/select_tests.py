@@ -398,6 +398,21 @@ def describe(selection: TestSelection, explain: bool = False) -> str:
     return "\n".join(lines)
 
 
+def direct(paths: Iterable[str], graph: Graph | None = None) -> list[str]:
+    """The changed test files and the test files that import or name a changed module directly (one edge, not the
+    closure), relative to the adapter: ``atc test run --touched``'s fast subset."""
+    graph = graph or Graph()
+    chosen: set[str] = set()
+    for path in (path.replace("\\", "/") for path in paths):
+        if path in graph.tests:
+            chosen.add(path)
+            continue
+        named = module_name(path)
+        if named is not None and named[0] in graph.modules:
+            chosen |= {test for test in graph.tests if named[0] in graph.edges[graph.by_path[test].name]}
+    return sorted(test.removeprefix(f"{ADAPTER}/") for test in chosen)
+
+
 def selected_files(selection: TestSelection) -> list[str]:
     """Every test file to run, relative to the adapter: the whole suite spelled out, ``[]`` for none."""
     args = pytest_args(selection)
@@ -419,6 +434,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--run", action="store_true",
                         help="run the testkit's stages on the selection; arguments after -- go to pytest")
     parser.add_argument("--workers", help="worker count for --run, checked by the stage runner")
+    parser.add_argument("--direct", action="store_true",
+                        help="print as a JSON array only the changed test files and the test files that import a "
+                             "changed module directly")
     shown = parser.add_mutually_exclusive_group()
     shown.add_argument("--explain", action="store_true", help="also list each selected test file with its cause")
     shown.add_argument("--json", action="store_true",
@@ -427,6 +445,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.json and (args.run or extra):
         parser.error("--json prints the selection; it takes no --run and no pytest arguments")
     paths = args.paths if args.paths else changed_paths(args.base)
+    if args.direct:
+        print(json.dumps(direct(paths)), flush=True)
+        return 0
     selection = select(paths)
     if args.json:
         print(json.dumps(selected_files(selection)), flush=True)

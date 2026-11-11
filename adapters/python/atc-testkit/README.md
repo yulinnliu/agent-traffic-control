@@ -104,10 +104,11 @@ diagnostics. A project supplies data.
 - `ci` is the runner a CI job calls: `python -m atc_testkit.ci --stages` runs the
   stages, `--slow` the slow tests, and any other arguments go to pytest. A project
   adds failure context, hints and initialization through `ci.main`.
-- `atc test run`, `atc test mutants`, `atc test private` and
+- `atc test run`, `atc test mutants`, `atc test private`, `atc test status` and
   `atc tmp checkout|list|clean|prune` run a test tree under a scratch directory on
   a private desktop, kill mutants of a committed tree, run one command on a
-  private desktop, and export commits into and manage the scratch registry; `python -m atc_testkit.commands` is the same entry point.
+  private desktop, show the host's test runs, and export commits into and manage
+  the scratch registry; `python -m atc_testkit.commands` is the same entry point.
   `-h` after a subcommand prints its help and exits 0. A refusal token goes to stderr; the per-directory lines `DELETED`, `SKIPPED`,
   `REFUSED`, `ANOMALY` and `LEFT` are the normal output of `atc tmp` on stdout.
 - `atc test mutants` counts `KILLED` only for pytest exit 1 with a `FAILED` line;
@@ -174,6 +175,7 @@ The rows down to `product_module_prefixes` are required; the others are optional
 | `ci_init` | the `module:function` the CI runner calls first |
 | `ignore` | the test paths each stage ignores, under `nt` and `posix` |
 | `selector` | the command `atc test run --select` runs to pick test paths |
+| `select_full_fraction` | the share of the tests at which `--select` skips with `SKIPPED_WIDE` |
 | `toolchain` | the toolchain's name, `python` when absent |
 
 The selection policy and the static checks stay in the project's gate script.

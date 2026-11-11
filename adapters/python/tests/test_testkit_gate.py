@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 from collections.abc import Sequence
 from pathlib import Path
@@ -225,7 +226,8 @@ def test_the_worker_flag_sets_the_parallel_stage(repo: Path, capsys: pytest.Capt
     recorder = Recorder()
     assert gate.main(project(repo), ["--run", "--workers", "3"], [push_line(repo, base, sha)], recorder) == 0
     command = recorder.calls[0][0]
-    assert command[command.index("-n") + 1] == "3" and "workers: 3 (flag)" in capsys.readouterr().out
+    assert command[command.index("-n") + 1] == "3" and re.search(r"workers: 3( of \d+)? \(flag\)",
+                                                                              capsys.readouterr().out)
 
 
 @pytest.mark.integration

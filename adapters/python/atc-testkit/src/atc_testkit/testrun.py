@@ -8,7 +8,7 @@ import glob
 import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import shutil
 import subprocess
@@ -165,10 +165,15 @@ def private_desktop(environ: Mapping[str, str]) -> bool:
     return os.name == "nt" and value != "0"
 
 
+def xdist_installed(python: str, tree: Path, environ: Mapping[str, str]) -> bool:
+    return _capture([python, "-c", "import xdist"], tree, environ, False, None).code == 0
+
+
 def _pytest_command(python: str, tree: Path, place: Path, environ: Mapping[str, str], private: bool,
-                    pytest_arguments: Sequence[str], junit: Path | None = None) -> list[str]:
+                    pytest_arguments: Sequence[str], junit: Path | None = None,
+                    xdist: bool | None = None) -> list[str]:
     """The run's pytest command; a private run adds ``not interactive_desktop`` to the caller's ``-m``."""
-    has_xdist = _capture([python, "-c", "import xdist"], tree, environ, False, None).code == 0
+    has_xdist = xdist_installed(python, tree, environ) if xdist is None else xdist
     expression, rest = python_toolchain.split_marker(pytest_arguments)
     if private:
         expression = python_toolchain.combine(expression, INTERACTIVE_EXCLUSION)
@@ -409,6 +414,10 @@ RUNS = "runs"
 LABEL_CHARACTERS = re.compile(r"[^A-Za-z0-9._-]+")
 COUNTS = re.compile(r"\b\d+ (?:passed|failed|errors?|skipped|deselected|xfailed|xpassed|warnings?)\b")
 SELECTOR_KEY = "selector"
+DIRECT_OPTION = "--direct"
+SELECT_FRACTION_KEY = "select_full_fraction"
+SELECT_FRACTION = 0.5
+SKIPPED_WIDE = "SKIPPED_WIDE"
 
 
 def _registered_row(root: Path, place: Path) -> scratch.Row | None:
@@ -510,45 +519,93 @@ def _worker_option(arguments: Sequence[str]) -> tuple[int, int, str] | None:
     return found
 
 
-def _worker_request(arguments: Sequence[str], tree: Path,
-                    environ: Mapping[str, str]) -> tuple[int, int, list[str]]:
-    """The tokens a run asks for and its floor, with ``-n K`` cut to the workers memory holds; ``-n auto`` or
-    ``logical`` asks for the default count down to ``workers.FLOOR``; no ``-n`` or ``-n 0`` is one token."""
+DEFAULT_VALUES = ("auto", "logical")
+
+
+def _without_workers(arguments: Sequence[str]) -> list[str]:
+    """``arguments`` without any ``-n``/``--numprocesses`` option, for a collection."""
+    arguments = list(arguments)
+    while (option := _worker_option(arguments)) is not None:
+        del arguments[option[0]:option[1] + 1]
+    return arguments
+
+
+def _worker_request(arguments: Sequence[str], tree: Path, environ: Mapping[str, str],
+                    xdist: bool = True) -> tuple[stages.Workers | None, list[str]]:
+    """The workers a run asks for and its arguments: no ``-n``, ``-n auto`` or ``-n logical`` is the default count
+    (``stages.resolve_workers``), written as ``-n auto`` until the grant; ``-n K`` a flag cut to the workers memory
+    holds; ``-n 0``, another value, or a Python without pytest-xdist and no ``-n``, ``None`` for one serial token."""
     arguments = list(arguments)
     option = _worker_option(arguments)
     if option is None:
-        return 1, 1, arguments
+        if not xdist:
+            return None, arguments
+        arguments = [*arguments, "-n", DEFAULT_VALUES[0]]
+        option = _worker_option(arguments)
     first, last, value = option
-    if value in ("auto", "logical"):
-        workers = stages.resolve_workers(None, environ, root=tree)
-        return workers.count, workers.floor(), arguments
-    if not value.isdigit():
-        return 1, 1, arguments
-    workers = stages.resolve_workers(int(value), root=tree) if int(value) else stages.Workers(0, stages.SOURCE_FLAG)
+    if value in DEFAULT_VALUES:
+        return stages.resolve_workers(None, environ, root=tree), arguments
+    if not value.isdigit() or not int(value):
+        return None, arguments
+    workers = stages.resolve_workers(int(value), environ, root=tree)
     if workers.clamp:
-        print(workers.line(), flush=True)
         arguments[first:last + 1] = ["-n", str(workers.count)]
-    return max(1, workers.count), max(1, workers.count), arguments
+    return workers, arguments
 
 
-def _granted_arguments(arguments: list[str], grant: host_workers.Grant, want: int) -> list[str]:
-    """``-n auto``, ``-n logical`` and an ``-n K`` above the pool size become the granted count; a pool that cut or
-    delayed the run prints why."""
+def _granted_arguments(arguments: list[str], grant: host_workers.Grant, want: int,
+                       workers: stages.Workers | None) -> tuple[list[str], str]:
+    """The arguments with the count the run got, and the ``workers:`` line naming what cut or delayed it (empty for
+    a serial run): ``-n auto``, ``-n logical`` and an ``-n K`` above the grant become the granted count."""
     option = _worker_option(arguments)
-    if option is None:
-        return arguments
+    if option is None or workers is None:
+        return arguments, ""
     first, last, value = option
-    note = grant.note(want)
-    if value in ("auto", "logical"):
-        arguments = [*arguments[:first], "-n", str(grant.count), *arguments[last + 1:]]
-        print(stages.Workers(grant.count, value, want if grant.count != want else None, budget=note).line(),
-              flush=True)
-    elif grant.count < want:
-        arguments = [*arguments[:first], "-n", str(grant.count), *arguments[last + 1:]]
-        print(stages.Workers(want, stages.SOURCE_FLAG).granted(grant).line(), flush=True)
-    elif note:
-        print(f"workers: {grant.count} (host budget: {note.removeprefix('host budget: ')})", flush=True)
-    return arguments
+    if value in DEFAULT_VALUES or grant.count < want:
+        count = 0 if value in DEFAULT_VALUES and grant.count == 1 else grant.count
+        arguments = [*arguments[:first], "-n", str(count), *arguments[last + 1:]]
+    return arguments, workers.granted(grant).line()
+
+
+def select_fraction(tree: Path) -> float:
+    """``[tool.atc-testkit] select_full_fraction``, a number from 0 to 1; ``SELECT_FRACTION`` when absent."""
+    value = config.tool_table(tree).get(SELECT_FRACTION_KEY)
+    if value is None:
+        return SELECT_FRACTION
+    if isinstance(value, (int, float)) and not isinstance(value, bool) and 0 <= value <= 1:
+        return float(value)
+    raise Refusal(stages.CONFIG_INVALID, f"{tree / 'pyproject.toml'}: [tool.atc-testkit] {SELECT_FRACTION_KEY} = "
+                                         f"{value!r} is not a number from 0 to 1", stages.CONFIG_EXIT)
+
+
+def _count(python: str, tree: Path, place: Path, environ: Mapping[str, str], private: bool,
+           arguments: Sequence[str]) -> int | None:
+    """The tests pytest collects for ``arguments`` (worker options dropped); ``None`` when it cannot tell."""
+    command = _pytest_command(python, tree, place, environ, private, [*_without_workers(arguments), "--collect-only"],
+                              xdist=False)
+    return stages.collected_items(command, tree, environ)
+
+
+def touched(tree: Path, python: str, paths: Sequence[str], environ: Mapping[str, str]) -> list[str]:
+    """The test paths the declared selector prints for ``--direct`` (changed test files and the test files that
+    import a changed module directly); a selector without ``--direct`` gives the changed test files of the tree."""
+    selector = config.tool_table(tree).get(SELECTOR_KEY)
+    if isinstance(selector, list) and selector and all(isinstance(item, str) for item in selector) and paths:
+        done = _capture([python, *selector, *paths, DIRECT_OPTION], tree, environ, False, None)
+        try:
+            chosen = json.loads(done.lines[-1]) if done.code == 0 and done.lines else None
+        except ValueError:
+            chosen = None
+        if isinstance(chosen, list) and all(isinstance(item, str) for item in chosen):
+            return chosen
+    prefix = (_git_lines(tree, "rev-parse", "--show-prefix") or [""])[0]
+    tests = []
+    for path in paths:
+        relative = path[len(prefix):] if path.startswith(prefix) else None
+        name = PurePosixPath(path).name
+        if relative and name.startswith("test_") and name.endswith(".py") and (tree / relative).is_file():
+            tests.append(relative)
+    return tests
 
 
 def summary(result: Result | None, log: Path) -> tuple[str, int]:
@@ -591,7 +648,16 @@ def run(argv: Sequence[str], environ: MutableMapping[str, str] | None = None) ->
     parser.add_argument("--label", default="run", metavar="NAME", help="name of the run, in its log's file name")
     parser.add_argument("--timeout", type=float, metavar="SECONDS", help="seconds before the run is ended and reported as TIMEOUT")
     parser.add_argument("--progress", action="store_true", help="also stream pytest's output to the console")
+    parser.add_argument("--wide", action="store_true",
+                        help=f"with --select: run a selection that {SKIPPED_WIDE} would skip as too wide")
+    parser.add_argument("--touched", action="store_true",
+                        help="with --select: run only the changed test files and the test files that import a "
+                             "changed module directly")
     args = parser.parse_args(argv)
+    if (args.wide or args.touched) and not args.select:
+        parser.error("--wide and --touched take --select")
+    if args.wide and args.touched:
+        parser.error("--wide and --touched exclude each other")
     environ = os.environ if environ is None else environ
     root, place = prepare_scratch(args.scratch, environ)
     row = _registered_row(root, place)
@@ -606,12 +672,24 @@ def run(argv: Sequence[str], environ: MutableMapping[str, str] | None = None) ->
     paths = changed_paths(tree, args.select, row) if args.select else None
     environ["PYTHONUNBUFFERED"] = "1"
     private = isolate(tree, place, python, environ)
+    items = None
     if paths is not None:
-        chosen = select(tree, python, paths, environ)
-        print(f"SELECT {args.select}: {len(paths)} changed paths, {len(chosen)} test paths", flush=True)
+        chosen = touched(tree, python, paths, environ) if args.touched else select(tree, python, paths, environ)
+        head = f"SELECT {args.select}{' --touched' if args.touched else ''}: {len(paths)} changed paths, " \
+               f"{len(chosen)} test paths"
         if not chosen:
-            print("NO_TESTS no test selected", flush=True)
+            print(head, "NO_TESTS no test selected", sep="\n", flush=True)
             return 0
+        fraction = 1.0 if args.wide or args.touched else select_fraction(tree)
+        if fraction < 1:
+            items = _count(python, tree, place, environ, private, [*chosen, *pytest_arguments])
+            total = _count(python, tree, place, environ, private, pytest_arguments)
+            if items and total and items >= fraction * total:
+                print(f"{head}, {items} of {total} tests ({items * 100 // total}%) >= {SELECT_FRACTION_KEY} "
+                      f"{fraction:g}", f"{SKIPPED_WIDE} the reviewer's atc verify runs these; run them here with "
+                      "--wide, or the touched files with --touched", sep="\n", flush=True)
+                return 0
+        print(head, flush=True)
         pytest_arguments = [*chosen, *pytest_arguments]
     (place / RUNS).mkdir(exist_ok=True)
     label = LABEL_CHARACTERS.sub("_", args.label)[:40] or "run"
@@ -620,7 +698,14 @@ def run(argv: Sequence[str], environ: MutableMapping[str, str] | None = None) ->
     if private:
         print(EXCLUSION_NOTE, flush=True)
     budget = stages.open_budget(f"atc test run {place.name}", environ, root=tree, max_wait=args.timeout)
-    want, floor, pytest_arguments = _worker_request(pytest_arguments, tree, environ)
+    xdist = xdist_installed(python, tree, environ)
+    workers, pytest_arguments = _worker_request(pytest_arguments, tree, environ, xdist)
+    if workers is not None and workers.source != stages.SOURCE_FLAG and budget.active:
+        if items is None:
+            items = _count(python, tree, place, environ, private, pytest_arguments)
+        workers = workers.capped(items)
+    want, floor = (workers.count, workers.floor()) if workers is not None else (1, 1)
+    want, floor = max(1, want), max(1, floor)
     try:
         grant = budget.acquire("tests", want, floor)
     except KeyboardInterrupt:
@@ -629,8 +714,12 @@ def run(argv: Sequence[str], environ: MutableMapping[str, str] | None = None) ->
     try:
         if budget.active:
             environ[host_workers.HELD] = budget.held_id()
-        pytest_arguments = _granted_arguments(pytest_arguments, grant, want)
-        command = _pytest_command(python, tree, place, environ, private, pytest_arguments)
+        pytest_arguments, workers_line = _granted_arguments(pytest_arguments, grant, want, workers)
+        if workers_line:
+            print(workers_line, flush=True)
+            environ[stages.WORKERS_LINE] = workers_line
+        budget.annotate(log=str(log), limit=workers_line)
+        command = _pytest_command(python, tree, place, environ, private, pytest_arguments, xdist=xdist)
         try:
             result: Result | None = _logged(command, tree, environ, private, args.timeout, log, args.progress)
         except KeyboardInterrupt:

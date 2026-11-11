@@ -279,3 +279,13 @@ def test_the_declared_selector_prints_the_json_form():
     done = subprocess.run([sys.executable, *selector, f"{ADAPTER}/scripts/worktree_cd_guard.py"], cwd=adapter,
                           capture_output=True, text=True, check=True)
     assert "tests/test_worktree_cd_guard.py" in json.loads(done.stdout)
+
+
+def test_direct_is_the_changed_tests_and_the_tests_one_edge_from_a_changed_module(graph, capsys):
+    preflight = f"{ADAPTER}/scripts/git_preflight.py"
+    assert "tests/test_git_preflight.py" in select_tests.direct([preflight], graph)
+    assert set(select_tests.direct([preflight], graph)) < set(chosen(graph, preflight))
+    assert select_tests.direct([f"{ADAPTER}/tests/test_tooling.py", "docs/NO_TEST_NAMES_THIS.md"], graph) == [
+        "tests/test_tooling.py"]
+    assert select_tests.main(["--json", "--paths", f"{ADAPTER}/scripts/worktree_cd_guard.py", "--direct"]) == 0
+    assert json.loads(capsys.readouterr().out) == ["tests/test_worktree_cd_guard.py"]

@@ -111,7 +111,8 @@ def _run_tests(project: Project, push_lines: list[str], pytest_paths: list[str],
             env_for=lambda stage: isolated.environment(stage.name),
             options_for=lambda stage: isolated.run_options(stage.name),
             log_for=lambda stage: logs / f"prepush-{stage.name}.log", workers=workers, run=run,
-            toolchain=isolated.toolchain, budget=budget)
+            toolchain=isolated.toolchain, budget=budget,
+            count=stages.collected_items if run is stages.run_logged else None)
     except workers_module.WaitTimeout as refusal:
         print(f"{refusal.token} {refusal.detail}", file=sys.stderr)
         return refusal.code

@@ -63,7 +63,10 @@ End every completed step with a step report in the shape governance
 
 1. Run the selection (governance `VERIFICATION.md` § Testing) and the
    mutants, one per guard, launchers and scripts included; the report gives
-   each command with its summary line and every surviving mutant.
+   each command with its summary line and every surviving mutant. A
+   selection `atc test run --select` skips with `SKIPPED_WIDE` is reported
+   as that line, never as a pass; `--touched` runs the directly touched
+   tests instead.
 2. Run `atc integrate --check` on the tip (governance `GIT_WORKFLOW.md`
    § Mainline check before final self-verification) and report the verdict
    it gives; `authority=missing` on its `CHECK` line is pending authority
