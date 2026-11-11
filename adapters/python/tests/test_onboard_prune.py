@@ -71,6 +71,7 @@ def test_prune_requires_sync_mode(tmp_path: Path) -> None:
         onboard_project.main(["--check", "--prune", "--project", "demo"], root=root)
 
 
+@pytest.mark.integration
 def test_onboard_sync_all_converges_every_project(tmp_path: Path) -> None:
     root, project = _orphaned_project(tmp_path)
     (project / ".claude/skills/demo-skill").mkdir(parents=True, exist_ok=True)
