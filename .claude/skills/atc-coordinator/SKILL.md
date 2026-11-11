@@ -140,7 +140,9 @@ own commits write; session names belong only in the hand-over.
    the writer replies `refused`, or its session is gone, run the
    instruction yourself with the words you heard, from outside the task's
    worktree, then `atc close-out --task <task>`. Check the result as that
-   section says.
+   section says. The coordinator acts on the Owner's word it heard itself; a
+   writer's `refused` is no new decision, so the coordinator runs the
+   instruction without asking the Owner again.
    Done when the result matches.
 6. **Close** under governance `DELIVERY.md` § Close-out, after the writer's
    close-out; the push waits for the Owner's word (`DELIVERY.md` § 10) and is
