@@ -43,50 +43,8 @@ Tasks here are identified by record (governance `CORE.md` § Task identity).
 - Verifier timeout: 1800
   (the test budget, governance `VERIFICATION.md` § Verifier test budget)
 
-The argv runs `adapters/python/scripts/integration_verify.py` in the
-candidate's own `adapters/python/.venv/` built from `uv.lock`; that script
-supplies the root's data to the verifier skeleton (`docs/TESTKIT.md`
-§ Integration verifier), which defines its input, import-location and
-clean-tree checks, its environment, working directory and logs. The verifier
-writes no verification report, so `atc integrate` records no evidence for this
-repository.
-
-Every range passes `git diff --check` of the range and the static checks of
-the `python-adapter` job in `.github/workflows/validate.yml`, run from
-`adapters/python`: `uv run --locked python scripts/validate_workspace.py` and
-`uv run --locked python scripts/policies.py check ../../shared/policies/examples`.
-In place of the job's full run of the testkit's stages, it runs the stages
-over the impact selection of the range (`select_tests.py`), which is the full
-suite only where the selector's rules widen to it (`adapters/python/README.md`
-§ Selected tests).
-The candidate has no `workspace.yaml`, `projects/`, `worktrees/` or `state/`,
-so the checks read the committed tree only, as CI does.
-
-The verifier applies `VERIFICATION.md` § Documentation-only verification
-itself, by consumers: a range is documentation-only, and skips the selection,
-when every path is Markdown under `docs/`, a task record under `.atc/tasks/`,
-or Markdown the selection maps to no test file. Markdown a test reads or a
-tool renders (the guidance, skills and their managed copies, the root's
-top-level Markdown) selects its readers and is not documentation-only. The
-caller never chooses the exception. The verifier's log line
-`classification: full` names every range that is not documentation-only; the
-selector's lines after it say which tests ran.
-
-The full suite, and with it the check that fails a session whose tests read
-the root's guidance undeclared (`ROOT_READ_UNDECLARED`), runs only in a
-manually dispatched run of `.github/workflows/validate.yml`
-(`VERIFICATION.md` § Full regression timing and evidence reuse); the Owner
-starts it.
-
-The installed `atc` is an editable install of `adapters/python`: it reads the
-checkout's code and holds the dependencies of the moment it was installed. An
-integrated range that changes the dependencies in
-`adapters/python/pyproject.toml` or `adapters/python/atc-testkit/pyproject.toml`
-is followed, on each host with an installed `atc`, by
-`uv tool install -e "<checkout>/adapters/python" --force`. Until
-then a command that imports a new dependency stops with
-`ModuleNotFoundError`, and `uv run --locked atc` from `adapters/python` works.
-
-## This host
-
-- Taipei time comes from PowerShell `[TimeZoneInfo]::ConvertTimeBySystemTimeZoneId((Get-Date), 'Taipei Standard Time')`; Git Bash ignores `TZ=Asia/Taipei` and still prints GMT.
+What the verifier checks, which ranges it treats as documentation-only and
+where the full suite runs: `docs/TESTKIT.md` § The workspace root's verifier.
+After an integrated range changes the dependencies of `adapters/python` or of
+its `atc-testkit`, reinstall `atc` on each host as `adapters/python/README.md`
+says.

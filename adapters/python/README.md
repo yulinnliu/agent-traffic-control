@@ -7,10 +7,18 @@ by this code. Python 3.12 or newer, provisioned by `uv` from the
 
 One command fronts the scripts: `uv run atc <command>` here, or
 `uv tool install -e .` once per machine to have `atc` on PATH, which is how
-the skills call it; the root `AGENTS.md` states when it is installed again.
+the skills call it.
 `atc` resolves the checkout from `--root`, `ATC_ROOT`,
 the nearest `workspace.yaml` above the working directory, or its own install
 location, in that order.
+
+The installed `atc` is an editable install: it reads the checkout's code and
+holds the dependencies of the moment it was installed. An integrated range
+that changes the dependencies in `pyproject.toml` or
+`atc-testkit/pyproject.toml` is followed, on each host with an installed
+`atc`, by `uv tool install -e "<checkout>/adapters/python" --force`. Until
+then a command that imports a new dependency stops with
+`ModuleNotFoundError`, and `uv run --locked atc` from here works.
 
 | `atc` command | Script | Does |
 | --- | --- | --- |
@@ -21,7 +29,7 @@ location, in that order.
 | `policies` | `policies.py` | `check DIR`: schema-validate a policy directory and refuse contradictions |
 | `enforce` | `generate_enforcement.py` | `--policies DIR --out DIR [--check]`: harness deny configs from hard deny, see `docs/ENFORCEMENT.md` |
 | `classify` | `classify_change.py` | `--policy escalation.yaml --changed FILE [--severity]`: `LOW` or `HIGH` |
-| `preflight` | `git_preflight.py` | `push` lists `origin/main..main` by integration with its task and authority, reading old and new `integrations.jsonl` lines; reads only. `merge` is retired: it runs `integrate --check` until the CLI trim |
+| `preflight` | `git_preflight.py` | `push` lists `origin/main..main` by integration with its task and authority, reading old and new `integrations.jsonl` lines; reads only. `merge` refuses and names `atc integrate --check` |
 | `integrate` | `git_integrate.py` | `--reviewed SHA --task TASK [--owner-words QUOTE] [--project NAME]`: `--task` is required; a record ID with a declared prefix names the repository and the branch (the record's `branch`) and takes its authority from the record on `main` (`FF` only) unless `--owner-words` quotes the Owner; a range that changes only `.atc/tasks/` runs the record check in place of the verifier, `--task` naming one of its records; `docs/TASKS.md` § Authority on `main` states the checks. A task identity string needs `--project`. `--reviewed` and `--rebased` take the full SHA or a unique prefix of 12 or more characters, resolved once to the full SHA the record holds; an ambiguous prefix stops with `AMBIGUOUS_SHA`. A task identity string and a records-only range integrate the one local branch at the reviewed SHA; `--check` resolves, preflights and warns without a slot or candidate; human output prints project names and 12-character SHAs, `--json` the full values |
 | `task` | `task_records.py` | `new --scope TEXT`, `list [--all] [--status S] [--json]`, `check [DIR]` task records under `.atc/tasks/` (`docs/TASKS.md`); `--project NAME` as `worktree` takes it |
 | `worktree` | `hami_worktree.py` | `create`, `resume`, `audit`, `cleanup` per-topic worktrees with identity in git; `audit` says whether each worktree is removable (merged into `main` and clean); `--project root` for this checkout's own topics under `worktrees/root/`; human output names `<project>/<worktree>`, `--json` the path |

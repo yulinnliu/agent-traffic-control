@@ -32,6 +32,7 @@ the one thing every agent and every language already has.
 | Prose outranks git | Truth order: runtime evidence, then git and files, then design records, then handoff notes, then tool memory |
 | Orphan worktrees | Owner, topic and session live in the worktree's git lock reason; any tool can read who holds it |
 | Capability mistaken for authority | Effective authority is the intersection of task grant, governance and project policy; hard deny, approval required and permission presets are data, generated into each harness's own config |
+| Unreviewed code reaching `main` | `atc integrate` fast-forwards `main` only to the exact SHA a reviewer passed, on the Owner's word for that SHA, bound by the task record in `.atc/tasks/`, after the integration verifier passes on the candidate |
 
 ## What is here
 
@@ -44,11 +45,22 @@ the one thing every agent and every language already has.
 | `shared/conformance/` | Language-neutral fixtures every tool implementation must pass |
 | `scripts/` | POSIX sh entry points that need no language runtime: install and check skill adapters |
 | `adapters/python/` | The Python reference implementation of the tools |
+| `adapters/python/atc-testkit/` | The test kit behind `atc test` and `atc tmp`, which projects vendor as a wheel |
+| `.atc/tasks/` | This repository's task records |
+| `docs/` | How the tools work: `WORKFLOW.md` walks one task; `LAYOUT.md`, `TASKS.md`, `TESTKIT.md`, `ENFORCEMENT.md` and `ATC_HOME.md` are the references |
 | `workspace.yaml.example` | The machine-local map from project name to repository, worktree and state roots |
 
 Contracts are files: Markdown rules, YAML policies, JSON Schemas, git
 metadata. Tools are replaceable implementations of those contracts. Python is
 the reference implementation, not a requirement.
+
+atc-testkit is the pytest side of the verification contract: test categories
+and stages, an isolated environment per run, scratch copies of an exact
+commit, and the skeletons of a project's pre-push gate and integration
+verifier. `atc test` runs tests on a scratch copy and keeps the output in a
+log; `atc tmp` makes, lists and deletes those scratches. A project vendors
+the wheel this repository builds, so its CI needs nothing from this
+checkout. `docs/TESTKIT.md` is the reference.
 
 ## Installation
 
@@ -86,19 +98,18 @@ uv tool install -e atc/adapters/python
 
 ```sh
 git clone https://github.com/yulinnliu/agent-traffic-control.git atc
-cd atc/adapters/python
-uv run --locked python scripts/bootstrap.py init                        # workspace.yaml, projects/ worktrees/ state/
-uv run --locked python scripts/bootstrap.py add my-project --url <url>  # clone, register, onboard, validate
-uv run --locked python scripts/bootstrap.py status                      # doctor plus a dry onboarding check
+uv tool install -e atc/adapters/python
+cd atc
+atc bootstrap init                          # workspace.yaml, projects/ worktrees/ state/
+atc bootstrap add my-project --url <url>    # clone, register, onboard, validate
+atc bootstrap status                        # doctor plus a dry onboarding check
 ```
 
 `add` also takes `--skills atc-worktree,hami-writing-for-agents` to install
 opt-in adapters beside the baseline ones, and accepts a checkout you already
-placed at `projects/<name>` when `--url` is omitted. This path adds the
-worktree, preflight, policy and friction tools behind one command, `atc`
-(`uv run atc --help`, or `uv tool install -e .` to have it on PATH); the
-layout it expects is in `docs/LAYOUT.md`, and `docs/WORKFLOW.md` walks one
-task from worktree to push with the command of each step. `atc` finds the workspace from the
+placed at `projects/<name>` when `--url` is omitted. The layout it expects is
+in `docs/LAYOUT.md`, and `docs/WORKFLOW.md` walks one task from worktree to
+push with the command of each step. `atc` finds the workspace from the
 nearest `workspace.yaml` above the working directory or from the checkout it
 was installed from; `ATC_ROOT` is an optional override, never a requirement.
 
@@ -110,11 +121,35 @@ this repository changes they are re-rendered, never edited:
 ```sh
 atc/scripts/check-skills.sh path/to/your-repo                           # current / drifted / orphaned / stale
 atc/scripts/link-skills.sh --prune path/to/your-repo                    # repair
-uv run atc bootstrap sync --prune                                       # every registered project, committed on its main, then validate
+atc bootstrap sync --prune                                              # every registered project, committed on its main, then validate
 ```
 
 Every rendered file carries `managed-by: agent-traffic-control`; a file
 without it is project-owned and never touched.
+
+## Commands
+
+`atc <command> --help` gives the flags; `adapters/python/README.md` lists
+them in one table.
+
+| Command | Does | Reference |
+| --- | --- | --- |
+| `atc worktree` | Creates, resumes, audits and cleans up per-topic worktrees; `--project root` for this repository's own | skill `atc-worktree` |
+| `atc task` | `new` writes a task record, `list` lists tasks, `check` checks records | `docs/TASKS.md` |
+| `atc integrate` | Fast-forwards `main` to a reviewed SHA once the verifier passes; `--check` only resolves and preflights | `docs/WORKFLOW.md` § 6–7, governance `GIT_WORKFLOW.md` |
+| `atc verify` | Runs the integration verifier on the candidate `atc integrate` would build, moving no ref | `docs/WORKFLOW.md` § 5 |
+| `atc close-out` | Removes a task's worktree, scratches and reports | `docs/TASKS.md` § Close-out |
+| `atc preflight` | `push` lists what `origin/main..main` would publish, by integration; reads only | `docs/WORKFLOW.md` § 8 |
+| `atc test` | Runs tests on a scratch copy into a log; `mutants` checks guards; `private` runs a command on a private desktop | `docs/TESTKIT.md` § Commands |
+| `atc tmp` | Exports a commit into a scratch with its environment; lists, cleans and prunes scratches | `docs/TESTKIT.md` § Commands, `docs/ATC_HOME.md` |
+| `atc bootstrap` | `init`, `add`, `sync`, `status`: sets up a workspace and keeps registered projects current | § Installation |
+| `atc onboard` | Checks or syncs one project's managed files; `--root-only` re-renders this repository's skill copies | `docs/LAYOUT.md` |
+| `atc validate` | Checks skill copies, task records and this repository's contract; `--projects` checks registered projects | `docs/LAYOUT.md`, `docs/ENFORCEMENT.md` § Drift |
+| `atc doctor` | Reports whether this machine is ready to run the tools (`READY`, `NOT_INITIALIZED`, `ERROR`), changing nothing | `atc doctor --help` |
+| `atc policies` | `check` validates a policy directory against its schemas and refuses contradictions | `shared/policies/schemas/` |
+| `atc enforce` | Generates each harness's deny configuration from `hard-deny.yaml`; `--check` reports drift | `docs/ENFORCEMENT.md` |
+| `atc classify` | Rates a list of changed paths `LOW` or `HIGH` under an escalation policy; `HIGH` means an independent review first | `atc classify --help` |
+| `atc friction` | Appends incidents and their resolutions to an append-only log under `state/workspace-friction/`; lists them and summarises their recurrence | `atc friction --help` |
 
 ## Skills
 
@@ -144,17 +179,9 @@ with the evidence. `GLOSSARY.md` defines the terms the rules use.
 Release 0.1.0 (git tag `v0.1.0`; the Python adapter carries the same
 version). Governance, policies, schemas, skills, conformance fixtures and
 the Python reference implementation are in place. The `validate.yml` GitHub
-Actions workflow is manually dispatched; when run, it checks policy examples
-against their schemas, and exercises the shell installer and Python suite on
-Linux and Windows. Files installed into a repository carry no format
-version of their own: they are current when they equal what this release
-renders, and sync replaces them otherwise. `atc enforce` renders hard denies
-per access mode, refuses unresolvable tokens and, with `--check`, compares
-installed copies too; from `workspace.yaml` it also renders a machine-local
-deny on each project's state root, kept out of `generated/enforcement/`.
-`atc validate --projects` checks each project's
-generated enforcement and, on `main`, that the revision in its `.atc/atc.lock`
-is in `main`'s history.
+Actions workflow runs only when dispatched by hand: it checks the policy
+examples against their schemas and runs the shell installer and the full
+Python suite on Linux and Windows.
 
 ## License
 

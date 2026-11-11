@@ -212,21 +212,50 @@ this order:
   verdict a pass.
 - The gate and the verifier of a project share one selection policy and one
   stage definition, which is what lets a record of one be reused by the other.
-- The workspace root builds the testkit and vendors no wheel. Its verifier
-  is the same skeleton, imported from the tree, with the rows a consumer's
-  data feeds absent: no selection hook, lock, contract, lint or collection
-  row. Its own rows carry its own tokens: after the ancestry rows it reads
-  the range, and a range Git cannot read refuses with `RANGE_UNREADABLE`;
-  its static checks follow, then the stages. Its documentation-only
-  predicate and its test selection are the root's data (root `AGENTS.md`
-  § Integration verification): `test_paths` maps the range to the pytest
-  paths the stages run in `tests_dir`, `[]` for the default suite and `None`
-  for none, which skips the stages, and a failure of it refuses with
-  `SELECTION_FAILED`; a documentation-only range skips the selection and the
-  stages. It writes no verification report.
-  § Isolated environment, § Running and
-  logging and the working-directory rules bind it as they bind a project's
-  verifier.
+
+### The workspace root's verifier
+
+The workspace root builds the testkit and vendors no wheel. Root `AGENTS.md`
+§ Integration verification names its argv file, which runs
+`adapters/python/scripts/integration_verify.py` in the candidate's own
+`adapters/python/.venv/` built from `uv.lock`. That script supplies the
+root's data to the same skeleton, imported from the tree, with the rows a
+consumer's data feeds absent: no selection hook, lock, contract, lint or
+collection row. § Isolated environment, § Running and logging and the
+working-directory rules bind it as they bind a project's verifier.
+
+- Its own rows carry its own tokens: after the ancestry rows it reads the
+  range, and a range Git cannot read refuses with `RANGE_UNREADABLE`; its
+  static checks follow, then the stages.
+- Static checks: `git diff --check` of the range and the static checks of
+  the `python-adapter` job in `.github/workflows/validate.yml`, run from
+  `adapters/python`: `uv run --locked python scripts/validate_workspace.py`
+  and `uv run --locked python scripts/policies.py check
+  ../../shared/policies/examples`.
+- Selection: in place of the job's full run of the stages, `test_paths`
+  maps the range through `select_tests.py` (`adapters/python/README.md`
+  § Selected tests) to the pytest paths the stages run in `tests_dir`: `[]`
+  for the full suite, where the selector's rules widen to it, and `None` for
+  none, which skips the stages. A failure of it refuses with
+  `SELECTION_FAILED`.
+- Documentation-only (`VERIFICATION.md` § Documentation-only verification),
+  decided by consumers: a range is documentation-only, and skips the
+  selection and the stages, when every path is Markdown under `docs/`, a
+  task record under `.atc/tasks/`, or Markdown the selection maps to no test
+  file. Markdown a test reads or a tool renders (the guidance, skills and
+  their managed copies, the root's top-level Markdown) selects its readers
+  and is not documentation-only. The caller never chooses the exception.
+  The log line `classification: full` names every range that is not
+  documentation-only; the selector's lines after it say which tests ran.
+- The candidate has no `workspace.yaml`, `projects/`, `worktrees/` or
+  `state/`, so the checks read the committed tree only, as CI does.
+- It writes no verification report, so `atc integrate` records no evidence
+  for the root.
+- The full suite, and with it the check that fails a session whose tests
+  read the root's guidance undeclared (`ROOT_READ_UNDECLARED`), runs only in
+  a manually dispatched run of `.github/workflows/validate.yml`
+  (`VERIFICATION.md` § Full regression timing and evidence reuse); the
+  Owner starts it.
 
 ## Child processes
 

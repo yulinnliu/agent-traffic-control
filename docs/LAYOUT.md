@@ -53,7 +53,10 @@ Operational description of the tree; governance semantics live under
 - `.atc/atc.lock` — `version` (the lock format, `1`), `source` (the governance
   repository, `owner/name`) and `revision` (the full ATC SHA of the last sync
   that changed a file sync writes into the repository), as TOML strings
-  except `version`.
+  except `version`. On `main`, `atc validate --projects` checks that this
+  revision is in `main`'s history. The files sync writes carry no format
+  version of their own: they are current when they equal what the locked
+  revision renders, and sync replaces them otherwise.
 - `.atc/tasks/<task_id>.yaml` — the repository's own task records, declared by
   `## Task records` in its `AGENTS.md` (`docs/TASKS.md`).
 - `.claude/skills/<name>/`, `.agents/skills/<name>/`, `.dsh/skills/<name>/` —

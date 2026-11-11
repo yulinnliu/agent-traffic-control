@@ -1,6 +1,6 @@
 """Verify the candidate checkout ``atc integrate`` prepared for this repository (AGENTS.md "Integration verification").
 
-The root's data for the verifier skeleton (docs/TESTKIT.md § Integration verifier, the workspace-root paragraph),
+The root's data for the verifier skeleton (docs/TESTKIT.md § The workspace root's verifier),
 imported from the candidate's own tree: the environment ``scripts/integration-verify.json`` builds from ``uv.lock``
 under the candidate's ignored ``adapters/python/.venv/`` installs ``atc_testkit`` from there. The skeleton runs the
 testkit's stages over ``select_tests.py``'s selection of the integration range; the full suite runs in a dispatched
