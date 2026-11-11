@@ -507,7 +507,7 @@ def test_a_result_line_stays_on_stdout_and_a_refusal_goes_to_stderr(atc_tmp: Pat
     assert captured.out == f"DELETED {atc_tmp / 's'}\n" and captured.err == ""
     assert commands.main(["tmp", "clean", "systmp"]) == 1
     captured = capsys.readouterr()
-    assert captured.out.startswith("REFUSED ") and captured.err == ""
+    assert captured.out.startswith("REFUSED ") and captured.err.startswith("STOP SCRATCH_REFUSED: 1 refused;")
 
 
 def test_mutants_need_the_export(export: Export, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -557,10 +557,27 @@ def test_a_wrong_command_exits_two(arguments: tuple[str, ...], atc_tmp: Path, ca
 def test_atc_reaches_the_package_with_its_arguments_and_returns_its_exit_code(
         monkeypatch: pytest.MonkeyPatch, arguments: list[str], attribute: str, module, expected: tuple) -> None:
     seen = []
-    monkeypatch.setattr(module, attribute, lambda *args, **kwargs: seen.append(args + ((kwargs,) if kwargs else ()))
-                        or 41)
+
+    def record(*args, say=None, **kwargs):
+        assert say is None or callable(say)  # tmp clean and prune pass the line printer that counts REFUSED lines
+        seen.append(args + ((kwargs,) if kwargs else ()))
+        return 41
+    monkeypatch.setattr(module, attribute, record)
     assert atc_cli.main(arguments) == 41
     assert seen == [expected]
+
+
+def test_a_prune_refusal_ends_with_a_stop_line_on_stderr(monkeypatch: pytest.MonkeyPatch,
+                                                          capsys: pytest.CaptureFixture[str]) -> None:
+    def refusing(*, say):
+        say("DELETED a")
+        say("REFUSED b (is itself a link)")
+        return 1
+    monkeypatch.setattr(scratch, "prune", refusing)
+    assert commands.main(["tmp", "prune"]) == 1
+    captured = capsys.readouterr()
+    assert captured.out.splitlines() == ["DELETED a", "REFUSED b (is itself a link)"]
+    assert captured.err.startswith("STOP PRUNE_REFUSED: 1 refused;")
 
 
 @pytest.mark.integration

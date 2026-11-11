@@ -102,7 +102,25 @@ def _clean(arguments: Sequence[str]) -> int:
     arguments = arguments[1:] if with_runs else arguments
     if not arguments or any(argument.startswith("--") for argument in arguments):
         return _usage(usage)
-    return scratch.clean(arguments, with_runs=with_runs)
+    return _reporting_refusals("SCRATCH_REFUSED", lambda say: scratch.clean(arguments, with_runs=with_runs, say=say))
+
+
+def _reporting_refusals(token: str, run) -> int:
+    """Run a deletion that prints one line per item; on a refusal, end with `STOP <TOKEN>: ...` on stderr.
+
+    shared/conformance/CLI.md § Exit codes: the first stderr line of an exit-1 refusal is that line.
+    """
+    refused = []
+
+    def say(line: str) -> None:
+        print(line)
+        if line.startswith("REFUSED "):
+            refused.append(line)
+    code = run(say)
+    if code and refused:
+        print(f"STOP {token}: {len(refused)} refused; each REFUSED line on stdout names the item and why",
+              file=sys.stderr)
+    return code
 
 
 def _dispatch(arguments: Sequence[str]) -> int:
@@ -133,7 +151,7 @@ def _dispatch(arguments: Sequence[str]) -> int:
         return scratch.list_scratches(as_json=True) if rest else scratch.list_scratches()
     if rest:
         return _usage(USAGES[command])
-    return scratch.prune()
+    return _reporting_refusals("PRUNE_REFUSED", lambda say: scratch.prune(say=say))
 
 
 def main(argv: Sequence[str] | None = None) -> int:

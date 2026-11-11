@@ -187,6 +187,8 @@ def main(argv: list[str] | None = None, root: Path = task_records.ROOT, environ:
         code = cli_conventions.OK
     else:
         code = cli_conventions.PARTIAL if counts["DELETED"] else cli_conventions.STOP
+        print(f"STOP ITEM_REFUSED: {counts['REFUSED']} refused, {counts['DELETED']} deleted; each REFUSED item "
+              f"names the path and why", file=sys.stderr)
     if args.json:
         items = []
         for line in lines:

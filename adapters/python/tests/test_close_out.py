@@ -140,10 +140,11 @@ def test_a_bad_keep_list_is_refused(ws: Workspace, atc_tmp: Path, capsys: pytest
 def test_a_worktree_cleanup_refuses_is_reported(done, capsys: pytest.CaptureFixture[str]) -> None:
     ws, topic, environ = done
     commit(topic, {"later.txt": "x\n"})
-    code, lines, _err = close(ws, environ, capsys, ws.root)
+    code, lines, err = close(ws, environ, capsys, ws.root)
     assert lines[0].startswith(f"REFUSED {topic} (") and topic.is_dir()
     assert lines[-1].endswith(", 1 refused")
     assert code == (3 if any(line.startswith("DELETED ") for line in lines) else 1)
+    assert err.splitlines()[0].startswith("STOP ITEM_REFUSED: 1 refused, ")
 
 
 def test_without_a_target_the_task_prefix_names_its_repository(ws: Workspace, atc_tmp: Path, tmp_path: Path,

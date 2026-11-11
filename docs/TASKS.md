@@ -150,7 +150,9 @@ is permanent. An item a `--skip` names (`worktree`, `scratches` or
 is written; a `--skip` of an absent item does nothing. Every item ends on one line,
 `DELETED`, `SKIPPED` or `REFUSED` with the reason, and a last line counts
 them; the exit code is 0 when none is `REFUSED`, 3 when one is `REFUSED`
-and another `DELETED`, else 1. `--json` prints the items and counts.
+and another `DELETED`, else 1. A refusal also prints
+`STOP ITEM_REFUSED: <count> refused, <count> deleted; ...` on stderr.
+`--json` prints the items and counts.
 
 `atc validate` runs the check on this repository and `atc validate
 --projects` on every registered project. A check reports: a file that is not

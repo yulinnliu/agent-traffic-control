@@ -210,9 +210,11 @@ the same checks, and the single recursive delete in ATC's temporary tooling runs
    `REFUSED`.
 6. A deleted `<dir>` prints `DELETED` and loses its registry line.
 
-Each `<dir>` ends on one line: `DELETED`, `SKIPPED` or `REFUSED` with the
-reason; an error while handling a `<dir>` is a `REFUSED` with the error. The exit code is the highest across all of them: 0, 1 for a refusal
-at steps 3 to 5, 2 for a refusal at step 1.
+Each `<dir>` ends on one line on stdout: `DELETED`, `SKIPPED` or `REFUSED`
+with the reason; an error while handling a `<dir>` is a `REFUSED` with the
+error. The exit code is 0, or 1 when any `<dir>` is refused, and a refusal
+also prints `STOP SCRATCH_REFUSED: <count> refused; ...` on stderr
+(`shared/conformance/CLI.md` § Exit codes).
 
 A scratch's dependent runs are the other registered scratches whose `tree`
 lies inside it, such as the mutant and test runs made on its export. After
@@ -237,6 +239,9 @@ expected, except a working directory of the verifier or of the gate.
   `.git` file names; a tree Git refuses to
   remove prints `REFUSED` with Git's message and is left. A report file, and
   a tree Git no longer knows, are handled as any other entry.
+
+A refused entry makes the exit code 1 and prints
+`STOP PRUNE_REFUSED: <count> refused; ...` on stderr.
 
 It reports registered scratches older than seven days and deletes none.
 
