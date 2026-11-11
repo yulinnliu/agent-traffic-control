@@ -453,10 +453,11 @@ with `integrate_main: true` is the Owner's integration authority for `FF`
 after an unconditional PASS on the exact SHA, never for `NO_FF`
 (`AUTHORITY_NOT_FF`), a push or a deploy.
 
-Who runs which form is split by flag:
+The Owner runs every `atc integrate` but `--check`; no agent runs it.
+Authority is split by flag:
 
-- whoever the project's rules let integrate runs `atc integrate --task <ID>`
-  on the record's authority;
+- on the record's authority the Owner runs `atc integrate --task <ID>`
+  without `--owner-words` (§ Owner-run commands);
 - only the coordinator, who hears the Owner, writes a record's `authority`;
 - `--owner-words` carries the Owner's decision: the Owner runs the
   integration command the coordinator gives (§ Owner-run commands), with
