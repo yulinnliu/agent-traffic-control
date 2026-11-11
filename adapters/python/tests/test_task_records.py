@@ -594,3 +594,14 @@ def test_start_is_partial_when_the_written_record_cannot_be_undone(
     assert json.loads(out)["refusal"]["verdict"] == "PARTIAL"
     assert written.is_file()
     assert task_id in backlog(ws)
+
+
+def test_a_dropped_prerequisite_no_longer_blocks_and_is_marked(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    dropped = plan(ws, capsys, "--scope", "dropped")
+    waiting = plan(ws, capsys, "--scope", "waiting")
+    task_id = plan(ws, capsys, "--scope", "next", "--rank", "1", "--after", dropped, waiting)
+    assert ws.cli(capsys, "drop", dropped, "--note", "n", "--project", PROJECT, cwd=ws.root)[0] == 0
+    row = ws.listing(capsys, "--status", "planned")[task_id]
+    assert (row["blocked_by"], row["after_dropped"]) == ([waiting], [dropped])
+    status, out, _ = ws.cli(capsys, "list", "--project", PROJECT, "--status", "planned", cwd=ws.root)
+    assert out.splitlines()[0] == f"{task_id}  planned  -  next  rank 1  BLOCKED by {waiting}  after {dropped} (dropped)"

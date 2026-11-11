@@ -582,8 +582,11 @@ def tasks(name: str, repo: Path, fold_warnings: bool = False) -> list[dict]:
             "after": [a for a in after if isinstance(a, str)] if isinstance(after, list) else [],
         })
     done = {row["task_id"] for row in rows if row["status"] in DONE}
+    dropped = {row["task_id"] for row in rows if row["status"] == "abandoned"}
     for row in rows:
-        row["blocked_by"] = [a for a in row["after"] if a not in done] if row["status"] == "planned" else []
+        waiting = row["after"] if row["status"] == "planned" else []
+        row["after_dropped"] = [a for a in waiting if a in dropped]
+        row["blocked_by"] = [a for a in waiting if a not in done and a not in dropped]
     return rows
 
 
@@ -604,6 +607,7 @@ def render(rows: list[dict], with_project: bool) -> str:
             cells.append(f"rank {row['rank']}")
         if row["blocked_by"]:
             cells.append(f"BLOCKED by {','.join(row['blocked_by'])}")
+        cells += [f"after {a} (dropped)" for a in row["after_dropped"]]
         lines.append("  ".join(cells) + ("  CONFLICT" if row["conflict"] else ""))
     return "\n".join(lines)
 
