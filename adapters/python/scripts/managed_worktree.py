@@ -1016,7 +1016,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="atc worktree", allow_abbrev=False, **cli_conventions.form(
         "Create, resume, audit and clean per-topic worktrees from the workspace map.",
         exit=WORKTREE_EXIT,
-        see="the atc-worktree skill"))
+        see="shared/skills/atc-worktree/SKILL.md § Commands"))
     sub = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
     summaries = {
         "create": "create the topic's worktree and branch from main (or --base-sha)",
@@ -1029,7 +1029,7 @@ def build_parser() -> argparse.ArgumentParser:
         aliases = ["cleanup"] if name == "clean" else []
         commands[name] = sub.add_parser(name, aliases=aliases, allow_abbrev=False, help=summary,
                                         **cli_conventions.form(summary[0].upper() + summary[1:] + ".",
-                                                               exit=WORKTREE_EXIT, see="the atc-worktree skill"))
+                                                               exit=WORKTREE_EXIT, see="shared/skills/atc-worktree/SKILL.md § Commands"))
     for name, p in commands.items():
         identity_required = name != "audit"
         cli_conventions.add_project(p, ", whose worktrees live under worktrees/root (default: the working "

@@ -53,6 +53,8 @@ def test_every_help_page_ends_with_exit_and_see_lines(subcommand: tuple[str, ...
     block = capsys.readouterr().out.rstrip().split("\n\n")[-1].splitlines()
     assert block[0].startswith("Exit: ") and re.fullmatch(r"See: \S.+", block[-1]), block
     assert sum(line.startswith(("Exit: ", "See: ")) for line in block) == 2, block
+    for reference in block[-1].removeprefix("See: ").split("; "):
+        assert re.fullmatch(r"\S+\.md § \S.*", reference), f"{reference!r} names no document and section"
 
 
 def test_top_level_help_groups_every_command(capsys: pytest.CaptureFixture[str]) -> None:

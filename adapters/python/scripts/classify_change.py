@@ -47,7 +47,7 @@ def main(argv: list[str] | None = None) -> int:
         "Classify a delegated change LOW or HIGH under an escalation policy.",
         "HIGH wins whenever a high_if_any trigger fires; otherwise LOW only when every path matches low_only_if.",
         exit="0 either verdict; 2 ERROR (unreadable or invalid policy or change list)",
-        see="shared/policies/schemas/escalation.schema.json"))
+        see="README.md § Commands"))
     parser.add_argument("--policy", type=Path, required=True, metavar="FILE", help="the escalation.yaml to apply")
     parser.add_argument("--changed", type=Path, required=True, metavar="FILE",
                         help="a file listing one repo-relative changed path per line")

@@ -233,7 +233,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="atc enforce", allow_abbrev=False, **cli_conventions.form(
         __doc__.splitlines()[0], "\n".join(__doc__.strip().splitlines()[2:]),
         exit="0 generated, or current under --check; 1 drift under --check, or a policy problem; 2 usage error",
-        see="docs/ENFORCEMENT.md"))
+        see="docs/ENFORCEMENT.md § Outputs, § Drift"))
     parser.add_argument("--policies", type=Path, required=True, metavar="DIR",
                         help="the policy directory holding hard-deny.yaml")
     parser.add_argument("--out", type=Path, required=True, metavar="DIR",

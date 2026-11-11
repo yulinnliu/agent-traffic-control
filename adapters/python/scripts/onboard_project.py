@@ -639,7 +639,7 @@ def build_parser() -> argparse.ArgumentParser:
         "Owned: CLAUDE.md when absent, the AGENTS.md pointer line, .atc/ (README.md, atc.lock,\n"
         "governance/) and one managed adapter per baseline skill. --sync commits on each project's main.",
         exit="0 current or synced; 1 STOP (drift under --check, a collision, a sync precondition); 2 ERROR",
-        see="docs/LAYOUT.md; GIT_WORKFLOW.md § Governance sync commits"))
+        see="docs/LAYOUT.md § Inside a consuming repository; GIT_WORKFLOW.md § Governance sync commits"))
     modes = parser.add_mutually_exclusive_group(required=True)
     modes.add_argument("--check", action="store_const", const="check", dest="mode",
                        help="write nothing; exit 1 when a sync would change anything")
