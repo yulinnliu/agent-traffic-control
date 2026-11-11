@@ -65,9 +65,10 @@ prints `LOG <path>` and one summary line; the log holds the rest
 (`docs/TESTKIT.md` § Commands). The root's own suite also runs through
 `python -m atc_testkit.ci --stages` from `adapters/python`. A command that
 opens windows runs under `atc test private` (`docs/TESTKIT.md` § Private
-desktop). A root writer also runs `atc validate`,
-`atc onboard --sync --root-only` and `atc policies check` as root
-`AGENTS.md` § Changing this repo says.
+desktop). A root writer also runs the checks its change calls for, such as
+`atc onboard --sync --root-only` then `atc validate` after a skill change and
+`atc policies check` after a schema or example change; root `AGENTS.md`
+§ Changing this repo says which apply.
 
 - `VENV_MISSING`: the tree has no `.venv`; make the scratch with
   `atc tmp checkout`.

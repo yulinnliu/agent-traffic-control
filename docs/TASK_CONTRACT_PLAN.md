@@ -576,8 +576,8 @@ review, one implementation review and one integration:
        treat as the user's approval (seen once in four Hami relays).
      - Several writers integrating at once into one `main`.
      - A root writer cannot remove the worktree its session runs in.
-     - Projects carry vendored governance and skills that say the
-       coordinator integrates and never forwards `--owner-words`.
+     - Projects carry vendored governance and skills from before the
+       relay rule until the final sync brings them the current ones.
      - A relayed quote is the coordinator's copy of the Owner's words.
    - Mitigations:
      - A refused writer stops and replies `refused`; the coordinator
