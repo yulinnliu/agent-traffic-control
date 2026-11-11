@@ -13,6 +13,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
+import cli_conventions
+
 ROOT = Path(__file__).resolve().parents[3]
 FRICTION_DIR = ROOT / "state" / "workspace-friction"
 EVENTS_FILE = FRICTION_DIR / "events.jsonl"
@@ -120,12 +122,16 @@ def project_state(records: Iterable[dict]) -> tuple[dict[str, dict], dict[str, d
     return incidents, resolutions
 
 
+class AlreadyResolved(ValueError):
+    """The incident already has a resolution event."""
+
+
 def resolve_incident(event_id: str, evidence: str, events_file: Path = EVENTS_FILE) -> dict:
     incidents, resolutions = project_state(load_records(events_file))
     if event_id not in incidents:
         raise ValueError(f"incident {event_id!r} does not exist")
     if event_id in resolutions:
-        raise ValueError(f"incident {event_id!r} is already resolved")
+        raise AlreadyResolved(f"incident {event_id!r} is already resolved")
     return append_record(
         {
             "event_id": new_event_id(),
@@ -193,14 +199,16 @@ def print_summary(events_file: Path, group_field: str, as_json: bool = False) ->
         print(f"{key}  {len(group)}  {open_count}  {projects}  {tools}  {threshold(group)}")
 
 
+FRICTION_EXIT = "0 OK; 1 the incident is already resolved; 2 usage error, an invalid kind, an unknown event or an unreadable log"
+
+
 def build_parser() -> argparse.ArgumentParser:
-    import cli_conventions
     parser = argparse.ArgumentParser(prog="atc friction", allow_abbrev=False, **cli_conventions.form(
         "Append-only friction incident log with replayed resolution state.",
-        exit="0 OK; 1 an unreadable log or unknown event; 2 usage error"))
+        exit=FRICTION_EXIT, see="README.md § Commands"))
     subparsers = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
     add = subparsers.add_parser("add", allow_abbrev=False, help="append one incident",
-                                **cli_conventions.form("Append one friction incident to the log."))
+                                **cli_conventions.form("Append one friction incident to the log.", exit=FRICTION_EXIT, see="README.md § Commands"))
     add.add_argument("--kind", required=True, choices=ALLOWED_KINDS, help="the incident's kind")
     add.add_argument("--project", required=True, metavar="NAME",
                      help="the repository where it happened (free text; need not be registered)")
@@ -214,19 +222,20 @@ def build_parser() -> argparse.ArgumentParser:
     add.add_argument("--recurrence-key", required=True, metavar="KEY", help="groups incidents of the same cause")
 
     list_parser = subparsers.add_parser("list", allow_abbrev=False, help="list incidents, open ones by default",
-                                        **cli_conventions.form("List friction incidents, oldest first."))
+                                        **cli_conventions.form("List friction incidents, oldest first.", exit=FRICTION_EXIT, see="README.md § Commands"))
     shown = list_parser.add_mutually_exclusive_group()
     shown.add_argument("--open", action="store_true", dest="open_only", help="only unresolved incidents (default)")
     shown.add_argument("--all", action="store_true", help="resolved incidents too")
 
     summary = subparsers.add_parser("summary", allow_abbrev=False, help="summarize incident recurrence",
                                     **cli_conventions.form("Summarize incidents by recurrence, with each group's "
-                                                           "escalation threshold."))
+                                                           "escalation threshold.", exit=FRICTION_EXIT, see="README.md § Commands"))
     summary.add_argument("--group", choices=("recurrence_key",), default="recurrence_key",
                          help="the field incidents are grouped by")
 
     resolve = subparsers.add_parser("resolve", allow_abbrev=False, help="append a resolution event",
-                                    **cli_conventions.form("Append a resolution event for one incident."))
+                                    **cli_conventions.form("Append a resolution event for one incident.",
+                                                           exit=FRICTION_EXIT, see="README.md § Commands"))
     resolve.add_argument("event_id", metavar="EVENT_ID", help="the incident to resolve")
     resolve.add_argument("--evidence", required=True, metavar="TEXT", help="where the fix can be seen")
     for p in (add, list_parser, summary, resolve):
@@ -262,9 +271,12 @@ def main(argv: list[str] | None = None, events_file: Path = EVENTS_FILE) -> int:
             print(json.dumps({"verdict": "APPENDED", "event": event}, indent=2) if args.json
                   else f"friction: appended resolution {event['event_id']} for {args.event_id}")
         return 0
+    except AlreadyResolved as exc:
+        print(f"STOP ALREADY_RESOLVED: {exc}", file=sys.stderr)
+        return cli_conventions.STOP
     except ValueError as exc:
-        print(f"friction: {exc}", file=sys.stderr)
-        return 1
+        print(f"ERROR FRICTION_INPUT {exc}", file=sys.stderr)
+        return cli_conventions.ERROR
 
 
 if __name__ == "__main__":

@@ -17,10 +17,9 @@ JSON_HELP = "print the result as one JSON object (shared/conformance/CLI.md § O
 NEXT_RELEASE = "0.4.0"
 
 
-def form(summary: str, detail: str | None = None, exit: str | None = None, see: str | None = None) -> dict:
+def form(summary: str, detail: str | None = None, *, exit: str, see: str) -> dict:
     """The keyword arguments of one help page: summary, optional detail, then `Exit:` and `See:` lines (CLI.md § Help)."""
-    tail = "\n".join(line for line in (exit and f"Exit: {exit}", see and f"See: {see}") if line)
-    return {"description": summary + (f"\n\n{detail}" if detail else ""), "epilog": tail or None,
+    return {"description": summary + (f"\n\n{detail}" if detail else ""), "epilog": f"Exit: {exit}\nSee: {see}",
             "formatter_class": argparse.RawDescriptionHelpFormatter}
 
 

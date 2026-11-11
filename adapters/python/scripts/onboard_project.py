@@ -704,12 +704,12 @@ def apply(name: str, root: Path = ROOT) -> int:
     try:
         projects = load_projects(root)
         if name not in projects:
-            print(f"'{name}' is not registered in workspace.yaml.", file=sys.stderr)
-            return 2
+            print(f"ERROR PROJECT_UNKNOWN '{name}' is not registered in workspace.yaml", file=sys.stderr)
+            return cli_conventions.ERROR
         return run("apply", [(name, (root / projects[name]["repo"]).resolve())], root, False)
     except ValueError as exc:
-        print(f"onboard: {exc}", file=sys.stderr)
-        return 2
+        print(f"ERROR ONBOARD {exc}", file=sys.stderr)
+        return cli_conventions.ERROR
 
 
 if __name__ == "__main__":

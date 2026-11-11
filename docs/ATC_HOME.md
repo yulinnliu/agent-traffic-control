@@ -195,7 +195,7 @@ the same checks, and the single recursive delete in ATC's temporary tooling runs
 
 1. Each `<dir>` is resolved first. One that is not a direct child of `<tmp>`
    through real directories, or that carries a reserved name, prints
-   `REFUSED` with the reason, and the command exits 2 before anything is
+   `REFUSED` with the reason, and the command exits 1 before anything is
    deleted.
 2. A missing `<dir>` prints `SKIPPED` and loses its registry line.
 3. A `<dir>` that is not a directory, or is itself a link, prints `REFUSED`.

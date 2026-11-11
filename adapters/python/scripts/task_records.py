@@ -415,16 +415,19 @@ def render(rows: list[dict], with_project: bool) -> str:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="atc task", allow_abbrev=False, **cli_conventions.form(
-        "Write, list and check task records under .atc/tasks/.", see="docs/TASKS.md"))
+        "Write, list and check task records under .atc/tasks/.",
+        exit="0 OK; 1 STOP or problems found; 2 ERROR", see="docs/TASKS.md § Commands"))
     sub = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
     new_parser = sub.add_parser("new", allow_abbrev=False, help="write a record in the current topic worktree",
                                 **cli_conventions.form(
                                     "Write a record for the topic worktree holding the working directory.",
-                                    exit="0 created; 1 STOP (not a topic worktree, no declaration); 2 ERROR"))
+                                    exit="0 created; 1 STOP (not a topic worktree, no declaration); 2 ERROR",
+                                    see="docs/TASKS.md § Commands"))
     new_parser.add_argument("--scope", required=True, metavar="TEXT", help="what the task covers, one sentence")
     list_parser = sub.add_parser("list", allow_abbrev=False, help="list tasks with their derived status",
                                  **cli_conventions.form("List tasks from the records on main and every local branch, "
-                                                        "with their derived status."))
+                                                        "with their derived status.",
+                                                        exit="0 listed; 2 ERROR", see="docs/TASKS.md § Status"))
     for p in (new_parser, list_parser):
         target = p.add_mutually_exclusive_group()
         cli_conventions.add_project(target, " (default: the working directory's project)")
@@ -434,7 +437,8 @@ def build_parser() -> argparse.ArgumentParser:
     check_parser = sub.add_parser("check", allow_abbrev=False, help="check the records in a working tree",
                                   **cli_conventions.form("Check the records and the task declaration in a working "
                                                          "tree, one problem per line.",
-                                                         exit="0 no problem; 1 problems found; 2 ERROR"))
+                                                         exit="0 no problem; 1 problems found; 2 ERROR",
+                                                         see="docs/TASKS.md § Record"))
     check_parser.add_argument("directory", nargs="?", type=Path, metavar="DIR",
                               help="the working tree (default: the one holding the working directory)")
     for p in (new_parser, list_parser, check_parser):

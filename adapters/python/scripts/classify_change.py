@@ -46,7 +46,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="atc classify", allow_abbrev=False, **cli_conventions.form(
         "Classify a delegated change LOW or HIGH under an escalation policy.",
         "HIGH wins whenever a high_if_any trigger fires; otherwise LOW only when every path matches low_only_if.",
-        exit="0 either verdict; 2 ERROR (unreadable or invalid policy or change list)"))
+        exit="0 either verdict; 2 ERROR (unreadable or invalid policy or change list)",
+        see="shared/policies/schemas/escalation.schema.json"))
     parser.add_argument("--policy", type=Path, required=True, metavar="FILE", help="the escalation.yaml to apply")
     parser.add_argument("--changed", type=Path, required=True, metavar="FILE",
                         help="a file listing one repo-relative changed path per line")
@@ -57,23 +58,24 @@ def main(argv: list[str] | None = None) -> int:
     cli_conventions.add_json(parser)
     args = parser.parse_args(argv)
 
-    def refuse(problems: list[str]) -> int:
+    def refuse(token: str, problems: list[str]) -> int:
+        """`ERROR <TOKEN> <first problem>` on stderr, then one line per further problem (CLI.md § Exit codes)."""
         if args.json:
-            print(json.dumps({"verdict": "ERROR", "problems": problems}, indent=2))
+            print(json.dumps({"verdict": "ERROR", "reason": token, "problems": problems}, indent=2))
         else:
-            print("\n".join(problems))
+            print("\n".join([f"ERROR {token} {problems[0]}", *problems[1:]]), file=sys.stderr)
         return cli_conventions.ERROR
 
     try:
         loaded = policies.load(args.policy.parent, args.schemas)
     except policies.PolicyError as exc:
-        return refuse(list(exc.problems))
+        return refuse("POLICY_INVALID", list(exc.problems))
     if "escalation" not in loaded or args.policy.name != "escalation.yaml":
-        return refuse([f"{args.policy}: expected an escalation.yaml"])
+        return refuse("POLICY_NOT_ESCALATION", [f"{args.policy}: expected an escalation.yaml"])
     try:
         changed = [line.strip() for line in args.changed.read_text(encoding="utf-8").splitlines() if line.strip()]
     except OSError as exc:
-        return refuse([f"{args.changed}: {exc.strerror or exc}"])
+        return refuse("CHANGED_UNREADABLE", [f"{args.changed}: {exc.strerror or exc}"])
     verdict, reason = classify(loaded["escalation"], changed, args.severity)
     if args.json:
         print(json.dumps({"verdict": verdict, "reason": reason, "changed": len(changed)}, indent=2))

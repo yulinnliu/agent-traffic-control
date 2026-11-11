@@ -277,10 +277,11 @@ def mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None = None
     """``atc test mutants <scratch> <sha> <worktree> <mutants.json> --python <py> --tests <path>...``."""
     parser = argparse.ArgumentParser(
         prog="atc test mutants", allow_abbrev=False,
-        description="Apply each mutant alone to <scratch>/tree and run the tests on it (docs/TESTKIT.md § Commands).",
-        epilog="Exit: 0 when every mutant ran and every file is restored, survivors named on the last line; 1 for a "
-               "red baseline, an aborted run or a restore mismatch; 9 for a refusal before the baseline, 8 for an "
-               "import-guard refusal.")
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="Apply each mutant alone to <scratch>/tree and run the tests on it.",
+        epilog="Exit: 0 when every mutant ran and every file is restored, survivors named on the last line; 1 for a\n"
+               "red baseline, an aborted run or a restore mismatch; 9 for a refusal before the baseline, 8 for an\n"
+               "import-guard refusal.\nSee: docs/TESTKIT.md § Commands")
     parser.add_argument("scratch", metavar="NAME", help="scratch name; NAME/tree holds the export of SHA")
     parser.add_argument("sha", metavar="SHA",
                         help="commit the export was made from; touched files are compared with it at the end")
@@ -484,9 +485,10 @@ def run(argv: Sequence[str], environ: MutableMapping[str, str] | None = None) ->
         argv, pytest_arguments = argv[:at], argv[at + 1:]
     parser = argparse.ArgumentParser(
         prog="atc test run", allow_abbrev=False,
-        description="One isolated pytest run in a scratch, its output kept in a log (docs/TESTKIT.md § Commands).",
-        epilog="Exit: pytest's code; 124 after --timeout, 130 when interrupted; 8 for a guard refusal, "
-               "9 for a refusal before the run.")
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="One isolated pytest run in a scratch, its output kept in a log.",
+        epilog="Exit: pytest's code; 124 after --timeout, 130 when interrupted; 8 for a guard refusal,\n"
+               "9 for a refusal before the run.\nSee: docs/TESTKIT.md § Commands")
     parser.add_argument("--scratch", required=True, metavar="NAME",
                         help="scratch name, a direct child of the ATC temporary root")
     parser.add_argument("--tree", metavar="DIR", help="the tree the tests run in (default: the tree the scratch's registry line "

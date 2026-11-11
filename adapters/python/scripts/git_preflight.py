@@ -545,7 +545,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
     push = sub.add_parser("push", allow_abbrev=False, help="fetch origin and list what a push of main would carry",
                           **cli_conventions.form("Fetch origin and list what a push of main would carry.",
-                                                 exit="0 PUSH; 1 STOP; 2 ERROR"))
+                                                 exit="0 PUSH; 1 STOP; 2 ERROR",
+                                                 see="GIT_WORKFLOW.md § Publication boundary"))
     cli_conventions.add_project(push, " (default: the working directory's project)")
     push.add_argument("--integration", metavar="SHA",
                       help="candidate SHA whose commits carry push approval; every other commit is flagged")

@@ -69,10 +69,11 @@ def checkout(argv: Sequence[str], environ: Mapping[str, str] | None = None, run:
     """``atc tmp checkout <sha> --task <ID>``: export, register, then sync; refusals exit 9, a failed sync 1."""
     parser = argparse.ArgumentParser(
         prog="atc tmp checkout", allow_abbrev=False,
-        description="Export <sha> into <tmp>/<scratch>/tree, register the scratch with its task, source worktree "
-                    "and commit, and build its environment with the tree's toolchain, `uv sync --locked` for Python "
-                    "(docs/ATC_HOME.md § Checkout).",
-        epilog="Exit: 0 when the environment is built; 1 for a failed sync; 9 for a refusal.")
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="Export <sha> into <tmp>/<scratch>/tree, register the scratch with its task, source worktree\n"
+                    "and commit, and build its environment with the tree's toolchain, `uv sync --locked` for Python.",
+        epilog="Exit: 0 when the environment is built; 1 for a failed sync; 9 for a refusal.\n"
+               "See: docs/ATC_HOME.md § Checkout")
     parser.add_argument("sha", metavar="SHA", help="the commit to export: a full SHA or a unique prefix")
     parser.add_argument("--task", required=True, metavar="ID",
                         help="the task ID the scratch belongs to, for example ATC-0008")

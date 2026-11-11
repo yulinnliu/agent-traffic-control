@@ -505,7 +505,7 @@ def test_a_result_line_stays_on_stdout_and_a_refusal_goes_to_stderr(atc_tmp: Pat
     assert commands.main(["tmp", "clean", "s"]) == 0
     captured = capsys.readouterr()
     assert captured.out == f"DELETED {atc_tmp / 's'}\n" and captured.err == ""
-    assert commands.main(["tmp", "clean", "systmp"]) == 2
+    assert commands.main(["tmp", "clean", "systmp"]) == 1
     captured = capsys.readouterr()
     assert captured.out.startswith("REFUSED ") and captured.err == ""
 

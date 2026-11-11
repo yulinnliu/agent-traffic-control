@@ -1008,11 +1008,14 @@ def full_sha_arg(value: str) -> str:
     return value.lower()
 
 
+WORKTREE_EXIT = "0 OK; 1 a refusal or an audit finding; 2 ERROR (usage, environment, contract)"
+
+
 def build_parser() -> argparse.ArgumentParser:
     import cli_conventions
     parser = argparse.ArgumentParser(prog="atc worktree", allow_abbrev=False, **cli_conventions.form(
         "Create, resume, audit and clean per-topic worktrees from the workspace map.",
-        exit="0 OK; 1 a refusal or an audit finding; 2 ERROR (usage, environment, contract)",
+        exit=WORKTREE_EXIT,
         see="the atc-worktree skill"))
     sub = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
     summaries = {
@@ -1025,7 +1028,8 @@ def build_parser() -> argparse.ArgumentParser:
     for name, summary in summaries.items():
         aliases = ["cleanup"] if name == "clean" else []
         commands[name] = sub.add_parser(name, aliases=aliases, allow_abbrev=False, help=summary,
-                                        **cli_conventions.form(summary[0].upper() + summary[1:] + "."))
+                                        **cli_conventions.form(summary[0].upper() + summary[1:] + ".",
+                                                               exit=WORKTREE_EXIT, see="the atc-worktree skill"))
     for name, p in commands.items():
         identity_required = name != "audit"
         cli_conventions.add_project(p, ", whose worktrees live under worktrees/root (default: the working "

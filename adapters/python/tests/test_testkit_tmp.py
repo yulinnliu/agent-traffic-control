@@ -158,7 +158,7 @@ def test_a_path_not_inside_the_root_refuses_the_whole_run(tmp_path: Path, atc_tm
            "under_link": atc_tmp / "link" / "tree", "nested": inside / "tree", "systmp": atc_tmp / "systmp",
            "candidates": "candidates", "SYSTMP": "SYSTMP", "named_dotdot": ".."}[where]
     code, lines = clean(inside, bad)
-    assert code == 2
+    assert code == 1
     assert len(lines) == 1 and lines[0].startswith("REFUSED ")
     assert (inside / "qdr/data.txt").is_file() and (outside / "tree/src/pkg/__init__.py").is_file()
     assert (atc_tmp / "systmp").is_dir()
@@ -169,7 +169,7 @@ def test_a_directory_under_a_link_back_into_the_root_is_refused(atc_tmp: Path) -
     victim = scratch_dir(atc_tmp, "victim")
     link_directory(atc_tmp / "loop", atc_tmp)
     code, lines = clean(atc_tmp / "loop" / "victim")
-    assert code == 2 and lines[0].startswith("REFUSED ") and victim.is_dir()
+    assert code == 1 and lines[0].startswith("REFUSED ") and victim.is_dir()
     unlink_directory(atc_tmp / "loop")
 
 
@@ -201,7 +201,7 @@ windows = pytest.mark.skipif(os.name != "nt", reason="a form of a name only Wind
 def test_a_reserved_name_typed_in_its_short_form_is_refused(atc_tmp: Path) -> None:
     held = write(atc_tmp / "candidates/keep.txt")
     code, lines = clean(short_form(atc_tmp / "candidates"))
-    assert code == 2 and len(lines) == 1 and lines[0].startswith("REFUSED ") and "reserved name" in lines[0]
+    assert code == 1 and len(lines) == 1 and lines[0].startswith("REFUSED ") and "reserved name" in lines[0]
     assert held.is_file()
 
 
@@ -220,7 +220,7 @@ def test_a_scratch_typed_in_its_short_form_is_the_scratch(atc_tmp: Path) -> None
 def test_a_stream_form_is_refused(atc_tmp: Path, name: str, stream: str, bare: bool) -> None:
     held = write(atc_tmp / name / "keep.txt")
     code, lines = clean(name + stream if bare else f"{atc_tmp}{os.sep}{name}{stream}")
-    assert code == 2 and len(lines) == 1 and lines[0].startswith("REFUSED ")
+    assert code == 1 and len(lines) == 1 and lines[0].startswith("REFUSED ")
     assert held.is_file()
 
 
@@ -230,7 +230,7 @@ def test_a_name_windows_trims_to_a_reserved_one_is_refused(atc_tmp: Path, typed:
     (atc_tmp / "candidates").mkdir()
     held = write(atc_tmp / "systmp/keep.txt")
     code, lines = clean(typed)
-    assert code == 2 and lines[0].startswith("REFUSED ") and held.is_file()
+    assert code == 1 and lines[0].startswith("REFUSED ") and held.is_file()
 
 
 @windows
@@ -238,13 +238,13 @@ def test_a_name_windows_trims_to_a_reserved_one_is_refused(atc_tmp: Path, typed:
 def test_a_device_form_of_a_reserved_name_is_refused(atc_tmp: Path, prefix: str) -> None:
     held = write(atc_tmp / "systmp/keep.txt")
     code, lines = clean(f"{prefix}{atc_tmp}{os.sep}systmp")
-    assert code == 2 and lines[0].startswith("REFUSED ") and held.is_file()
+    assert code == 1 and lines[0].startswith("REFUSED ") and held.is_file()
 
 
 def test_a_name_outside_the_scratch_form_is_refused(atc_tmp: Path) -> None:
     held = write(atc_tmp / "a name/keep.txt")
     code, lines = clean(atc_tmp / "a name")
-    assert code == 2 and "not a scratch name" in lines[0] and held.is_file()
+    assert code == 1 and "not a scratch name" in lines[0] and held.is_file()
 
 
 def test_the_recursive_delete_refuses_a_directory_that_is_a_link(tmp_path: Path, atc_tmp: Path) -> None:

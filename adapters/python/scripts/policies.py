@@ -111,12 +111,13 @@ def main(argv: list[str] | None = None) -> int:
     import cli_conventions
     parser = argparse.ArgumentParser(prog="atc policies", allow_abbrev=False, **cli_conventions.form(
         "Load a policy directory, validate each file against its schema, and refuse contradictions.",
-        see="shared/policies/schemas/"))
+        exit="0 ok; 1 problems found; 2 usage error", see="shared/policies/schemas/"))
     sub = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
     check = sub.add_parser("check", allow_abbrev=False, help="validate a policy directory", **cli_conventions.form(
         "Validate the policy files in DIR: hard-deny.yaml, approval-required.yaml, permission-presets.yaml,\n"
         "escalation.yaml. Prints `ok: <kinds>` or one problem per line.",
-        exit="0 ok; 1 problems found, or no policy file in DIR; 2 usage error"))
+        exit="0 ok; 1 problems found, or no policy file in DIR; 2 usage error",
+        see="shared/policies/schemas/"))
     check.add_argument("directory", type=Path, metavar="DIR", help="the policy directory to check")
     check.add_argument("--schemas", type=Path, default=SCHEMAS, metavar="DIR",
                        help="policy schema directory (default: shared/policies/schemas)")

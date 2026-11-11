@@ -76,7 +76,7 @@ An argument error prints the usage line, the error, and
 
 | Exit | Name | Meaning |
 | --- | --- | --- |
-| 0 | OK | Done; a check found nothing; or a verdict was printed (`classify` LOW or HIGH, `preflight` PUSH, `integrate --check` CHECK FF) |
+| 0 | OK | Done; a check found nothing; or a verdict was printed (`classify` LOW or HIGH, `preflight` PUSH, `integrate --check` CHECK FF or CHECK NO_FF) |
 | 1 | STOP | A valid call was refused by the state it found, before it changed anything; or a check or validation found problems or drift |
 | 2 | ERROR | A usage error, invalid input, or a Git or runtime fault |
 | 3 | PARTIAL | Stopped after the action began: `integrate` after its candidate exists, `close-out` after an item was deleted |
@@ -159,12 +159,13 @@ A rename that can keep the old spelling keeps it as an alias for exactly one
 minor version: the version that introduces the new name accepts the old one
 and prints `WARNING DEPRECATED <old>: use <new>; removed in atc <next minor>`
 on stderr, with the exit code and `--json` unchanged, and the next minor
-version removes it. A change that cannot keep an alias (an exit code, a
-`--json` field's meaning, the record or lock format) lands in a minor version
-and the release notes mark it BREAKING; `atc` reads the `atc.lock` and task
-records of the previous minor version, and `onboard --sync` migrates them. A
-breaking change to a governance contract also goes through governance
-`GOVERNANCE_CHANGES.md`.
+version removes it. The rule covers commands, subcommands and options; the
+adapter's internal module and script paths are not part of the CLI. A change
+that cannot keep an alias (an exit code, a `--json` field's meaning, the
+record or lock format) lands in a minor version and the release notes mark it
+BREAKING; `atc` reads the `atc.lock` and task records of the previous minor
+version, and `onboard --sync` migrates them. A breaking change to a governance
+contract also goes through governance `GOVERNANCE_CHANGES.md`.
 
 ## Deprecated forms
 

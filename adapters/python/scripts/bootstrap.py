@@ -57,12 +57,11 @@ def init(root: Path, governance_source: str | None, force: bool, environ: dict[s
     environ = os.environ if environ is None else environ
     target = root / "workspace.yaml"
     if target.exists() and not force:
-        print(f"{target} exists; pass --force to rewrite it")
-        return 1
+        return _stop("WORKSPACE_EXISTS", f"{target} exists; pass --force to rewrite it")
     source = governance_source or origin_slug(root)
     if not source:
-        print("cannot infer governance_source from the origin remote; pass --governance-source OWNER/REPO")
-        return 1
+        return _error("GOVERNANCE_SOURCE_UNKNOWN", "cannot infer governance_source from the origin remote; "
+                      "pass --governance-source OWNER/REPO")
     text = f"{MAP_HEADER}\nversion: 1\n\ngovernance_source: {source}\n\nworkspace_root: {root.as_posix()}\n\nprojects: {{}}\n"
     target.write_text(text, encoding="utf-8", newline="\n")
     for name in ("projects", "worktrees", "state"):
@@ -76,11 +75,22 @@ def init(root: Path, governance_source: str | None, force: bool, environ: dict[s
     return 0
 
 
+def _stop(token: str, detail: str) -> int:
+    """A refusal by the state found, before anything changed (shared/conformance/CLI.md § Exit codes)."""
+    print(f"STOP {token}: {detail}", file=sys.stderr)
+    return cli_conventions.STOP
+
+
+def _error(token: str, detail: str) -> int:
+    """Invalid input or a failed step (shared/conformance/CLI.md § Exit codes)."""
+    print(f"ERROR {token} {detail}", file=sys.stderr)
+    return cli_conventions.ERROR
+
+
 def register(root: Path, name: str) -> dict:
     path = root / "workspace.yaml"
     if not path.is_file():
-        print(f"{path} missing; run `bootstrap.py init` first")
-        raise SystemExit(1)
+        raise SystemExit(_stop("WORKSPACE_MISSING", f"{path} missing; run `atc bootstrap init` first"))
     data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     projects = data.get("projects") or {}
     entry = {"repo": f"projects/{name}", "worktrees": f"worktrees/{name}", "state": f"state/{name}-data"}
@@ -103,16 +113,15 @@ def register(root: Path, name: str) -> dict:
 def install_opt_in(root: Path, project: Path, skills: list[str]) -> None:
     for skill in skills:
         if not (root / "shared" / "skills" / skill / "SKILL.md").is_file():
-            print(f"unknown skill {skill}; see shared/skills/")
-            raise SystemExit(1)
+            raise SystemExit(_error("SKILL_UNKNOWN", f"{skill}; see shared/skills/"))
         metadata = onboard_project.canonical_skills(root)[skill]
         for tool_dir in onboard_project.validator.adapter_dirs(metadata):
             target = project / tool_dir / "skills" / skill / "SKILL.md"
             if target.exists():
                 continue
             if onboard_project.holds_files(target.parent):
-                print(f"collision {target.relative_to(project).as_posix()}: {onboard_project.UNOWNED_DIRECTORY}")
-                raise SystemExit(1)
+                raise SystemExit(_stop("COLLISION", f"{target.relative_to(project).as_posix()}: "
+                                                    f"{onboard_project.UNOWNED_DIRECTORY}"))
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(onboard_project.validator.render_adapter(root, skill, tool_dir), encoding="utf-8", newline="\n")
             onboard_project.apply_plan(onboard_project.supporting_plan(root, skill, target.parent), "sync")
@@ -128,33 +137,30 @@ def validate(root: Path) -> int:
 
 def add(root: Path, name: str, url: str | None, skills: list[str]) -> int:
     if not NAME.match(name):
-        print(f"{name}: use a lowercase hyphenated name")
-        return 1
+        return _error("PROJECT_NAME_INVALID", f"{name}: use a lowercase hyphenated name")
     reserved = validate_workspace.reserved_root_problem(name, f"worktrees/{name}")
     if reserved:
-        print(f"{name}: {reserved}")
-        return 1
+        return _error("PROJECT_NAME_RESERVED", f"{name}: {reserved}")
     project = root / "projects" / name
     if url and URL.match(url):
         if project.exists():
-            print(f"{project} exists; drop --url to register it as is")
-            return 1
+            return _stop("PROJECT_EXISTS", f"{project} exists; drop --url to register it as is")
         print(f"$ git clone {url} {project}")
         if subprocess.call(["git", "clone", url, str(project)]) != 0:
-            return 1
+            return _error("CLONE_FAILED", f"git clone {url} failed")
     elif url:
-        print(f"--url must be a URL; place an existing checkout at {project} and rerun without --url")
-        return 1
+        return _error("URL_INVALID", f"--url must be a URL; place an existing checkout at {project} and rerun "
+                      "without --url")
     if not (project / ".git").exists():
-        print(f"{project} is not a git repository")
-        return 1
+        return _stop("PROJECT_NOT_A_REPOSITORY", f"{project} is not a git repository")
     entry = register(root, name)
     for key in ("worktrees", "state"):
         (root / entry[key]).mkdir(parents=True, exist_ok=True)
     install_opt_in(root, project, skills)
     print(f"$ onboard apply {name}")
-    if onboard_project.apply(name, root=root) != 0:
-        return 1
+    applied = onboard_project.apply(name, root=root)
+    if applied:
+        return applied
     return validate(root)
 
 
@@ -185,16 +191,22 @@ def status(root: Path, as_json: bool = False) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="atc bootstrap", allow_abbrev=False, **cli_conventions.form(
-        "Set up this checkout as a workspace root and bring projects under it.", see="README.md § Installation"))
+        "Set up this checkout as a workspace root and bring projects under it.",
+        exit="0 OK; 1 STOP or drift; 2 ERROR (usage, invalid input, a failed step)", see="README.md § Installation"))
     sub = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
     p_init = sub.add_parser("init", allow_abbrev=False, help="write workspace.yaml and the workspace directories",
                             **cli_conventions.form("Write workspace.yaml with this checkout as workspace_root and "
-                                                   "create projects/, worktrees/ and state/."))
+                                                   "create projects/, worktrees/ and state/.",
+                                                   exit="0 written; 1 workspace.yaml exists (without --force); "
+                                                        "2 ERROR", see="README.md § Installation"))
     p_init.add_argument("--governance-source", metavar="OWNER/REPO",
                         help="the repository governance is read from (default: this checkout's origin)")
     p_init.add_argument("--force", action="store_true", help="overwrite an existing workspace.yaml")
     p_add = sub.add_parser("add", allow_abbrev=False, help="register one project and onboard it",
-                           **cli_conventions.form("Register one project, onboard it and validate the result."))
+                           **cli_conventions.form("Register one project, onboard it and validate the result.",
+                                                  exit="0 registered and onboarded; 1 STOP from onboard or "
+                                                       "validate; 2 ERROR (invalid name or URL, a failed clone)",
+                                                  see="README.md § Installation"))
     targets = p_add.add_mutually_exclusive_group(required=True)
     cli_conventions.add_project(targets, help="the project's name in workspace.yaml and under projects/")
     targets.add_argument("legacy_name", nargs="?", metavar="NAME", help="deprecated: use --project NAME")
@@ -202,12 +214,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_add.add_argument("--skills", default="", metavar="NAME,...", help="comma-separated opt-in skills to install")
     p_sync = sub.add_parser("sync", allow_abbrev=False, help="deprecated: use atc onboard --sync",
                             **cli_conventions.form("Deprecated: runs `atc onboard --sync --all` or "
-                                                   "`atc onboard --sync --project NAME`, then validates."))
+                                                   "`atc onboard --sync --project NAME`, then validates.",
+                                                   exit="as atc onboard, then 1 for validation problems",
+                                                   see="shared/conformance/CLI.md § Deprecated forms"))
     p_sync.add_argument("name", nargs="?", metavar="NAME", help="one project (default: every project)")
     p_sync.add_argument("--prune", action="store_true", help="delete orphaned managed adapters")
     p_status = sub.add_parser("status", allow_abbrev=False, help="run doctor and atc onboard --check --all",
                               **cli_conventions.form("Run doctor and `atc onboard --check --all`; changes nothing.",
-                                                     exit="0 ready and current; 1 an error or drift; 2 usage error"))
+                                                     exit="0 ready and current; 1 an error or drift; 2 usage error",
+                                                     see="README.md § Keeping installed files current"))
     cli_conventions.add_json(p_status)
     return parser
 

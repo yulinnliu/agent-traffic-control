@@ -40,11 +40,19 @@ def test_every_argument_has_help_and_a_typed_metavar(subcommand: tuple[str, ...]
                     f"{parser.prog} {action.option_strings or action.dest}: metavar {action.metavar!r}"
 
 
-@pytest.mark.parametrize("command", ["integrate", "verify", "close-out", "doctor", "validate", "classify", "enforce",
-                                     "onboard"])
-def test_command_help_ends_with_its_exit_codes(command: str, capsys: pytest.CaptureFixture[str]) -> None:
-    assert call([command, "--help"]) == 0
-    assert "\nExit: 0 " in capsys.readouterr().out
+def test_the_help_pages_checked_cover_every_command_and_testkit_usage() -> None:
+    from atc_testkit import commands
+    assert {(name,) for name in [*atc_cli.COMMANDS, *atc_cli.TESTKIT_COMMANDS]} <= set(SUBCOMMANDS)
+    assert set(commands.USAGES) <= set(SUBCOMMANDS)
+
+
+@pytest.mark.parametrize("subcommand", SUBCOMMANDS, ids=" ".join)
+def test_every_help_page_ends_with_exit_and_see_lines(subcommand: tuple[str, ...],
+                                                      capsys: pytest.CaptureFixture[str]) -> None:
+    assert call([*subcommand, "--help"]) == 0
+    block = capsys.readouterr().out.rstrip().split("\n\n")[-1].splitlines()
+    assert block[0].startswith("Exit: ") and re.fullmatch(r"See: \S.+", block[-1]), block
+    assert sum(line.startswith(("Exit: ", "See: ")) for line in block) == 2, block
 
 
 def test_top_level_help_groups_every_command(capsys: pytest.CaptureFixture[str]) -> None:
@@ -99,8 +107,42 @@ def test_classify_exits_2_on_an_unreadable_change_list(tmp_path: Path, capsys: p
     root = Path(atc_cli.__file__).resolve().parents[4]
     policy = root / "shared" / "policies" / "examples" / "escalation.yaml"
     assert classify_change.main(["--policy", str(policy), "--changed", str(tmp_path / "absent.txt")]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == "" and captured.err.startswith("ERROR CHANGED_UNREADABLE ")
     assert classify_change.main(["--policy", str(policy), "--changed", str(tmp_path / "absent.txt"), "--json"]) == 2
-    assert json.loads(capsys.readouterr().out.split("\n", 1)[1])["verdict"] == "ERROR"
+    assert json.loads(capsys.readouterr().out)["reason"] == "CHANGED_UNREADABLE"
+
+
+@pytest.mark.parametrize(("name", "token"), [("Bad_Name", "PROJECT_NAME_INVALID"), ("root", "PROJECT_NAME_RESERVED")])
+def test_bootstrap_add_exits_2_on_an_invalid_name(name: str, token: str, tmp_path: Path,
+                                                  capsys: pytest.CaptureFixture[str]) -> None:
+    import bootstrap
+    assert bootstrap.add(tmp_path, name, None, []) == 2
+    assert capsys.readouterr().err.startswith(f"ERROR {token} ")
+    assert bootstrap.add(tmp_path, "fine", "not a url", []) == 2
+    assert capsys.readouterr().err.startswith("ERROR URL_INVALID ")
+
+
+def test_onboard_apply_names_an_unknown_project(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    import onboard_project
+    (tmp_path / "workspace.yaml").write_text(f"version: 1\nworkspace_root: {tmp_path.as_posix()}\nprojects: {{}}\n",
+                                             encoding="utf-8")
+    assert onboard_project.apply("absent", root=tmp_path) == 2
+    assert capsys.readouterr().err.startswith("ERROR PROJECT_UNKNOWN ")
+
+
+def test_friction_exits_2_on_an_unknown_event_and_1_on_a_resolved_one(tmp_path: Path,
+                                                                     capsys: pytest.CaptureFixture[str]) -> None:
+    import friction
+    log = tmp_path / "events.jsonl"
+    assert friction.main(["resolve", "absent", "--evidence", "x"], events_file=log) == 2
+    assert capsys.readouterr().err.startswith("ERROR FRICTION_INPUT ")
+    event = friction.append_incident(kind=friction.ALLOWED_KINDS[0], project="p", tool="t", policy_key=None, skill=None,
+                                  session_id=None, expected="e", observed="o", evidence="v", recurrence_key="k",
+                                  events_file=log)
+    assert friction.main(["resolve", event["event_id"], "--evidence", "x"], events_file=log) == 0
+    assert friction.main(["resolve", event["event_id"], "--evidence", "x"], events_file=log) == 1
+    assert "STOP ALREADY_RESOLVED: " in capsys.readouterr().err
 
 
 def test_a_deprecated_bootstrap_sync_warns_and_runs_onboard(monkeypatch: pytest.MonkeyPatch, tmp_path: Path,

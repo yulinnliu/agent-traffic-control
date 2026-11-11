@@ -39,7 +39,10 @@ GROUP_SUMMARIES = {"test": "Isolated pytest runs.", "tmp": "Scratch checkouts un
 DESCRIPTIONS = {
     ("test", "private"): """Run one command on a private desktop from the current directory with the current
 environment; print `desktop: private` (or `desktop: interactive` where none can be
-created), stream its merged output and exit with its code (docs/TESTKIT.md § Commands).""",
+created), stream its merged output and exit with its code.
+
+Exit: the command's code; 2 without a command.
+See: docs/TESTKIT.md § Commands""",
     ("tmp", "list"): """Print one line per registered scratch: its name, its tree relative to the scratch
 (the full path when the tree lies outside it), its age, `missing` when the directory is
 gone, and its task; delete nothing. A last line counts the missing ones and names
@@ -47,6 +50,7 @@ gone, and its task; delete nothing. A last line counts the missing ones and name
 
   --json          every registry field of each scratch plus `size` in bytes (null when missing)
 
+Exit: 0 listed; 2 usage error.
 See: docs/ATC_HOME.md § Scratch registry""",
     ("tmp", "clean"): f"""Delete the scratches you name.
 
@@ -54,10 +58,12 @@ See: docs/ATC_HOME.md § Scratch registry""",
   {WITH_RUNS_OPTION}             also delete each scratch's dependent runs, the scratches
                           whose registered tree is inside it; without it they are listed
 
-Exit: 0, 1 for a refused directory, 2 before anything is deleted.
+Exit: 0 every scratch deleted; 1 a refused or unresolved directory (nothing is deleted when one does
+not resolve); 2 usage error.
 See: docs/ATC_HOME.md § Deleting""",
     ("tmp", "prune"): """Delete entries of <tmp>/systmp and <tmp>/candidates older than seven days.
 
+Exit: 0 nothing refused; 1 an entry refused; 2 usage error.
 See: docs/ATC_HOME.md § Deleting""",
 }
 GROUPS = {"test": ("run", "mutants", "private"), "tmp": ("checkout", "list", "clean", "prune")}
@@ -71,7 +77,9 @@ def _group_help(group: str) -> str:
     width = max(len(name) for name in GROUPS[group])
     lines = [f"usage: atc {group} COMMAND ...", "", GROUP_SUMMARIES[group], "", "commands:"]
     lines += [f"  {name:<{width}}  {SUMMARIES[(group, name)]}" for name in GROUPS[group]]
-    return "\n".join(lines + ["", f"Run `atc {group} COMMAND --help` for one command."])
+    return "\n".join(lines + ["", f"Run `atc {group} COMMAND --help` for one command.", "",
+                              "Exit: 0 for --help; each command's codes are in its own help.",
+                              "See: docs/TESTKIT.md § Commands"])
 
 
 def _asks_help(arguments: Sequence[str]) -> bool:

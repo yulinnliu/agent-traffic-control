@@ -167,7 +167,8 @@ def diagnose(root: Path = ROOT, environ: dict[str, str] | None = None, checkout:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="atc doctor", allow_abbrev=False, **cli_conventions.form(
         "Diagnose local Agent Traffic Control runtime readiness; changes nothing.",
-        exit="0 every check READY or NOT_INITIALIZED; 1 a check reports ERROR; 2 usage error"))
+        exit="0 every check READY or NOT_INITIALIZED; 1 a check reports ERROR; 2 usage error",
+        see="README.md § Commands"))
     cli_conventions.add_json(parser)
     return parser
 

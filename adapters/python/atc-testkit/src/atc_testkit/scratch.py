@@ -339,7 +339,7 @@ def clean(arguments: Sequence[str], *, say: Callable[[str], None] = print, envir
         else:
             directories.append(directory)
     if len(directories) != len(chosen):
-        return 2
+        return 1
     ordered: list[str] = []
     for directory in directories:
         for run in dependent_runs(root, directory):
