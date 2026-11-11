@@ -260,7 +260,13 @@ When verification passes with a valid report, the adapter writes an evidence
 record for the candidate under the repository's Git common directory after
 `main` is updated and read back. A missing or invalid report leaves
 integration unaffected and writes no record. The report and record formats
-are defined in `shared/conformance/verification-evidence/README.md`.
+are defined in `shared/conformance/verification-evidence/README.md`. `atc verify`
+writes a record of its own candidate, passed or failed, apart from the
+records the pre-push gate reads; within the active slot `atc integrate`
+reuses its latest passing one in place of rerunning the verifier when the
+candidate tree, expected main, reviewed SHA, verifier argv and timeout,
+platform, dependency inputs, selector and time slack all match, and names
+the reused record in its evidence and integration record.
 
 Apart from that evidence, the adapter records every integration that updates
 `main`, with or without a verification report, as one JSON line in
