@@ -1043,7 +1043,9 @@ def test_failed_verification_writes_no_record(repo: Path, capsys: pytest.Capture
     assert main_tip(repo) == before
     assert records(repo) == []
     assert leftover_reports() == []
-    failed = json.loads(gi.candidate_record_path(repo, "FF", before, tip).read_text(encoding="utf-8"))
+    failed_path = gi.candidate_record_path(repo, "FF", before, tip)
+    assert failed_path.is_file()
+    failed = json.loads(failed_path.read_text(encoding="utf-8"))
     assert (failed["result"], failed["clean"], failed["report"]) == ("FAIL", False, None)
 
 

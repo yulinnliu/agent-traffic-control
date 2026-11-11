@@ -81,7 +81,7 @@ def test_integrate_reuses_a_passing_verify_of_the_same_candidate(
         captured.err.splitlines()
     evidence = json.loads(Path(data["evidence"]).read_text(encoding="utf-8"))
     note = {"record": out["candidate_record"], "candidate_sha": tip, "verified_at": record["verified_at"]}
-    assert evidence["reused"] == note and evidence["report"] == record["report"]
+    assert evidence.get("reused") == note and evidence["report"] == record["report"]
     line = json.loads((repo / ".git" / "atc" / "integrations.jsonl").read_text(encoding="utf-8").splitlines()[-1])
     assert line["verification_evidence"] == note
 
@@ -111,7 +111,7 @@ def test_a_merge_candidate_is_reused_when_its_tree_matches(
     assert run_count(runs) == 1 and data["verification_reuse"] == "REUSED"
     assert run_git(repo, "rev-parse", f"{data['candidate_sha']}^{{tree}}") == record["tree"]
     evidence = json.loads(Path(data["evidence"]).read_text(encoding="utf-8"))
-    assert evidence["reused"]["candidate_sha"] == record["candidate_sha"] != data["candidate_sha"]
+    assert (evidence.get("reused") or {}).get("candidate_sha") == record["candidate_sha"] != data["candidate_sha"]
 
 
 def tamper(repo: Path, base: str, tip: str, change) -> None:
