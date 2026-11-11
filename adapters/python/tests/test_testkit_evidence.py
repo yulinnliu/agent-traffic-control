@@ -411,6 +411,13 @@ def test_report_carries_the_compared_fields(tmp_path: Path) -> None:
     assert gi._valid_report(report)
 
 
+@pytest.mark.unit
+def test_the_report_records_the_slack_the_environment_sets(tmp_path: Path) -> None:
+    target = tmp_path / "report.json"
+    ev.write_report({ev.REPORT_ENV: str(target), "ATC_TEST_TIME_SLACK": "5"}, tmp_path, [A], STAGES)
+    assert json.loads(target.read_text(encoding="utf-8"))["time_slack"] == 5.0
+
+
 def test_module_version_matches_the_package() -> None:
     assert f"`atc-testkit` {atc_testkit.__version__};" in (TESTKIT_SRC.parent / "README.md").read_text(encoding="utf-8")
     assert (ev.REPORT_SCHEMA, ev.RECORD_SCHEMA) == (gi.REPORT_SCHEMAS[-1], gi.EVIDENCE_SCHEMA)
