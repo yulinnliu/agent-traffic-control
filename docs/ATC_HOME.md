@@ -189,10 +189,8 @@ so classification costs no path length.
 
 ## Deleting
 
-`atc tmp clean <dir>...` deletes scratches; `atc tmp clean --tree-name <name>`
-takes its directories from the registry rows whose `project` column is
-`<name>`. Both pass every directory through the same checks, and the single
-recursive delete in ATC's temporary tooling runs only at the end of them.
+`atc tmp clean <dir>...` deletes scratches. Every directory passes through
+the same checks, and the single recursive delete in ATC's temporary tooling runs only at the end of them.
 
 1. Each `<dir>` is resolved first. One that is not a direct child of `<tmp>`
    through real directories, or that carries a reserved name, prints

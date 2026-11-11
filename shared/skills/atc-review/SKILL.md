@@ -90,7 +90,7 @@ After a PASS the reviewed SHA is frozen; fixes go in new commits.
 
 Where the project runs its tests through `atc-testkit`, run targeted tests
 against the worktree with
-`atc test run <worktree> <scratch> <python> <label> <pytest args...>`;
+`atc test run --scratch <scratch> --tree <worktree> [--python <py>] -- <pytest args...>`;
 elsewhere the targeted test commands are the ones the project's `AGENTS.md`
 names. `<scratch>` is a name; the run creates it as `<tmp>/<scratch>`, where
 `<tmp>` is `~/.atc/tmp`, or `ATC_TMP` when that is set. The run removes every

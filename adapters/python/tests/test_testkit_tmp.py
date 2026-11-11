@@ -42,9 +42,9 @@ def scratch_dir(root: Path, name: str) -> Path:
     return root / name
 
 
-def clean(*dirs: Path | str, tree_name: str | None = None) -> tuple[int, list[str]]:
+def clean(*dirs: Path | str) -> tuple[int, list[str]]:
     lines: list[str] = []
-    code = scratch.clean([str(item) for item in dirs], tree_name, say=lines.append)
+    code = scratch.clean([str(item) for item in dirs], say=lines.append)
     return code, lines
 
 
@@ -247,13 +247,6 @@ def test_a_name_outside_the_scratch_form_is_refused(atc_tmp: Path) -> None:
     assert code == 2 and "not a scratch name" in lines[0] and held.is_file()
 
 
-def test_the_registry_passes_the_same_name_checks(atc_tmp: Path) -> None:
-    held = write(atc_tmp / "systmp/keep.txt")
-    scratch.register(atc_tmp, f"{atc_tmp}{os.sep}systmp.x:y", atc_tmp)
-    code, lines = clean(tree_name=atc_tmp.name)
-    assert code == 2 and lines[0].startswith("REFUSED ") and held.is_file()
-
-
 def test_the_recursive_delete_refuses_a_directory_that_is_a_link(tmp_path: Path, atc_tmp: Path) -> None:
     link = atc_tmp / "link"
     link_directory(link, target(tmp_path, "victim"))
@@ -355,24 +348,6 @@ def test_the_only_recursive_delete_rescans_for_links_first() -> None:
     source = (package / "scratch.py").read_text(encoding="utf-8")
     body = source[source.index("def remove_tree"):source.index("shutil.rmtree(")]
     assert "left = _links(directory)" in body and "if left:" in body and "return f\"{len(left)} links remain" in body
-
-
-@pytest.mark.unit
-def test_clean_by_tree_name_takes_its_directories_from_the_registry(atc_tmp: Path) -> None:
-    one, two = scratch_dir(atc_tmp, "one"), scratch_dir(atc_tmp, "two")
-    scratch.register(atc_tmp, one, write(one / "tree/pyproject.toml", '[project]\nname = "alpha"\n').parent)
-    scratch.register(atc_tmp, two, write(two / "tree/pyproject.toml", '[project]\nname = "beta"\n').parent)
-    assert clean(tree_name="alpha") == (0, [f"DELETED {one}"])
-    assert two.is_dir() and registered_names(atc_tmp) == ["two"]
-    assert clean(tree_name="absent") == (0, [])
-
-
-@pytest.mark.unit
-def test_clean_by_tree_name_passes_the_same_checks(atc_tmp: Path, tmp_path: Path) -> None:
-    outside = scratch_dir(tmp_path, "outside")
-    scratch.register(atc_tmp, outside, outside / "tree")
-    code, lines = clean(tree_name="tree")
-    assert code == 2 and lines[0].startswith("REFUSED ") and outside.is_dir()
 
 
 # the registry

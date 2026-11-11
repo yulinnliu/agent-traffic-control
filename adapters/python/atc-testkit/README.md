@@ -106,8 +106,7 @@ diagnostics. A project supplies data.
   `atc tmp checkout|list|clean|prune` run a test tree under a scratch directory on
   a private desktop, kill mutants of a committed tree, run one command on a
   private desktop, and export commits into and manage the scratch registry; `python -m atc_testkit.commands` is the same entry point.
-  `-h` after a subcommand prints its help and exits 0. `atc tmp clean
-  --tree-name <name>` takes the registry rows of one tree. A refusal token goes to stderr; the per-directory lines `DELETED`, `SKIPPED`,
+  `-h` after a subcommand prints its help and exits 0. A refusal token goes to stderr; the per-directory lines `DELETED`, `SKIPPED`,
   `REFUSED`, `ANOMALY` and `LEFT` are the normal output of `atc tmp` on stdout.
 - `atc test mutants` counts `KILLED` only for pytest exit 1 with a `FAILED` line.
   Every other ending of a mutated run (a setup `ERROR` alone, exits 2 to 5, a

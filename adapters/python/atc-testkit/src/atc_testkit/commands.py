@@ -14,12 +14,10 @@ from .locations import Refusal
 
 USAGE_EXIT = 2
 HELP_OPTIONS = ("-h", "--help")
-TREE_NAME_OPTION = "--tree-name"
 WITH_RUNS_OPTION = "--with-runs"
 
 USAGES = {
-    ("test", "run"): "usage: atc test run <tree> <scratch> <python> <label> <pytest args...>\n"
-                     "       atc test run --scratch <name> [--tree <tree>] [--python <py>] [--select <base>] "
+    ("test", "run"): "usage: atc test run --scratch <name> [--tree <tree>] [--python <py>] [--select <base>] "
                      "[--label <label>] [--timeout <s>] [--progress] [-- <pytest args...>]",
     ("test", "mutants"): "usage: atc test mutants <scratch> <sha> <worktree> <mutants.json> --python <py> "
                          "--tests <path>...",
@@ -27,23 +25,10 @@ USAGES = {
     ("tmp", "checkout"): "usage: atc tmp checkout <sha> --task <ID> [--worktree <path>] [--scratch <name>] "
                          "[--lock-dir <dir>]",
     ("tmp", "list"): "usage: atc tmp list [--json]",
-    ("tmp", "clean"): f"usage: atc tmp clean [{WITH_RUNS_OPTION}] (<dir>... | {TREE_NAME_OPTION} <name>)",
+    ("tmp", "clean"): f"usage: atc tmp clean [{WITH_RUNS_OPTION}] <dir>...",
     ("tmp", "prune"): "usage: atc tmp prune",
 }
 DESCRIPTIONS = {
-    ("test", "run"): """One isolated pytest run inside <tree> (docs/TESTKIT.md § Commands).
-
-  <tree>          worktree or exported copy the tests run in
-  <scratch>       scratch name, a direct child of the ATC temporary root
-  <python>        interpreter that runs pytest: a path, or a name on PATH
-  <label>         name printed as `== <label> ==` before the run
-  <pytest args>   passed to pytest after the isolation options
-
-The flag form keeps pytest's output in <scratch>/runs/ and prints the log
-path and one summary line; `atc test run --scratch x --help` lists its options.
-
-Exit: pytest's code, 8 for a guard refusal, 9 for a refusal before the run (a location or
-ATC_PRIVATE_DESKTOP).""",
     ("test", "private"): """Run one command on a private desktop from the current directory with the current
 environment; print `desktop: private` (or `desktop: interactive` where none can be
 created), stream its merged output and exit with its code (docs/TESTKIT.md § Commands).""",
@@ -58,8 +43,6 @@ gone, and its task; delete nothing. A last line counts the missing ones and name
     ("tmp", "clean"): f"""Delete scratches (docs/ATC_HOME.md § Deleting).
 
   <dir>...                scratches under the ATC temporary root
-  {TREE_NAME_OPTION} <name>       every scratch whose registry `project` column is <name>:
-                          the tree's [project].name, else its directory name
   {WITH_RUNS_OPTION}             also delete each scratch's dependent runs, the scratches
                           whose registered tree is inside it; without it they are listed
 
@@ -92,10 +75,6 @@ def _clean(arguments: Sequence[str]) -> int:
     usage = USAGES[("tmp", "clean")]
     with_runs = arguments[:1] == [WITH_RUNS_OPTION]
     arguments = arguments[1:] if with_runs else arguments
-    if arguments[:1] == [TREE_NAME_OPTION]:
-        if len(arguments) != 2:
-            return _usage(usage)
-        return scratch.clean((), arguments[1], with_runs=with_runs)
     if not arguments or any(argument.startswith("--") for argument in arguments):
         return _usage(usage)
     return scratch.clean(arguments, with_runs=with_runs)
@@ -110,14 +89,14 @@ def _dispatch(arguments: Sequence[str]) -> int:
     command, rest = tuple(arguments[:2]), arguments[2:]
     if command not in USAGES:
         return _usage(_group_usage(group))
+    if command == ("test", "run"):
+        return testrun.run(rest)
     if command == ("test", "mutants"):
         return testrun.mutants(rest)
     if command == ("tmp", "checkout"):
         return checkout.checkout(rest)
     if _asks_help(rest):
         return _help(f"{USAGES[command]}\n\n{DESCRIPTIONS[command]}")
-    if command == ("test", "run"):
-        return testrun.run(rest)
     if command == ("test", "private"):
         rest = rest[1:] if rest[:1] == ["--"] else rest
         if not rest:

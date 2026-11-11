@@ -1653,8 +1653,9 @@ atc-coordinator seeded in hami-quant and hami-quant-trading).
 ## CLI trim before the final sync
 
 Project skills name the removed flags until the final sync, which follows the
-trim's integration immediately, replaces them. Items 1-5 are done; items 6
-and 7 are deferred to the next atc-testkit release, after the final sync.
+trim's integration immediately, replaces them. Items 1-5 are done; ATC-0015
+drops `tmp clean --tree-name`, the positional form of `atc test run` and
+`atc preflight merge`.
 
 1. `--authority-reference` goes; `--task` becomes required.
    - Side effects: a repository without `## Task records` (heartopia) has
@@ -1678,16 +1679,7 @@ and 7 are deferred to the next atc-testkit release, after the final sync.
    - Side effects: `atc bootstrap add` calls it.
    - Mitigations: `bootstrap` calls the apply mode as a function, and its
      `--repo URL` becomes `--url URL`; the adapter README row changes with it.
-6. Deferred: drop `tmp clean --tree-name`; `close-out --task` replaces it.
-   - Side effects: `atc-review` and 8 project skill files use it.
-   - Mitigations: the final sync moves them to `close-out --task` first.
-7. Deferred: drop `atc test run`'s positional form (D.12). `atc preflight
-   merge` already refuses and names `atc integrate --check`, since the trim
-   leaves it no `--branch` to forward.
-   - Side effects: vendored governance and project skills that still name
-     them.
-   - Mitigations: the final sync carries C's governance and skills first.
-8. `friction`, `classify`, `policies`, `enforce` and `bootstrap` stay:
+6. `friction`, `classify`, `policies`, `enforce` and `bootstrap` stay:
    `enforce` and `bootstrap` have root and project references,
    `scripts/policies.py` runs in CI, and `friction` and `classify` carry no cost
    while unused.

@@ -36,6 +36,13 @@ def run_command(*args: str, cwd: Path | None = None, **env: str) -> subprocess.C
                           capture_output=True, text=True, encoding="utf-8", stdin=subprocess.DEVNULL)
 
 
+def run_tests(tree: Path | str, scratch_name: str, python: str, *args: str, cwd: Path | None = None,
+              **env: str) -> subprocess.CompletedProcess[str]:
+    """``atc test run`` with pytest's output streamed, so a test's prints reach stdout."""
+    return run_command("test", "run", "--scratch", scratch_name, "--tree", str(tree), "--python", python,
+                       "--progress", "--", *args, cwd=cwd, **env)
+
+
 @pytest.fixture()
 def tree(tmp_path: Path) -> Path:
     root = tmp_path / "tree"
@@ -47,13 +54,11 @@ def tree(tmp_path: Path) -> Path:
     return root
 
 
-def test_a_run_prints_the_note_the_label_and_the_tail(tree: Path, atc_tmp: Path) -> None:
-    run = run_command("test", "run", str(tree), "s1", sys.executable, "the label", "-s", "tests", HAMI_X="set",
-                      ATC_PRIVATE_DESKTOP="0")
+@pytest.mark.integration
+def test_a_run_isolates_the_temporary_and_data_directories(tree: Path, atc_tmp: Path) -> None:
+    run = run_tests(tree, "s1", sys.executable, "-s", "tests", HAMI_X="set", ATC_PRIVATE_DESKTOP="0")
     assert run.returncode == 0, run.stdout + run.stderr
     lines = run.stdout.splitlines()
-    assert lines[0].startswith("NOTE no .venv") and lines[1] == "== the label =="
-    assert len(lines) <= 2 + testrun.TAIL_LINES
     scratch_dir = atc_tmp / "s1"
     values = dict(line.split(" ", 1) for line in lines if line.split(" ")[0] in ("TEMPDIR", "BASE", "DATA", "HAMI", "FILE"))
     assert values["TEMPDIR"] == str(scratch_dir)
@@ -65,40 +70,32 @@ def test_a_run_prints_the_note_the_label_and_the_tail(tree: Path, atc_tmp: Path)
 
 def test_the_exit_code_is_pytests(tree: Path, atc_tmp: Path) -> None:
     (tree / "tests/test_bad.py").write_text("def test_bad(): assert False\n", encoding="utf-8")
-    assert run_command("test", "run", str(tree), "s", sys.executable, "l", "tests").returncode == 1
-
-
-def test_only_the_last_fifteen_lines_are_printed(tree: Path, atc_tmp: Path) -> None:
-    body = "def test_lines():\n    for i in range(40): print('LINE', i)\n"
-    (tree / "tests/test_lines.py").write_text(body, encoding="utf-8")
-    run = run_command("test", "run", str(tree), "s", sys.executable, "l", "-s", "tests/test_lines.py",
-                      ATC_PRIVATE_DESKTOP="0")
-    assert "LINE 0\n" not in run.stdout and run.stdout.count("\n") <= 2 + 15
+    assert run_tests(str(tree), "s", sys.executable, "tests").returncode == 1
 
 
 def test_the_tree_names_its_data_roots(tree: Path, atc_tmp: Path) -> None:
     (tree / "pyproject.toml").write_text('[tool.atc-testkit]\ndata_root_variables = ["OTHER_ROOT"]\n', encoding="utf-8")
-    run = run_command("test", "run", str(tree), "s", sys.executable, "l", "-s", "tests", QUANT_DATA_ROOT="ambient")
+    run = run_tests(str(tree), "s", sys.executable, "-s", "tests", QUANT_DATA_ROOT="ambient")
     assert f"DATA ambient {atc_tmp / 's/qdr'}" in run.stdout
 
 
 def test_xdist_is_turned_off_when_installed_and_the_cache_provider_always(tree: Path, atc_tmp: Path) -> None:
     (tree / "pyproject.toml").write_text('[tool.pytest.ini_options]\naddopts = "-n 2"\n', encoding="utf-8")
-    run = run_command("test", "run", str(tree), "s", sys.executable, "l", "-s", "tests")
+    run = run_tests(str(tree), "s", sys.executable, "-s", "tests")
     assert run.returncode == 0 and "created:" not in run.stdout and "BASE" in run.stdout
     assert not (tree / ".pytest_cache").exists()
 
 
 def test_a_relative_tree_and_python_resolve_against_the_caller(tree: Path, atc_tmp: Path) -> None:
-    run = run_command("test", "run", "tree", "s", sys.executable, "l", "tests", cwd=tree.parent)
+    run = run_tests("tree", "s", sys.executable, "tests", cwd=tree.parent)
     assert run.returncode == 0, run.stdout + run.stderr
     python = Path(sys.executable)
-    run = run_command("test", "run", str(tree), "s", os.path.join(os.curdir, python.name), "l", "tests", cwd=python.parent)
+    run = run_tests(tree, "s", os.path.join(os.curdir, python.name), "tests", cwd=python.parent)
     assert run.returncode == 0, run.stdout + run.stderr
 
 
 def test_a_bare_python_name_is_found_on_the_path(tree: Path, atc_tmp: Path) -> None:
-    run = run_command("test", "run", str(tree), "s", "python", "l", "tests",
+    run = run_tests(str(tree), "s", "python", "tests",
                       PATH=os.pathsep.join((os.path.dirname(sys.executable), os.environ["PATH"])))
     assert run.returncode == 0, run.stdout + run.stderr
 
@@ -122,7 +119,7 @@ def test_a_refusal_exits_nine_with_its_token_and_creates_nothing(tree: Path, atc
     values = {"absent": str(tmp_path / "absent/x"), "python": sys.executable, "tree": str(tree),
               "outside": str(tmp_path / "out"), "nested": str(atc_tmp / "a/b"), "blocked": "blocked",
               "long": "a" * (65 - len(str(atc_tmp)))}
-    run = run_command("test", "run", *(argument.format(**values) for argument in arguments), "l", "tests")
+    run = run_tests(*(argument.format(**values) for argument in arguments), "tests")
     assert run.returncode == 9, run.stdout + run.stderr
     assert run.stderr.startswith(token + " ")
     assert not (tmp_path / "out").exists() and not (atc_tmp / values["long"]).exists()
@@ -130,7 +127,7 @@ def test_a_refusal_exits_nine_with_its_token_and_creates_nothing(tree: Path, atc
 
 def test_the_scratch_bound_is_sixty_four_characters(tree: Path, atc_tmp: Path) -> None:
     name = "a" * (64 - len(str(atc_tmp)) - 1)
-    assert run_command("test", "run", str(tree), name, sys.executable, "l", "tests").returncode == 0
+    assert run_tests(str(tree), name, sys.executable, "tests").returncode == 0
 
 
 def test_a_scratch_that_cannot_be_resolved_is_refused(atc_tmp: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -147,7 +144,7 @@ def test_a_path_to_a_direct_child_is_accepted(atc_tmp: Path) -> None:
 
 
 def test_an_unsuitable_root_exits_nine(tree: Path, atc_tmp: Path) -> None:
-    run = run_command("test", "run", str(tree), "s", sys.executable, "l", "tests", ATC_TMP="relative")
+    run = run_tests(str(tree), "s", sys.executable, "tests", ATC_TMP="relative")
     assert run.returncode == 9 and run.stderr.startswith("ATC_TMP_UNSUITABLE ")
 
 
@@ -155,14 +152,14 @@ def test_a_pythonpath_directory_absent_after_entering_is_refused(tree: Path, atc
                                                                  monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(testrun, "pythonpath_directories", lambda _tree: [str(tmp_path / "gone")])
     with pytest.raises(Refusal) as refused:
-        testrun.execute(str(tree), "s", sys.executable, "l", ["tests"], dict(os.environ))
+        testrun.execute(str(tree), "s", sys.executable, ["tests"], dict(os.environ))
     assert refused.value.token == "PYTHONPATH_MISSING" and refused.value.code == 8
 
 
 @pytest.mark.parametrize("body", ["raise ImportError('broken')\n", "import sys\nraise SystemExit(0) if False else None\nraise RuntimeError('x')\n"])
 def test_a_package_that_cannot_load_is_refused(tree: Path, atc_tmp: Path, body: str) -> None:
     (tree / "src/fixture_pkg/__init__.py").write_text(body, encoding="utf-8")
-    run = run_command("test", "run", str(tree), "s", sys.executable, "l", "tests")
+    run = run_tests(str(tree), "s", sys.executable, "tests")
     assert run.returncode == 8 and run.stderr.startswith("COPY_IMPORT_MISMATCH ")
 
 
@@ -172,7 +169,7 @@ def test_a_package_loaded_from_outside_the_tree_is_refused(tree: Path, atc_tmp: 
     (outside / "fixture_pkg.py").write_text("X = 1\n", encoding="utf-8")
     body = f"import sys, importlib\nsys.modules.pop(__name__)\nsys.path.remove(sys.path[0]) if False else None\nsys.path.insert(0, {str(outside)!r})\nimport importlib.util\nspec = importlib.util.spec_from_file_location(__name__, {str(outside / 'fixture_pkg.py')!r})\nmodule = importlib.util.module_from_spec(spec)\nspec.loader.exec_module(module)\nsys.modules[__name__] = module\n"
     (tree / "src/fixture_pkg/__init__.py").write_text(body, encoding="utf-8")
-    run = run_command("test", "run", str(tree), "s", sys.executable, "l", "tests")
+    run = run_tests(str(tree), "s", sys.executable, "tests")
     assert run.returncode == 8 and "fixture_pkg" in run.stderr
 
 
@@ -180,21 +177,15 @@ def test_the_guard_descends_through_namespace_directories(tree: Path, atc_tmp: P
     package = tree / "packages/one/src/name_space/inner"
     package.mkdir(parents=True)
     (package / "__init__.py").write_text("raise ImportError('deep')\n", encoding="utf-8")
-    run = run_command("test", "run", str(tree), "s", sys.executable, "l", "tests")
+    run = run_tests(str(tree), "s", sys.executable, "tests")
     assert run.returncode == 8 and "name_space.inner" in run.stderr
-
-
-def test_the_tree_has_no_venv_note_when_it_holds_one(tree: Path, atc_tmp: Path) -> None:
-    (tree / ".venv").mkdir()
-    assert "NOTE" not in run_command("test", "run", str(tree), "s", sys.executable, "l", "tests",
-                                     ATC_PRIVATE_DESKTOP="0").stdout
 
 
 def test_the_registry_gets_one_line_per_scratch(tree: Path, atc_tmp: Path) -> None:
     for _ in range(2):
-        assert run_command("test", "run", str(tree), "s", sys.executable, "l", "tests").returncode == 0
+        assert run_tests(str(tree), "s", sys.executable, "tests").returncode == 0
     (atc_tmp / "s2").mkdir()
-    assert run_command("test", "run", str(tree), "s2", sys.executable, "l", "tests").returncode == 0
+    assert run_tests(str(tree), "s2", sys.executable, "tests").returncode == 0
     rows = scratch.registered(atc_tmp)
     assert [(row.project, row.scratch, row.tree) for row in rows] == [
         ("fixture-name", str(atc_tmp / "s"), str(tree.resolve())), ("fixture-name", str(atc_tmp / "s2"), str(tree.resolve()))]
@@ -214,7 +205,7 @@ def test_a_private_desktop_run_excludes_interactive_tests(tree: Path, atc_tmp: P
     (tree / "tests/test_desktop.py").write_text(body, encoding="utf-8")
     (tree / "pyproject.toml").write_text('[tool.pytest.ini_options]\nmarkers = ["interactive_desktop: x"]\n', encoding="utf-8")
     for value in ("1", ""):
-        run = run_command("test", "run", str(tree), "s", sys.executable, "l", "tests/test_desktop.py",
+        run = run_tests(str(tree), "s", sys.executable, "tests/test_desktop.py",
                           ATC_PRIVATE_DESKTOP=value)
         assert run.returncode == 0, run.stdout + run.stderr
         assert "1 passed, 1 deselected" in run.stdout and testrun.EXCLUSION_NOTE in run.stdout
@@ -226,9 +217,9 @@ def test_zero_runs_on_the_interactive_desktop_and_another_value_is_refused(tree:
     body = "import pytest\n@pytest.mark.interactive_desktop\ndef test_interactive():\n    pass\n"
     (tree / "tests/test_desktop.py").write_text(body, encoding="utf-8")
     (tree / "pyproject.toml").write_text('[tool.pytest.ini_options]\nmarkers = ["interactive_desktop: x"]\n', encoding="utf-8")
-    run = run_command("test", "run", str(tree), "s", sys.executable, "l", "tests/test_desktop.py", ATC_PRIVATE_DESKTOP="0")
+    run = run_tests(str(tree), "s", sys.executable, "tests/test_desktop.py", ATC_PRIVATE_DESKTOP="0")
     assert run.returncode == 0 and "1 passed" in run.stdout and testrun.EXCLUSION_NOTE not in run.stdout
-    run = run_command("test", "run", str(tree), "s", sys.executable, "l", "tests", ATC_PRIVATE_DESKTOP="yes")
+    run = run_tests(str(tree), "s", sys.executable, "tests", ATC_PRIVATE_DESKTOP="yes")
     assert run.returncode == 9 and run.stderr.startswith("PRIVATE_DESKTOP_INVALID ")
 
 
@@ -241,8 +232,10 @@ def test_the_exclusion_joins_a_given_marker_expression() -> None:
     assert excluded(["-munit", "-x"]) == ("(unit) and not interactive_desktop", ["-x"])
 
 
-def test_a_run_needs_its_four_arguments() -> None:
-    assert run_command("test", "run", "a", "b", "c").returncode == 2
+@pytest.mark.integration
+def test_a_run_without_its_scratch_option_prints_the_usage() -> None:
+    run = run_command("test", "run", "a", "b", "c")
+    assert run.returncode == 2 and "--scratch" in run.stderr
 
 
 # ``atc test mutants``
@@ -544,7 +537,7 @@ def test_mutants_refuse_a_sha_that_names_no_commit_before_the_baseline(
 
 
 @pytest.mark.parametrize("arguments", [("test",), ("test", "other"), ("tmp",), ("tmp", "list", "x"), ("tmp", "list", "--json", "x"), ("tmp", "clean"),
-                                       ("tmp", "clean", "--tree-name"), ("tmp", "clean", "--project"),
+                                       ("tmp", "clean", "--tree-name", "p"), ("tmp", "clean", "--project"),
                                        ("tmp", "clean", "--tree"), ("other",)])
 def test_a_wrong_command_exits_two(arguments: tuple[str, ...], atc_tmp: Path, capsys: pytest.CaptureFixture[str]) -> None:
     assert commands.main(list(arguments)) == 2
@@ -553,13 +546,12 @@ def test_a_wrong_command_exits_two(arguments: tuple[str, ...], atc_tmp: Path, ca
 
 
 @pytest.mark.parametrize(("arguments", "attribute", "module", "expected"), [
-    (["test", "run", "a", "b"], "run", testrun, (["a", "b"],)),
+    (["test", "run", "--scratch", "a"], "run", testrun, (["--scratch", "a"],)),
     (["test", "mutants", "a"], "mutants", testrun, (["a"],)),
     (["tmp", "list"], "list_scratches", scratch, ()),
     (["tmp", "list", "--json"], "list_scratches", scratch, ({"as_json": True},)),
     (["tmp", "prune"], "prune", scratch, ()),
     (["tmp", "clean", "a", "b"], "clean", scratch, (["a", "b"], {"with_runs": False})),
-    (["tmp", "clean", "--tree-name", "p"], "clean", scratch, ((), "p", {"with_runs": False})),
     (["tmp", "clean", "--with-runs", "a"], "clean", scratch, (["a"], {"with_runs": True})),
 ])
 def test_atc_reaches_the_package_with_its_arguments_and_returns_its_exit_code(
@@ -569,19 +561,6 @@ def test_atc_reaches_the_package_with_its_arguments_and_returns_its_exit_code(
                         or 41)
     assert atc_cli.main(arguments) == 41
     assert seen == [expected]
-
-
-@pytest.mark.integration
-def test_tmp_clean_takes_only_the_tree_name_option(monkeypatch: pytest.MonkeyPatch,
-                                                   capsys: pytest.CaptureFixture[str]) -> None:
-    monkeypatch.setattr(scratch, "clean", lambda *args, **kwargs: 0)
-    assert commands.main(["tmp", "clean", "--tree-name", "p"]) == 0
-    assert commands.main(["tmp", "clean", "--with-runs", "--tree-name", "p"]) == 0
-    assert capsys.readouterr().err == ""
-    assert commands.main(["tmp", "clean", "--tree-name", "p", "--with-runs"]) == 2
-    assert capsys.readouterr().err.startswith("usage: atc tmp clean")
-    assert commands.main(["tmp", "clean", "--project", "p"]) == 2
-    assert capsys.readouterr().err.startswith("usage: atc tmp clean")
 
 
 @pytest.mark.integration

@@ -377,45 +377,22 @@ that imports a module the installed `atc` lacks stops with
 `ERROR MISSING_DEPENDENCY` (exit 2) naming the module and the reinstall
 command of the root's `AGENTS.md`.
 
-### `atc test run <tree> <scratch> <python> <label> <pytest args...>`
-
-One isolated pytest run inside `<tree>`, a worktree or an exported copy, in
-the scratch `<scratch>` (`ATC_HOME.md` § Test scratch). In order:
-
-1. Resolve `<tree>` and a path-form `<python>` against the caller's
-   directory: `TREE_NOT_FOUND`, `PYTHON_NOT_FOUND` (exit 9). Check and
-   create the scratch: `SCRATCH_OUTSIDE_TMP`, `SCRATCH_PATH_TOO_LONG`,
-   `SCRATCH_NOT_RESOLVED`, `SCRATCH_NOT_CREATED` (exit 9).
-2. Remove every `HAMI_*` variable. Point each data-root variable the tree's
-   `[tool.atc-testkit]` names, and `QUANT_DATA_ROOT` when it names none, at
-   `<scratch>/qdr`. Point `PYTHONPYCACHEPREFIX` at `<scratch>/pyc`, so no
-   child of the run (the guard, the selector, pytest) writes bytecode into
-   the tree. Make the scratch the temporary directory.
-3. Set `PYTHONPATH` to the tree's `packages/*/src` and `src` directories. One
-   that is absent after entering the tree is refused with
-   `PYTHONPATH_MISSING` (exit 8).
-4. Import every regular package under those directories, descending through
-   namespace directories, and require each to load from inside the tree:
-   `COPY_IMPORT_MISMATCH` (exit 8). This guard is what proves the copy, not
-   an installed checkout, is what runs.
-5. Print `NOTE no .venv` when the tree has none, the private desktop's
-   exclusion line (§ Private desktop), then `== <label> ==`, and
-   run pytest with `-p no:cacheprovider`, `-n 0` when xdist is installed,
-   `-q` and `--basetemp <scratch>/bt`, printing the last fifteen lines of its
-   output.
-
 ### `atc test run --scratch <name> [--tree <tree>] [--python <py>] [--select <base>] [--label <label>] [--timeout <s>] [--progress] [-- <pytest args>]`
 
-The same run as the positional form, steps 2 to 4 included, with its output
-in a log. The form is chosen by the first argument: an option selects it.
+One isolated pytest run inside a tree, a worktree or an exported copy, in
+the scratch `<name>` (`ATC_HOME.md` § Test scratch), its output kept in a
+log. In order:
 
-1. Before the run, each refusal exits 9 and runs no test. The scratch is
-   checked as in step 1 above. `--tree` defaults to the tree the scratch's
-   registry line names, as `atc tmp checkout` records it; without either,
-   `TREE_NOT_FOUND`. `--python` defaults to the tree's `.venv`
-   interpreter; without one, `VENV_MISSING`, which names
-   `atc tmp checkout` and the project's `AGENTS.md` preparation, and never
-   another Python.
+1. Before the run, each refusal exits 9 and runs no test. Check and create
+   the scratch: `SCRATCH_OUTSIDE_TMP`, `SCRATCH_PATH_TOO_LONG`,
+   `SCRATCH_NOT_RESOLVED`, `SCRATCH_NOT_CREATED`. Resolve `--tree` and a
+   path-form `--python` against the caller's directory:
+   `TREE_NOT_FOUND`, `PYTHON_NOT_FOUND`. `--tree` defaults to the tree the
+   scratch's registry line names, as `atc tmp checkout` records it; without
+   either, `TREE_NOT_FOUND`. `--python` defaults to the interpreter of the
+   tree's environment (§ Toolchain); without one, `VENV_MISSING`, which
+   names `atc tmp checkout` and the project's `AGENTS.md` preparation, and
+   never another Python.
 2. `--select <base>` runs the tree's `[tool.atc-testkit]` `selector`, a
    list of strings: the argv of a command that takes changed paths as
    arguments and prints the test paths to run as a JSON array on its last
@@ -431,12 +408,27 @@ in a log. The form is chosen by the first argument: an option selects it.
    `SELECT <base>: <n> changed paths, <k> test paths` follows; with none
    selected, `NO_TESTS no test selected` ends the command with exit 0. The
    selected paths come before the pytest arguments.
-3. pytest runs as in step 5 above with `PYTHONUNBUFFERED=1`, its output
+3. Remove every `HAMI_*` variable. Point each data-root variable the tree's
+   `[tool.atc-testkit]` names, and `QUANT_DATA_ROOT` when it names none, at
+   `<scratch>/qdr`. Point the toolchain's bytecode variable,
+   `PYTHONPYCACHEPREFIX`, at `<scratch>/pyc`, so no child of the run (the
+   guard, the selector, pytest) writes bytecode into the tree. Make the
+   scratch the temporary directory. `ATC_TEST_TIME_SLACK` passes through
+   and is checked first: `TIME_SLACK_INVALID` (§ Time slack).
+4. Set `PYTHONPATH` to the tree's `packages/*/src` and `src` directories. One
+   that is absent after entering the tree is refused with
+   `PYTHONPATH_MISSING` (exit 8).
+5. Import every regular package under those directories, descending through
+   namespace directories, and require each to load from inside the tree:
+   `COPY_IMPORT_MISMATCH` (exit 8). This guard is what proves the copy, not
+   an installed checkout, is what runs.
+6. Run pytest with `PYTHONUNBUFFERED=1`, `-q`, `-n 0` when xdist is
+   installed, `-p no:cacheprovider` and `--basetemp <scratch>/bt`, its output
    written as it arrives to `<scratch>/runs/<UTC time>-<label>.log` after
    the § Running and logging header. The console shows `LOG <path>` first,
-   then the private desktop's exclusion line, and, with `--progress`, the
-   output too.
-4. One summary line ends the command: `PASS`, `FAIL`, `NO_TESTS`,
+   then the private desktop's exclusion line (§ Private desktop), and, with
+   `--progress`, the output too.
+7. One summary line ends the command: `PASS`, `FAIL`, `NO_TESTS`,
    `INTERRUPTED` or `ERROR exit <code>`, pytest's counts, the failed and
    errored tests by node ID, and the log path. A run that `--timeout` ends
    prints the log's last fifteen lines and `TIMEOUT` (exit 124); one the

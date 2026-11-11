@@ -5,7 +5,7 @@
 Commands map onto the scripts under `adapters/python/scripts/`:
 
     worktree   hami_worktree.py   create / resume / audit / cleanup
-    preflight  git_preflight.py   push listing; merge (retired: names integrate --check)
+    preflight  git_preflight.py   push listing
     integrate  git_integrate.py   advance local main to a reviewed topic
     verify     git_integrate.py   run the verifier on the candidate integrate would build
     task       task_records.py    new / list / check task records

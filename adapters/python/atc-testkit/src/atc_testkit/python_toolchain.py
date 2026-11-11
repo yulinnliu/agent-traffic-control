@@ -50,9 +50,9 @@ def split_marker(arguments: Sequence[str]) -> tuple[str | None, list[str]]:
 
 
 def pytest_arguments(*, quiet: bool = True, select: str | None = None, workers: int | None = None,
-                     xdist: bool = True, ignore: Sequence[str] = (), no_cache: bool = False, basetemp: Path | str | None = None,
-                     cache_dir: Path | str | None = None, collect_only: bool = False,
-                     junit: Path | str | None = None) -> list[str]:
+                     xdist: bool = True, ignore: Sequence[str] = (), no_cache: bool = False,
+                     basetemp: Path | str | None = None, cache_dir: Path | str | None = None,
+                     collect_only: bool = False, junit: Path | str | None = None) -> list[str]:
     """pytest's options, always in this order.
 
     ``workers`` is the parallel stage's count, spread with ``--dist loadgroup``; ``None`` or 0 runs without
@@ -129,12 +129,6 @@ class PythonToolchain:
             raise Refusal("VENV_MISSING", f"{tree} has no .venv; make the scratch with `atc tmp checkout`, prepare "
                                           "the environment as the project's AGENTS.md says, or name one with --python")
         return str(python)
-
-    def environment_note(self, tree: Path) -> str | None:
-        if (tree / VENV).exists():
-            return None
-        return (f"NOTE no .venv in {tree}: tests that launch source children need one; "
-                "prepare it as the project's AGENTS.md says.")
 
 
 TOOLCHAIN = PythonToolchain()

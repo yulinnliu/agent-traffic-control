@@ -42,8 +42,6 @@ class Toolchain(Protocol):
 
     def interpreter(self, tree: Path) -> str: ...
 
-    def environment_note(self, tree: Path) -> str | None: ...
-
 
 def resolve(name: str = DEFAULT) -> Toolchain:
     """The toolchain registered under ``name``; ``TOOLCHAIN_UNKNOWN`` (exit 9) for any other name."""

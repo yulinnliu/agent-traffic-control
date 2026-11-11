@@ -2,8 +2,7 @@
 """Read-only Git preflight for the lifecycle in shared/governance/GIT_WORKFLOW.md.
 
 `push` runs `git fetch origin` and lists every commit a push of main would
-carry, grouped by the integration that brought it in (PUSH / STOP). `merge`
-is retired: it refuses and names `atc integrate --check` (plan D.7).
+carry, grouped by the integration that brought it in (PUSH / STOP).
 `merge_preflight()` evaluates that file's integration table for `atc
 integrate`, and `cleanup_preflight()` judges a worktree's removal for `atc
 worktree cleanup`. None of them writes a branch, the index or the working
@@ -12,7 +11,6 @@ only unreferenced objects, and the fetch updates only remote-tracking refs.
 
 Usage:
   git_preflight.py push [--project <name>] [--integration <sha>] [--json]
-  git_preflight.py merge ...   (retired: refuses and names atc integrate --check)
 
 `--project` names a project registered in workspace.yaml, `root` the workspace
 root; without it, the project holding the working directory.
@@ -20,7 +18,7 @@ root; without it, the project holding the working directory.
 A STOP verdict carries a `next:` line naming the step that resolves it
 (governance `GIT_WORKFLOW.md` § Integrate and § Command results).
 
-Exit status: 0 for PUSH; 1 for STOP; 2 for a usage or git error and for `merge`.
+Exit status: 0 for PUSH; 1 for STOP; 2 for a usage or git error.
 """
 
 from __future__ import annotations
@@ -548,16 +546,8 @@ def build_parser() -> argparse.ArgumentParser:
     push.add_argument(
         "--integration", help="candidate SHA whose commits carry push approval; every other commit is flagged",
     )
-    sub.add_parser("merge", allow_abbrev=False, help="retired: names atc integrate --check")
     push.add_argument("--json", action="store_true", help="print the report as JSON")
     return parser
-
-
-def retired_merge() -> int:
-    """`preflight merge` (plan D.7): it names the command that replaced it."""
-    print("ERROR USAGE atc preflight merge is retired; run atc integrate --check --project <project> "
-          "--task <task> --reviewed <sha>", file=sys.stderr)
-    return 2
 
 
 def checkout_of(project: str | None, root: Path | None, cwd: str) -> Path:
@@ -585,8 +575,6 @@ def checkout_of(project: str | None, root: Path | None, cwd: str) -> Path:
 
 def main(argv: list[str] | None = None, root: Path | None = None, cwd: str | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
-    if argv[:1] == ["merge"] and not {"-h", "--help"} & set(argv):
-        return retired_merge()
     args = build_parser().parse_args(argv)
     try:
         repo = checkout_of(args.project, root, cwd or os.getcwd())

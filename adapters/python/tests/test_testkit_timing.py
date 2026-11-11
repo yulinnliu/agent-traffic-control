@@ -88,7 +88,8 @@ def test_the_ci_runner_refuses_a_bad_slack(monkeypatch: pytest.MonkeyPatch,
 def test_atc_test_run_refuses_a_bad_slack(tmp_path: Path, atc_tmp: Path) -> None:
     done = subprocess.run([sys.executable, "-m", "atc_testkit.commands", "test", "run", "--scratch", "s",
                            "--tree", str(tmp_path), "--python", sys.executable, "--", "tests"],
-                          capture_output=True, text=True, env={**os.environ, "ATC_TMP": str(atc_tmp), timing.SLACK_VARIABLE: "31"})
+                          capture_output=True, text=True,
+                          env={**os.environ, "ATC_TMP": str(atc_tmp), timing.SLACK_VARIABLE: "31"})
     assert done.returncode == 9 and done.stderr.startswith("TIME_SLACK_INVALID ")
     assert not (atc_tmp / "s" / testrun.RUNS).exists()
 

@@ -172,41 +172,16 @@ def _pytest_command(python: str, tree: Path, place: Path, environ: Mapping[str, 
     return [python, "-m", "pytest", *options, *rest]
 
 
-def execute(tree_argument: str, scratch_argument: str, python_argument: str, label: str,
-            pytest_arguments: Sequence[str], environ: MutableMapping[str, str], *, quiet: bool = False,
-            timeout: float | None = None, junit: Path | None = None) -> Result:
-    """Steps 1 to 5 of the section; a refusal raises ``Refusal`` with its token and exit code."""
+def execute(tree_argument: str, scratch_argument: str, python_argument: str, pytest_arguments: Sequence[str],
+            environ: MutableMapping[str, str], *, timeout: float | None = None, junit: Path | None = None) -> Result:
+    """One captured pytest run of a mutant; a refusal raises ``Refusal`` with its token and exit code."""
     tree = resolve_tree(tree_argument)
     python = resolve_python(python_argument)
     root, place = prepare_scratch(scratch_argument, environ)
     scratch.register(root, place, tree)
     private = isolate(tree, place, python, environ)
-
-    if not quiet:
-        note = toolchains.for_tree(tree).environment_note(tree)
-        if note:
-            print(note, flush=True)
-        if private:
-            print(EXCLUSION_NOTE, flush=True)
-        print(f"== {label} ==", flush=True)
     command = _pytest_command(python, tree, place, environ, private, pytest_arguments, junit)
-    result = _capture(command, tree, environ, private, timeout)
-    if not quiet:
-        for line in result.lines[-TAIL_LINES:]:
-            print(line, flush=True)
-    return result
-
-
-def run(argv: Sequence[str], environ: MutableMapping[str, str] | None = None) -> int:
-    """``atc test run``: the flag form when the first argument is an option, else the positional form."""
-    if argv and argv[0].startswith("--"):
-        return run_flags(argv, environ)
-    if len(argv) < 4:
-        print("usage: atc test run <tree> <scratch> <python> <label> <pytest args...>", file=sys.stderr)
-        return 2
-    environ = os.environ if environ is None else environ
-    tree, place, python, label, *arguments = argv
-    return execute(tree, place, python, label, arguments, environ).code
+    return _capture(command, tree, environ, private, timeout)
 
 
 def verify_commit(worktree: str, sha: str) -> None:
@@ -340,7 +315,7 @@ def mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None = None
             junit = reports / f"{attempts:03d}-{LABEL_CHARACTERS.sub('_', label)[:40]}.xml"
             junit.unlink(missing_ok=True)
         attempts += 1
-        result = execute(str(tree), str(place), python, label, ["-x", *tests], environ, quiet=True,
+        result = execute(str(tree), str(place), python, ["-x", *tests], environ,
                          timeout=MUTANT_SECONDS, junit=junit)
         return _verdict(result, junit)
 
@@ -497,7 +472,7 @@ def summary(result: Result | None, log: Path) -> tuple[str, int]:
     return f"{' '.join(parts)}; {'; '.join(tail)}", result.code
 
 
-def run_flags(argv: Sequence[str], environ: MutableMapping[str, str] | None = None) -> int:
+def run(argv: Sequence[str], environ: MutableMapping[str, str] | None = None) -> int:
     """``atc test run --scratch <name> [--tree <tree>] [--python <py>] [--select <base>] [-- <pytest args>]``."""
     argv = list(argv)
     pytest_arguments: list[str] = []

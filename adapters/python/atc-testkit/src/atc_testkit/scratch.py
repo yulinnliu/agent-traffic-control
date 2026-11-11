@@ -323,15 +323,14 @@ def dependent_runs(root: Path, directory: str) -> list[str]:
             if row.tree and _within(row.tree, directory) and not locations.same_path(row.scratch, directory)]
 
 
-def clean(arguments: Sequence[str], tree_name: str | None = None, *, say: Callable[[str], None] = print,
-          environ=None, with_runs: bool = False) -> int:
-    """``atc tmp clean``: the highest exit code across the directories; ``tree_name`` picks registry rows.
+def clean(arguments: Sequence[str], *, say: Callable[[str], None] = print, environ=None,
+          with_runs: bool = False) -> int:
+    """``atc tmp clean``: the highest exit code across the directories.
 
     A scratch's dependent runs are listed; ``with_runs`` deletes them too, before the scratch.
     """
     root = locations.locate(environ).tmp
-    chosen = ([row.scratch for row in registered(root) if row.project == tree_name] if tree_name is not None
-              else list(arguments))
+    chosen = list(arguments)
     directories = []
     for argument in chosen:
         directory, why = _resolve_for_clean(argument, root)

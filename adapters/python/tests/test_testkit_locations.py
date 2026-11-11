@@ -170,7 +170,8 @@ def test_a_link_stops_atc_tmp(linked: tuple[Path, Path], command: str) -> None:
 def test_a_link_stops_atc_test_run_before_its_scratch_exists(linked: tuple[Path, Path], tmp_path: Path, atc_tmp: Path) -> None:
     tree = tmp_path / "tree"
     tree.mkdir()
-    run = outside_a_pytest("-m", "atc_testkit.commands", "test", "run", str(tree), "scratch", sys.executable, "label", "tests")
+    run = outside_a_pytest("-m", "atc_testkit.commands", "test", "run", "--scratch", "scratch", "--tree", str(tree),
+                           "--python", sys.executable, "--", "tests")
     assert_refused(run, linked[0])
     assert not (atc_tmp / "scratch").exists() and not (atc_tmp / "scratch-dirs.tsv").exists()
 

@@ -314,25 +314,14 @@ def test_an_ambiguous_prefix_stops_and_lists_the_matches(
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("extra", [(), ("--repo", ".", "--branch", "topic", "--reviewed", "f" * 40)])
-def test_preflight_merge_names_integrate_check(
-        repo: Path, capsys: pytest.CaptureFixture[str], extra: tuple[str, ...]) -> None:
-    import git_preflight as gp
-
-    assert gp.main(["merge", *extra], root=repo.parent) == 2
-    assert capsys.readouterr().err == (
-        "ERROR USAGE atc preflight merge is retired; run atc integrate --check --project <project> "
-        "--task <task> --reviewed <sha>\n")
-
-
-@pytest.mark.integration
-def test_preflight_cleanup_is_gone(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+@pytest.mark.parametrize("command", ["cleanup", "merge"])
+def test_preflight_cleanup_and_merge_are_gone(repo: Path, capsys: pytest.CaptureFixture[str], command: str) -> None:
     import git_preflight as gp
 
     with pytest.raises(SystemExit) as exited:
-        gp.main(["cleanup", "--project", "repo", "--worktree", str(repo)], root=repo.parent)
+        gp.main([command, "--project", "repo"], root=repo.parent)
     assert exited.value.code == 2
-    assert "invalid choice: 'cleanup'" in capsys.readouterr().err
+    assert f"invalid choice: '{command}'" in capsys.readouterr().err
 
 
 @pytest.mark.integration
