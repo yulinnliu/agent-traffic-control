@@ -1,0 +1,17 @@
+task_id: ATC-0021
+repository: yulinnliu/agent-traffic-control
+base_sha: b0c5c2b308b43f7d24993e53ac3c0e4a867f7aa5
+scope: 'Batch release: atc 0.4.0 and atc-testkit 0.11.0 carrying ATC-0018, ATC-0019
+  and ATC-0020'
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: b0c5c2b308b43f7d24993e53ac3c0e4a867f7aa5
+branch: worktree-claude+batch-release
+decisions:
+  - 'Owner 2026-11-11: atc 0.4.0 + atc-testkit 0.11.0, one batch release for ATC-0018, ATC-0019 and ATC-0020; today''s second release is an Owner exception.'
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
