@@ -231,7 +231,7 @@ the rules and steps, C.8 is the editorial pass over every file they touched.
      `DELIVERY.md` § Close-out.
    - Close-out steps: the list comes from `atc tmp list`, with each
      scratch's dependent runs (a `tree` inside it); sessions are archived
-     after a successful `atc worktree cleanup`; a refused archive is read
+     after a successful `atc worktree clean`; a refused archive is read
      through the session's state: a running session's writer ends its work,
      a pinned or idle one goes to the Owner.
 7. `shared/conformance/verification-evidence/README.md` and `docs/GLOSSARY.md`
@@ -283,7 +283,7 @@ sizes are a floor of what the commands print.
 | 3 | `atc onboard`, all modes | 176 | 316 | 945-2041 | 1551-4481 |
 | 4 | `atc worktree audit` | 252 | 252 | 374 | 2248 |
 | 5 | `atc worktree create` | 332 | 191 | 251 | 987 |
-| 6 | `atc worktree cleanup` | 363 | 157 | 473 | 691 |
+| 6 | `atc worktree clean` | 363 | 157 | 473 | 691 |
 | 7 | `atc integrate --check` | 194 | 135 | 416 | 1332 |
 | 8 | `atc validate` | 126 | 127 | 523 | 2065 |
 | 9 | `atc test run` | 133 | 111 | 464 | 1688 |
@@ -328,7 +328,7 @@ the last lines of its log, never a pass.
 4. `atc worktree audit`: its own output is one line per worktree (40 to 46
    characters measured); the transcript sizes come from commands chained to
    it. No change.
-5. `atc worktree create` and `atc worktree cleanup`: one verdict line
+5. `atc worktree create` and `atc worktree clean`: one verdict line
    (`CREATED` or `REMOVED`, project/topic, base or main as a 12-character
    SHA); evidence under `--json`.
 6. `atc integrate --check`: the short form of D.10 becomes the default
@@ -366,8 +366,8 @@ and by a test per command that pins its default output.
 
 ## Verified CLI facts
 
-1. `atc preflight cleanup` duplicates `atc worktree cleanup`: the check is
-   the same. `worktree cleanup` runs `git_preflight.cleanup_preflight`
+1. `atc preflight cleanup` duplicates `atc worktree clean`: the check is
+   the same. `worktree clean` runs `git_preflight.cleanup_preflight`
    (`managed_worktree.py:824`) before it removes anything; `preflight cleanup`
    runs that check alone, read-only. No root doc, skill, project skill or
    project doc names it, and the transcripts hold no call; its one test is
@@ -486,7 +486,7 @@ review, one implementation review and one integration:
      when `integrations.jsonl` has the task's line and the local `main`
      contains it (no push needed, `DELIVERY.md` § Close-out), and skips the keep exceptions in the record; every item
      ends `DELETED`, `SKIPPED` or `REFUSED`; it touches nothing outside the
-     task and runs `worktree cleanup`'s own checks. A worktree that holds
+     task and runs `worktree clean`'s own checks. A worktree that holds
      the caller's working directory ends `SKIPPED` with that reason, so a
      writer running it from its worktree (D.5) leaves that item to the
      coordinator; `atc-review` "Writer: after integration" and
@@ -640,7 +640,7 @@ review, one implementation review and one integration:
        `--reviewed`.
      - `cleanup` leaves the parser, so `atc preflight cleanup` is argparse's
        invalid-choice usage error with atc's `next: atc preflight --help`.
-       `cleanup_preflight()` stays: `atc worktree cleanup` runs it.
+       `cleanup_preflight()` stays: `atc worktree clean` runs it.
        `merge_preflight()` stays: `atc integrate` runs it.
      - `atc worktree audit`: `state_evidence()` adds `removable`, true when
        the worktree is present, `main` resolves, and it is clean and merged
@@ -737,7 +737,7 @@ review, one implementation review and one integration:
     - Mitigations: the `CHECK ` prefix, the verdict word right after it and
       the `WARNING` lines keep their form until the CLI trim after the
       final sync; readers of the evidence use `--json` (B.3).
-11. `atc worktree cleanup` given `--expected-head` outside its modes names
+11. `atc worktree clean` given `--expected-head` outside its modes names
     the modes that take it (`--abandon`, `--squash-integrated`).
     - Side effects: error text changes.
     - Mitigations: tests assert the token, not the prose.
@@ -810,7 +810,7 @@ review, one implementation review and one integration:
       `git rev-parse --verify <prefix>^{commit}` in the integration
       checkout; `AMBIGUOUS_SHA` stops the run; every record and output line
       carries the full SHA.
-    - `atc worktree cleanup --reviewed`, `--expected-head`,
+    - `atc worktree clean --reviewed`, `--expected-head`,
       `--expected-main` and `--integrated-as` stay full-SHA only
       (`managed_worktree.py:1025-1031`): they bind a deletion, and their values
       come from `--json` or `integrations.jsonl`, which carry full SHAs.

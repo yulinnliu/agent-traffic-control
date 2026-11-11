@@ -15,7 +15,7 @@ the code every session runs.
 - `root` is reserved: `validate_workspace.load_and_check_workspace_yaml`
   refuses a project named `root` or a project whose `worktrees` is
   `worktrees/root`, so `atc validate` and every command that loads the map
-  report it; `atc bootstrap add root` refuses before writing.
+  report it; `atc bootstrap add --project root` refuses before writing.
 - The canonical checkout stays on `main` with no tracked modification. It is
   fast-forwarded by `atc integrate` and serves the installed `atc`; it
   never checks out a topic branch and never renders managed copies.
@@ -114,5 +114,5 @@ The tool cannot yet create a root worktree, so this topic was opened by hand
 with `git worktree add` at `worktrees/root/claude+root-worktree`. Before the
 first commit its branch is renamed to `worktree-claude+root-worktree` and the
 worktree locked with reason `claude:root-worktree:-`, so it already matches
-contract 1 and `atc worktree cleanup --repo` removes it after integration, on
+contract 1 and `atc worktree clean --project root` removes it after integration, on
 the Owner's word.

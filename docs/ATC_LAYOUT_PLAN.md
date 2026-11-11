@@ -340,9 +340,9 @@ Side effects:
 
 After the topic integrates:
 
-1. hami-quant, hami-quant-trading, ria-project: `atc onboard --sync
+1. hami-quant, hami-quant-trading, ria-project: `atc onboard --sync --project
    <project>` makes each project's migration sync commit; each push needs the
-   Owner's word. `atc onboard --check <project>` then lists nothing pending.
+   Owner's word. `atc onboard --check --project <project>` then lists nothing pending.
    hami-quant's sync commit lands on top of the unpushed fc5a3a0, so its push
    carries both; `atc preflight push` lists them before the Owner's word.
    Rollback: § 4.
@@ -402,7 +402,7 @@ After the topic integrates:
 
       `git fetch .` refuses a non-fast-forward update of `main`, and with
       `main` at the branch's commit the switch changes no file.
-   5. `atc onboard --sync my-heartopia-tools` makes the migration sync
+   5. `atc onboard --sync --project my-heartopia-tools` makes the migration sync
       commit on top.
    6. Push on the Owner's word, as above.
 
