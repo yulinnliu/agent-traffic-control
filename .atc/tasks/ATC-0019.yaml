@@ -22,5 +22,4 @@ decisions:
   O2: 'the --owner-words decision label is "Owner run: approve integration"'
   O3: the push of main is bound to the SHA, git -C "<main checkout>" push origin
     <40-character SHA>:refs/heads/main
-  O4: the atc-testkit version takes a patch increment at integration time, after
-    ATC-0016's 0.10.2; set on rebase
+  O4: this branch sets no atc-testkit version; the Owner gives the number at integration
