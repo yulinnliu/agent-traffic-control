@@ -567,6 +567,7 @@ def test_atc_reaches_the_package_with_its_arguments_and_returns_its_exit_code(
     assert seen == [expected]
 
 
+@pytest.mark.unit
 def test_a_prune_refusal_ends_with_a_stop_line_on_stderr(monkeypatch: pytest.MonkeyPatch,
                                                           capsys: pytest.CaptureFixture[str]) -> None:
     def refusing(*, say):
