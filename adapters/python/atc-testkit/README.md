@@ -1,6 +1,6 @@
 # atc-testkit
 
-This document describes `atc-testkit` 0.9.1; update it with every version bump.
+This document describes `atc-testkit` 0.10.0; update it with every version bump.
 
 Development-only Python package shared by the projects of a workspace. It holds
 the pytest plugin and marker contract, policy-driven test selection, Git gate
@@ -66,7 +66,8 @@ and pushed-commit identity when a consumer's gate requires it.
 `evidence` lets a pre-push gate reuse a passed `atc integrate` candidate
 verification in place of its test stage; the formats and the reuse table are
 `shared/conformance/verification-evidence/README.md` at the bound governance
-revision. It reads records of `atc-verification-evidence/1` and `/2`.
+revision. It reads records of `atc-verification-evidence/1` and `/2`, and
+writes reports of `atc-verification-report/2`, which record the time slack.
 
 - The project's integration verifier calls `write_report(os.environ, root,
   selection.pytest_paths(), stages)` once its checks pass. It writes the report
@@ -79,8 +80,9 @@ revision. It reads records of `atc-verification-evidence/1` and `/2`.
   `pre-push: tests REUSED (...)` or `pre-push: tests RUN (evidence: <reason>)`.
   It skips the test stage only when `decision.reuse` is true.
 - Reuse needs the record of exactly the pushed commit and its tree, a clean
-  candidate, the same platform, `uv.lock` and `.python-version` digests,
-  verifier argv file, testkit version and stages, and a recorded selection
+  candidate, the same platform, digests of the toolchain's dependency files
+  (`uv.lock` and `.python-version` for `python`), verifier argv file, testkit
+  version, stages and time slack, and a recorded selection
   that covers the gate's own: the full suite covers everything, a directory
   covers the files below it. The Python version is recorded and not compared.
 - A missing, unreadable or mismatched record, and any error while checking,
@@ -108,13 +110,22 @@ diagnostics. A project supplies data.
   private desktop, and export commits into and manage the scratch registry; `python -m atc_testkit.commands` is the same entry point.
   `-h` after a subcommand prints its help and exits 0. A refusal token goes to stderr; the per-directory lines `DELETED`, `SKIPPED`,
   `REFUSED`, `ANOMALY` and `LEFT` are the normal output of `atc tmp` on stdout.
-- `atc test mutants` counts `KILLED` only for pytest exit 1 with a `FAILED` line.
-  Every other ending of a mutated run (a setup `ERROR` alone, exits 2 to 5, a
-  timeout) prints `INCONCLUSIVE` with the reason, ends the run with exit 1 after
+- `atc test mutants` counts `KILLED` only for pytest exit 1 with a `FAILED` line;
+  `--kill-rule assertion` also requires every failure to be an assertion, read
+  from a junit report. Every other ending of a mutated run (a setup `ERROR`
+  alone, exits 2 to 5, a timeout, a failure the kill rule does not count)
+  prints `INCONCLUSIVE` with the reason, ends the run with exit 1 after
   restoring the files, and leaves the remaining mutants unrun; the last line
   then reads `done: N of M mutants`, where `N` counts the mutants that printed a
   result line. An exception while applying or running a
   mutant ends the run the same way, with its name on stderr.
+- `toolchain` holds the seam between the neutral stages and a test runner, and
+  `python_toolchain` the one toolchain: pytest, uv and `.venv`, and the one
+  builder of pytest's options (`docs/TESTKIT.md` § Toolchain).
+- `timing` resolves `ATC_TEST_TIME_SLACK`, 0 to 30 seconds, 2 by default
+  (`docs/TESTKIT.md` § Time slack).
+- `docs` checks the relative links of Markdown; `docs.DOCUMENTATION_CHECK` is
+  the verifier's documentation check (`docs/TESTKIT.md` § Documentation check).
 
 ## Distribution
 
@@ -127,7 +138,7 @@ against that snapshot. It refuses to replace changed release content. Use a fres
 `src/atc_testkit/__init__.py` is the one place that sets the version.
 
 Each consumer commits the exact wheel under `vendor/`, pins
-`atc-testkit==0.9.1` in its development dependencies and records the local
+`atc-testkit==0.10.0` in its development dependencies and records the local
 artifact in `uv.lock`. Standalone clones and CI install their committed artifact
 without a workspace checkout or credentials. Released versions are immutable;
 source changes require a new version and explicit consumer upgrades.
@@ -162,6 +173,8 @@ The rows down to `product_module_prefixes` are required; the others are optional
 | `ci_platforms` | the platforms the CI job covers |
 | `ci_init` | the `module:function` the CI runner calls first |
 | `ignore` | the test paths each stage ignores, under `nt` and `posix` |
+| `selector` | the command `atc test run --select` runs to pick test paths |
+| `toolchain` | the toolchain's name, `python` when absent |
 
 The selection policy and the static checks stay in the project's gate script.
 Workspace validator, doctor and onboarding inspect opted-in projects. Onboarding

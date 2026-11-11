@@ -12,8 +12,6 @@ behaviour for the version it describes, and this document repeats none of
 them. This document states the capabilities that README describes from the
 release that carries them, in which the package, not each repository, owns
 execution commands, parallelism, platform initialization and diagnostics.
-`VERIFICATION.md` names the package and the README by path, so the release
-lands together with a governance change to that sentence.
 
 ## Adoption
 
@@ -48,7 +46,7 @@ stage:
 A test run of the gate or the verifier is the same three stages in this
 order. Each is one pytest invocation over the selected paths.
 
-| Stage | Marker expression | Workers | Desktop |
+| Stage | Category expression | Workers | Desktop |
 | --- | --- | --- | --- |
 | `parallel` | `not slow and not serial and not interactive_desktop` | `-n <workers> --dist loadgroup` | private |
 | `serial` | `serial and not slow and not interactive_desktop` | `-n 0` | private |
@@ -80,7 +78,7 @@ order. Each is one pytest invocation over the selected paths.
 - A stage that collects no test passes. A run in which every stage collects
   no test is refused with `NO_TESTS_COLLECTED`.
 - A project may append `--ignore` arguments to a stage, for a platform for
-  example, and nothing else. A stage's evidence record is its name, marker
+  example, and nothing else. A stage's evidence record is its name, category
   expression and ignored paths, as the evidence format defines.
 - Each stage has its own data root (§ Isolated environment).
 - CI runs the same stages through the same runner and passes its own worker
@@ -98,6 +96,30 @@ order. Each is one pytest invocation over the selected paths.
   run has shown that a hosted Windows CI runner's job desktop serves one. The
   first such test's first CI run of this invocation shows it.
 
+## Toolchain
+
+A toolchain is how a tree's tests are prepared, selected and run. The stages,
+the isolation, the gate, the verifier, the CI runner and the commands go
+through it; `[tool.atc-testkit]` `toolchain` names it, and `python`, the one
+toolchain, is the default. Any other name stops the gate, the verifier and
+`atc tmp checkout` with `TOOLCHAIN_UNKNOWN` (exit 9).
+
+| The toolchain supplies | `python` |
+| --- | --- |
+| The runner of a stage, given the category expression, the workers and the ignored paths | pytest through `python -m atc_testkit.ci`: `-q -m <expression>`, `-n <workers> --dist loadgroup` or `-n 0`, `--ignore=<path>` |
+| The exit code of a run that collects no test | 5 |
+| The dependency files whose digests evidence compares | `uv.lock`, `.python-version` |
+| The lock check of the verifier | `uv lock --check` |
+| The repository-wide collection of the verifier | `python -m pytest -q -n 0 --collect-only` |
+| The variable pointed at the run's bytecode directory | `PYTHONPYCACHEPREFIX` |
+| The environment `atc tmp checkout` prepares, and its interpreter | `uv sync --locked` into `.venv` |
+
+A stage's marker is a category expression over the § Markers names with
+`and`, `or`, `not` and parentheses; the toolchain turns it into its runner's
+selection, and every toolchain selects the same tests for it. One function of
+the `python` toolchain builds every pytest command line, always in the order
+above.
+
 ## Isolated environment
 
 The gate and the verifier first remove every `HAMI_*` variable from their own
@@ -109,13 +131,14 @@ environment built from the caller's by these rules:
   `_PASSWORD`, or that the project names. Names compare case-insensitively.
 - Pointed into the run's working directory: `HOME`, `USERPROFILE`, `APPDATA`,
   `LOCALAPPDATA`, `XDG_CACHE_HOME`, `XDG_CONFIG_HOME`, `XDG_DATA_HOME`,
-  `PYTHONPYCACHEPREFIX`, pytest's `cache_dir`, and each data-root variable the
-  project names, one directory per stage.
+  the toolchain's bytecode variable, pytest's `cache_dir`, and each
+  data-root variable the project names, one directory per stage.
 - Shared across runs: `UV_CACHE_DIR`, `UV_PYTHON_INSTALL_DIR` and
   `RUFF_CACHE_DIR`, under `~/.atc/cache`. These stores are content-addressed
   and safe to share.
 - `TEMP`, `TMP`, `TMPDIR` and `ATC_TMP` carry the values the entry point
-  resolved before it redirected the profile.
+  resolved before it redirected the profile, and `ATC_TEST_TIME_SLACK`
+  passes through (§ Time slack).
 - Set: `PYTHONIOENCODING=utf-8`, whatever the caller's value, so a Python
   child writes UTF-8 to its pipes and files; output read back is decoded
   as UTF-8 with replacement. `atc` sets the same value for every child it
@@ -132,13 +155,29 @@ passing run, and kept with its path printed after a failing one. Every
 stage's pytest base directory lies in it (`ATC_HOME.md` § Integration and
 the pre-push gate).
 
+## Time slack
+
+`ATC_TEST_TIME_SLACK` is the seconds a project's timing tests may add to
+their limits on a slow host: a number from 0 to 30, 2 when unset or empty.
+Any other value stops the gate, the verifier, the CI runner and
+`atc test run` with `TIME_SLACK_INVALID` (exit 9) before any check or test.
+
+- The isolation passes it to every stage; a project's own variable for the
+  same purpose is a project setting the isolation removes with the rest.
+- The log header shows `time slack: <seconds> (<ATC_TEST_TIME_SLACK|default>)`
+  after the command line, and the parallel stage prints the same line after
+  its workers line.
+- The verification report records it, and evidence made with another slack
+  covers nothing (`TIME_SLACK_MISMATCH`).
+
 ## Running and logging
 
 The output rule every `atc` command follows is governance `GIT_WORKFLOW.md`
 § Command results.
 
 - A command's output is shown live and written to a log. The log starts with
-  a header: time, platform, Python, working directory, desktop and command.
+  a header: time, platform, Python, working directory, desktop, command and
+  time slack.
 - The gate keeps the latest run's logs in the checkout's ignored `.tmp/`
   directory, one file per static check and per stage, and the CI runner's
   `--stages` writes its stage logs there. A `.tmp` that is a link or anything
@@ -191,7 +230,7 @@ this order:
 | The expected-main to candidate range changes at least one path | `EMPTY_INTEGRATION_DIFF` |
 | The selection for that range can be computed | `SELECTION_FAILED` |
 | The project's static checks that run first | the project's tokens |
-| `uv lock --check` | `UV_LOCK_CHECK_FAILED` |
+| The toolchain's lock check, `uv lock --check` | `UV_LOCK_CHECK_FAILED` |
 | `git diff --check` over the range | `DIFF_CHECK_FAILED` |
 | `python -m atc_testkit.check --installed` | `TESTKIT_CONTRACT_FAILED` |
 | `ruff check` over the project's lint scope | `RUFF_CHECK_FAILED` |
@@ -206,7 +245,8 @@ this order:
 - A range is documentation-only when every changed path is Markdown, the
   selection names no test, and no path is automation Markdown (`AGENTS.md`,
   `CLAUDE.md`, or a file under a prefix the project names). Such a range
-  skips the stages and runs the project's documentation check.
+  skips the stages and runs the project's documentation check
+  (§ Documentation check).
 - After a pass the verifier writes the verification report to the path in
   `ATC_VERIFICATION_REPORT`. A report that cannot be written leaves the
   verdict a pass.
@@ -256,6 +296,32 @@ working-directory rules bind it as they bind a project's verifier.
   a manually dispatched run of `.github/workflows/validate.yml`
   (`VERIFICATION.md` § Full regression timing and evidence reuse); the
   Owner starts it.
+
+## Documentation check
+
+`atc_testkit.docs` checks the relative links of Markdown, one rule set for
+every project.
+
+- A link target outside code (inline links, images and reference
+  definitions; fenced blocks and inline code are skipped) without a URL
+  scheme must name an existing path. A path starting with `/` is read from
+  the repository root; a `?query` is ignored and `%XX` is decoded.
+- A link that leaves the repository is a problem, `relative link escapes
+  the tree`, unless the caller allows links out, to a sibling repository
+  for example.
+- A Markdown file that is missing, not UTF-8 or empty is a problem.
+- With anchors, a `#fragment` must name a heading, as GitHub numbers a
+  repeated one, or an HTML `id` or `name` of the Markdown file it points
+  into.
+- `python -m atc_testkit.docs --range` checks the range the verifier's
+  `ATC_EXPECTED_MAIN_SHA` and `ATC_INTEGRATION_SHA` name: the Markdown files
+  it adds or changes, or every tracked one when it deletes a path. It prints
+  one `path:line: message` per problem and exits 1 on any; `--anchors` and
+  `--allow-outside` turn on the two options, and paths in place of
+  `--range` check those files. `docs.DOCUMENTATION_CHECK` is that command
+  as a `StaticCheck` with the token `DOCUMENTATION_REFERENCE_FAILED`, the
+  documentation check a project's verifier runs for a documentation-only
+  range.
 
 ## Child processes
 
@@ -435,39 +501,49 @@ log. In order:
    caller interrupts prints them and `INTERRUPTED` (exit 130). Neither ever
    reports a pass. Otherwise the exit code is pytest's.
 
-### `atc test mutants <scratch> <sha> <worktree> <mutants.json> --python <py> --tests <path>...`
+### `atc test mutants <scratch> <sha> <worktree> <mutants.json> --python <py> [--kill-rule failure|assertion] --tests <path>...`
 
 Applies each mutant alone to `<scratch>/tree`, the export of `<sha>`, through
-`atc test run`.
+the isolation of `atc test run`. Each run is pytest with `-x` and a
+900-second timeout.
 
 - `<sha>` must name a commit in `<worktree>` (`git rev-parse --verify`):
   `SHA_NOT_FOUND` (exit 9) before the scratch is touched, then
-  `PYTHON_NOT_FOUND`, the scratch refusals of `atc test run` and
-  `PRIVATE_DESKTOP_INVALID` (exit 9). The private desktop's exclusion line
-  comes first when the runs are private.
-- The tests run once unmutated first; a failing baseline prints
-  `BASELINE-RED` and exits 1 before any mutant is applied.
-- A mutant is a label and a list of edits `{path, old, new}`. An `old` that
-  does not occur exactly once in its file aborts the run. Edits follow the
-  file's line endings.
+  `PYTHON_NOT_FOUND`, the scratch refusals of `atc test run`,
+  `TIME_SLACK_INVALID` and `PRIVATE_DESKTOP_INVALID` (exit 9). The private
+  desktop's exclusion line comes first when the runs are private.
+- A mutant is a label, a list of edits `{path, old, new}` and optional
+  `tests`, the pytest arguments that judge it in place of `--tests`. An
+  `old` that does not occur exactly once in its file aborts the run. Edits
+  follow the file's line endings.
+- The tests run once unmutated first, `--tests` together with every
+  mutant's own `tests`; a failing baseline prints `BASELINE-RED` and exits
+  1 before any mutant is applied.
 - Each mutant prints one line, and its files are restored whether or not the
   run completes. Every edit and restore moves the file's modification time
   to a later whole second than its last, so a bytecode cache, which records
   that second and the size, never stands in for the source the run is meant
-  to see. A run that exits 1 with a `FAILED` line prints `KILLED` with
-  that line; a run that exits 0 prints `SURVIVED` with the summary.
-- Any other ending of a mutated run, an `ERROR` line alone, exits 2 to 5 or a
-  timeout, prints `INCONCLUSIVE <label> -> <reason>` and aborts the run with
-  exit 1. An import-guard refusal aborts the run with its exit code, and an
-  exception while applying or running a mutant with exit 1, each with its
-  token or name on stderr. The remaining mutants of an aborted run stay unrun.
+  to see. A run that exits 0 prints `SURVIVED` with the summary.
+- The kill rule decides a failed run. `failure`, the default: a run that
+  exits 1 with a `FAILED` line prints `KILLED` with that line.
+  `assertion`: pytest also writes a junit report to
+  `<scratch>/junit/<NNN>-<label>.xml`, and the run kills only when every
+  failure's message starts with `AssertionError`, `assert ` or
+  `Failed: DID NOT RAISE` and no test errored; a failure by any other
+  exception, `pytest.fail` among them, is `INCONCLUSIVE`.
+- Any other ending of a mutated run, an `ERROR` line alone, exits 2 to 5, a
+  timeout or a failure the kill rule does not count, prints
+  `INCONCLUSIVE <label> -> <reason>` and aborts the run with exit 1. An
+  import-guard refusal aborts the run with its exit code, and an exception
+  while applying or running a mutant with exit 1, each with its token or
+  name on stderr. The remaining mutants of an aborted run stay unrun.
 - At the end every touched file is compared with its Git object at `<sha>`,
   carriage returns ignored: `restored-ok` or `RESTORE-MISMATCH` per file,
   exit 1 on any mismatch. The last line counts the mutants and names the
   survivors: `done: M mutants, S survived <labels>`, or
   `done: N of M mutants, S survived <labels>` after any abort, also one on the
   last mutant, where `N` counts the mutants that printed a `KILLED`,
-  `SURVIVED` or `INCONCLUSIVE` line.
+  `SURVIVED` or `INCONCLUSIVE` line. Survivors alone leave the exit code 0.
 
 ### `atc test private [--] <command> [args...]`
 
@@ -511,6 +587,8 @@ In `[tool.atc-testkit]`; the first seven keys are required:
 | `ci_platforms` | the CI platform matrix |
 | `ci_init` | the CI runner's initialization function, as `module:function` |
 | `ignore` | `--ignore` paths appended to a stage, under `nt` and `posix` |
+| `selector` | the argv of the command `atc test run --select` runs (§ Commands) |
+| `toolchain` | the toolchain's name, `python` when absent (§ Toolchain) |
 
 Elsewhere in the project:
 
