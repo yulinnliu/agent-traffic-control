@@ -17,9 +17,14 @@ authority:
 decisions:
   date: '2026-11-11'
   source: the Owner, through the coordinator
-  O1: authorized the governance changes of GIT_WORKFLOW.md § Task and authority
-    and § Integrate, and DELIVERY.md § Close-out and § 10 (GOVERNANCE_CHANGES.md)
+  O1: >-
+    authorized the governance changes of GIT_WORKFLOW.md § Task and authority
+    and § Integrate, and DELIVERY.md § Close-out and § 10 (GOVERNANCE_CHANGES.md);
+    Owner 2026-11-11: § Publication boundary added
   O2: 'the --owner-words decision label is "Owner run: approve integration"'
   O3: the push of main is bound to the SHA, git -C "<main checkout>" push origin
     <40-character SHA>:refs/heads/main
   O4: this branch sets no atc-testkit version; the Owner gives the number at integration
+  governance_revision: stays dad8fbd; the governance drift from dad8fbd to b28f309
+    (GIT_WORKFLOW.md exit-code paragraph and sync text) lies outside the sections
+    this task edits
