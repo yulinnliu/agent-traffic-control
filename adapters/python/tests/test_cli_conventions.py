@@ -123,6 +123,16 @@ def test_bootstrap_add_exits_2_on_an_invalid_name(name: str, token: str, tmp_pat
     assert capsys.readouterr().err.startswith("ERROR URL_INVALID ")
 
 
+@pytest.mark.parametrize("source", ["bad source!", "owner", "owner/repo/extra", "/repo", "owner/"])
+def test_bootstrap_init_exits_2_on_an_invalid_governance_source_and_writes_nothing(
+        source: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    import bootstrap
+    assert bootstrap.init(tmp_path, source, force=False, environ={}) == 2
+    assert capsys.readouterr().err.startswith("ERROR GOVERNANCE_SOURCE_INVALID ")
+    assert not (tmp_path / "workspace.yaml").exists()
+    assert bootstrap.init(tmp_path, "owner-1/repo.name_2", force=False, environ={}) == 0
+
+
 def test_onboard_apply_names_an_unknown_project(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     import onboard_project
     (tmp_path / "workspace.yaml").write_text(f"version: 1\nworkspace_root: {tmp_path.as_posix()}\nprojects: {{}}\n",

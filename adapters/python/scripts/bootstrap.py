@@ -33,6 +33,7 @@ ROOT = Path(__file__).resolve().parents[3]
 SCRIPTS = Path(__file__).resolve().parent
 NAME = re.compile(r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")
 URL = re.compile(r"^(https?://|git@|ssh://)")
+GOVERNANCE_SOURCE = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+")
 
 MAP_HEADER = """# Machine-specific root map for this checkout. Absolute paths live here and
 # nowhere else; never committed. Sub-paths under `projects:` are relative to
@@ -62,7 +63,9 @@ def init(root: Path, governance_source: str | None, force: bool, environ: dict[s
     if not source:
         return _error("GOVERNANCE_SOURCE_UNKNOWN", "cannot infer governance_source from the origin remote; "
                       "pass --governance-source OWNER/REPO")
-    text = f"{MAP_HEADER}\nversion: 1\n\ngovernance_source: {source}\n\nworkspace_root: {root.as_posix()}\n\nprojects: {{}}\n"
+    if not GOVERNANCE_SOURCE.fullmatch(source):
+        return _error("GOVERNANCE_SOURCE_INVALID", f"{source!r}: use OWNER/REPO, a GitHub owner and repository name")
+    text =f"{MAP_HEADER}\nversion: 1\n\ngovernance_source: {source}\n\nworkspace_root: {root.as_posix()}\n\nprojects: {{}}\n"
     target.write_text(text, encoding="utf-8", newline="\n")
     for name in ("projects", "worktrees", "state"):
         (root / name).mkdir(exist_ok=True)
