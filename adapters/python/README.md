@@ -2,8 +2,9 @@
 
 One adapter among several: the contracts these tools implement live under
 `shared/` and are defined by their schemas and the conformance fixtures, not
-by this code. Python 3.12 or newer, provisioned by `uv` from the
-`pyproject.toml` and `uv.lock` here. Run everything from this directory.
+by this code. Python 3.12 (`requires-python = ">=3.12,<3.13"`), provisioned
+by `uv` from the `pyproject.toml` and `uv.lock` here. Run everything from this
+directory.
 
 One command fronts the scripts: `uv run atc <command>` here, or
 `uv tool install -e .` once per machine to have `atc` on PATH, which is how
@@ -20,26 +21,34 @@ that changes the dependencies in `pyproject.toml` or
 then a command that imports a new dependency stops with
 `ModuleNotFoundError`, and `uv run --locked atc` from here works.
 
-| `atc` command | Script | Does |
-| --- | --- | --- |
-| `bootstrap` | `bootstrap.py` | `init`, `add --project NAME [--url URL] [--skills NAME,...]`, `status [--json]`: the quickstart path over the tools below |
-| `validate` | `validate_workspace.py` | canonical skills versus rendered adapters, root contract, task records and their declaration, `--projects` for registered checkouts (adapters, the `AGENTS.md` pointer line, `.atc/` with its lock, task records, one prefix per repository), `--root DIR --adapters-only` for a fixture; `--json` (§ validate) |
-| `onboard` | `onboard_project.py` | `--check`, `--sync [--prune]` the managed files of `--project NAME` or `--all`; `--root-only` re-renders this checkout's adapters; never touches project-owned files |
-| `doctor` | `doctor.py` | local readiness: `READY`, `NOT_INITIALIZED`, `ERROR`, with the host worker pool's free tokens, holders and waiters; `--json` |
-| `policies` | `policies.py` | `check DIR`: schema-validate a policy directory and refuse contradictions |
-| `enforce` | `generate_enforcement.py` | `--policies DIR --out DIR [--check]`: harness deny configs from hard deny, see `docs/ENFORCEMENT.md` |
-| `classify` | `classify_change.py` | `--policy escalation.yaml --changed FILE [--severity]`: `LOW` or `HIGH` |
-| `preflight` | `git_preflight.py` | `push` lists `origin/main..main` by integration with its task and authority, reading old and new `integrations.jsonl` lines; reads only |
-| `integrate` | `git_integrate.py` | `--reviewed SHA --task TASK [--owner-words QUOTE] [--project NAME]`: `--task` is required; a record ID with a declared prefix names the repository and the branch (the record's `branch`) and takes its authority from the record on `main` (`FF` only) unless `--owner-words` quotes the Owner; a range that changes only `.atc/tasks/` runs the record check in place of the verifier, `--task` naming one of its records; `docs/TASKS.md` § Authority on `main` states the checks. A task identity string needs `--project`. `--reviewed` and `--rebased` take the full SHA or a unique prefix of 12 or more characters, resolved once to the full SHA the record holds; an ambiguous prefix stops with `AMBIGUOUS_SHA`. A task identity string and a records-only range integrate the one local branch at the reviewed SHA; `--check` resolves, preflights and warns without a slot or candidate; within the slot the latest passing `atc verify` record of the same candidate replaces the verifier run when every check of `shared/conformance/verification-evidence/README.md` § Integration reuse holds; human output prints project names and 12-character SHAs, `--json` the full values |
-| `task` | `task_records.py` | `new --scope TEXT`, `list [--all] [--status S] [--json]`, `check [DIR]` task records under `.atc/tasks/` (`docs/TASKS.md`); `--project NAME` as `worktree` takes it |
-| `worktree` | `managed_worktree.py` | `create`, `resume`, `audit`, `clean` per-topic worktrees with identity in git; `audit` says whether each worktree is removable (merged into `main` and clean); `--project root` for this checkout's own topics under `worktrees/root/`; human output names `<project>/<worktree>`, `--json` the path |
-| `friction` | `friction.py` | append incident and resolution events; summaries |
-| `test` | `atc-testkit` | `run --scratch NAME [--tree DIR] [-- PYTEST_ARG...]`: a test tree under a scratch of `~/.atc/tmp`; `mutants`: one guard mutant at a time on an exported commit |
-| `tmp` | `atc-testkit` | `checkout`, `list`, `clean DIR...`, `prune`: the scratch registry and what is older than seven days |
-| | `check_workspace.py` | runs the validator and records a failure as friction evidence |
-| | `integration_verify.py` | the verifier `atc integrate` runs in a candidate of this checkout (root `AGENTS.md` § Integration verification) |
-| | `build_testkit_release.py` | builds the `atc-testkit` wheel and digest record for consuming projects |
-| | `select_tests.py` | the test files a change can affect: a count and one reason per path, each file's cause with `--explain`, a JSON array with `--json` (§ Selected tests) |
+## Commands
+
+`atc --help` lists the commands by group and `atc <command> --help` gives the
+flags. Exit codes, `--json`, naming, versions and deprecated forms:
+`shared/conformance/CLI.md`.
+
+| `atc` command | Script | Does | Reference |
+| --- | --- | --- | --- |
+| `bootstrap` | `bootstrap.py` | `init`, `add --project NAME [--url URL] [--skills NAME,...]`, `status [--json]`: the quickstart path over the tools below | root `README.md` § Installation |
+| `validate` | `validate_workspace.py` | canonical skills versus rendered adapters, root contract, task records and their declaration, `--projects` for registered checkouts (adapters, the `AGENTS.md` pointer line, `.atc/` with its lock, task records, one prefix per repository), `--root DIR --adapters-only` for a fixture; `--json` (§ validate) | `docs/LAYOUT.md`, `docs/ENFORCEMENT.md` § Drift |
+| `onboard` | `onboard_project.py` | `--check`, `--sync [--prune]` the managed files of `--project NAME` or `--all`; `--root-only` re-renders this checkout's adapters; never touches project-owned files | `docs/LAYOUT.md` |
+| `doctor` | `doctor.py` | local readiness: `READY`, `NOT_INITIALIZED`, `ERROR`, with the host worker pool's free tokens, holders and waiters; `--json` | `atc doctor --help` |
+| `policies` | `policies.py` | `check DIR`: schema-validate a policy directory and refuse contradictions | `shared/policies/schemas/` |
+| `enforce` | `generate_enforcement.py` | `--policies DIR --out DIR [--check]`: harness deny configs from hard deny, see `docs/ENFORCEMENT.md` | `docs/ENFORCEMENT.md` |
+| `classify` | `classify_change.py` | `--policy escalation.yaml --changed FILE [--severity]`: `LOW` or `HIGH` | `atc classify --help` |
+| `preflight` | `git_preflight.py` | `push` lists `origin/main..main` by integration with its task and authority, reading old and new `integrations.jsonl` lines; reads only | `docs/WORKFLOW.md` § 8 |
+| `integrate` | `git_integrate.py` | `--reviewed SHA --task TASK [--owner-words QUOTE] [--project NAME]`: `--task` is required; a record ID with a declared prefix names the repository and the branch (the record's `branch`) and takes its authority from the record on `main` (`FF` only) unless `--owner-words` quotes the Owner; a range that changes only `.atc/tasks/` runs the record check in place of the verifier, `--task` naming one of its records; `docs/TASKS.md` § Authority on `main` states the checks. A task identity string needs `--project`. `--reviewed` and `--rebased` take the full SHA or a unique prefix of 12 or more characters, resolved once to the full SHA the record holds; an ambiguous prefix stops with `AMBIGUOUS_SHA`. A task identity string and a records-only range integrate the one local branch at the reviewed SHA; `--check` resolves, preflights and warns without a slot or candidate; within the slot the latest passing `atc verify` record of the same candidate replaces the verifier run when every check of `shared/conformance/verification-evidence/README.md` § Integration reuse holds; human output prints project names and 12-character SHAs, `--json` the full values | `docs/WORKFLOW.md` § 6–7, governance `GIT_WORKFLOW.md` |
+| `verify` | `git_integrate.py` | runs the integration verifier on the candidate `atc integrate` would build, moving no ref, and records a PASS that `atc integrate` reuses | `docs/WORKFLOW.md` § 5 |
+| `close-out` | `close_out.py` | removes a task's worktree, scratches and reports | `docs/TASKS.md` § Close-out |
+| `task` | `task_records.py` | `new --scope TEXT`, `list [--all] [--status S] [--json]`, `check [DIR]` task records under `.atc/tasks/` (`docs/TASKS.md`); `--project NAME` as `worktree` takes it | `docs/TASKS.md` |
+| `worktree` | `managed_worktree.py` | `create`, `resume`, `audit`, `clean` per-topic worktrees with identity in git; `audit` says whether each worktree is removable (merged into `main` and clean); `--project root` for this checkout's own topics under `worktrees/root/`; human output names `<project>/<worktree>`, `--json` the path | skill `atc-worktree` |
+| `friction` | `friction.py` | append incident and resolution events; summaries | `atc friction --help` |
+| `test` | `atc-testkit` | `run --scratch NAME [--tree DIR] [-- PYTEST_ARG...]`: a test tree under a scratch of `~/.atc/tmp`; `mutants`: one guard mutant at a time on an exported commit; `private`: a command on a private desktop | `docs/TESTKIT.md` § Commands |
+| `tmp` | `atc-testkit` | `checkout`, `list`, `clean DIR...`, `prune`: the scratch registry and what is older than seven days | `docs/TESTKIT.md` § Commands, `docs/ATC_HOME.md` |
+| | `check_workspace.py` | runs the validator and records a failure as friction evidence | |
+| | `integration_verify.py` | the verifier `atc integrate` runs in a candidate of this checkout (root `AGENTS.md` § Integration verification) | |
+| | `build_testkit_release.py` | builds the `atc-testkit` wheel and digest record for consuming projects | |
+| | `select_tests.py` | the test files a change can affect: a count and one reason per path, each file's cause with `--explain`, a JSON array with `--json` (§ Selected tests) | |
 
 `src/atc_cli/` is the dispatcher: it resolves `--root`, applies the
 canonical checkout guard and wraps every `--json` result in the envelope of

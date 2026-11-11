@@ -1,10 +1,36 @@
 # Agent Traffic Control
 
+![Many agents. One runway. Clearance before landing.](docs/assets/atc-banner.png)
+
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](adapters/python/pyproject.toml)
+![Works with Claude Code / Codex](https://img.shields.io/badge/works%20with-Claude%20Code%20%2F%20Codex-555.svg)
+
+[繁體中文](README.zh-TW.md)
+
+**Many agents. One runway. Clearance before landing.**
+
 Who is cleared to write, one writer per branch, and clean handoffs between
 sessions. For one owner running several coding agents across several
 repositories. Not a gateway, not an orchestrator.
 
-[繁體中文](README.zh-TW.md)
+Three guarantees, each held by an `atc` command rather than by an agent
+reading the rules:
+
+- **`main` moves only to a reviewed, verified SHA.** `atc integrate`
+  fast-forwards `main` to a candidate built from the exact SHA named as
+  reviewed. It refuses without a task record bound to that branch, without
+  the Owner's authority (granted in the record on `main`, or quoted with
+  `--owner-words`), and without a passing integration verifier run on that
+  candidate (a range of task records alone gets the record check instead).
+- **Every worktree says whose it is.** `atc worktree` writes owner, topic and
+  session into the worktree's git lock reason. `resume` refuses a worktree
+  another session holds unless it is explicitly rebound, and `clean` refuses
+  one that is dirty or not merged into `main`.
+- **Hard denies are harness configuration, not prose.** `atc enforce`
+  generates Claude Code's `permissions.deny`, a Codex rules block and a git
+  pre-commit hook from one `hard-deny.yaml`, and `--check` reports drift.
+  Once installed, the harness refuses the denied action.
 
 ## Why
 
@@ -54,13 +80,31 @@ Contracts are files: Markdown rules, YAML policies, JSON Schemas, git
 metadata. Tools are replaceable implementations of those contracts. Python is
 the reference implementation, not a requirement.
 
-atc-testkit is the pytest side of the verification contract: test categories
-and stages, an isolated environment per run, scratch copies of an exact
-commit, and the skeletons of a project's pre-push gate and integration
-verifier. `atc test` runs tests on a scratch copy and keeps the output in a
-log; `atc tmp` makes, lists and deletes those scratches. A project vendors
-the wheel this repository builds, so its CI needs nothing from this
-checkout. `docs/TESTKIT.md` is the reference.
+## atc-testkit
+
+atc-testkit is the pytest side of the verification contract, and the code
+behind `atc test` and `atc tmp`:
+
+- **Tests run against the tree you name.** `atc tmp checkout` exports an
+  exact commit into a scratch directory; `atc test run` runs pytest against
+  that copy or a worktree and keeps the output in a log. An import-location
+  guard stops the run when the code under test is imported from anywhere
+  else.
+- **Each run gets its own settings.** The run drops the host's `HAMI_*`
+  variables and points the project's data-root variables and the temporary
+  directory into the scratch. It is not a sandbox: the tests still run with
+  your account's file and network access.
+- **Tests carry a category and run in stages.** Markers classify each test,
+  stages run the parallel ones first and the serial ones after, and a
+  change-impact selection picks the test files a change can affect.
+- **Guards get mutated.** `atc test mutants` changes one guard at a time on
+  an exported commit and reports which mutants the tests failed to catch.
+- **Projects get the gate skeletons.** A project's pre-push gate and
+  integration verifier are built from the testkit's skeletons, and the
+  project vendors the wheel this repository builds, so its CI needs nothing
+  from this checkout.
+
+`docs/TESTKIT.md` is the reference.
 
 ## Installation
 
@@ -130,27 +174,10 @@ without it is project-owned and never touched.
 ## Commands
 
 `atc --help` lists the commands by group and `atc <command> --help` gives the
-flags; `adapters/python/README.md` lists them in one table. Exit codes,
-`--json`, naming, versions and deprecated forms: `shared/conformance/CLI.md`.
-
-| Command | Does | Reference |
-| --- | --- | --- |
-| `atc worktree` | Creates, resumes, audits and cleans per-topic worktrees; `--project root` for this repository's own | skill `atc-worktree` |
-| `atc task` | `new` writes a task record, `list` lists tasks, `check` checks records | `docs/TASKS.md` |
-| `atc integrate` | Fast-forwards `main` to a reviewed SHA once the verifier passes; `--check` only resolves and preflights | `docs/WORKFLOW.md` § 6–7, governance `GIT_WORKFLOW.md` |
-| `atc verify` | Runs the integration verifier on the candidate `atc integrate` would build, moving no ref, and records a PASS that `atc integrate` reuses | `docs/WORKFLOW.md` § 5 |
-| `atc close-out` | Removes a task's worktree, scratches and reports | `docs/TASKS.md` § Close-out |
-| `atc preflight` | `push` lists what `origin/main..main` would publish, by integration; reads only | `docs/WORKFLOW.md` § 8 |
-| `atc test` | Runs tests on a scratch copy into a log; `mutants` checks guards; `private` runs a command on a private desktop | `docs/TESTKIT.md` § Commands |
-| `atc tmp` | Exports a commit into a scratch with its environment; lists, cleans and prunes scratches | `docs/TESTKIT.md` § Commands, `docs/ATC_HOME.md` |
-| `atc bootstrap` | `init`, `add`, `status`: sets up a workspace and registers projects | § Installation |
-| `atc onboard` | Checks or syncs the managed files of `--project NAME` or `--all`; `--root-only` re-renders this repository's skill copies | `docs/LAYOUT.md` |
-| `atc validate` | Checks skill copies, task records and this repository's contract; `--projects` checks registered projects | `docs/LAYOUT.md`, `docs/ENFORCEMENT.md` § Drift |
-| `atc doctor` | Reports whether this machine is ready to run the tools (`READY`, `NOT_INITIALIZED`, `ERROR`), changing nothing | `atc doctor --help` |
-| `atc policies` | `check` validates a policy directory against its schemas and refuses contradictions | `shared/policies/schemas/` |
-| `atc enforce` | Generates each harness's deny configuration from `hard-deny.yaml`; `--check` reports drift | `docs/ENFORCEMENT.md` |
-| `atc classify` | Rates a list of changed paths `LOW` or `HIGH` under an escalation policy; `HIGH` means an independent review first | `atc classify --help` |
-| `atc friction` | Appends incidents and their resolutions to an append-only log under `state/workspace-friction/`; lists them and summarises their recurrence | `atc friction --help` |
+flags. [`adapters/python/README.md` § Commands](adapters/python/README.md#commands)
+lists every command with what it does and where its reference lives. Exit
+codes, `--json`, naming, versions and deprecated forms:
+`shared/conformance/CLI.md`.
 
 ## Skills
 

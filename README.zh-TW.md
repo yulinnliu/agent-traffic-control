@@ -1,10 +1,34 @@
 # Agent Traffic Control
 
+![多個 agent，一條跑道，放行才能降落。](docs/assets/atc-banner.png)
+
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](adapters/python/pyproject.toml)
+![Works with Claude Code / Codex](https://img.shields.io/badge/works%20with-Claude%20Code%20%2F%20Codex-555.svg)
+
+[English](README.md)
+
+**多個 agent，一條跑道，放行才能降落。**
+
 一個人同時讓好幾個 coding agent 在好幾個 repository 裡工作時，總得有人管：
 誰可以寫、每條 branch 同時只能有一個 writer、session 之間怎麼交接才不會出錯。
 Agent Traffic Control 就是做這件事的。它不是 gateway，也不是 orchestrator。
 
-[English](README.md)
+下面三項保證由 `atc` 指令本身把關，不靠 agent 讀了規則自己遵守：
+
+- **`main` 只會移到審過、驗過的 SHA。** `atc integrate` 把 `main`
+  fast-forward 到一個 candidate，這個 candidate 由指定為已審查的那個確切 SHA
+  建出來。沒有綁定這條 branch 的任務紀錄、沒有 Owner 的授權（寫在 `main` 上的
+  紀錄裡，或用 `--owner-words` 引述），或 integration verifier 沒有在這個
+  candidate 上通過（只改任務紀錄的範圍改跑紀錄檢查），它都會拒絕。
+- **每個 worktree 都寫明是誰的。** `atc worktree` 把 owner、topic、session
+  寫進 worktree 的 git lock reason。別的 session 持有的 worktree，`resume`
+  會拒絕，除非明確重新綁定；有未提交變更、或還沒合進 `main` 的 worktree，
+  `clean` 會拒絕。
+- **hard deny 是 harness 的設定，不是文字。** `atc enforce` 從同一份
+  `hard-deny.yaml` 產生 Claude Code 的 `permissions.deny`、Codex 的 rules 區塊
+  和 git pre-commit hook，`--check` 會回報不一致。裝上之後，被禁止的動作由
+  harness 直接拒絕。
 
 ## 為什麼需要它
 
@@ -49,12 +73,27 @@ agent、哪種語言，git 都已經在那裡了。
 git metadata。工具只是照著這些規則做事的實作，隨時可以換掉。Python 版是參考
 實作，不是一定要用 Python。
 
-atc-testkit 負責驗證規則裡和 pytest 有關的部分：測試分類與分階段執行、每次
-執行各自隔離的環境、指定 commit 的 scratch 副本，以及專案 pre-push gate 和
-integration verifier 的骨架。`atc test` 在 scratch 副本上跑測試，輸出存成
-log；`atc tmp` 負責建立、列出和刪除這些 scratch。專案 vendor 的是這個
-repository 建出來的 wheel，所以專案的 CI 完全不需要這份 checkout。詳細說明在
-`docs/TESTKIT.md`。
+## atc-testkit
+
+atc-testkit 負責驗證規則裡和 pytest 有關的部分，也是 `atc test`、`atc tmp`
+背後的程式：
+
+- **測試跑在你指定的 tree 上。** `atc tmp checkout` 把確切的 commit 匯出到
+  scratch 目錄；`atc test run` 對這份副本或某個 worktree 跑 pytest，輸出存成
+  log。受測程式碼如果是從別的地方 import 進來的，import 位置檢查會讓這次執行
+  停下來。
+- **每次執行有自己的設定。** 執行時會拿掉主機上的 `HAMI_*` 變數，把專案的
+  data-root 變數和暫存目錄指到 scratch 裡。它不是 sandbox：測試仍然用你帳號的
+  檔案與網路權限在跑。
+- **測試有分類，分階段執行。** 每個測試用 marker 標分類，先跑可平行的階段、
+  再跑必須依序的階段；change-impact selection 會挑出一個變更可能影響的測試檔。
+- **guard 會被做 mutation。** `atc test mutants` 在匯出的 commit 上一次改一個
+  guard，回報哪些 mutant 沒被測試抓到。
+- **專案拿到 gate 的骨架。** 專案的 pre-push gate 和 integration verifier
+  從 testkit 的骨架建起來；專案 vendor 的是這個 repository 建出來的 wheel，
+  所以專案的 CI 完全不需要這份 checkout。
+
+詳細說明在 `docs/TESTKIT.md`。
 
 ## 安裝
 
@@ -123,28 +162,10 @@ render 出來的檔案都帶有 `managed-by: agent-traffic-control` 標記；沒
 
 ## 指令
 
-`atc --help` 依群組列出所有指令，每個指令的參數用 `atc <command> --help` 查；
-`adapters/python/README.md` 有一張表把它們全部列出來。Exit code、`--json`、命名、
-版本與棄用的寫法見 `shared/conformance/CLI.md`。
-
-| 指令 | 用途 | 參考 |
-| --- | --- | --- |
-| `atc worktree` | 建立、接續、檢查、清理每個 topic 的 worktree；`--project root` 用在這個 repository 自己的 topic | skill `atc-worktree` |
-| `atc task` | `new` 寫任務紀錄，`list` 列出任務，`check` 檢查紀錄 | `docs/TASKS.md` |
-| `atc integrate` | verifier 通過後，把 `main` fast-forward 到審過的 SHA；加 `--check` 只做解析和預檢 | `docs/WORKFLOW.md` § 6–7、governance `GIT_WORKFLOW.md` |
-| `atc verify` | 在 `atc integrate` 會建出的 candidate 上跑 integration verifier，不移動任何 ref；PASS 會留下紀錄，供 `atc integrate` 沿用 | `docs/WORKFLOW.md` § 5 |
-| `atc close-out` | 移除任務的 worktree、scratch 和報告 | `docs/TASKS.md` § Close-out |
-| `atc preflight` | `push` 依 integration 列出 `origin/main..main` 會發布哪些內容，只讀不寫 | `docs/WORKFLOW.md` § 8 |
-| `atc test` | 在 scratch 副本上跑測試並寫成 log；`mutants` 檢查 guard 有沒有效；`private` 在私有桌面上執行指令 | `docs/TESTKIT.md` § Commands |
-| `atc tmp` | 把 commit 匯出成 scratch 並建好環境；列出、清除、定期清理 scratch | `docs/TESTKIT.md` § Commands、`docs/ATC_HOME.md` |
-| `atc bootstrap` | `init`、`add`、`status`：建立 workspace 並登記專案 | 上面的〈安裝〉 |
-| `atc onboard` | 檢查或同步 `--project NAME` 或 `--all` 的受管檔案；`--root-only` 重新 render 這個 repository 自己的 skill 副本 | `docs/LAYOUT.md` |
-| `atc validate` | 檢查 skill 副本、任務紀錄和這個 repository 的規則；`--projects` 檢查所有已登記的專案 | `docs/LAYOUT.md`、`docs/ENFORCEMENT.md` § Drift |
-| `atc doctor` | 檢查這台機器是否已能執行這些工具（`READY`、`NOT_INITIALIZED`、`ERROR`），不改動任何東西 | `atc doctor --help` |
-| `atc policies` | `check` 用 schema 驗證 policy 目錄，發現互相矛盾的規則就拒絕 | `shared/policies/schemas/` |
-| `atc enforce` | 從 `hard-deny.yaml` 產生各 harness 的 deny 設定；`--check` 回報不一致 | `docs/ENFORCEMENT.md` |
-| `atc classify` | 依 escalation policy 把一串變更路徑判為 `LOW` 或 `HIGH`；`HIGH` 代表要先做獨立 review | `atc classify --help` |
-| `atc friction` | 把卡關事件和它的解法記進 `state/workspace-friction/` 底下只增不改的 log，可以列出來，也可以統計重複發生的情況 | `atc friction --help` |
+`atc --help` 依群組列出所有指令，每個指令的參數用 `atc <command> --help` 查。
+[`adapters/python/README.md` § Commands](adapters/python/README.md#commands)
+列出每個指令的用途和參考文件。Exit code、`--json`、命名、版本與棄用的寫法見
+`shared/conformance/CLI.md`。
 
 ## Skills
 
