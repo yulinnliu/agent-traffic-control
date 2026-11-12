@@ -18,7 +18,9 @@ The installed `atc` is an editable install: it reads the checkout's code and
 holds the dependencies of the moment it was installed. An integrated range
 that changes the dependencies in `pyproject.toml` or
 `atc-testkit/pyproject.toml` is followed, on each host with an installed
-`atc`, by `uv tool install -e "<checkout>/adapters/python" --force`. Until
+`atc`, by `uv tool install -e "<checkout>/adapters/python" --force`, after
+the uninstall below on a host whose `uv tool list` shows
+`atc-python-adapter`. Until
 then a command that imports a new dependency stops with
 `ModuleNotFoundError`, and `uv run --locked atc` from here works.
 

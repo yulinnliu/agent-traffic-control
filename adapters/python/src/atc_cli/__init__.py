@@ -225,7 +225,8 @@ def main(argv: list[str] | None = None, checkout: Path | None = None) -> int:
         return _dispatch(command, rest, explicit_root)
     except ModuleNotFoundError as error:
         print(f"ERROR MISSING_DEPENDENCY atc {command} needs the module {error.name!r}, which this "
-              f"installation lacks; reinstall it with: {reinstall_command()}", file=sys.stderr)
+              f"installation lacks; reinstall it with: {reinstall_command()} (a host whose `uv tool list` "
+              f"shows atc-python-adapter runs `uv tool uninstall atc-python-adapter` first)", file=sys.stderr)
         return 2
     finally:
         sys.argv[0] = program
