@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 import subprocess
 import tarfile
+import threading
 
 from . import locations, scratch, toolchain as toolchains
 from .git import git_env
@@ -16,6 +17,7 @@ from .locations import Refusal
 TASK_ID = re.compile(r"[A-Z][A-Z0-9]*-[0-9]+")
 SHORT_SHA = 7
 TREE = "tree"
+PIPE_CHUNK = 1 << 16
 SyncRun = Callable[[Sequence[str], Path, Mapping[str, str]], subprocess.CompletedProcess]
 
 
@@ -42,20 +44,32 @@ def source_worktree(argument: str | None) -> Path:
 
 
 def export(worktree: Path, commit: str, tree: Path) -> None:
-    """``git archive`` of ``commit`` unpacked into ``tree``, which must not exist."""
+    """``git archive`` of ``commit`` unpacked into ``tree``, which must not exist.
+
+    Both pipes are read to their end, stderr on its own thread, so git never blocks on a full pipe: the
+    tar reader stops at the end-of-archive blocks and leaves git's trailing record padding unread.
+    """
     tree.mkdir(parents=True)
     archive = subprocess.Popen(["git", "-C", str(worktree), "archive", "--format=tar", commit],
                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL,
                                env=git_env(), creationflags=scratch.WINDOW_HIDDEN)
+    stderr: list[bytes] = []
+    reader = threading.Thread(target=lambda: stderr.append(archive.stderr.read()), daemon=True)
+    reader.start()
     try:
         with tarfile.open(fileobj=archive.stdout, mode="r|") as stream:
             stream.extractall(tree, filter="data")
+        while archive.stdout.read(PIPE_CHUNK):
+            pass
     except (tarfile.TarError, OSError) as error:
         archive.kill()
         archive.wait()
+        reader.join()
         raise Refusal("EXPORT_FAILED", f"{commit} into {tree}: {error}") from error
-    errors = archive.stderr.read().decode("utf-8", errors="replace").strip()
-    if archive.wait() != 0:
+    code = archive.wait()
+    reader.join()
+    if code != 0:
+        errors = b"".join(stderr).decode("utf-8", errors="replace").strip()
         raise Refusal("EXPORT_FAILED", f"{commit} into {tree}: {errors}")
 
 

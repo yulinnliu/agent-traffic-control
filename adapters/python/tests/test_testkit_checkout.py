@@ -1,10 +1,14 @@
 """docs/ATC_HOME.md § Checkout: ``atc tmp checkout`` exports a commit into a registered scratch and builds its environment."""
 from __future__ import annotations
 
+import io
 import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
+import tarfile
+import threading
 
 import pytest
 
@@ -151,3 +155,63 @@ def test_a_real_sync_builds_the_environment(tmp_path: Path, atc_tmp: Path, monke
     lines: list[str] = []
     assert checkout.checkout(["HEAD", "--task", TASK, "--worktree", str(repo)], environ, say=lines.append) == 0
     assert (Path(lines[1].removeprefix("SYNCED ")) / "pyvenv.cfg").is_file()
+
+
+ARCHIVE_STAND_IN = """import sys
+sys.stderr.buffer.write(b"w" * int(sys.argv[3])); sys.stderr.buffer.write(sys.argv[4].encode()); sys.stderr.flush()
+sys.stdout.buffer.write(open(sys.argv[1], "rb").read()); sys.stdout.buffer.write(bytes(int(sys.argv[2])))
+sys.stdout.flush(); sys.exit(int(sys.argv[5]))
+"""
+
+
+@pytest.fixture()
+def stand_in(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Runs ``export`` against a stand-in ``git archive``: a one-file tar, ``tail`` bytes after it, ``noise``
+    bytes and ``message`` on stderr, exit ``code``; the export finishes within the timeout or the test fails."""
+    payload = io.BytesIO()
+    with tarfile.open(fileobj=payload, mode="w", format=tarfile.PAX_FORMAT) as tar:
+        info = tarfile.TarInfo("a.txt")
+        info.size = 1
+        tar.addfile(info, io.BytesIO(b"a"))
+    archive_file = tmp_path / "archive.tar"
+    archive_file.write_bytes(payload.getvalue())
+    started: list[subprocess.Popen] = []
+    real = subprocess.Popen
+
+    def run(tail: int, noise: int, message: str = "", code: int = 0) -> tuple[Path, list[BaseException]]:
+        def popen(argv, **kwargs):
+            if "archive" not in argv:
+                return real(argv, **kwargs)
+            started.append(real([sys.executable, "-c", ARCHIVE_STAND_IN, str(archive_file), str(tail), str(noise),
+                                 message, str(code)], **kwargs))
+            return started[-1]
+        monkeypatch.setattr(checkout.subprocess, "Popen", popen)
+        tree = tmp_path / "tree"
+        raised: list[BaseException] = []
+
+        def target() -> None:
+            try:
+                checkout.export(tmp_path, "HEAD", tree)
+            except BaseException as error:  # noqa: BLE001 - handed to the test thread
+                raised.append(error)
+        worker = threading.Thread(target=target, daemon=True)
+        worker.start()
+        worker.join(30)
+        assert not worker.is_alive(), "export deadlocked on the stand-in git archive"
+        return tree, raised
+
+    yield run
+    for process in started:
+        process.kill()
+        process.wait()
+
+
+def test_the_export_drains_what_git_writes_after_the_archive_and_on_stderr(stand_in) -> None:
+    tree, raised = stand_in(tail=1 << 20, noise=1 << 20)
+    assert raised == [] and (tree / "a.txt").read_text(encoding="utf-8") == "a"
+
+
+def test_a_failed_git_archive_is_refused_with_its_stderr(stand_in) -> None:
+    _tree, [refused] = stand_in(tail=10240, noise=0, message="fatal: not a tree object", code=128)
+    assert isinstance(refused, checkout.Refusal) and refused.token == "EXPORT_FAILED"
+    assert "fatal: not a tree object" in refused.detail

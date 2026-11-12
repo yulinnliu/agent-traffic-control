@@ -831,3 +831,22 @@ def test_an_owner_that_cannot_be_read_keeps_its_candidate_for_seven_days(reposit
     assert scratch.prune(say=lines.append) == 0
     assert lines == [f"DELETED {old}"]
     assert not old.exists() and not owner.marker(old).exists() and young.is_dir() and owner.marker(young).exists()
+
+
+@pytest.mark.integration
+def test_a_refused_candidate_that_stays_keeps_its_marker_and_its_record(repository: Path, atc_tmp: Path,
+                                                                        monkeypatch: pytest.MonkeyPatch) -> None:
+    held = candidate(repository, atc_tmp, "held", "0")
+    real = subprocess.run
+
+    def remove_fails(argv, *args, **kwargs):
+        if argv[-4:-1] == ["remove", "-f", "-f"]:
+            return subprocess.CompletedProcess(argv, 1, "", "error: failed to delete 'held': Permission denied")
+        return real(argv, *args, **kwargs)
+    lines: list[str] = []
+    with monkeypatch.context() as patch:
+        patch.setattr(scratch.subprocess, "run", remove_fails)
+        assert scratch.prune(say=lines.append) == 1
+    assert lines == [f"REFUSED {held} (error: failed to delete 'held': Permission denied)"]
+    assert held.is_dir() and owner.marker(held).exists()
+    assert "held" in git(repository, "worktree", "list", "--porcelain")
