@@ -160,7 +160,7 @@ never assigns work itself.
 
 ## Close-out
 
-`atc close-out --task <ID> [--project P] [--skip ITEM]...` carries out governance
+`atc close-out --task <ID> [--project P] [--skip ITEM]... [--check]` carries out governance
 `DELIVERY.md` § Close-out for one task, the project named as `atc task` names
 it. Without `--project` the project is the one repository, the
 workspace root or a registered project, whose `AGENTS.md` on `main` declares
@@ -202,6 +202,20 @@ them; the exit code is 0 when none is `REFUSED`, 3 when one is `REFUSED`
 and another `DELETED`, else 1. A refusal also prints
 `STOP ITEM_REFUSED: <count> refused, <count> deleted; ...` on stderr.
 `--json` prints the items and counts.
+
+`--check` rehearses the run: it deletes nothing, writes no ledger line,
+unregisters no scratch and takes no lock. Every item ends on the line the
+run would give it, `DELETED`, `SKIPPED` or `REFUSED`, each with its reason: a
+worktree's comes from the read-only `atc worktree audit` (`removable`, or
+what keeps it), an empty leftover directory's from the conditions
+`atc worktree clean` checks, a scratch's names it a registered scratch or a
+dependent run, and a report's previews its ledger line's `role` and
+`verdict`. The last line counts them and says nothing was deleted. The exit
+code is 0 when no item would be `REFUSED`, else 1 with
+`STOP ITEM_REFUSED: <count> would be refused; ...` on stderr; `--skip` and
+`--json` apply, and `--json` gives `verdict` `READY` or `REFUSED` and
+`check: true`. A step the check cannot see, such as a file locked at
+deletion time, still ends `REFUSED` on the run.
 
 `atc validate` runs the check on this repository and `atc validate
 --projects` on every registered project. A check reports: a file that is not

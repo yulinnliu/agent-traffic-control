@@ -129,7 +129,8 @@ pass their output through.
 - `clean` deletes the targets you name, after its safety checks
   (`worktree clean`, `tmp clean`); `prune` deletes what the command finds
   orphaned (`tmp prune`, `onboard --sync --prune`). `close-out` is the
-  task-lifecycle step that cleans one integrated task.
+  task-lifecycle step that cleans one integrated task; `close-out --check`
+  lists what it would delete, skip and refuse.
 - `onboard --sync` is the one command that converges projects' ATC-owned
   files.
 

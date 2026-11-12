@@ -160,8 +160,10 @@ the map from task ID to session and nothing a record, Git or
    turn read Git as § Owner-run commands states. Then:
    - Done: compare the line. `FF` matches when `candidate_sha` equals the
      reviewed SHA; `NO_FF` when the candidate's second parent is the
-     reviewed SHA and its first parent `main_before`. Run
-     `atc close-out --task <task>` from outside the task's worktree.
+     reviewed SHA and its first parent `main_before`. From outside the
+     task's worktree run `atc close-out --task <task> --check`, show the
+     Owner each item it lists with its outcome and reason, then run
+     `atc close-out --task <task>`.
    - Not run, `main` unchanged: the command waits on the Owner; keep it
      ready to copy and ask for nothing else. A stop the Owner shows you
      follows its token's `next`; a corrected command for the same SHA needs

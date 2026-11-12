@@ -158,13 +158,69 @@ def record_report(repo: Path, task: str, report: Path) -> None:
         handle.write(line)
 
 
-def remove_worktree(root: Path, name: str, worktree: Path, cwd: str, environ: dict[str, str]) -> str:
+def rehearse_worktree(root: Path, name: str, worktree: Path, owner: str, topic: str,
+                      environ: dict[str, str]) -> str:
+    """What `atc worktree clean` would do to the task's worktree, read through the read-only `atc worktree audit`."""
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        hw.main(["audit", "--project", name, "--owner", owner, "--topic", topic, "--json"], root=root,
+                environ=environ, home=str(locations.atc_home(environ).parent), cwd=str(root))
+    try:
+        results = json.loads(out.getvalue())["results"]
+    except (ValueError, KeyError):
+        return f"REFUSED {worktree} (worktree audit gave no result)"
+    mine = [result for result in results if hw.key(result["target"]) == hw.key(str(worktree))] or results[:1]
+    if not mine:
+        return f"REFUSED {worktree} (worktree audit gave no result)"
+    result = mine[0]
+    if result["reason"] == "OK" and result["evidence"].get("removable"):
+        return f"DELETED {worktree} (removable)"
+    if (result["reason"], result["detail"]) == ("PATH_UNSAFE", "unregistered"):
+        return rehearse_leftover(root, name, worktree, f"{hw.BRANCH_PREFIX}{owner}+{topic}", environ)
+    why = f"{result['reason']}: {result['detail']}" if result["reason"] != "OK" else result["detail"]
+    return f"REFUSED {worktree} ({why})"
+
+
+def rehearse_leftover(root: Path, name: str, directory: Path, branch: str, environ: dict[str, str]) -> str:
+    """The conditions `atc worktree clean` checks before removing an unregistered leftover directory."""
+    try:
+        ws = hw.load_workspace(root, environ)
+    except hw.Stop as stop:
+        return f"REFUSED {directory} ({stop.result.code}: {stop.result.detail})"
+    project = hw.root_project(ws) if name == hw.root_project(ws).name else ws.projects[name]
+    if hw.is_reparse(str(directory)) or not directory.is_dir():
+        return f"REFUSED {directory} (not a plain directory)"
+    if any(directory.iterdir()):
+        return f"REFUSED {directory} (directory not empty)"
+    tip = hw.commit_of(project.repo, f"refs/heads/{branch}")
+    main_tip = hw.commit_of(project.repo, "main")
+    if tip is not None and (main_tip is None or not hw.is_ancestor(project.repo, tip, main_tip)):
+        return f"REFUSED {directory} (branch {branch} not merged into main)"
+    return f"DELETED {directory} (empty leftover directory)"
+
+
+def rehearse_report(repo: Path, task: str, report: Path) -> str:
+    """What the real run would do to a report: its ledger line, previewed, then the deletion."""
+    common = git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip()
+    if not common:
+        return f"REFUSED {report} (ledger: no git common directory for {repo})"
+    try:
+        summary = report_summary(task, report)
+    except (OSError, UnicodeError) as error:
+        return f"REFUSED {report} (ledger: {error})"
+    return f"DELETED {report} (ledger line: role {summary['role']}, verdict {summary['verdict'] or 'null'})"
+
+
+def remove_worktree(root: Path, name: str, worktree: Path, cwd: str, environ: dict[str, str],
+                    check: bool = False) -> str:
     """One report line for the task's worktree, removed through `atc worktree clean` and its checks."""
     if Path(os.path.normcase(os.path.realpath(cwd))).is_relative_to(os.path.normcase(os.path.realpath(worktree))):
         return f"SKIPPED {worktree} (working directory)"
     owner, plus, topic = worktree.name.partition("+")
     if not plus or owner not in hw.OWNERS:
         return f"REFUSED {worktree} (not a managed worktree <owner>+<topic>)"
+    if check:
+        return rehearse_worktree(root, name, worktree, owner, topic, environ)
     target = ["--project", name]
     out = io.StringIO()
     with contextlib.redirect_stdout(out):
@@ -180,12 +236,40 @@ def remove_worktree(root: Path, name: str, worktree: Path, cwd: str, environ: di
     return f"REFUSED {worktree} ({why})"
 
 
+def json_items(lines: list[str]) -> list[dict]:
+    """The ``items`` of ``--json``: each line's outcome, path and reason."""
+    items = []
+    for line in lines:
+        outcome, _, rest = line.partition(" ")
+        target, _, why = rest.partition(" (")
+        items.append({"outcome": outcome, "path": target, "why": why[:-1] if why.endswith(")") else why or None})
+    return items
+
+
+def report_check(task: str, lines: list[str], counts: dict[str, int], as_json: bool) -> int:
+    """The ``--check`` result: 0 when no item would be REFUSED, else 1."""
+    code = cli_conventions.STOP if counts["REFUSED"] else cli_conventions.OK
+    if code:
+        print(f"STOP ITEM_REFUSED: {counts['REFUSED']} would be refused; each REFUSED item names the path and why",
+              file=sys.stderr)
+    if as_json:
+        print(json.dumps({"verdict": "REFUSED" if code else "READY", "check": True, "task": task,
+                          "items": json_items(lines), "counts": {k.lower(): v for k, v in counts.items()}}, indent=2))
+        return code
+    for line in lines:
+        print(line)
+    print(f"close-out {task} --check: {counts['DELETED']} to delete, {counts['SKIPPED']} skipped, "
+          f"{counts['REFUSED']} refused; nothing deleted")
+    return code
+
+
 def main(argv: list[str] | None = None, root: Path = task_records.ROOT, environ: dict[str, str] | None = None,
          cwd: str | None = None) -> int:
     parser = argparse.ArgumentParser(prog="atc close-out", allow_abbrev=False, **cli_conventions.form(
         "Close out an integrated task: remove its worktree, scratches and report files.",
-        exit="0 every item DELETED or SKIPPED; 1 STOP before anything is removed, or an item REFUSED with nothing "
-             "deleted; 3 PARTIAL: an item REFUSED while another was deleted; 2 ERROR",
+        exit="0 every item DELETED or SKIPPED (under --check: would be); 1 STOP before anything is removed, an item "
+             "REFUSED with nothing deleted, or under --check an item that would be REFUSED; 3 PARTIAL: an item REFUSED "
+             "while another was deleted; 2 ERROR",
         see="docs/TASKS.md § Close-out; DELIVERY.md § Close-out"))
     parser.add_argument("--task", required=True, metavar="ID", help="the integrated task, for example ATC-0008")
     cli_conventions.add_project(parser, " (default: the repository declaring the task's prefix, else the working "
@@ -193,6 +277,9 @@ def main(argv: list[str] | None = None, root: Path = task_records.ROOT, environ:
     parser.add_argument("--skip", action="append", choices=ITEMS, default=[], metavar="ITEM",
                         help=f"leave this item for this run only, nothing written ({', '.join(ITEMS)}; repeatable; "
                              "an absent item is a no-op); the record's keep is permanent")
+    parser.add_argument("--check", action="store_true",
+                        help="rehearse: list each item with what the run would do and why; delete nothing, take no "
+                             "lock; exit 0 when no item would be REFUSED, else 1")
     cli_conventions.add_json(parser)
     args = parser.parse_args(argv)
     environ = dict(os.environ) if environ is None else environ
@@ -225,18 +312,21 @@ def main(argv: list[str] | None = None, root: Path = task_records.ROOT, environ:
     elif skipped("worktree"):
         lines.append(f"SKIPPED {worktree} ({skipped('worktree')})")
     else:
-        lines.append(remove_worktree(root, name, worktree, cwd, environ))
+        lines.append(remove_worktree(root, name, worktree, cwd, environ, check=args.check))
 
     scratches = scratch_rows
     if skipped("scratches"):
         lines += [f"SKIPPED {item} ({skipped('scratches')})" for item in scratches]
     elif scratches:
-        scratch.clean(scratches, say=lines.append, environ=environ, with_runs=True)
+        scratch.clean(scratches, say=lines.append, environ=environ, with_runs=True, check=args.check)
 
     reports = sorted((locations.atc_home(environ) / REPORTS).glob(f"{args.task}-*.md"))
     for report in reports:
         if skipped("reports"):
             lines.append(f"SKIPPED {report} ({skipped('reports')})")
+            continue
+        if args.check:
+            lines.append(rehearse_report(checkout, args.task, report))
             continue
         try:
             record_report(checkout, args.task, report)
@@ -250,6 +340,8 @@ def main(argv: list[str] | None = None, root: Path = task_records.ROOT, environ:
             lines.append(f"REFUSED {report} ({error})")
 
     counts = {word: sum(line.startswith(f"{word} ") for line in lines) for word in ("DELETED", "SKIPPED", "REFUSED")}
+    if args.check:
+        return report_check(args.task, lines, counts, args.json)
     if not counts["REFUSED"]:
         code = cli_conventions.OK
     else:
@@ -257,13 +349,8 @@ def main(argv: list[str] | None = None, root: Path = task_records.ROOT, environ:
         print(f"STOP ITEM_REFUSED: {counts['REFUSED']} refused, {counts['DELETED']} deleted; each REFUSED item "
               f"names the path and why", file=sys.stderr)
     if args.json:
-        items = []
-        for line in lines:
-            outcome, _, rest = line.partition(" ")
-            target, _, why = rest.partition(" (")
-            items.append({"outcome": outcome, "path": target, "why": why[:-1] if why.endswith(")") else why or None})
         print(json.dumps({"verdict": {0: "DONE", 1: "REFUSED", 3: "PARTIAL"}[code], "task": args.task,
-                          "items": items, "counts": {k.lower(): v for k, v in counts.items()}}, indent=2))
+                          "items": json_items(lines), "counts": {k.lower(): v for k, v in counts.items()}}, indent=2))
         return code
     for line in lines:
         print(line)

@@ -57,6 +57,51 @@ def test_an_integrated_task_loses_its_worktree_scratches_and_reports(done, atc_t
     assert lines[-1] == f"close-out {TASK}: 4 deleted, 0 skipped, 0 refused"
 
 
+def test_check_lists_what_the_run_would_do_and_deletes_nothing(done, atc_tmp: Path,
+                                                                capsys: pytest.CaptureFixture[str]) -> None:
+    ws, topic, environ = done
+    reports = Path(environ["HOME"]) / ".atc" / "reports"
+    ledger = ws.repo / ".git" / "atc" / "integrations.jsonl"
+    before = ledger.read_bytes()
+    code, lines, err = close(ws, environ, capsys, ws.root, "--check", "--skip", "scratches")
+    assert code == 0, (lines, err)
+    assert lines == [f"DELETED {topic} (removable)", f"SKIPPED {atc_tmp / 'mine'} (--skip)",
+                     f"DELETED {reports / f'{TASK}-abc-review.md'} (ledger line: role unknown, verdict null)",
+                     f"DELETED {reports / f'{TASK}-abc.md'} (ledger line: role unknown, verdict null)",
+                     f"close-out {TASK} --check: 3 to delete, 1 skipped, 0 refused; nothing deleted"]
+    assert topic.is_dir() and (atc_tmp / "mine").is_dir() and len(list(reports.iterdir())) == 3
+    assert ledger.read_bytes() == before
+    code, lines, err = close(ws, environ, capsys, ws.root, "--check")
+    assert code == 0 and f"DELETED {atc_tmp / 'mine'} (registered scratch)" in lines, (lines, err)
+    assert len(scratch.registered(atc_tmp)) == 2
+    assert close(ws, environ, capsys, ws.root)[0] == 0 and not topic.exists()
+
+
+def test_check_exits_1_when_an_item_would_be_refused(done, capsys: pytest.CaptureFixture[str]) -> None:
+    ws, topic, environ = done
+    commit(topic, {"later.txt": "x\n"})
+    code, lines, err = close(ws, environ, capsys, ws.root, "--check", "--json")
+    payload = json.loads("\n".join(lines))
+    assert code == 1 and (payload["verdict"], payload["check"]) == ("REFUSED", True)
+    assert payload["items"][0] == {"outcome": "REFUSED", "path": str(topic), "why": "not removable: unmerged"}
+    assert payload["counts"]["refused"] == 1 and topic.is_dir()
+    assert err.startswith("STOP ITEM_REFUSED: 1 would be refused")
+
+
+def test_check_rehearses_a_leftover_directory(done, capsys: pytest.CaptureFixture[str]) -> None:
+    ws, topic, environ = done
+    run_git(ws.repo, "worktree", "unlock", str(topic))
+    run_git(ws.repo, "worktree", "remove", "--force", str(topic))
+    topic.mkdir()
+    (topic / "stray.txt").write_text("x", encoding="utf-8")
+    argv = ("--check", "--skip", "scratches", "--skip", "reports")
+    code, lines, _err = close(ws, environ, capsys, ws.root, *argv)
+    assert (code, lines[0]) == (1, f"REFUSED {topic} (directory not empty)")
+    (topic / "stray.txt").unlink()
+    code, lines, _err = close(ws, environ, capsys, ws.root, *argv)
+    assert (code, lines[0]) == (0, f"DELETED {topic} (empty leftover directory)") and topic.is_dir()
+
+
 def test_the_working_directorys_worktree_is_skipped(done, capsys: pytest.CaptureFixture[str]) -> None:
     ws, topic, environ = done
     code, lines, _err = close(ws, environ, capsys, topic)

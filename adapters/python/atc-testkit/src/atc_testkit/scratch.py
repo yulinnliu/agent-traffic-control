@@ -314,14 +314,16 @@ def _resolve_for_clean(argument: str, root: Path) -> tuple[str | None, str]:
     return os.path.join(root, name), ""
 
 
-def _clean_one(directory: str, root: Path, say: Callable[[str], None]) -> int:
-    """Steps 2 to 6 of § Deleting; each directory ends on one line."""
+def _clean_one(directory: str, root: Path, say: Callable[[str], None], check: str | None = None) -> int:
+    """Steps 2 to 6 of § Deleting; each directory ends on one line. ``check`` is the reason a rehearsal gives
+    a directory that would be deleted, and then nothing is removed or unregistered."""
     try:
         try:
             status = os.lstat(_extended(directory))
         except FileNotFoundError:
             say(f"SKIPPED {directory} (not found)")
-            _unregister(root, directory)
+            if check is None:
+                _unregister(root, directory)
             return 0
         if _is_link(status):
             say(f"REFUSED {directory} (is itself a link)")
@@ -329,6 +331,9 @@ def _clean_one(directory: str, root: Path, say: Callable[[str], None]) -> int:
         if not stat.S_ISDIR(status.st_mode):
             say(f"REFUSED {directory} (not a directory)")
             return 1
+        if check is not None:
+            say(f"DELETED {directory} ({check})")
+            return 0
         why = remove_tree(directory, scratch_links(directory), say)
         if why:
             say(f"REFUSED {directory} ({why})")
@@ -356,10 +361,11 @@ def dependent_runs(root: Path, directory: str) -> list[str]:
 
 
 def clean(arguments: Sequence[str], *, say: Callable[[str], None] = print, environ=None,
-          with_runs: bool = False) -> int:
+          with_runs: bool = False, check: bool = False) -> int:
     """``atc tmp clean``: the highest exit code across the directories.
 
-    A scratch's dependent runs are listed; ``with_runs`` deletes them too, before the scratch.
+    A scratch's dependent runs are listed; ``with_runs`` deletes them too, before the scratch. ``check``
+    rehearses: each line says what the run would do, and nothing is deleted, unregistered or locked.
     """
     root = locations.locate(environ).tmp
     chosen = list(arguments)
@@ -372,20 +378,19 @@ def clean(arguments: Sequence[str], *, say: Callable[[str], None] = print, envir
             directories.append(directory)
     if len(directories) != len(chosen):
         return 1
-    ordered: list[str] = []
+    ordered: list[tuple[str, str]] = []
     for directory in directories:
         for run in dependent_runs(root, directory):
-            if any(locations.same_path(run, seen) for seen in [*ordered, *directories]):
+            if any(locations.same_path(run, seen) for seen in [*(path for path, _ in ordered), *directories]):
                 continue
             if with_runs:
-                ordered.append(run)
+                ordered.append((run, f"dependent run of {directory}"))
             else:
                 say(f"DEPENDENT {run} (its tree is inside {directory}; --with-runs deletes it)")
-        ordered.append(directory)
-    directories = ordered
+        ordered.append((directory, "registered scratch"))
     code = 0
-    for directory in directories:
-        code = max(code, _clean_one(directory, root, say))
+    for directory, reason in ordered:
+        code = max(code, _clean_one(directory, root, say, reason if check else None))
     return code
 
 

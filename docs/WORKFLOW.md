@@ -138,10 +138,13 @@ and the fix goes back to review.
 ## 7. Coordinator: close out
 
 ```text
+atc close-out --task <ID> --check
 atc close-out --task <ID>
 ```
 
-`atc close-out` removes the worktree, the task's scratches and its reports
+`--check` lists each item with what the run would do and why, and deletes
+nothing; the coordinator shows the Owner those items, then runs it without
+`--check`. `atc close-out` removes the worktree, the task's scratches and its reports
 (`docs/TASKS.md` § Close-out):
 
 - An intermediate batch of a multi-batch topic runs it with `--skip` for
