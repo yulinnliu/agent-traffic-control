@@ -1,0 +1,19 @@
+task_id: ATC-0031
+repository: yulinnliu/agent-traffic-control
+base_sha: 375e271c4d90dca847f3f46b95f75ed85777364d
+scope: Rename the CLI distribution from atc-python-adapter to agent-traffic-control
+  (console script stays atc); update install docs; no PyPI publish
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: 375e271c4d90dca847f3f46b95f75ed85777364d
+branch: worktree-claude+pypi-dist-name
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
+decisions:
+  - 'Queue item 4c (ATC-0029 design § 8 finding: `atc` is taken on PyPI by an unrelated package; `agent-traffic-control` and `atc-testkit` are free). Owner 11-13 ("改名，開 task"): the CLI distribution in adapters/python/pyproject.toml is renamed from atc-python-adapter to agent-traffic-control; the console script stays `atc`; atc-testkit keeps its name; base 375e271.'
+  - 'Everything that names the distribution follows: importlib.metadata lookups (atc_cli/__init__.py and any other), uv.lock regenerated with uv, install and reinstall instructions (adapters/python/README.md, root README.md and README.zh-TW.md, docs/), scripts, CI workflows, tests and conformance text. An existing install under the old name must get a documented upgrade path (uninstall the old tool, install the new one); state it where reinstalling is described.'
+  - 'No PyPI publish, no tag, no version bump unless shared/conformance/CLI.md § Versions and compatibility requires one for a distribution rename; if it does, stop and report to the coordinator before bumping. docs/design/ATC-0029.md keeps its § 8 finding as written (a design record); nothing under shared/governance/ changes.'
