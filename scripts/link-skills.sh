@@ -11,13 +11,12 @@
 #
 # Also writes .atc/README.md (the bootloader), vendors shared/governance/
 # into .atc/governance/, records the revision in .atc/atc.lock, installs
-# CLAUDE.md when the repository has none (or has the previous one), and the
-# pointer line in AGENTS.md (an older policy block or .atc/governance.yaml
-# is migrated). .atc/tasks/ is the repository's and never touched. An adapter
-# without a `managed-by` marker is reported and left alone; a managed file
-# that drifted is rewritten. Stops before writing anything when AGENTS.md
-# lacks its `## Integration verification` section or argv file, when Git
-# ignores a path it would write, or when .atc/ holds a file sync does not write.
+# CLAUDE.md when the repository has none, and the pointer line in AGENTS.md.
+# .atc/tasks/ is the repository's and never touched. An adapter without a
+# `managed-by` marker is reported and left alone; a managed file that drifted
+# is rewritten. Stops before writing anything when AGENTS.md lacks its
+# `## Integration verification` section or argv file, when Git ignores a
+# path it would write, or when .atc/ holds a file sync does not write.
 set -eu
 
 usage() { sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; }
@@ -51,13 +50,7 @@ managed() { grep -q "^managed-by: $MARKER\$" "$1"; }
 # Byte comparison after dropping carriage returns, so a CRLF checkout is not drift.
 same() { [ "$(tr -d '\r' < "$1" | cksum)" = "$(tr -d '\r' < "$2" | cksum)" ]; }
 LOCK="$REPO/.atc/atc.lock"
-LEGACY="$REPO/.atc/governance.yaml"
 POINTER=$(tr -d '\r' < "$ROOT/shared/templates/PROJECT_AGENTS.md")
-# The workspace root's CLAUDE.md before it imported AGENTS.md.
-LEGACY_CLAUDE_SUM=$(printf '%s\n' '# CLAUDE.md' '' \
-  'Canonical agent guidance for the directory holding this file lives in the' \
-  '`AGENTS.md` next to it. Read that `AGENTS.md` in full before starting work and' \
-  'follow it as if it were this file.' | cksum)
 
 # GIT_WORKFLOW.md § Lock advancement: no file moves ahead of the lock.
 AGENTS="$REPO/AGENTS.md"
@@ -97,7 +90,6 @@ if [ -d "$REPO/.atc" ]; then
   strays=$(cd "$REPO" && find .atc \( -type f -o -type l \) | sed 's|^\./||' | sort | while IFS= read -r f; do
     case $f in
       .atc/README.md|.atc/atc.lock|.atc/tasks/*) ;;
-      .atc/governance.yaml) grep -q "^managed-by: $MARKER\$" "$f" || echo "$f (no ownership marker)" ;;
       .atc/governance/*) [ -f "$ROOT/shared/governance/${f#.atc/governance/}" ] || echo "$f" ;;
       *) echo "$f" ;;
     esac
@@ -195,8 +187,6 @@ if [ ! -e "$REPO/CLAUDE.md" ]; then
   cp "$ROOT/CLAUDE.md" "$REPO/CLAUDE.md"; echo "installed  CLAUDE.md"; wrote=1
 elif same "$ROOT/CLAUDE.md" "$REPO/CLAUDE.md"; then
   echo "current    CLAUDE.md"
-elif [ "$(tr -d '\r' < "$REPO/CLAUDE.md" | cksum)" = "$LEGACY_CLAUDE_SUM" ]; then
-  cp "$ROOT/CLAUDE.md" "$REPO/CLAUDE.md"; echo "updated    CLAUDE.md (imports AGENTS.md)"; wrote=1
 else
   echo "differs    CLAUDE.md (project-owned, left alone)"
 fi
@@ -209,12 +199,6 @@ if grep -q '^<!-- atc:governance -->' "$AGENTS"; then
     awk -v line="$POINTER" '/^<!-- atc:governance -->/ && !done { print line; done=1; next } { print }' "$AGENTS" > "$tmp"
     mv "$tmp" "$AGENTS"; echo "updated    AGENTS.md (pointer line)"; wrote=1
   fi
-elif grep -q 'atc:project-policy-reference begin' "$AGENTS"; then
-  awk -v line="$POINTER" '
-    /atc:project-policy-reference begin/ { print line; skip=1; next }
-    /atc:project-policy-reference end/ && skip { skip=0; next }
-    !skip { print }' "$AGENTS" > "$tmp"
-  mv "$tmp" "$AGENTS"; echo "updated    AGENTS.md (policy block replaced by the pointer line)"; wrote=1
 else
   awk -v line="$POINTER" 'BEGIN{done=0} /^## / && !done { print line; print ""; done=1 } { print }' "$AGENTS" > "$tmp"
   mv "$tmp" "$AGENTS"; echo "updated    AGENTS.md (pointer line inserted before the first section)"; wrote=1
@@ -228,14 +212,11 @@ lsource=$( [ -e "$LOCK" ] && tr -d '\r' < "$LOCK" | sed -n 's/^source = "\(.*\)"
 # A locked revision missing from this checkout's history is re-locked, as check-skills.sh reports it stale.
 stale=0
 if [ "$revision" != unknown ] && [ -n "$locked" ] && ! git -C "$ROOT" merge-base --is-ancestor "$locked" HEAD 2>/dev/null; then stale=1; fi
-if [ ! -e "$LOCK" ] || [ -e "$LEGACY" ] || [ "$wrote" = 1 ] || [ "$stale" = 1 ] || [ -z "$locked" ] || [ "$lsource" != "$source" ]; then
+if [ ! -e "$LOCK" ] || [ "$wrote" = 1 ] || [ "$stale" = 1 ] || [ -z "$locked" ] || [ "$lsource" != "$source" ]; then
   printf 'version = 1\nsource = "%s"\nrevision = "%s"\n' "$source" "$revision" > "$LOCK"
   echo "locked     .atc/atc.lock ($source @ $revision)"
 else
   echo "current    .atc/"
-fi
-if [ -e "$LEGACY" ]; then
-  rm -f "$LEGACY"; echo "removed    .atc/governance.yaml (migrated to .atc/atc.lock)"
 fi
 
 if ! command -v atc >/dev/null 2>&1; then

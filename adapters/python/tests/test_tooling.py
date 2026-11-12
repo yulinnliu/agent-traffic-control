@@ -401,24 +401,6 @@ def test_pointer_line_must_be_current_and_before_the_first_section(tmp_path: Pat
 
 
 @pytest.mark.integration
-def test_policy_block_from_an_older_release_is_stale_and_replaced_by_the_pointer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    root, project = make_workspace(tmp_path)
-    write(project / "AGENTS.md", f"# AGENTS.md\n\n<!-- atc:project-policy-reference begin 2025 -->\nold\n{validator.LEGACY_POLICY_END}\n\n## What\n")
-    monkeypatch.setattr(validator, "ROOT", root)
-    validator.FAILURES.clear()
-    validator.check_project_pointer(project, "projects.demo")
-    assert validator.FAILURES == ["projects.demo: AGENTS.md policy block is from an older release — run sync to replace it with the pointer line"]
-    validator.FAILURES.clear()
-    plan = onboard_project.build_plan(project, root)
-    item = next(i for i in plan if i.path == project / "AGENTS.md")
-    assert item.action == "update"
-    onboard_project.apply_plan(plan, "sync")
-    assert (project / "AGENTS.md").read_text(encoding="utf-8") == f"# AGENTS.md\n\n{POINTER}\n\n## What\n"
-    validator.check_project_pointer(project, "projects.demo")
-    assert validator.FAILURES == []
-
-
-@pytest.mark.integration
 def test_atc_dir_is_installed_locked_and_checked(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root, project = make_workspace(tmp_path)
     assert onboard_project.run("sync", [("demo", project)], root) == 0
@@ -428,7 +410,6 @@ def test_atc_dir_is_installed_locked_and_checked(tmp_path: Path, monkeypatch: py
     lock = (project / ".atc/atc.lock").read_bytes()
     assert lock == validator.render_lock(onboard_project.governance_source(root), onboard_project.governance_revision(root)).encode("utf-8")
     assert lock.startswith(b'version = 1\nsource = "') and b"\r" not in lock and lock.endswith(b'"\n') and lock.count(b"\n") == 3
-    assert not (project / ".atc/governance.yaml").exists()
     assert check_registered_projects(root, monkeypatch) == []
     write(project / ".atc/governance/CORE.md", "# edited locally\n")
     write(project / ".atc/README.md", "# edited locally\n")
@@ -498,34 +479,22 @@ def test_task_records_under_atc_are_the_projects_and_never_touched(tmp_path: Pat
 
 
 @pytest.mark.integration
-def test_project_in_the_previous_layout_is_migrated_in_write_order(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_sync_writes_the_lock_last(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root, project = make_workspace(tmp_path)
-    write(project / "AGENTS.md", f"# AGENTS.md\n\nIntro.\n\n{validator.LEGACY_POLICY_BEGIN}\nold\n{validator.LEGACY_POLICY_END}\n\n## What this is\n\nDemo.\n\n" + VERIFICATION_SECTION)
-    write(project / ".atc/governance.yaml", "# Written by Agent Traffic Control sync; never edited by hand.\nmanaged-by: agent-traffic-control\nsource: a/b\nrevision: 1234\n")
+    write(project / "AGENTS.md", "# AGENTS.md\n\nIntro.\n\n## What this is\n\nDemo.\n\n" + VERIFICATION_SECTION)
     write(project / ".atc/governance/CORE.md", "# older\n")
     write(project / validator.TASKS_DIR / "DEMO-0001.yaml", "task_id: DEMO-0001\n")
-    write(project / "CLAUDE.md", onboard_project.LEGACY_CLAUDE_MD)
     plan = onboard_project.build_plan(project, root)
     writes = [i.path.relative_to(project).as_posix() for i in plan if i.action in ("create", "update")]
     assert writes[0] == ".atc/README.md"
-    assert writes.index(".atc/governance/CORE.md") < writes.index("AGENTS.md") < writes.index("CLAUDE.md") < writes.index(".atc/atc.lock")
-    assert writes[-1] == ".atc/governance.yaml" and plan[-1].content is None
+    assert writes.index(".atc/governance/CORE.md") < writes.index("AGENTS.md") < writes.index("CLAUDE.md")
+    assert writes[-1] == ".atc/atc.lock"
     assert onboard_project.run("sync", [("demo", project)], root) == 0
-    assert not (project / ".atc/governance.yaml").exists()
     assert sorted(p.name for p in (project / ".atc").iterdir()) == ["README.md", "atc.lock", "governance", "tasks"]
     assert (project / validator.TASKS_DIR / "DEMO-0001.yaml").read_text(encoding="utf-8") == "task_id: DEMO-0001\n"
     assert (project / "AGENTS.md").read_text(encoding="utf-8").startswith(f"# AGENTS.md\n\nIntro.\n\n{POINTER}\n\n## What this is\n")
     assert (project / "CLAUDE.md").read_text(encoding="utf-8") == (root / "CLAUDE.md").read_text(encoding="utf-8")
     assert not [f for f in check_registered_projects(root, monkeypatch) if "task records" not in f]
-
-
-@pytest.mark.integration
-def test_previous_layout_pin_without_marker_is_a_collision(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    root, project = make_workspace(tmp_path)
-    write(project / ".atc/governance.yaml", "source: mine\nrevision: abc\n")
-    assert onboard_project.run("sync", [("demo", project)], root) == 1
-    assert (project / ".atc/governance.yaml").read_text(encoding="utf-8") == "source: mine\nrevision: abc\n"
-    assert not (project / ".atc/atc.lock").exists() and not (project / ".atc/README.md").exists()
 
 
 @pytest.mark.integration
@@ -606,17 +575,6 @@ def test_verification_gate_stops_the_project_before_writing(tmp_path: Path, caps
     assert (project / ".atc/atc.lock").is_file()
 
 
-@pytest.mark.integration
-def test_previous_root_claude_md_is_replaced_and_any_other_kept(tmp_path: Path) -> None:
-    root, project = make_workspace(tmp_path)
-    (project / "CLAUDE.md").write_bytes(onboard_project.LEGACY_CLAUDE_MD.replace("\n", "\r\n").encode("utf-8"))
-    item = next(i for i in onboard_project.build_plan(project, root) if i.path == project / "CLAUDE.md")
-    assert (item.action, item.content) == ("update", (root / "CLAUDE.md").read_text(encoding="utf-8"))
-    write(project / "CLAUDE.md", onboard_project.LEGACY_CLAUDE_MD + "\nProject note.\n")
-    item = next(i for i in onboard_project.build_plan(project, root) if i.path == project / "CLAUDE.md")
-    assert item.action == "skip"
-
-
 @pytest.mark.unit
 def test_root_atc_holds_only_task_records(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root, _ = make_workspace(tmp_path)
@@ -692,7 +650,7 @@ def test_hardcoded_governance_source_is_rejected(tmp_path: Path, monkeypatch: py
 
 @pytest.mark.unit
 @pytest.mark.parametrize("pointer, readme, problem", [
-    ("<!-- atc:project-policy-reference begin -->\nold\n", BOOTLOADER, "must be one line starting <!-- atc:governance -->"),
+    ("Read the governance.\nold\n", BOOTLOADER, "must be one line starting <!-- atc:governance -->"),
     ("<!-- atc:governance -->Read the docs.\n", BOOTLOADER, "naming .atc/README.md"),
     (POINTER + "\n", "Read `.atc/governance/INDEX.md`.\n", "missing the exact governance revision lock (.atc/atc.lock)"),
     (POINTER + "\n", "governance revision in `.atc/atc.lock`.\n", "missing the vendored governance index reference"),

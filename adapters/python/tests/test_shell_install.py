@@ -145,7 +145,6 @@ def test_an_ignored_synced_path_stops_link_skills_before_writing(tmp_path: Path)
 @pytest.mark.parametrize("path, content", [
     (".atc/notes.txt", "mine\n"),
     (".atc/governance/LOCAL.md", "mine\n"),
-    (".atc/governance.yaml", "source: x\n"),
     (".atc/atc.lock", 'version = 2\nsource = "a/b"\nrevision = "0"\n'),
 ])
 def test_a_file_sync_does_not_write_under_atc_stops_link_skills_before_writing(tmp_path: Path, path: str, content: str) -> None:
@@ -175,22 +174,6 @@ def test_link_skills_writes_the_lock_and_pointer_line_then_stays_current(tmp_pat
     again = sh("link-skills.sh", repo.as_posix(), "atc-review")
     assert again.returncode == 0 and "current    AGENTS.md pointer line" in again.stdout and "current    .atc/" in again.stdout
     assert tree(repo) == before
-
-
-@pytest.mark.integration
-def test_link_skills_migrates_a_policy_block_and_the_legacy_pin_to_the_pointer_and_lock(tmp_path: Path) -> None:
-    repo = make_repo(tmp_path)
-    write(repo / "AGENTS.md", "# AGENTS.md\n\n<!-- atc:project-policy-reference begin -->\nold policy\n"
-          "<!-- atc:project-policy-reference end -->\n\n" + SECTION)
-    write(repo / ".atc/governance.yaml", "managed-by: agent-traffic-control\nrevision: 0\n")
-    run = sh("link-skills.sh", repo.as_posix(), "atc-review")
-    assert run.returncode == 0, run.stdout
-    agents = (repo / "AGENTS.md").read_text(encoding="utf-8").replace("\r", "")
-    assert "old policy" not in agents and "atc:project-policy-reference" not in agents and agents.count(POINTER) == 1
-    assert (repo / ".atc/atc.lock").read_bytes() == expected_lock().encode()
-    assert not (repo / ".atc/governance.yaml").exists()
-    out = run.stdout
-    assert out.index("updated    AGENTS.md (policy block") < out.index("locked     .atc/atc.lock") < out.index("removed    .atc/governance.yaml")
 
 
 @pytest.mark.integration

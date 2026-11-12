@@ -57,14 +57,6 @@ SUPPORTING_PATH = re.compile(r"[A-Za-z0-9._/-]+")
 WORKSPACE_ENV_REFERENCE = re.compile(r"\$(?:\{)?ATC_ROOT\b|\$env:ATC_ROOT\b")
 HARDCODED_GOVERNANCE_SOURCE = re.compile(r"[A-Za-z0-9_.-]+/agent-traffic-control\b")
 POINTER_MARKER = "<!-- atc:governance -->"
-# The policy block an older release wrote into AGENTS.md, whatever it wrote
-# after `begin`; sync replaces it with the pointer line.
-LEGACY_POLICY_BEGIN = "<!-- atc:project-policy-reference begin -->"
-LEGACY_POLICY_END = "<!-- atc:project-policy-reference end -->"
-LEGACY_POLICY_BLOCK = re.compile(
-    r"<!-- atc:project-policy-reference begin[^>]*-->.*?<!-- atc:project-policy-reference end -->",
-    re.DOTALL,
-)
 GOVERNANCE_INDEX_RELATIVE = Path("shared") / "governance" / "INDEX.md"
 POLICY_RELATIVE = GOVERNANCE_INDEX_RELATIVE
 GOVERNANCE_MODULES = ("CORE.md", "GIT_WORKFLOW.md", "VERIFICATION.md", "DELIVERY.md", "FAILURE_ESCALATION.md", "GOVERNANCE_CHANGES.md", "PROJECT_RUNTIME.md")
@@ -73,8 +65,6 @@ VENDORED_GOVERNANCE = ATC_DIR / "governance"
 ATC_LOCK = ATC_DIR / "atc.lock"
 ATC_README = ATC_DIR / "README.md"
 TASKS_DIR = ATC_DIR / "tasks"
-# The pin file of the layout before atc.lock; sync migrates it.
-LEGACY_MANIFEST = ATC_DIR / "governance.yaml"
 LOCK_VERSION = 1
 VENDORED_INDEX_REFERENCE = ".atc/governance/INDEX.md"
 # GIT_WORKFLOW.md § Integration verifier source: the section every project's
@@ -597,9 +587,6 @@ def check_project_pointer(project_path: Path, label: str) -> None:
         fail(f"{label}: {agents_md} missing")
         return
     text = normalise(agents_md.read_text(encoding="utf-8"))
-    if LEGACY_POLICY_BLOCK.search(text):
-        fail(f"{label}: AGENTS.md policy block is from an older release — run sync to replace it with the pointer line")
-        return
     lines = text.splitlines()
     pointer = next((index for index, line in enumerate(lines) if line.startswith(POINTER_MARKER)), None)
     if pointer is None:
@@ -737,10 +724,7 @@ def report_machine_local(project_path: Path, label: str, workspace_yaml: Path) -
 def check_atc_dir(project_path: Path, label: str) -> None:
     """The project's `.atc/`: a valid lock, the current bootloader and vendored governance, nothing else but `tasks/`."""
     for stray in atc_strays(project_path):
-        if stray == LEGACY_MANIFEST:
-            fail(f"{label}: {LEGACY_MANIFEST.as_posix()} is from an older release — run sync to migrate it to {ATC_LOCK.as_posix()}")
-        else:
-            fail(f"{label}: {stray.as_posix()} is not a file sync writes; .atc/ holds README.md, atc.lock, governance/ and the project's tasks/")
+        fail(f"{label}: {stray.as_posix()} is not a file sync writes; .atc/ holds README.md, atc.lock, governance/ and the project's tasks/")
     try:
         lock = read_lock(project_path)
     except ValueError as exc:

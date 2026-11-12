@@ -80,12 +80,10 @@ Operational description of the tree; governance semantics live under
   governance repository, when sync changes any file it writes into the
   repository, or when the recorded revision is not in the history of ATC
   `main`. `scripts/link-skills.sh` reads the lock without parsing it, so it
-  also rewrites a lock with an empty `revision`, rewrites the lock whenever a
-  legacy `.atc/governance.yaml` is still present (and then removes that
-  file), and checks the recorded revision against its checkout's `HEAD`. On `main`,
-  `atc validate --projects` checks that this revision is in `main`'s history.
-  The files sync writes carry no format
-  version of their own: they are current when they equal what the locked
+  also rewrites a lock with an empty `revision`, and checks the recorded
+  revision against its checkout's `HEAD`. On `main`, `atc validate
+  --projects` checks that this revision is in `main`'s history. The files
+  sync writes carry no format version of their own: they are current when they equal what the locked
   revision renders, and sync replaces them otherwise.
 - `.atc/tasks/<task_id>.yaml` — the repository's own task records, declared by
   `## Task records` in its `AGENTS.md` (`docs/TASKS.md`).

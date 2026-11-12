@@ -106,7 +106,6 @@ def ws(tmp_path: Path) -> Workspace:
 
 
 LOCK = f'version = 1\nsource = "{GOVERNANCE_SOURCE}"\nrevision = "{PINNED}"\n'
-LEGACY = f"managed-by: agent-traffic-control\nsource: {GOVERNANCE_SOURCE}\nrevision: '{'b' * 40}'\n"
 
 
 def bound(ws: Workspace, capsys: pytest.CaptureFixture[str], files: dict[str, str | None]) -> tuple[int, str]:
@@ -124,16 +123,11 @@ def bound(ws: Workspace, capsys: pytest.CaptureFixture[str], files: dict[str, st
     return status, yaml.safe_load((topic / TASKS_DIR / "DEMO-0001.yaml").read_text(encoding="utf-8"))["governance_revision"]
 
 
-def test_new_binds_the_lock_over_the_previous_layouts_pin(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
-    assert bound(ws, capsys, {".atc/governance.yaml": LEGACY}) == (0, PINNED)
-
-
-def test_new_falls_back_to_a_marked_previous_layout_pin_without_a_lock(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
-    assert bound(ws, capsys, {".atc/atc.lock": None, ".atc/governance.yaml": LEGACY}) == (0, "b" * 40)
+def test_new_binds_the_lock(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    assert bound(ws, capsys, {}) == (0, PINNED)
 
 
 @pytest.mark.parametrize("files, detail", [
-    ({".atc/atc.lock": None, ".atc/governance.yaml": LEGACY.replace("managed-by: agent-traffic-control\n", "")}, "atc.lock is missing"),
     ({".atc/atc.lock": None}, "atc.lock is missing"),
     ({".atc/atc.lock": 'version = 2\nsource = "a/b"\nrevision = "c"\n'}, "version 2 is not 1"),
 ])

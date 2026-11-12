@@ -57,9 +57,6 @@ for tool in .claude .agents .dsh; do
   done
 done
 
-if [ -e "$REPO/.atc/governance.yaml" ]; then
-  echo "stale      .atc/governance.yaml (older layout; run link-skills.sh to migrate it to .atc/atc.lock)"; status=1
-fi
 if [ -e "$REPO/.atc/atc.lock" ] || [ -d "$REPO/.atc/governance" ]; then
   # Same rule as validate_workspace.lock_state: the locked revision must be in HEAD's history.
   revision=$( [ -e "$REPO/.atc/atc.lock" ] && tr -d '\r' < "$REPO/.atc/atc.lock" | sed -n 's/^revision = "\(.*\)"$/\1/p' | head -n 1 || true)
@@ -97,8 +94,6 @@ if [ -e "$REPO/AGENTS.md" ]; then
     echo "current    AGENTS.md pointer line"
   elif grep -q '^<!-- atc:governance -->' "$REPO/AGENTS.md"; then
     echo "drifted    AGENTS.md pointer line"; status=1
-  elif grep -q 'atc:project-policy-reference begin' "$REPO/AGENTS.md"; then
-    echo "stale      AGENTS.md policy block (older release; run link-skills.sh)"; status=1
   else
     echo "missing    AGENTS.md pointer line"; status=1
   fi

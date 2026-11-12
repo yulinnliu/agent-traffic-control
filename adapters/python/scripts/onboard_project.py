@@ -1,14 +1,12 @@
 #!/usr/bin/env python3
 """Check or sync the files Agent Traffic Control owns inside a project.
 
-Owned files: `CLAUDE.md` (only when the project has none, or has the
-previous workspace entrypoint), the pointer line in `AGENTS.md`, sync's files
+Owned files: `CLAUDE.md` (only when the project has none), the pointer line in `AGENTS.md`, sync's files
 under `.atc/` (`README.md`, `atc.lock`, `governance/`), and one managed
 adapter per baseline skill and tool directory. Each adapter is rendered from
 the canonical skill, so a project needs nothing from this checkout at run
 time. `.atc/tasks/` is the project's; an adapter without an ownership marker
-is project-owned; neither is ever rewritten. A project in the layout before
-`atc.lock` is migrated in the same pass (docs/LAYOUT.md).
+is project-owned; neither is ever rewritten.
 
 `--sync` with `--project` or `--all` commits what it writes on each project's
 `main` and records the commit in `integrations.jsonl`; `--root-only` renders
@@ -41,16 +39,7 @@ from integration_slot import IntegrationSlot
 ROOT = Path(__file__).resolve().parents[3]
 # The `--json` result: one entry per checkout `run` plans, None outside `--json` (shared/conformance/CLI.md § Output).
 EVENTS: list[dict] | None = None
-LEGACY_POLICY_PATTERN = validator.LEGACY_POLICY_BLOCK
 POINTER_LINE = re.compile(rf"^{re.escape(validator.POINTER_MARKER)}.*$", re.MULTILINE)
-# The workspace root's CLAUDE.md before it imported AGENTS.md; a project copy
-# equal to it is replaced, any other CLAUDE.md is the project's.
-LEGACY_CLAUDE_MD = (
-    "# CLAUDE.md\n\n"
-    "Canonical agent guidance for the directory holding this file lives in the\n"
-    "`AGENTS.md` next to it. Read that `AGENTS.md` in full before starting work and\n"
-    "follow it as if it were this file.\n"
-)
 VERIFIER_SOURCE_HEADING = re.compile(r"^#+ Integration verifier source\s*$", re.MULTILINE)
 
 
@@ -102,7 +91,7 @@ def managed_adapter(path: Path, skill: str) -> bool:
 
 
 def pointer_plan(project_path: Path, line: str) -> PlanItem:
-    """The pointer line in AGENTS.md; an older release's policy block is replaced by it in place."""
+    """The pointer line in AGENTS.md."""
     agents_md = project_path / "AGENTS.md"
     if not agents_md.exists():
         return PlanItem("collision", agents_md, "missing; create project-specific AGENTS.md first")
@@ -112,10 +101,6 @@ def pointer_plan(project_path: Path, line: str) -> PlanItem:
         if current.group(0) == line:
             return PlanItem("skip", agents_md, "pointer line is current")
         return PlanItem("update", agents_md, "pointer line drift", text[: current.start()] + line + text[current.end() :])
-    legacy = LEGACY_POLICY_PATTERN.search(text)
-    if legacy:
-        return PlanItem("update", agents_md, "older policy block replaced by the pointer line",
-                        text[: legacy.start()] + line + text[legacy.end() :])
     if any(token in text for token in ("shared/governance/INDEX.md", ".atc/governance/INDEX.md", "AGENT_DECISION_POLICY.md", "GIT_LIFECYCLE.md")):
         return PlanItem(
             "collision",
@@ -155,20 +140,10 @@ def governance_revision(root: Path) -> str:
         return "unknown"
 
 
-def legacy_manifest(project_path: Path) -> bool:
-    """Whether the project holds the pin file of the layout before `atc.lock`, carrying sync's marker."""
-    path = project_path / validator.LEGACY_MANIFEST
-    return path.is_file() and validator.managed_marker_present(path.read_text(encoding="utf-8"))
-
-
 def atc_plan(project_path: Path, root: Path) -> list[PlanItem]:
     """The bootloader and the vendored governance; collisions alone when `.atc/` holds what sync does not own."""
     plan: list[PlanItem] = []
     for stray in validator.atc_strays(project_path):
-        if stray == validator.LEGACY_MANIFEST:
-            if not legacy_manifest(project_path):
-                plan.append(PlanItem("collision", project_path / stray, "exists without an ownership marker; refusing to manage .atc/"))
-            continue
         plan.append(PlanItem("collision", project_path / stray, "not a file sync writes; .atc/ holds README.md, atc.lock, governance/ and tasks/"))
     try:
         validator.read_lock(project_path)
@@ -219,7 +194,7 @@ def lock_plan(project_path: Path, root: Path, changed: bool) -> PlanItem:
 
 def build_plan(project_path: Path, root: Path = ROOT, prune: bool = False) -> list[PlanItem]:
     """Every file sync writes, in its write order: `.atc/` bootloader and governance, the pointer line,
-    `CLAUDE.md`, the adapters, then the lock and last the removal of the previous layout's pin file."""
+    `CLAUDE.md`, the adapters, then the lock."""
     template_path = validator.pointer_template_path(root)
     if not template_path.exists():
         raise ValueError(f"{template_path}: missing canonical pointer line template")
@@ -235,8 +210,6 @@ def build_plan(project_path: Path, root: Path = ROOT, prune: bool = False) -> li
         plan.append(PlanItem("create", claude_target, "workspace entrypoint", claude_source))
     elif claude_target.read_text(encoding="utf-8").strip() == claude_source.strip():
         plan.append(PlanItem("skip", claude_target, "workspace entrypoint is current"))
-    elif validator.normalise(claude_target.read_text(encoding="utf-8")) == LEGACY_CLAUDE_MD:
-        plan.append(PlanItem("update", claude_target, "previous workspace entrypoint; replaced by the import", claude_source))
     else:
         plan.append(
             PlanItem(
@@ -283,8 +256,6 @@ def build_plan(project_path: Path, root: Path = ROOT, prune: bool = False) -> li
     if not atc_collision:
         changed = any(item.action in ("create", "update") or (prune and item.action == "prune") for item in plan)
         plan.append(lock_plan(project_path, root, changed))
-        if legacy_manifest(project_path):
-            plan.append(PlanItem("update", project_path / validator.LEGACY_MANIFEST, "migrated to .atc/atc.lock; sync removes it"))
     return plan
 
 
