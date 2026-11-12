@@ -19,7 +19,7 @@
 # path it would write, or when .atc/ holds a file sync does not write.
 set -eu
 
-usage() { sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; }
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 MODE=copy
