@@ -73,10 +73,16 @@ Operational description of the tree; governance semantics live under
   ```
 
   Readers drop carriage returns first, since a `core.autocrlf` checkout may
-  hold the file with CRLF. A `version` other than `1` is a collision for sync
-  and a failure for validation. Sync writes the ATC `HEAD` into `revision`
-  whenever it changes any file it writes into the repository, or when the
-  recorded revision is not in the history of ATC `main`. On `main`,
+  hold the file with CRLF. A lock that does not parse, has a `version` other
+  than `1`, or lacks a non-empty `source` or `revision` is a collision for
+  sync and a failure for validation. Sync writes the lock with the ATC `HEAD`
+  as `revision` when the lock is missing, when its `source` differs from the
+  governance repository, when sync changes any file it writes into the
+  repository, or when the recorded revision is not in the history of ATC
+  `main`. `scripts/link-skills.sh` reads the lock without parsing it, so it
+  also rewrites a lock with an empty `revision`, rewrites the lock whenever a
+  legacy `.atc/governance.yaml` is still present (and then removes that
+  file), and checks the recorded revision against its checkout's `HEAD`. On `main`,
   `atc validate --projects` checks that this revision is in `main`'s history.
   The files sync writes carry no format
   version of their own: they are current when they equal what the locked
