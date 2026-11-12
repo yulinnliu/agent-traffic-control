@@ -23,3 +23,6 @@ decisions:
   - 'Owner ruling 11-13: PyPI is a name check only. The writer reports whether atc and atc-testkit are free on PyPI and proposes names if they are taken. The workflow gets no publish step.'
   - 'The README gains a release badge pointing at the latest GitHub Release, next to the existing badges from ATC-0024.'
   - 'Design first: the writer commits docs/design/ATC-0029.md (workflow shape, asset list, how a dispatch on an old tag builds from that tag, where Release notes come from, permissions the workflow needs, the PyPI finding) and reports it to the coordinator before implementing. No version bump. The workflow is not run against GitHub by the writer; tags, pushes and publishing are the Owner''s.'
+  - 'Owner ruling 11-13: a run refuses whenever any Release, draft or published, already exists for the tag; the workflow never edits or deletes a Release (design § 6).'
+  - 'Owner ruling 11-13: the atc-testkit build backend setuptools>=68 stays unpinned; pinning it is out of this task.'
+  - 'Owner ruling 11-13: the release badge goes in both README.md and README.zh-TW.md.'
