@@ -1,0 +1,25 @@
+task_id: ATC-0029
+repository: yulinnliu/agent-traffic-control
+base_sha: 28d90791caa7ca5de2b978f30b9ca99af6c94882
+scope: 'Release pipeline: validate.yml gains a tag-push trigger (keeping workflow_dispatch,
+  plus a tag input for existing tags) that validates, builds the conformance fixtures,
+  the atc-testkit wheel and SHA-256 sums, and creates a draft GitHub Release tagged
+  with the atc version and naming the testkit version, notes in the Release body;
+  README release badge; PyPI name check for atc and atc-testkit (report only)'
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: 28d90791caa7ca5de2b978f30b9ca99af6c94882
+branch: worktree-claude+release-pipeline
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
+decisions:
+  - 'Queue group C (backlog item 7 plus the README release badge left out of ATC-0024), opened by the Owner 11-13 ("Open Group C") after ATC-0028 integrated; base 28d9079.'
+  - 'Owner ruling 11-13: "projects sync only to tagged releases" is out of this task. Nothing under shared/governance/ changes; it stays in the backlog as its own governance topic.'
+  - 'Owner ruling 11-13: CI creates a draft GitHub Release and the Owner publishes it by hand. A tag push matching v* triggers the workflow; workflow_dispatch stays and gains a tag input so the existing tags v0.3.0 and v0.4.0 can get Releases. The run validates, builds the conformance fixtures archive, the atc-testkit wheel and a SHA-256 sums file as Release assets, and creates the Release as a draft only. The Release is tagged with the atc version and names the atc-testkit version; notes go in the Release body, with no CHANGELOG file.'
+  - 'Owner ruling 11-13: PyPI is a name check only. The writer reports whether atc and atc-testkit are free on PyPI and proposes names if they are taken. The workflow gets no publish step.'
+  - 'The README gains a release badge pointing at the latest GitHub Release, next to the existing badges from ATC-0024.'
+  - 'Design first: the writer commits docs/design/ATC-0029.md (workflow shape, asset list, how a dispatch on an old tag builds from that tag, where Release notes come from, permissions the workflow needs, the PyPI finding) and reports it to the coordinator before implementing. No version bump. The workflow is not run against GitHub by the writer; tags, pushes and publishing are the Owner''s.'
