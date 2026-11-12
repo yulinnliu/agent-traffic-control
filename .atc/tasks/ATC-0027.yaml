@@ -1,0 +1,19 @@
+task_id: ATC-0027
+repository: yulinnliu/agent-traffic-control
+base_sha: fa4e4259e92ef7ebe01e8e8326c0743c0f86d869
+scope: Fix the atc tmp checkout deadlock in checkout.py export, and add the missing
+  test for a candidate marker whose directory still exists
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: fa4e4259e92ef7ebe01e8e8326c0743c0f86d869
+branch: worktree-claude+checkout-deadlock
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
+decisions:
+  - 'Fix before the NtFC A/B and queue item 3 (Owner, 2026-11-12, "Fix it first"): atc tmp checkout hangs in adapters/python/atc_testkit/checkout.py export. git archive writes a trailing 10240-byte padding record that the streaming tarfile never reads, while stderr.read() waits for git to exit. Found by the ATC-0026 writer and reviewer; reproduced on main fa4e425 by the measuring session (tree stuck at 636 files, two git archive children alive).'
+  - 'Fix so the export cannot deadlock whatever git writes after the archive end (for example drain stdout after extractall, or read stdout and stderr concurrently), with a regression test that would hang or fail on the old code under a timeout. No version bump. No change under shared/governance/.'
+  - 'Also: add the test the ATC-0026 review found missing (surviving mutant orphan-marker-any at adapters/python/atc_testkit/scratch.py:615): when prune is refused on a candidate and its directory stays, its owner marker and Git record are kept.'
