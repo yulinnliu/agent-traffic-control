@@ -1,0 +1,28 @@
+task_id: ATC-0026
+repository: yulinnliu/agent-traffic-control
+base_sha: 86618980d8418774063c9df4fd45c8e7238f2012
+scope: 'Close-out and integration tooling: close-out finds a task''s scratches, report
+  summaries in the ledger, sync commit version label, diff --check in integrate --check,
+  atc task list overlap view, docs-only classification of automation paths, tmp list
+  hint, leftover candidate worktrees'
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: 86618980d8418774063c9df4fd45c8e7238f2012
+branch: worktree-claude+closeout-tooling
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
+decisions:
+  - 'Group B of the 2026-11-12 queue, merged by the Owner ("照這樣合併"): items 2b, 2c and 4, plus two findings of 2026-11-12 folded in (Owner, 2026-11-12). The 2b item "close-out copies design and release-notes reports to the archive" is dropped: ATC-0025 commits the design doc and release notes to the repo (Owner, 2026-11-12).'
+  - 'Design first: the writer commits docs/design/ATC-0026.md before code, as ATC-0023 did. No version bump. A change under shared/governance/ is not authorized for this task; if one is needed, stop and ask.'
+  - 'Docs-only ranges: testkit verifier.documentation_only treats .atc/, .claude/ and .agents/ paths as automation Markdown and .yaml/.lock as non-Markdown, so a sync-only or record-only range is never documentation-only and skips the docs link check. Fix so such ranges get the documentation-only treatment, with the exact rule set in the design.'
+  - 'Close-out scratches: close_out.py matches only the row.task column, which only atc tmp checkout --task writes, so atc test run --scratch scratches are missed. atc test run --scratch records the task when --tree lies in a task''s managed worktree, and close-out also takes rows whose tree lies inside the task''s worktree.'
+  - 'Report summaries (item 4): before deleting reports, close-out writes one line per report (role, SHA, verdict) into integrations.jsonl.'
+  - 'Sync label (item 2c): the atc onboard --sync commit message keeps the SHA and adds the tag when the revision is tagged ("v0.4.0 (abc1234)"), else "(after v0.3.0)".'
+  - 'atc integrate --check also runs git diff --check over the range.'
+  - 'atc task list shows file overlap and claimed versions across open tasks, and infers the project root when run at the canonical checkout.'
+  - 'atc tmp list: its last line names atc tmp prune for missing rows, but prune deletes only systmp and candidates entries older than seven days; atc tmp clean <name> drops a missing row. Fix the hint and docs/ATC_HOME.md.'
+  - 'Leftover candidates: 2026-11-11 integrations left three detached candidate worktrees and one stale worktree record under ~/.atc/tmp/candidates (removed 2026-11-12 with the Owner''s word). Find the atc integrate or atc verify path that skips removing its candidate, fix it, and make leftovers visible in atc tmp list or atc worktree audit.'
