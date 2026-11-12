@@ -305,8 +305,10 @@ that ran and the revision it ran against.
 
 A SHA's first review is a fresh reviewer: a subagent or a separate session
 that has not seen the writer's conversation. A re-review that only fixes the
-last round's findings continues the same reviewer with the findings and the
-fix diff; new design or new files get a fresh reviewer. No rule requires the
+last round's findings continues the same reviewer, on its own model, with the
+findings and the fix diff (after a FAIL amend, `GIT_WORKFLOW.md` § After
+formal review, the `git range-diff`); new design or new files get a fresh
+reviewer. No rule requires the
 final round to be fresh.
 
 A reviewer's targeted tests are its own choice: the tests that settle its own

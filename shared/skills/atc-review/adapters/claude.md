@@ -5,9 +5,11 @@
   repository's `AGENTS.md` prescribes: its own worktree for a registered
   project, and for the workspace root whatever the root's `AGENTS.md`
   § Changing this repo states.
-- Model: Opus 5.5 or Sonnet 5.5, chosen per task (Sonnet for mechanical or
-  well-briefed work, Opus for design-heavy writing or a review of a
-  behaviour change); Fable only after the Owner agreed for that session.
+- Model and effort per role: the `atc-coordinator` skill's Claude adapter,
+  "Model by role".
+- On Claude desktop the wrap_up recap and the session's closing message are
+  both the one line of "Writer: the step report" step 5; neither adds a
+  summary.
 - The step report or verdict goes by SendMessage as "Every block you write"
   says, to the receiving session addressed by the exact name ListAgents
   shows. The harness's idle note carries only the first few hundred

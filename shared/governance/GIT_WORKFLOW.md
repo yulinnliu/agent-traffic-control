@@ -181,11 +181,17 @@ for alignment with task-oriented branch naming.
 ## After formal review: reviewed commits are frozen
 
 - Never amend, squash, rebase, or force-push a commit at or below the
-  reviewed SHA.
+  reviewed SHA, except as the FAIL bullet below allows.
 - A further change is a new commit on top. Only that delta needs review, and
   its verdict names the new tip.
+- After a FAIL verdict the writer may instead amend or squash the fixes into
+  the reviewed commits. The verdict's SHA is void; the re-review reads
+  `git range-diff` of the old and the new tip against the findings, and
+  `atc verify` runs on the new tip. Not when another branch stacks on the
+  reviewed commits or the topic was pushed; after a PASS the history stays
+  frozen as above.
 - If the reviewed SHA is no longer an ancestor of the branch tip, the review
-  is void: the branch needs a full re-review.
+  is void: the branch needs a full re-review, except after the amend above.
 - Rewriting anyway (for example, task authority explicitly chooses a rebase) is allowed only as an
   explicit decision, and voids the review the same way.
 - The one exception is the rebase `Integrate` requires of an unpublished topic

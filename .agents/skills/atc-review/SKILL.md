@@ -56,6 +56,19 @@ the `atc-coordinator` skill's `references/briefs.md`.
   identify it. A task ID from another project's numbering is dropped and
   pointed out.
 
+## Writer: the design step
+
+A task that needs a design first starts with it: the writer's first step
+produces the design, and the implementation follows as later steps of the
+same task and record.
+
+- The design document and the release notes are committed to the repository,
+  at the place the project's `AGENTS.md` or docs layout gives; a report alone
+  does not hold them, since close-out deletes `~/.atc/reports`.
+- The Owner's decisions on the design go into the task record's `decisions`.
+- The design step adds no status and no role: the same writer and reviewer
+  carry it, with the step report and the review below.
+
 ## Writer: the step report
 
 End every completed step with a step report in the shape governance
@@ -90,7 +103,10 @@ only on the fetched tip; never continue from a stale base. For a published
 topic, confirm that the remote branch tip equals the tip you continue from
 before the first commit.
 
-After a PASS the reviewed SHA is frozen; fixes go in new commits.
+After a PASS the reviewed SHA is frozen; fixes go in new commits. After a
+FAIL verdict the writer may amend or squash the fixes into the reviewed
+commits instead (governance `GIT_WORKFLOW.md` § After formal review) and
+reports the new tip.
 
 Where the project runs its tests through `atc-testkit`, run targeted tests
 against the worktree with
@@ -132,7 +148,9 @@ one `atc test mutants` call. Tests and mutants run in the foreground
 
 Whether you review fresh or as a continued re-review is governance
 `VERIFICATION.md` § Independent review; a continued re-review reads the fix
-diff against your last round's findings.
+diff against your last round's findings, after a FAIL amend the
+`git range-diff` of the old and the new tip, and runs `atc verify` on the new
+tip.
 
 1. **Pin the revision.** First confirm the previous topic's closure read-only:
    the `main` position and `atc worktree audit`. Then review exactly the tip
@@ -261,7 +279,8 @@ writer runs neither and is sent neither.
   rebased tip; `CARRY_OVER_REFUSED` sends that tip to the reviewer for a
   fresh review.
 - When the verdict or the holder sends work back, the fix goes in new
-  commits and a new step report.
+  commits, or after a FAIL verdict as "Writer: the step report" allows, and
+  in a new step report.
 
 Done when the holder has the rebased tip or the new step report, or nothing
 is sent back.

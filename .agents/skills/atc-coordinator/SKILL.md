@@ -76,6 +76,22 @@ the map from task ID to session and nothing a record, Git or
 - Text for the Owner is in the Owner's language, with the role terms
   writer, reviewer, coordinator and Owner kept in English.
 
+## Sessions and decisions
+
+- **Names.** The task record comes first (step 2). Each session's title is
+  `[<task ID>] <topic>` and its name `<task id lowercased>-<topic>`.
+- **Model and effort by role.** The strongest tier for design writers and
+  first reviews; the middle tier for verify-only reruns, mechanical writers
+  and close-out; the lightest for research and reading only. A fix-only
+  re-review continues the original reviewer on its own model (governance
+  `VERIFICATION.md` § Independent review). The adapter names the models.
+- **Decision prompts.** A choice only the Owner can make reaches the Owner as
+  a prompt: its options, what each changes, the recommended option first and
+  marked. The ruling goes into the task record's `decisions`.
+- **Design phase.** A task that needs a design starts with the writer's design
+  step (`atc-review` "Writer: the design step"); no status or role is added
+  for it.
+
 ## Steps
 
 1. **Before opening.** Read the project's `AGENTS.md`, the task identity form
@@ -101,7 +117,8 @@ the map from task ID to session and nothing a record, Git or
    Such a records-only range needs no review (governance `VERIFICATION.md`
    § Documentation-only verification). Done when the record is written, and
    bound on `main` when the Owner pre-authorized the task.
-3. **Start the writer session** with the writer brief of
+3. **Start the writer session**, named as § Sessions and decisions says, with
+   the writer brief of
    [`references/briefs.md`](references/briefs.md), its working directory
    at the task's place: a project task at the project's checkout folder, a
    root task at its root worktree. The writer sends its
@@ -109,7 +126,8 @@ the map from task ID to session and nothing a record, Git or
    § 8.1). Done when the session is started and the brief delivered.
 4. **Start the reviewer session** with the reviewer brief of
    `references/briefs.md`, relaying the step report verbatim as its path.
-   Start it fresh or continue the last reviewer as governance
+   The reviewer is a fresh subagent or a separate session that has not seen
+   the writer's conversation; it continues the last reviewer only as governance
    `VERIFICATION.md` § Independent review states. Relay findings to the
    writer verbatim as the verdict's path; never review the work yourself.
    Done when the verdict is received whole.
