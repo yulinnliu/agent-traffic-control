@@ -121,9 +121,11 @@ usage, environment, permission or contract problem.
 | `CONTRACT_INCOMPATIBLE` | stop; report the contract your adapter expects and the one the workspace provides |
 | `PERMISSION_DENIED` | the sandbox, an ACL or a busy directory blocked Git metadata or the worktrees root; leave the directory or get approval, then retry once. A retried `clean` finishes a removal Git left half-done and reports `RECOVERED` |
 | `UNSUPPORTED_ENVIRONMENT` | a local capability is missing or unverifiable (Git, `main`, lock-reason support, another tool's worktree root that cannot be read); stop retrying |
+| `CANDIDATE_IN_USE` | an `atc integrate` or `atc verify` candidate whose owner still runs; leave it |
+| `CANDIDATE_LEFTOVER` | a candidate whose owner is gone; `atc tmp prune` removes it |
 
-In `audit`, `LEGACY_TARGET` is informational; only identity conflicts, a
-missing lock and `PATH_UNSAFE` are findings.
+In `audit`, `LEGACY_TARGET` and `CANDIDATE_IN_USE` are informational; only identity conflicts, a
+missing lock, `PATH_UNSAFE` and `CANDIDATE_LEFTOVER` are findings.
 
 ## Working in the worktree
 

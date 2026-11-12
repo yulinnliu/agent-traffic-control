@@ -1621,3 +1621,25 @@ def test_an_expected_head_without_its_mode_names_the_modes(ws: Workspace, capsys
     assert exc.value.code == 2
     error = capsys.readouterr().err
     assert "--abandon" in error and "--squash-integrated" in error
+
+
+@pytest.mark.integration
+def test_audit_names_candidates_in_use_and_left_over(ws: Workspace, atc_tmp: Path,
+                                                     capsys: pytest.CaptureFixture[str]) -> None:
+    from atc_testkit import owner as candidate_owner
+    candidates = atc_tmp / "candidates"
+    candidates.mkdir()
+    for name, created in (("gone", "0"), ("live", candidate_owner.created(os.getpid()))):
+        tree = candidates / name
+        run_git(ws.repo, "worktree", "add", "-q", "--detach", str(tree), "main")
+        candidate_owner.write_marker(tree, "integrate", ws.repo, "DEMO-0001")
+        data = json.loads(candidate_owner.marker(tree).read_text(encoding="utf-8"))
+        candidate_owner.marker(tree).write_text(json.dumps({**data, "created": created}), encoding="utf-8")
+    shutil.rmtree(candidates / "gone")
+    ws.environ["ATC_TMP"] = str(atc_tmp)
+    status, results = ws.run(capsys, "audit", None, None)
+    by_code = {r["reason"]: r for r in results}
+    assert status == 1 and set(by_code) == {"CANDIDATE_LEFTOVER", "CANDIDATE_IN_USE"}
+    assert by_code["CANDIDATE_LEFTOVER"]["detail"] == (
+        f"integrate DEMO-0001, pid {os.getpid()}; record only; atc tmp prune removes it")
+    assert by_code["CANDIDATE_IN_USE"]["detail"] == f"integrate DEMO-0001, pid {os.getpid()}"

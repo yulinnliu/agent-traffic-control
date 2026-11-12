@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import sys
 import os
 import subprocess
@@ -1456,6 +1457,30 @@ def test_check_resolves_and_preflights_without_a_candidate(repo: Path, capsys: p
     assert (data["check"], data["refusal"]["reason"], data["resolved"]["branch"]) == (True, "CONFLICT", "topic")
 
 
+@pytest.mark.integration
+def test_check_warns_of_whitespace_problems_and_keeps_its_verdict(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    for name, text in (("a.txt", "a2 \n"), ("b.txt", "b\t\n"), ("c.txt", "c\n")):
+        (repo / name).write_bytes(text.encode())
+    run_git(repo, "switch", "-q", "-c", "topic")
+    run_git(repo, "add", "a.txt", "b.txt")
+    run_git(repo, "commit", "-q", "-m", "whitespace")
+    tip = run_git(repo, "rev-parse", "HEAD")
+    run_git(repo, "switch", "-q", "main")
+    run_git(repo, "switch", "-q", "-c", "clean")
+    run_git(repo, "add", "c.txt")
+    run_git(repo, "commit", "-q", "-m", "clean")
+    clean = run_git(repo, "rev-parse", "HEAD")
+    run_git(repo, "switch", "-q", "main")
+    assert run(repo, "--project", "repo", "--reviewed", tip, *TASK, "--check", "--json") == 0
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+    [warning] = [w for w in data["resolved"]["warnings"] if w.startswith("DIFF_CHECK: ")]
+    assert warning.startswith("DIFF_CHECK: 2 whitespace problems in ") and "first: a.txt:1: trailing whitespace." in warning
+    assert data["preflight"]["verdict"] == "FF" and f"WARNING {warning}" in captured.err
+    assert run(repo, "--project", "repo", "--reviewed", clean, *TASK, "--check") == 0
+    assert "DIFF_CHECK" not in capsys.readouterr().err
+
+
 def not_warnings(text: str) -> list[str]:
     return [line for line in text.splitlines() if not line.startswith("WARNING ")]
 
@@ -1646,3 +1671,53 @@ def test_atc_verify_stops_when_main_moved_since_its_declaration_was_read(
     first, _ = refusal(capsys.readouterr().err)
     assert first.startswith("STOP REF_DRIFT: main moved from ")
     assert main_tip(repo) == moved[0] and run_git(repo, "worktree", "list").count("\n") == 0
+
+
+@pytest.mark.integration
+def test_the_candidate_has_an_owner_marker_while_it_exists(repo: Path, atc_tmp: Path,
+                                                           monkeypatch: pytest.MonkeyPatch) -> None:
+    from atc_testkit import owner
+    seen: dict = {}
+    real = gi._verify_candidate
+
+    def spy(argv, candidate_dir, *rest):
+        seen.update(owner.read_marker(candidate_dir) or {}, state=owner.state(candidate_dir)[0])
+        return real(argv, candidate_dir, *rest)
+    monkeypatch.setattr(gi, "_verify_candidate", spy)
+    tip = topic(repo, {"a.txt": "a2\n"})
+    assert integrate(repo, "topic", tip) == 0
+    assert (seen["state"], seen["command"], seen["pid"], seen["repo"]) == ("in use", "integrate", os.getpid(), str(repo))
+    assert list((atc_tmp / "candidates").glob("*.owner.json")) == []
+
+
+@pytest.mark.integration
+def test_a_dirty_locked_candidate_is_removed_and_a_gone_one_loses_only_its_record(repo: Path, atc_tmp: Path) -> None:
+    from atc_testkit import owner
+    dirty, gone, kept = (atc_tmp / "candidates" / name for name in ("dirty", "gone", "kept"))
+    for tree in (dirty, gone, kept):
+        run_git(repo, "worktree", "add", "-q", "--detach", str(tree), "main")
+        owner.write_marker(tree, "verify", repo, None)
+    run_git(repo, "worktree", "lock", str(dirty))
+    (dirty / "a.txt").write_text("changed\n", encoding="utf-8")
+    (dirty / "new.txt").write_text("new\n", encoding="utf-8")
+    shutil.rmtree(gone)
+    shutil.rmtree(kept)
+    assert gi._remove_candidate(repo, dirty) is None and gi._remove_candidate(repo, gone) is None
+    listed = run_git(repo, "worktree", "list", "--porcelain")
+    assert not dirty.exists() and "candidates/dirty" not in listed and "candidates/gone" not in listed
+    assert "candidates/kept" in listed
+    assert not owner.marker(dirty).exists() and not owner.marker(gone).exists()
+    run_git(repo, "worktree", "prune")
+
+
+@pytest.mark.integration
+def test_a_failed_record_cleanup_is_the_cleanup_warning(repo: Path, atc_tmp: Path,
+                                                       monkeypatch: pytest.MonkeyPatch) -> None:
+    from atc_testkit import scratch
+    gone = atc_tmp / "candidates" / "gone"
+
+    def refuse(_common, _candidate):
+        raise OSError("held open")
+    monkeypatch.setattr(scratch, "forget_worktree", refuse)
+    assert gi._remove_candidate(repo, gone) == f"candidate worktree record retained for {gone}: held open"
+    assert "retained for" in gi._remove_candidate(repo.parent / "not-a-repo", gone)

@@ -511,7 +511,28 @@ def check_project_checkout(project_path: Path) -> None:
         raise SyncStop("BEHIND_ORIGIN", "local main does not contain origin/main; bring main up to date first")
 
 
-def commit_sync(project_path: Path, plan: list[PlanItem], source: str, revision: str) -> str | None:
+RELEASE_TAGS = "v[0-9]*"
+
+
+def release_tags(root: Path, revision: str) -> tuple[str | None, str | None]:
+    """The release tag at ``revision``, else the latest release tag before it, read in the ATC checkout."""
+    exact = _git(root, "describe", "--tags", "--match", RELEASE_TAGS, "--exact-match", revision, check=False)
+    if exact.returncode == 0:
+        return exact.stdout.strip(), None
+    after = _git(root, "describe", "--tags", "--match", RELEASE_TAGS, "--abbrev=0", revision, check=False)
+    return None, (after.stdout.strip() or None) if after.returncode == 0 else None
+
+
+def sync_label(revision: str, tags: tuple[str | None, str | None]) -> str:
+    """``v0.4.0 (abc1234)`` at a release tag, ``abc1234 (after v0.4.0)`` past one, else the short SHA."""
+    tag, after = tags
+    if tag:
+        return f"{tag} ({revision[:7]})"
+    return f"{revision[:7]} (after {after})" if after else revision[:7]
+
+
+def commit_sync(project_path: Path, plan: list[PlanItem], source: str, revision: str,
+                tags: tuple[str | None, str | None] = (None, None)) -> str | None:
     """Commit the files sync just wrote and record the commit; None when nothing tracked changed."""
     paths = changed_paths(project_path)
     if not paths:
@@ -522,7 +543,7 @@ def commit_sync(project_path: Path, plan: list[PlanItem], source: str, revision:
         raise SyncStop("UNMANAGED_CHANGE", "changed outside the synced files, left uncommitted: " + ", ".join(stray))
     before = _git(project_path, "rev-parse", "HEAD").stdout.strip()
     _git(project_path, "add", "-A")
-    _git(project_path, "commit", "-q", "-m", f"chore(governance): sync from {source} {revision[:7]}",
+    _git(project_path, "commit", "-q", "-m", f"chore(governance): sync from {source} {sync_label(revision, tags)}",
          "-m", f"Rendered by `atc onboard --sync` from {source} at {revision}.")
     sha = _git(project_path, "rev-parse", "HEAD").stdout.strip()
     common = Path(_git(project_path, "rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip())
@@ -537,13 +558,16 @@ def commit_sync(project_path: Path, plan: list[PlanItem], source: str, revision:
             "main_before": before,
             "records_only": False,
             "source": source,
+            "source_after": tags[1],
             "source_revision": revision,
+            "source_tag": tags[0],
             "task": revision,
         }, sort_keys=True) + "\n")
     return sha
 
 
-def sync_and_commit(project_path: Path, plan: list[PlanItem], prune: bool, source: str, revision: str) -> str | None:
+def sync_and_commit(project_path: Path, plan: list[PlanItem], prune: bool, source: str, revision: str,
+                    tags: tuple[str | None, str | None] = (None, None)) -> str | None:
     """Write the plan into the project's main checkout and commit it, holding the project's Integration Slot."""
     check_project_checkout(project_path)
     slot = IntegrationSlot(project_path)
@@ -552,7 +576,7 @@ def sync_and_commit(project_path: Path, plan: list[PlanItem], prune: bool, sourc
     try:
         check_project_checkout(project_path)
         apply_plan(plan, "sync", prune)
-        return commit_sync(project_path, plan, source, revision)
+        return commit_sync(project_path, plan, source, revision, tags)
     finally:
         slot.release()
 
@@ -579,6 +603,7 @@ def run(mode: str, targets: list[tuple[str, Path]], root: Path = ROOT, prune: bo
             _stop(stop.code, stop.detail)
             return cli_conventions.STOP
         source = governance_source(root)
+        tags = release_tags(root, revision)
     elif not root_collision or mode == "check":
         apply_plan(root_plan, mode)
     for name, project_path in targets:
@@ -606,7 +631,7 @@ def run(mode: str, targets: list[tuple[str, Path]], root: Path = ROOT, prune: bo
         unpruned |= (not prune) and any(item.action == "prune" for item in plan)
         if commit and not project_collision:
             try:
-                sha = sync_and_commit(project_path, plan, prune, source, revision)
+                sha = sync_and_commit(project_path, plan, prune, source, revision, tags)
             except SyncStop as stop:
                 _stop(stop.code, stop.detail)
                 has_stop = True

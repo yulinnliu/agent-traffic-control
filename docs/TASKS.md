@@ -42,6 +42,7 @@ The section may carry prose after the line; tools read only the line.
 | `rank` | no | a planned task's place in the queue, an integer from 1; lower comes first |
 | `after` | no | task IDs that must read `integrated` or `closed` before this one starts; one that reads `abandoned` no longer blocks it |
 | `notes` | no | background and conditions for whoever starts the task |
+| `version` | no | the release the task is planned for, such as `0.8.0`; `atc task list` shows it and nothing checks or enforces it |
 
 Other keys (`repository_identity_status`, `writer`,
 `verification_requirements`, `execution_context`, `delivery`, `decisions`)
@@ -149,12 +150,12 @@ never assigns work itself.
 
 | Command | Does |
 | --- | --- |
-| `atc task plan --scope TEXT [--rank N] [--after ID...] [--notes TEXT] [--project P]` | commits a planned record to the `backlog` branch (§ Backlog): `task_id` issued as `new` issues it, `repository`, `scope`, `governance_source`, `authority` all false, and the options given. Touches no working tree, so it runs from any checkout. Refuses an `--after` ID that no record or integration holds (`ERROR UNKNOWN_TASK`) |
-| `atc task start ID [--scope TEXT] [--project P]` | moves the planned record `ID` from the `backlog` branch into the topic worktree holding the working directory, as `new` binds one: `base_sha`, `governance_revision`, `branch`, `authority` `edit` and `commit` true; it drops `rank`, keeps the other fields and replaces `scope` when `--scope` is given. The record is written first and left uncommitted; the `backlog` copy is removed after it, and when that removal fails the written record is deleted again and the removal's refusal stands, or, when it cannot be deleted, the command stops with `STOP START_INCOMPLETE` (exit 3) naming both copies. Refuses as `new` refuses, with `STOP RECORD_EXISTS` when the worktree already holds the record, and with `STOP NOT_PLANNED` for an ID the `backlog` branch holds no planned record of |
+| `atc task plan --scope TEXT [--rank N] [--after ID...] [--notes TEXT] [--version V] [--project P]` | commits a planned record to the `backlog` branch (§ Backlog): `task_id` issued as `new` issues it, `repository`, `scope`, `governance_source`, `authority` all false, and the options given. Touches no working tree, so it runs from any checkout. Refuses an `--after` ID that no record or integration holds (`ERROR UNKNOWN_TASK`) |
+| `atc task start ID [--scope TEXT] [--version V] [--project P]` | moves the planned record `ID` from the `backlog` branch into the topic worktree holding the working directory, as `new` binds one: `base_sha`, `governance_revision`, `branch`, `authority` `edit` and `commit` true; it drops `rank`, keeps the other fields and replaces `scope` when `--scope` is given. The record is written first and left uncommitted; the `backlog` copy is removed after it, and when that removal fails the written record is deleted again and the removal's refusal stands, or, when it cannot be deleted, the command stops with `STOP START_INCOMPLETE` (exit 3) naming both copies. Refuses as `new` refuses, with `STOP RECORD_EXISTS` when the worktree already holds the record, and with `STOP NOT_PLANNED` for an ID the `backlog` branch holds no planned record of |
 | `atc task rank ID N [--project P]` | sets `rank` of a planned record on the `backlog` branch. A `rank` below 1 or an empty `--notes`, here or at `plan`, is refused with `ERROR RECORD_INVALID` |
 | `atc task drop ID --note TEXT [--project P]` | writes `closure: {state: abandoned, note}` to a planned record on the `backlog` branch; the record stays there, so its ID is never issued again |
-| `atc task new --scope TEXT [--project P]` | writes `.atc/tasks/<id>.yaml` in the topic worktree holding the working directory, planning and starting the task in one step: `task_id` one past the highest on `main`, every local and remote-tracking branch, the `backlog` branch's history and `integrations.jsonl`, so a number is never reused on this machine; `repository` from the `origin` remote; `base_sha` the merge base of `HEAD` and `main`; `governance_source` and `governance_revision` from the repository's bound governance (the workspace root, being the source, binds its own `main`); `branch` the current branch; `authority` `edit` and `commit` true, the rest false. Refuses with `STOP` (exit 1) in a checkout on `main` and in the workspace root's canonical checkout |
-| `atc task list [--project P \| --all] [--status S] [--json]` | reads the records on `main` and every local branch without a checkout, one line per task: `task_id`, status, `branch`, the first 60 characters of `scope`; a planned task adds its `rank`, `BLOCKED by` the `after` IDs not yet `integrated`, `closed` or `abandoned` (`blocked_by` in `--json`), and `after <ID> (dropped)` for each `after` ID that reads `abandoned`, which no longer blocks it (`after_dropped` in `--json`). `--status planned` lists the queue in order: by `rank`, unranked last, then by ID. A record on several refs shows the copy on `main` for authority and the copy on its own `branch` for the rest. Without a target it infers the project as `atc worktree` does; `--all` covers every registered project and the root; `--json` puts the rows under `tasks` |
+| `atc task new --scope TEXT [--version V] [--project P]` | writes `.atc/tasks/<id>.yaml` in the topic worktree holding the working directory, planning and starting the task in one step: `task_id` one past the highest on `main`, every local and remote-tracking branch, the `backlog` branch's history and `integrations.jsonl`, so a number is never reused on this machine; `repository` from the `origin` remote; `base_sha` the merge base of `HEAD` and `main`; `governance_source` and `governance_revision` from the repository's bound governance (the workspace root, being the source, binds its own `main`); `branch` the current branch; `authority` `edit` and `commit` true, the rest false. Refuses with `STOP` (exit 1) in a checkout on `main` and in the workspace root's canonical checkout |
+| `atc task list [--project P \| --all] [--status S] [--json]` | reads the records on `main` and every local branch without a checkout, one line per task: `task_id`, status, `branch`, the first 60 characters of `scope`; a planned task adds its `rank`, `BLOCKED by` the `after` IDs not yet `integrated`, `closed` or `abandoned` (`blocked_by` in `--json`), and `after <ID> (dropped)` for each `after` ID that reads `abandoned`, which no longer blocks it (`after_dropped` in `--json`). `--status planned` lists the queue in order: by `rank`, unranked last, then by ID. A record on several refs shows the copy on `main` for authority and the copy on its own `branch` for the rest. An open or planned task with a `version` adds `version <V>`. After the rows, one `OVERLAP <ID> <ID>: <n> files: <first five>` line names each pair of open tasks of one repository whose branches both change a file since their merge base with `main` (task records left out), and one `VERSIONS <project>: <version> <IDs>; ...` line per repository groups its open and planned tasks by `version`; `--json` adds `overlaps`. Without a target it infers the project as `atc worktree` does, and a working directory inside the workspace root that is in no registered project names the root; `--all` covers every registered project and the root; `--json` puts the rows under `tasks` |
 | `atc task check [DIR]` | checks the records in the working tree of `DIR` (default: the working directory's repository) |
 
 ## Close-out
@@ -176,9 +177,21 @@ several, the working directory's.
    left at that branch's managed path after Git unregistered the worktree.
    A worktree that holds the working directory ends
    `SKIPPED (working directory)`, for the coordinator to remove.
-3. The scratches whose registry line names the task, with their dependent
-   runs (`ATC_HOME.md` § Deleting), go through `atc tmp clean`.
-4. The report files `~/.atc/reports/<ID>-*.md` are deleted.
+3. The scratches whose registry line names the task, or whose `tree` lies
+   inside the task's worktree (paths compared as real paths without case),
+   with their dependent runs (`ATC_HOME.md` § Deleting), go through
+   `atc tmp clean`. `atc test run` fills the `task` of the line it registers
+   from the tree's branch when one record names that branch.
+4. Each report file `~/.atc/reports/<ID>-*.md` first appends one line to the
+   repository's `integrations.jsonl`, then is deleted:
+   `{"kind": "report", "task", "role", "sha", "verdict", "file", "closed_at"}`.
+   `role` is `writer` for `<ID>-<sha>.md`, `reviewer` for
+   `<ID>-<sha>-review.md`, else `unknown` with `sha` `null`; a reviewer's
+   `verdict` is the first whole word `CONDITIONAL PASS`, `PASS` or `FAIL` of
+   the file's first non-empty line, a leading `#` ignored and a word after
+   `NO` or `NOT` skipped, else `null`. A line that cannot be written ends the
+   file `REFUSED` with the error and keeps it. Readers of integrations take
+   only lines with a `candidate_sha`, so these lines change no status.
 
 An item the record's `keep` names ends `SKIPPED (keep)` on every run; `keep`
 is permanent. An item a `--skip` names (`worktree`, `scratches` or

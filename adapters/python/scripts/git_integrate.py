@@ -25,7 +25,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
-from atc_testkit import locations, stages, timing, workers as host_workers
+from atc_testkit import locations, owner, scratch, stages, timing, workers as host_workers
 import git_preflight as gp
 import cli_conventions
 import managed_worktree as hw
@@ -196,11 +196,20 @@ def _git_ok(repo: Path, *args: str) -> str:
 
 
 def _remove_candidate(repo: Path, candidate_dir: Path) -> str | None:
-    if not candidate_dir.exists():
-        return None
-    removed = git(repo, "worktree", "remove", str(candidate_dir), check=False)
-    if removed.returncode:
-        return f"candidate worktree retained at {candidate_dir}: {(removed.stderr or removed.stdout).strip()}"
+    """Remove the candidate worktree, forced, locked or dirty, and its owner marker; the warning when it stays.
+
+    A candidate whose directory is gone loses only its own record under ``<git common dir>/worktrees``."""
+    if candidate_dir.exists():
+        removed = git(repo, "worktree", "remove", "-f", "-f", str(candidate_dir), check=False)
+        if removed.returncode:
+            return f"candidate worktree retained at {candidate_dir}: {(removed.stderr or removed.stdout).strip()}"
+    else:
+        try:
+            scratch.forget_worktree(Path(_git_ok(repo, "rev-parse", "--path-format=absolute", "--git-common-dir")),
+                                    candidate_dir)
+        except (GitError, OSError) as error:
+            return f"candidate worktree record retained for {candidate_dir}: {error}"
+    owner.marker(candidate_dir).unlink(missing_ok=True)
     return None
 
 
@@ -1064,6 +1073,7 @@ def integrate(t: Target, progress: bool = True) -> tuple[int, dict]:
                 repo, main_before, reviewed, report.verdict, t.verify_argv, t.timeout, built,
                 branch=branch, records_only=t.binding.records_only, timeout_source=t.timeout_source,
                 progress=progress, reuse=reuse, reuse_reason=None if reuse else reuse_reason,
+                task=t.binding.tasks[0] if len(t.binding.tasks) == 1 else None,
             ):
                 built.fill(result)
                 candidate_sha = built.candidate_sha
@@ -1208,7 +1218,7 @@ class Built:
 def build_and_verify(
     repo: Path, main_before: str, reviewed: str, verdict: str, argv: list[str], timeout: float, built: Built, *,
     branch: str, records_only: bool, timeout_source: str = "", progress: bool = False,
-    reuse: dict | None = None, reuse_reason: str | None = None,
+    reuse: dict | None = None, reuse_reason: str | None = None, command: str = "integrate", task: str | None = None,
 ):
     """Build the candidate `atc integrate` would build in a detached worktree under `<tmp>/candidates` (the
     reviewed commit on `FF`, the merge on `NO_FF`), verify it with the verifier, or the record check for a
@@ -1231,6 +1241,7 @@ def build_and_verify(
     report_path = candidate_dir.with_name(candidate_dir.name + ".report.json")
     created = False
     try:
+        owner.write_marker(candidate_dir, command, repo, task)
         base = main_before if verdict == "NO_FF" else reviewed
         add = git(repo, "worktree", "add", "--detach", str(candidate_dir), base, check=False)
         if add.returncode:
@@ -1291,6 +1302,8 @@ def build_and_verify(
         report_path.unlink(missing_ok=True)
         if created:
             built.cleanup_warning = _remove_candidate(repo, candidate_dir)
+        else:
+            owner.marker(candidate_dir).unlink(missing_ok=True)
 
 
 def _reused(built: Built, reuse: dict, progress: bool) -> None:
@@ -1649,6 +1662,23 @@ def _print_refusal(refusal: Refused, payload: dict, as_json: bool) -> None:
         print(json.dumps({**payload, "refusal": refusal.as_dict()}, indent=2))
 
 
+DIFF_PROBLEM = re.compile(r"[^+\s].*:\d+: ")
+
+
+def diff_check_warning(repo: Path, main: str, reviewed: str) -> str | None:
+    """`git diff --check` from the merge base of ``main`` and ``reviewed`` to ``reviewed``, the range the
+    verifier checks for an `FF` candidate, as one warning line; ``None`` when it finds nothing."""
+    base = git(repo, "merge-base", main, reviewed, check=False).stdout.strip()
+    if not base:
+        return None
+    run = git(repo, "diff", "--check", base, reviewed, check=False)
+    problems = [line for line in run.stdout.splitlines() if DIFF_PROBLEM.match(line)]
+    if not problems:
+        return None
+    return (f"DIFF_CHECK: {len(problems)} whitespace problems in {base[:12]}..{reviewed[:12]}; "
+            f"first: {problems[0]}; the verifier refuses them with DIFF_CHECK_FAILED")
+
+
 def check(t: Target, as_json: bool) -> int:
     payload = {"command": "integrate", "check": True, "resolved": {**asdict(t), "repo": str(t.repo)}}
     recovered = _recover_interrupted_update(t.repo, t.main, t.branch, t.reviewed, t.binding, [], check=True)
@@ -1668,6 +1698,10 @@ def check(t: Target, as_json: bool) -> int:
             payload, as_json,
         )
         return STOP_BEFORE_CANDIDATE
+    if warning := diff_check_warning(t.repo, t.main, t.reviewed):
+        t.warnings.append(warning)
+        payload["resolved"]["warnings"] = list(t.warnings)
+        print(f"WARNING {warning}", file=sys.stderr)
     report = merge_preflight(t.repo, t.branch, t.reviewed, t.main)
     if report.verdict == "STOP":
         _print_stop_report(report, payload, as_json)
@@ -1833,6 +1867,7 @@ def verify(t: Target, as_json: bool) -> int:
         with build_and_verify(
             t.repo, main_before, t.reviewed, report.verdict, t.verify_argv, t.timeout, built,
             branch=t.branch, records_only=t.binding.records_only, timeout_source=t.timeout_source, progress=as_json,
+            command="verify", task=t.binding.tasks[0] if len(t.binding.tasks) == 1 else None,
         ):
             pass
     except Refused as refusal:

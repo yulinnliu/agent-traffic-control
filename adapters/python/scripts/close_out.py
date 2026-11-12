@@ -7,10 +7,12 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+from datetime import datetime, timezone
 import io
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 
@@ -85,6 +87,12 @@ def task_worktree(repo: Path, branch: str) -> Path | None:
 
 def leftover_directory(root: Path, name: str, branch: str, environ: dict[str, str]) -> Path | None:
     """The managed path of ``worktree-<owner>+<topic>`` when Git no longer lists it but a directory is still there."""
+    path = managed_path(root, name, branch, environ)
+    return path if path is not None and os.path.lexists(path) else None
+
+
+def managed_path(root: Path, name: str, branch: str, environ: dict[str, str]) -> Path | None:
+    """The managed worktree path of ``worktree-<owner>+<topic>``, whether or not it exists."""
     owner, plus, topic = branch.removeprefix(hw.BRANCH_PREFIX).partition("+")
     if not branch.startswith(hw.BRANCH_PREFIX) or not plus or owner not in hw.OWNERS or not hw.TOPIC.fullmatch(topic):
         return None
@@ -93,8 +101,61 @@ def leftover_directory(root: Path, name: str, branch: str, environ: dict[str, st
     except hw.Stop:
         return None
     project = hw.root_project(ws) if name == hw.root_project(ws).name else ws.projects.get(name)
-    path = Path(project.worktrees) / hw.durable(owner, topic)[0] if project is not None else None
-    return path if path is not None and os.path.lexists(path) else None
+    return Path(project.worktrees) / hw.durable(owner, topic)[0] if project is not None else None
+
+
+def _real(path: str | Path) -> Path:
+    return Path(os.path.normcase(os.path.realpath(path)))
+
+
+def task_scratches(tmp: Path, task: str, worktree: Path | None) -> list[str]:
+    """The scratches whose registry line names ``task`` or whose tree lies inside the task's worktree."""
+    inside = _real(worktree) if worktree is not None else None
+    return [row.scratch for row in scratch.registered(tmp)
+            if row.task == task or (inside is not None and row.tree.strip() and _real(row.tree).is_relative_to(inside))]
+
+
+REPORT_NAME = re.compile(r"(?P<task>.+?)-(?P<sha>[0-9a-f]{7,40})(?P<review>-review)?\.md")
+NEGATIONS = frozenset({"NO", "NOT"})
+
+
+def verdict_of(line: str) -> str | None:
+    """The first whole-word ``CONDITIONAL PASS``, ``PASS`` or ``FAIL`` of a line, a leading ``#`` stripped and a
+    negated word skipped."""
+    words = re.findall(r"[\w-]+", line.lstrip().lstrip("#"))
+    for index, word in enumerate(words):
+        before = words[index - 1] if index else ""
+        if word == "CONDITIONAL" and words[index + 1:index + 2] == ["PASS"] and before not in NEGATIONS:
+            return "CONDITIONAL PASS"
+        if word in ("PASS", "FAIL") and before not in NEGATIONS and before != "CONDITIONAL":
+            return word
+    return None
+
+
+def report_summary(task: str, report: Path) -> dict:
+    """The ledger line of a report file: its role and SHA from the name, a reviewer's verdict from its first line."""
+    match = REPORT_NAME.fullmatch(report.name)
+    if match is None or match["task"] != task:
+        role, sha = "unknown", None
+    else:
+        role, sha = ("reviewer" if match["review"] else "writer"), match["sha"]
+    verdict = None
+    if role == "reviewer":
+        first = next((line for line in report.read_text(encoding="utf-8").splitlines() if line.strip()), "")
+        verdict = verdict_of(first)
+    return {"kind": "report", "task": task, "role": role, "sha": sha, "verdict": verdict, "file": report.name,
+            "closed_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+
+
+def record_report(repo: Path, task: str, report: Path) -> None:
+    """Append the report's summary line to the repository's ``integrations.jsonl``."""
+    common = git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip()
+    if not common:
+        raise OSError(f"no git common directory for {repo}")
+    path = Path(common).joinpath(*INTEGRATIONS)
+    line = json.dumps(report_summary(task, report), sort_keys=True) + "\n"
+    with path.open("a", encoding="utf-8", newline="\n") as handle:
+        handle.write(line)
 
 
 def remove_worktree(root: Path, name: str, worktree: Path, cwd: str, environ: dict[str, str]) -> str:
@@ -157,6 +218,8 @@ def main(argv: list[str] | None = None, root: Path = task_records.ROOT, environ:
 
     branch = str(data.get("branch", ""))
     worktree = task_worktree(checkout, branch) or leftover_directory(root, name, branch, environ)
+    scratch_rows = task_scratches(locations.locate(environ).tmp, args.task,
+                                  worktree or managed_path(root, name, branch, environ))
     if worktree is None:
         pass
     elif skipped("worktree"):
@@ -164,8 +227,7 @@ def main(argv: list[str] | None = None, root: Path = task_records.ROOT, environ:
     else:
         lines.append(remove_worktree(root, name, worktree, cwd, environ))
 
-    tmp = locations.locate(environ).tmp
-    scratches = [row.scratch for row in scratch.registered(tmp) if row.task == args.task]
+    scratches = scratch_rows
     if skipped("scratches"):
         lines += [f"SKIPPED {item} ({skipped('scratches')})" for item in scratches]
     elif scratches:
@@ -175,6 +237,11 @@ def main(argv: list[str] | None = None, root: Path = task_records.ROOT, environ:
     for report in reports:
         if skipped("reports"):
             lines.append(f"SKIPPED {report} ({skipped('reports')})")
+            continue
+        try:
+            record_report(checkout, args.task, report)
+        except (OSError, UnicodeError) as error:
+            lines.append(f"REFUSED {report} (ledger: {error})")
             continue
         try:
             report.unlink()

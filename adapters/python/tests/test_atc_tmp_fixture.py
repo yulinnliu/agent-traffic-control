@@ -15,7 +15,8 @@ pytestmark = pytest.mark.integration
 def _caller_root(length: int, monkeypatch: pytest.MonkeyPatch, *, own_parent: bool = False) -> Path:
     """A caller's root of ``length`` characters below the host's ``<tmp>``; with ``own_parent`` it lies in a
     directory of its own, so a listing beside it sees no other run's directories."""
-    base = Path(os.path.realpath(os.environ.get("ATC_TMP") or Path.home() / ".atc" / "tmp"))
+    import conftest
+    base = conftest.HOST_TMP
     if own_parent:
         base.mkdir(parents=True, exist_ok=True)
         base = _short_directory(base)
@@ -65,3 +66,27 @@ def test_a_caller_root_at_the_bound_skips_and_creates_nothing_beside_it(caller_r
         conftest._new_root(conftest.ROOT_MARGIN)
     assert sorted(caller_root_at_the_bound.parent.iterdir()) == beside
     assert list(caller_root_at_the_bound.iterdir()) == []
+
+
+def test_a_test_runs_in_the_session_s_tmp_and_atc_tmp_gives_a_usable_root_inside_it(request) -> None:
+    import conftest
+    session = request.getfixturevalue("_session_tmp")
+    if session is None:
+        pytest.skip(f"{conftest.HOST_TMP} leaves no room for a session root")
+    assert os.environ["ATC_TMP"] == str(session) and session.parent == conftest.HOST_TMP
+    assert locations.locate(os.environ).tmp == session
+    root = request.getfixturevalue("atc_tmp")
+    assert root.parent == session and locations.locate(os.environ).tmp == root
+    assert locations.long_name(locations.tmp_root({"ATC_TMP": str(root / "new")})) == str(root / "new")
+
+
+@pytest.fixture(scope="module")
+def _module_tmp() -> str | None:
+    return os.environ.get("ATC_TMP")
+
+
+def test_a_module_fixture_runs_in_the_session_s_tmp(_module_tmp: str | None, request) -> None:
+    session = request.getfixturevalue("_session_tmp")
+    if session is None:
+        pytest.skip("the host's <tmp> leaves no room for a session root")
+    assert _module_tmp == str(session)

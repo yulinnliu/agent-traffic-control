@@ -605,3 +605,50 @@ def test_a_dropped_prerequisite_no_longer_blocks_and_is_marked(ws: Workspace, ca
     assert (row["blocked_by"], row["after_dropped"]) == ([waiting], [dropped])
     status, out, _ = ws.cli(capsys, "list", "--project", PROJECT, "--status", "planned", cwd=ws.root)
     assert out.splitlines()[0] == f"{task_id}  planned  -  next  rank 1  BLOCKED by {waiting}  after {dropped} (dropped)"
+
+
+def test_list_at_the_canonical_checkout_lists_the_root(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    commit(ws.root, {".atc/tasks/ATC-0001.yaml": record("ATC-0001", "gone")})
+    (ws.root / "docs").mkdir()
+    for cwd in (ws.root, ws.root / "docs"):
+        status, out, err = ws.cli(capsys, "list", cwd=cwd)
+        assert (status, out.split()[:1]) == (0, ["ATC-0001"]), err
+    status, _out, err = ws.cli(capsys, "list", cwd=ws.root.parent)
+    assert status == 2 and "UNKNOWN_PROJECT" in err
+
+
+def test_list_shows_the_files_two_open_tasks_both_change(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    shared = {f"src/{n}.py": "x\n" for n in range(7)}
+    for task_id, branch, files in (("DEMO-0001", "t-one", {**shared, "a.py": "a\n", ".atc/tasks/notes.md": "1\n"}),
+                                   ("DEMO-0002", "t-two", {**shared, "b.py": "b\n"}),
+                                   ("DEMO-0003", "t-three", {"c.py": "c\n", ".atc/tasks/notes.md": "3\n"}),
+                                   ("DEMO-0004", "t-four", shared)):
+        topic = ws.worktree(ws.repo, f"claude+{branch}", branch)
+        closure = {"closure": {"state": "closed", "note": "done"}} if task_id == "DEMO-0004" else {}
+        commit(topic, {f".atc/tasks/{task_id}.yaml": record(task_id, branch, **closure), **files})
+    status, out, _ = ws.cli(capsys, "list", "--project", PROJECT, cwd=ws.root)
+    assert status == 0
+    [line] = [line for line in out.splitlines() if line.startswith("OVERLAP ")]
+    assert line == ("OVERLAP DEMO-0001 DEMO-0002: 7 files: src/0.py, src/1.py, src/2.py, src/3.py, src/4.py (+2)")
+    status, out, _ = ws.cli(capsys, "list", "--project", PROJECT, "--json", cwd=ws.root)
+    assert json.loads(out)["overlaps"] == [{"project": PROJECT, "tasks": ["DEMO-0001", "DEMO-0002"],
+                                           "files": sorted(shared)}]
+    status, out, _ = ws.cli(capsys, "list", "--project", PROJECT, "--status", "planned", cwd=ws.root)
+    assert "OVERLAP" not in out
+
+
+def test_list_shows_the_versions_open_and_planned_tasks_claim(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    first = plan(ws, capsys, "--scope", "one", "--version", "0.7.2")
+    second = plan(ws, capsys, "--scope", "two", "--version", "0.7.2")
+    third = plan(ws, capsys, "--scope", "three", "--version", "0.8.0")
+    assert backlog(ws)[first]["version"] == "0.7.2"
+    topic = ws.worktree(ws.repo, "claude+widget", "topic-widget")
+    status, _out, err = ws.cli(capsys, "start", third, "--version", "0.9.0", cwd=topic)
+    assert status == 0, err
+    assert yaml.safe_load((topic / TASKS_DIR / f"{third}.yaml").read_text(encoding="utf-8"))["version"] == "0.9.0"
+    run_git(topic, "add", TASKS_DIR)
+    commit(topic, {"w.py": "w\n"})
+    status, out, _ = ws.cli(capsys, "list", "--project", PROJECT, cwd=ws.root)
+    assert status == 0
+    assert f"{first}  planned  -  one  version 0.7.2" in out.splitlines()
+    assert out.splitlines()[-1] == f"VERSIONS {PROJECT}: 0.7.2 {first}, {second}; 0.9.0 {third}"

@@ -162,11 +162,12 @@ def common_dir(repo: Path) -> str:
 
 
 def resolve(root: Path, environ: dict[str, str], cwd: str, project: str | None, every: bool = False,
-            task: str | None = None):
+            task: str | None = None, root_default: bool = False):
     """The targets as (name, main checkout) pairs, named as `atc worktree` names them.
 
     Without ``project``, a record ID ``task`` names the one repository declaring its prefix; with none
-    or several, the working directory's project.
+    or several, the working directory's project, or with ``root_default`` the root for a directory elsewhere in
+    the canonical checkout.
     """
     import managed_worktree as hw
     try:
@@ -189,6 +190,8 @@ def resolve(root: Path, environ: dict[str, str], cwd: str, project: str | None, 
     if len(declared) == 1:
         return [(declared[0].name, Path(declared[0].repo))]
     found = hw.infer_project(ws, cwd)
+    if found is None and root_default and hw.within(cwd, ws.root):
+        return [(root_target.name, Path(ws.root))]
     if found is None:
         raise Refused("UNKNOWN_PROJECT", f"no --project and {cwd} is in no registered project; {registered}")
     return [(found.name, Path(found.repo))]
@@ -290,11 +293,12 @@ def dump(record: dict, prefix: str | None) -> str:
     return text
 
 
-def new(root: Path, environ: dict[str, str], cwd: str, scope: str, project: str | None) -> Path:
+def new(root: Path, environ: dict[str, str], cwd: str, scope: str, project: str | None,
+        version: str | None = None) -> Path:
     """An unplanned task: its ID issued through the backlog like a planned one's, then started at once."""
     worktree, name, main_checkout, branch, prefix = topic_place(root, environ, cwd, project)
     task_id = reserve(root, name, main_checkout, prefix, scope, scan=worktree)
-    return bind(root, worktree, name, main_checkout, branch, prefix, task_id, None)
+    return bind(root, worktree, name, main_checkout, branch, prefix, task_id, None, version)
 
 
 # backlog
@@ -362,7 +366,8 @@ def backlog_write(repo: Path, change) -> None:
 
 
 def reserve(root: Path, name: str, repo: Path, prefix: str, scope: str, scan: Path | None = None,
-            rank: int | None = None, after: list[str] | None = None, notes: str | None = None) -> str:
+            rank: int | None = None, after: list[str] | None = None, notes: str | None = None,
+            version: str | None = None) -> str:
     """Commits a new planned record to the backlog of ``repo`` and returns its ID: one past every number in use."""
     identity = repository_identity(scan or repo, repo)
     source = bound_governance(name, root, scan or repo)[0]
@@ -380,7 +385,8 @@ def reserve(root: Path, name: str, repo: Path, prefix: str, scope: str, scan: Pa
         task_id = f"{prefix}-{number:04d}"
         record = {"task_id": task_id, **identity, "scope": scope, "governance_source": source,
                   "authority": dict(NO_AUTHORITY)}
-        record.update({k: v for k, v in (("rank", rank), ("after", after), ("notes", notes)) if v is not None})
+        record.update({k: v for k, v in (("rank", rank), ("after", after), ("notes", notes), ("version", version))
+                       if v is not None})
         issued[:] = [task_id]
         return task_id, dump(record, prefix), f"plan {task_id}"
 
@@ -389,7 +395,7 @@ def reserve(root: Path, name: str, repo: Path, prefix: str, scope: str, scan: Pa
 
 
 def bind(root: Path, worktree: Path, name: str, main_checkout: Path, branch: str, prefix: str, task_id: str,
-         scope: str | None) -> Path:
+         scope: str | None, version: str | None = None) -> Path:
     """Moves the planned record ``task_id`` from the backlog into ``worktree``, bound to its branch with `edit` and
     `commit`; the record is left uncommitted in the worktree.
 
@@ -415,6 +421,7 @@ def bind(root: Path, worktree: Path, name: str, main_checkout: Path, branch: str
         "branch": branch,
         "authority": {**NO_AUTHORITY, "edit": True, "commit": True},
         **rest,
+        **({"version": version} if version is not None else {}),
     }
     text = dump(bound, prefix)
 
@@ -447,17 +454,18 @@ def bind(root: Path, worktree: Path, name: str, main_checkout: Path, branch: str
 
 
 def plan(root: Path, environ: dict[str, str], cwd: str, scope: str, project: str | None, rank: int | None,
-         after: list[str] | None, notes: str | None) -> str:
+         after: list[str] | None, notes: str | None, version: str | None = None) -> str:
     [(name, repo)] = resolve(root, environ, cwd, project)
     prefix = main_prefix(repo)
     if prefix is None:
         raise Refused("NO_DECLARATION", f"AGENTS.md on {MAIN} of {repo} declares no task prefix")
-    return reserve(root, name, repo, prefix, scope, rank=rank, after=after, notes=notes)
+    return reserve(root, name, repo, prefix, scope, rank=rank, after=after, notes=notes, version=version)
 
 
-def start(root: Path, environ: dict[str, str], cwd: str, task_id: str, project: str | None, scope: str | None) -> Path:
+def start(root: Path, environ: dict[str, str], cwd: str, task_id: str, project: str | None, scope: str | None,
+          version: str | None = None) -> Path:
     worktree, name, main_checkout, branch, prefix = topic_place(root, environ, cwd, project)
-    return bind(root, worktree, name, main_checkout, branch, prefix, task_id, scope)
+    return bind(root, worktree, name, main_checkout, branch, prefix, task_id, scope, version)
 
 
 def amend(root: Path, environ: dict[str, str], cwd: str, task_id: str, project: str | None, verb: str, **fields) -> None:
@@ -580,6 +588,7 @@ def tasks(name: str, repo: Path, fold_warnings: bool = False) -> list[dict]:
             "authority": (main_copy or {}).get("authority"),
             "rank": rank if isinstance(rank, int) else None,
             "after": [a for a in after if isinstance(a, str)] if isinstance(after, list) else [],
+            "version": detail.get("version") if isinstance(detail.get("version"), str) else None,
         })
     done = {row["task_id"] for row in rows if row["status"] in DONE}
     dropped = {row["task_id"] for row in rows if row["status"] == "abandoned"}
@@ -595,6 +604,48 @@ def by_rank(rows: list[dict]) -> list[dict]:
     return sorted(rows, key=lambda row: (row["rank"] is None, row["rank"] or 0, row["project"], row["task_id"]))
 
 
+CLAIMING = ("open", "planned")
+OVERLAP_SHOWN = 5
+
+
+def changed_files(repo: Path, branch: str) -> set[str]:
+    """The paths ``branch`` changes since its merge base with main, task records left out."""
+    run = git(repo, "diff", "--name-only", f"refs/heads/{MAIN}...refs/heads/{branch}", check=False)
+    return {path for path in run.stdout.splitlines() if path and not path.startswith(f"{TASKS_DIR}/")}
+
+
+def overlaps(repos: dict[str, Path], rows: list[dict]) -> list[dict]:
+    """The files each pair of open tasks of one repository both change."""
+    found = []
+    for name, repo in repos.items():
+        open_rows = sorted((row for row in rows if row["project"] == name and row["status"] == "open" and row["branch"]),
+                           key=lambda row: row["task_id"])
+        files = {row["task_id"]: changed_files(repo, row["branch"]) for row in open_rows}
+        for index, left in enumerate(open_rows):
+            for right in open_rows[index + 1:]:
+                shared = sorted(files[left["task_id"]] & files[right["task_id"]])
+                if shared:
+                    found.append({"project": name, "tasks": [left["task_id"], right["task_id"]], "files": shared})
+    return found
+
+
+def summary(rows: list[dict], found: list[dict]) -> list[str]:
+    """The `OVERLAP` lines, then one `VERSIONS` line per repository whose open or planned tasks claim a version."""
+    lines = []
+    for entry in found:
+        files = entry["files"]
+        more = f" (+{len(files) - OVERLAP_SHOWN})" if len(files) > OVERLAP_SHOWN else ""
+        lines.append(f"OVERLAP {' '.join(entry['tasks'])}: {len(files)} files: {', '.join(files[:OVERLAP_SHOWN])}{more}")
+    claims: dict[str, dict[str, list[str]]] = {}
+    for row in rows:
+        if row["version"] is not None and row["status"] in CLAIMING:
+            claims.setdefault(row["project"], {}).setdefault(row["version"], []).append(row["task_id"])
+    for project, versions in sorted(claims.items()):
+        lines.append(f"VERSIONS {project}: " + "; ".join(f"{version} {', '.join(sorted(tasks))}"
+                                                           for version, tasks in sorted(versions.items())))
+    return lines
+
+
 def render(rows: list[dict], with_project: bool) -> str:
     if not rows:
         return "no task records"
@@ -605,6 +656,8 @@ def render(rows: list[dict], with_project: bool) -> str:
         cells += [row["task_id"], row["status"], row["branch"] or "-", scope[:SCOPE_WIDTH]]
         if row["rank"] is not None and row["status"] == "planned":
             cells.append(f"rank {row['rank']}")
+        if row["version"] is not None and row["status"] in CLAIMING:
+            cells.append(f"version {row['version']}")
         if row["blocked_by"]:
             cells.append(f"BLOCKED by {','.join(row['blocked_by'])}")
         cells += [f"after {a} (dropped)" for a in row["after_dropped"]]
@@ -626,6 +679,7 @@ def build_parser() -> argparse.ArgumentParser:
                                            "3 PARTIAL (record written, still planned on the backlog)",
                                     see="docs/TASKS.md § Commands"))
     new_parser.add_argument("--scope", required=True, metavar="TEXT", help="what the task covers, one sentence")
+    new_parser.add_argument("--version", metavar="TEXT", help="the version the task claims, for example 0.7.2")
     plan_parser = sub.add_parser("plan", allow_abbrev=False, help="queue a planned task on the backlog branch",
                                  **cli_conventions.form(
                                      "Commit a planned record, which grants nothing, to the backlog branch.",
@@ -637,6 +691,7 @@ def build_parser() -> argparse.ArgumentParser:
     plan_parser.add_argument("--rank", type=int, metavar="N", help="queue position; lower comes first")
     plan_parser.add_argument("--after", nargs="+", metavar="ID", help="tasks that must be integrated or closed first")
     plan_parser.add_argument("--notes", metavar="TEXT", help="background and conditions for whoever starts it")
+    plan_parser.add_argument("--version", metavar="TEXT", help="the version the task claims, for example 0.7.2")
     start_parser = sub.add_parser("start", allow_abbrev=False, help="move a planned record into the current topic worktree",
                                   **cli_conventions.form(
                                       "Bind a planned task to the topic worktree holding the working directory.",
@@ -647,6 +702,7 @@ def build_parser() -> argparse.ArgumentParser:
                                       see="docs/TASKS.md § Backlog"))
     start_parser.add_argument("task", metavar="ID", help="the planned task")
     start_parser.add_argument("--scope", metavar="TEXT", help="replace the planned scope")
+    start_parser.add_argument("--version", metavar="TEXT", help="the version the task claims; replaces a planned one")
     rank_parser = sub.add_parser("rank", allow_abbrev=False, help="move a planned task in the queue",
                                  **cli_conventions.form("Set the rank of a planned task on the backlog branch.",
                                                         exit="0 ranked; 1 STOP (not planned, backlog busy); 2 ERROR",
@@ -701,17 +757,18 @@ def main(argv: list[str] | None = None, root: Path = ROOT, environ: dict[str, st
                     print(f"ok: {directory}")
             return cli_conventions.STOP if found else cli_conventions.OK
         if args.command == "new":
-            path = new(root, environ, cwd, args.scope, args.project)
+            path = new(root, environ, cwd, args.scope, args.project, args.version)
             print(json.dumps({"verdict": "CREATED", "task_id": path.stem, "path": str(path)}, indent=2)
                   if args.json else f"CREATED {path.stem} {path}")
             return cli_conventions.OK
         if args.command == "start":
-            path = start(root, environ, cwd, args.task, args.project, args.scope)
+            path = start(root, environ, cwd, args.task, args.project, args.scope, args.version)
             print(json.dumps({"verdict": "STARTED", "task_id": path.stem, "path": str(path)}, indent=2)
                   if args.json else f"STARTED {path.stem} {path}")
             return cli_conventions.OK
         if args.command == "plan":
-            task_id = plan(root, environ, cwd, args.scope, args.project, args.rank, args.after, args.notes)
+            task_id = plan(root, environ, cwd, args.scope, args.project, args.rank, args.after, args.notes,
+                           args.version)
             print(json.dumps({"verdict": "PLANNED", "task_id": task_id}, indent=2) if args.json else f"PLANNED {task_id}")
             return cli_conventions.OK
         if args.command in ("rank", "drop"):
@@ -721,13 +778,17 @@ def main(argv: list[str] | None = None, root: Path = ROOT, environ: dict[str, st
             verdict = "RANKED" if args.command == "rank" else "ABANDONED"
             print(json.dumps({"verdict": verdict, "task_id": args.task}, indent=2) if args.json else f"{verdict} {args.task}")
             return cli_conventions.OK
-        targets = resolve(root, environ, cwd, args.project, every=args.all)
+        targets = resolve(root, environ, cwd, args.project, every=args.all, root_default=True)
         rows = [row for name, repo in targets for row in tasks(name, repo, fold_warnings=not args.json)]
         if args.status:
             rows = [row for row in rows if row["status"] == args.status]
         if args.status == "planned":
             rows = by_rank(rows)
-        print(json.dumps({"tasks": rows}, indent=2) if args.json else render(rows, with_project=args.all))
+        found = overlaps(dict(targets), rows)
+        if args.json:
+            print(json.dumps({"tasks": rows, "overlaps": found}, indent=2))
+        else:
+            print("\n".join([render(rows, with_project=args.all), *summary(rows, found)]))
         return cli_conventions.OK
     except Refused as refused:
         if refused.token in ERROR_TOKENS:

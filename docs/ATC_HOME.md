@@ -186,14 +186,41 @@ registered, so `atc tmp clean <scratch>` removes it.
 - `atc tmp list` prints one line per scratch and deletes nothing: its name,
   its tree relative to the scratch (the full path when the tree lies outside
   it), its age, `missing` when the directory is gone, and its task when the
-  row has one. A last line counts the missing scratches and names
-  `atc tmp prune`. `atc tmp clean` takes the name as printed.
+  row has one. A line after them counts the missing scratches and gives
+  the `atc tmp clean` command that drops their rows; `atc tmp clean` takes
+  the name as printed. Each leftover candidate (§ Candidates) then prints
+  `candidates/<id>`, its age, `leftover`, its owner's command, task and PID
+  (or `no owner marker`) and its repository (or `repository gone`), and a
+  last line counts them and names `atc tmp prune`.
   `atc tmp list --json` prints the envelope of `shared/conformance/CLI.md`
   § Output with every row under `scratches`, all its columns plus `size` in
   bytes (`null` when the directory is missing).
 
 Scratches are classified by the `project` column, never by a directory level,
 so classification costs no path length.
+
+## Candidates
+
+`atc integrate` and `atc verify` write `<tmp>/candidates/<id>.owner.json`
+before they add the candidate worktree `<tmp>/candidates/<id>`, and remove
+both when they finish: `pid`, `created` (the process's creation time),
+`command`, `repo`, `task` and `started_at`. The candidate is removed with
+`git worktree remove -f -f`, so a dirty or locked candidate goes too; when
+its directory is already gone, its record under the repository's
+`worktrees/` whose `gitdir` names it is removed instead (paths compared
+without case). A file another process holds open still makes the removal
+fail, which prints the retained-candidate warning.
+
+A candidate is in use while a process with the marker's `pid` and the same
+creation time runs; a process whose creation time cannot be read counts as
+running. It is left over when that process is gone, or, without a marker,
+when the directory was last modified more than an hour ago; a younger
+candidate without a marker is neither. An owner counted as running only
+because its creation time cannot be read is not confirmed: the seven-day
+rule of § Deleting still removes its candidate. `atc tmp list` names the leftovers,
+`atc worktree audit` reports a candidate Git still lists as
+`CANDIDATE_LEFTOVER` or `CANDIDATE_IN_USE`, and only `atc tmp prune`, run
+by hand, removes them (§ Deleting).
 
 ## Deleting
 
@@ -248,10 +275,16 @@ expected, except a working directory of the verifier or of the gate.
   removed as links and never entered. `<stage>` is a stage of `TESTKIT.md`
   § Stages or `tests`, the workspace root's test command.
 - Under `<tmp>/candidates` it removes a candidate tree through
-  `git worktree remove` in the repository that owns it, which the tree's own
-  `.git` file names; a tree Git refuses to
-  remove prints `REFUSED` with Git's message and is left. A report file, and
-  a tree Git no longer knows, are handled as any other entry.
+  `git worktree remove -f -f` in the repository that owns it, which the
+  tree's own `.git` file names; a tree Git refuses to remove prints
+  `REFUSED` with Git's message and is left. A candidate whose owner is
+  confirmed to run, its `pid` and creation time matching (§ Candidates), is
+  left at any age; one whose owner's creation time cannot be read is left
+  until it is older than seven days. A leftover candidate is removed at any
+  age, with its marker; a marker whose candidate is gone and whose owner no
+  longer runs is deleted after the repository it names forgets the
+  candidate. A report file, and a tree Git no longer knows, are handled as
+  any other entry.
 
 A refused entry makes the exit code 1 and prints
 `STOP PRUNE_REFUSED: <count> refused; ...` on stderr.

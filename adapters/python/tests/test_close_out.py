@@ -1,11 +1,14 @@
 """`atc close-out --task`: an integrated task's worktree, scratches and reports (docs/TASKS.md § Close-out)."""
 from __future__ import annotations
 
+import json
+import os
 from pathlib import Path
 
 import pytest
 
 import close_out
+import git_preflight
 import managed_worktree as hw
 from atc_testkit import scratch
 from test_task_records import PROJECT, Workspace, commit, record, run_git, ws  # noqa: F401 - the fixture
@@ -163,3 +166,104 @@ def test_without_a_target_the_task_prefix_names_its_repository(ws: Workspace, at
     for cwd, token, expected in ((ws.repo, "NOT_INTEGRATED", 1), (ws.root, "UNKNOWN_PROJECT", 2)):
         code = close_out.main(["--task", "ZZZ-0001"], root=ws.root, environ=environ, cwd=str(cwd))
         assert (code, capsys.readouterr().err.split(" ", 2)[1].rstrip(":")) == (expected, token)
+
+
+def _link(link: Path, target: Path) -> None:
+    """A directory junction on Windows, a symbolic link elsewhere."""
+    if os.name == "nt":
+        import _winapi
+        _winapi.CreateJunction(str(target), str(link))
+    else:
+        link.symlink_to(target, target_is_directory=True)
+
+
+@pytest.mark.parametrize("through", ["direct", "link"])
+def test_a_scratch_whose_tree_lies_in_the_worktree_is_removed(done, atc_tmp: Path, tmp_path: Path, through: str,
+                                                              capsys: pytest.CaptureFixture[str]) -> None:
+    ws, topic, environ = done
+    (topic / "sub").mkdir()
+    base = topic
+    if through == "link":
+        base = tmp_path / "linked"
+        _link(base, topic)
+    (atc_tmp / "writer").mkdir()
+    scratch.register(atc_tmp, atc_tmp / "writer", Path(str(base).upper() if os.name == "nt" else base) / "sub")
+    code, lines, err = close(ws, environ, capsys, ws.root)
+    assert code == 0, (lines, err)
+    assert f"DELETED {atc_tmp / 'writer'}" in lines and (atc_tmp / "theirs").is_dir()
+
+
+def ledger_reports(ws: Workspace) -> list[dict]:
+    path = ws.repo / ".git" / "atc" / "integrations.jsonl"
+    return [entry for entry in map(json.loads, path.read_text(encoding="utf-8").splitlines())
+            if entry.get("kind") == "report"]
+
+
+def test_each_deleted_report_leaves_a_summary_line(done, capsys: pytest.CaptureFixture[str]) -> None:
+    ws, _topic, environ = done
+    reports = Path(environ["HOME"]) / ".atc" / "reports"
+    (reports / f"{TASK}-1a2b3c4.md").write_text("step report, tip 1a2b3c4\n", encoding="utf-8")
+    (reports / f"{TASK}-1a2b3c4-review.md").write_text("\n# CONDITIONAL PASS at 1a2b3c4\n", encoding="utf-8")
+    code, _lines, err = close(ws, environ, capsys, ws.root)
+    assert code == 0, err
+    rows = {entry["file"]: entry for entry in ledger_reports(ws)}
+    assert set(rows) == {f"{TASK}-abc.md", f"{TASK}-abc-review.md", f"{TASK}-1a2b3c4.md", f"{TASK}-1a2b3c4-review.md"}
+    assert (rows[f"{TASK}-1a2b3c4-review.md"]["role"], rows[f"{TASK}-1a2b3c4-review.md"]["sha"],
+            rows[f"{TASK}-1a2b3c4-review.md"]["verdict"]) == ("reviewer", "1a2b3c4", "CONDITIONAL PASS")
+    assert (rows[f"{TASK}-1a2b3c4.md"]["role"], rows[f"{TASK}-1a2b3c4.md"]["verdict"]) == ("writer", None)
+    assert (rows[f"{TASK}-abc.md"]["role"], rows[f"{TASK}-abc.md"]["sha"]) == ("unknown", None)
+    assert all(entry["task"] == TASK and "candidate_sha" not in entry for entry in rows.values())
+    assert [entry["task"] for entry in git_preflight.read_integrations(ws.repo)] == [TASK]
+
+
+def test_a_report_the_ledger_cannot_take_is_kept(done, capsys: pytest.CaptureFixture[str],
+                                                 monkeypatch: pytest.MonkeyPatch) -> None:
+    ws, _topic, environ = done
+
+    def refuse(*_args: object) -> None:
+        raise OSError("read-only")
+    monkeypatch.setattr(close_out, "record_report", refuse)
+    code, lines, _err = close(ws, environ, capsys, ws.root)
+    reports = Path(environ["HOME"]) / ".atc" / "reports"
+    assert code == 3 and f"REFUSED {reports / f'{TASK}-abc.md'} (ledger: read-only)" in lines
+    assert (reports / f"{TASK}-abc.md").exists()
+
+
+def test_kept_reports_write_no_summary(done, capsys: pytest.CaptureFixture[str]) -> None:
+    ws, _topic, environ = done
+    assert close(ws, environ, capsys, ws.root, "--skip", "reports")[0] == 0
+    assert ledger_reports(ws) == []
+
+
+@pytest.mark.parametrize(("line", "verdict"), [
+    ("# ATC-0026 review: PASS at 1a2b3c4", "PASS"), ("CONDITIONAL PASS: rebase first", "CONDITIONAL PASS"),
+    ("FAIL - two findings", "FAIL"), ("PASSED every test", None), ("NO PASS yet; FAIL", "FAIL"), ("NOT PASS", None),
+    ("", None), ("## Verdict", None)])
+def test_the_verdict_is_a_whole_word_of_the_first_line(line: str, verdict: str | None) -> None:
+    assert close_out.verdict_of(line) == verdict
+
+
+def _repo_on(tmp_path: Path, branch: str, records: dict[str, str]) -> Path:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    run_git(repo, "init", "-q", "-b", branch)
+    commit(repo, {f".atc/tasks/{name}.yaml": text for name, text in records.items()} or {"a.txt": "a"})
+    (repo / "adapters").mkdir()
+    return repo
+
+
+@pytest.mark.parametrize(("branch", "records", "expected"), [
+    ("worktree-claude+widget", {TASK: record(TASK, "worktree-claude+widget")}, TASK),
+    ("worktree-claude+widget", {TASK: record(TASK, "worktree-claude+other")}, ""),
+    ("worktree-claude+widget", {TASK: record(TASK, "worktree-claude+widget"),
+                                "DEMO-0002": record("DEMO-0002", "worktree-claude+widget")}, ""),
+    ("topic", {TASK: record(TASK, "topic")}, "")])
+def test_a_test_run_scratch_records_the_task_of_its_managed_worktree(tmp_path: Path, atc_tmp: Path, branch: str,
+                                                                     records: dict[str, str], expected: str) -> None:
+    repo = _repo_on(tmp_path, branch, records)
+    assert scratch.task_of_tree(repo / "adapters") == expected
+    scratch.register(atc_tmp, atc_tmp / "s", repo / "adapters")
+    scratch.register(atc_tmp, atc_tmp / "s", repo / "adapters", task=scratch.task_of_tree(repo / "adapters"))
+    scratch.register(atc_tmp, atc_tmp / "s", repo / "adapters", task="DEMO-0009")
+    [row] = scratch.registered(atc_tmp)
+    assert row.task == (expected or "DEMO-0009")

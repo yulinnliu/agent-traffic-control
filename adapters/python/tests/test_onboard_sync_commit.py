@@ -51,6 +51,26 @@ def test_sync_commits_on_main_and_records_it(tmp_path: Path, capsys: pytest.Capt
     assert len(records(project)) == 1
 
 
+@pytest.mark.parametrize("case", ["at tag", "after tag", "no tag"])
+def test_the_sync_subject_names_the_release_tag(tmp_path: Path, case: str) -> None:
+    root, project = committed_workspace(tmp_path)
+    if case != "no tag":
+        subprocess.run(["git", "-C", str(root), "tag", "v0.3.0"], check=True)
+        subprocess.run(["git", "-C", str(root), "tag", "notes-1"], check=True)
+    if case == "after tag":
+        (root / "notes.txt").write_text("n\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(root), "add", "notes.txt"], check=True)
+        subprocess.run(["git", "-C", str(root), *COMMIT, "notes"], check=True)
+    assert onboard_project.main(["--sync", "--project", "demo"], root=root) == 0
+    short = git_out(root, "rev-parse", "HEAD")[:7]
+    label, tag, after = {"at tag": (f"v0.3.0 ({short})", "v0.3.0", None),
+                         "after tag": (f"{short} (after v0.3.0)", None, "v0.3.0"),
+                         "no tag": (short, None, None)}[case]
+    assert git_out(project, "log", "-1", "--format=%s") == f"chore(governance): sync from unknown {label}"
+    [record] = records(project)
+    assert (record["source_tag"], record["source_after"]) == (tag, after)
+
+
 @pytest.mark.parametrize("case", ["dirty", "branch", "busy", "behind"])
 def test_project_precondition_stops_before_writing(tmp_path: Path, capsys: pytest.CaptureFixture[str], case: str) -> None:
     root, project = committed_workspace(tmp_path)

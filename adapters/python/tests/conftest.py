@@ -16,6 +16,8 @@ pytest_plugins = ("atc_testkit.plugin",)
 ROOT_NAME_LENGTH = 9
 SHORTEST_ROOT_NAME = 3
 ROOT_MARGIN = len("/new")
+SESSION_RESERVE = 1 + 5 + ROOT_MARGIN  # a separator, a test's root of five characters and its margin
+HOST_TMP = Path(os.path.realpath(os.environ.get("ATC_TMP") or Path.home() / ".atc" / "tmp"))
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
@@ -88,6 +90,46 @@ def _new_root(reserve: int) -> Path:
         except FileExistsError:
             continue
         return root
+
+
+@pytest.fixture(scope="session")
+def _session_tmp():
+    """A short ``<tmp>`` of the session inside the host's, leaving room for a test's own root below it; ``None``
+    when the host's ``<tmp>`` leaves no room for one."""
+    length = min(ROOT_NAME_LENGTH, locations.TMP_NAME_BOUND - SESSION_RESERVE - len(str(HOST_TMP)) - 1)
+    if length < SHORTEST_ROOT_NAME:
+        yield None
+        return
+    HOST_TMP.mkdir(parents=True, exist_ok=True)
+    while True:
+        root = HOST_TMP / secrets.token_hex(ROOT_NAME_LENGTH)[:length]
+        try:
+            root.mkdir()
+        except FileExistsError:
+            continue
+        break
+    root = Path(os.path.realpath(root))
+    before = os.environ.get("ATC_TMP")
+    os.environ["ATC_TMP"] = str(root)
+    yield root
+    if before is None:
+        os.environ.pop("ATC_TMP", None)
+    else:
+        os.environ["ATC_TMP"] = before
+    shutil.rmtree(root, onexc=_writable_retry)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _no_host_tmp(_session_tmp: Path | None) -> None:
+    """Code the session runs, from session, module and test fixtures, in process or in a child, uses the session's
+    ``<tmp>``, so no candidate, scratch or run directory lands in the host's; a test that needs another sets its own."""
+
+
+@pytest.fixture(autouse=True)
+def _session_tmp_each_test(monkeypatch: pytest.MonkeyPatch, _session_tmp: Path | None) -> None:
+    """A test that changed ``ATC_TMP`` without restoring it leaves the next test the session's again."""
+    if _session_tmp is not None:
+        monkeypatch.setenv("ATC_TMP", str(_session_tmp))
 
 
 @pytest.fixture()

@@ -49,7 +49,8 @@
     },
     "rank": {"type": "integer", "minimum": 1},
     "after": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/task_id"}},
-    "notes": {"type": "string", "minLength": 1}
+    "notes": {"type": "string", "minLength": 1},
+    "version": {"type": "string", "minLength": 1}
   },
   "allOf": [
     {

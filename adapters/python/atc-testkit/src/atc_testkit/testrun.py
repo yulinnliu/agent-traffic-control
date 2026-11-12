@@ -668,7 +668,7 @@ def run(argv: Sequence[str], environ: MutableMapping[str, str] | None = None) ->
     else:
         raise Refusal("TREE_NOT_FOUND", f"the scratch {place.name} names no tree; pass --tree")
     python = resolve_python(args.python) if args.python else toolchains.for_tree(tree).interpreter(tree)
-    scratch.register(root, place, tree)
+    scratch.register(root, place, tree, task=scratch.task_of_tree(tree))
     paths = changed_paths(tree, args.select, row) if args.select else None
     environ["PYTHONUNBUFFERED"] = "1"
     private = isolate(tree, place, python, environ)

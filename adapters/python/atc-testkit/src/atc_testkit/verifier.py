@@ -21,6 +21,11 @@ REQUIRED_ENV = ("ATC_EXPECTED_MAIN_SHA", "ATC_INTEGRATION_SHA", "ATC_CANDIDATE_D
 FULL_OBJECT_ID = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
 AUTOMATION_MARKDOWN = frozenset({"agents.md", "claude.md"})
 MARKDOWN_SUFFIXES = (".md", ".markdown")
+TASK_RECORD = re.compile(r"\.atc/tasks/[^/]+\.yaml")
+SYNC_FILES = frozenset({".atc/atc.lock", ".atc/README.md"})
+SYNC_PREFIX = ".atc/governance/"
+SKILL_COPY = re.compile(r"(?:\.claude|\.agents|\.dsh)/skills/[^/]+/")
+MANAGED_MARKER = re.compile(r"(?m)^managed-by:\s*agent-traffic-control\s*$")
 RANGE_UNREADABLE = "RANGE_UNREADABLE"
 REPORTED_LINES = 20
 
@@ -174,10 +179,38 @@ def is_automation_markdown(path: str, prefixes: Sequence[str]) -> bool:
             or normalized.startswith(tuple(prefix.lower() for prefix in prefixes)))
 
 
-def documentation_only(paths: Sequence[str], pytest_paths: list[str] | None, prefixes: Sequence[str]) -> bool:
-    """Every path is Markdown, the selection names no test, and no path is automation Markdown."""
-    return (bool(paths) and pytest_paths is None and all(path.lower().endswith(MARKDOWN_SUFFIXES) for path in paths)
-            and not any(is_automation_markdown(path, prefixes) for path in paths))
+def _managed_skill(text: str) -> bool:
+    """Whether a ``SKILL.md`` text's frontmatter carries the marker of a copy sync renders."""
+    if not text.startswith("---"):
+        return False
+    frontmatter = text[3:].split("\n---", 1)[0]
+    return MANAGED_MARKER.search(frontmatter) is not None
+
+
+def is_atc_managed(path: str, root: Path, base: str) -> bool:
+    """A task record, a file sync owns under ``.atc/``, or a file of a skill copy sync renders; a skill
+    the range deletes is read at ``base``."""
+    path = path.replace("\\", "/")
+    if TASK_RECORD.fullmatch(path) or path in SYNC_FILES or path.startswith(SYNC_PREFIX):
+        return True
+    match = SKILL_COPY.match(path)
+    if match is None:
+        return False
+    skill = f"{match.group(0)}SKILL.md"
+    try:
+        text = (root / skill).read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        shown = git(root, "show", f"{base}:{skill}")
+        text = shown.stdout if shown.returncode == 0 else ""
+    return _managed_skill(text)
+
+
+def documentation_only(paths: Sequence[str], pytest_paths: list[str] | None, prefixes: Sequence[str],
+                       managed: Callable[[str], bool] = lambda _path: False) -> bool:
+    """The selection names no test, and every path is ATC-managed or Markdown that is not automation Markdown."""
+    return (bool(paths) and pytest_paths is None
+            and all(managed(path) or (path.lower().endswith(MARKDOWN_SUFFIXES)
+                                      and not is_automation_markdown(path, prefixes)) for path in paths))
 
 
 def is_test_input(path: str, testpaths: Sequence[str]) -> bool:
@@ -265,7 +298,8 @@ def _consumer_checks(project: Project, checks: _Checks, base: str, sha: str, pat
                      consumer_selection: Selection) -> bool:
     """The rows from the selection to the stages, for a project that carries the testkit; whether documentation-only."""
     pytest_paths = consumer_selection.pytest_paths()
-    doc_only = documentation_only(paths, pytest_paths, project.automation_markdown_prefixes)
+    doc_only = documentation_only(paths, pytest_paths, project.automation_markdown_prefixes,
+                                  lambda path: is_atc_managed(path, project.root, base))
     testpaths = project.tests_toolchain().test_paths(project.root)
     collect = any(is_test_input(path, testpaths) for path in paths)
     print(describe(consumer_selection), flush=True)

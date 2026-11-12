@@ -16,11 +16,14 @@ import time
 import tomllib
 from typing import NamedTuple
 
-from . import isolation, locations, stages, toolchain
+import yaml
+
+from . import isolation, locations, owner, stages, toolchain
 from .git import git_env
 from .locations import CANDIDATES, Refusal, SYSTMP, is_link as _is_link
 
 SCRATCH_NAME = re.compile(r"[A-Za-z0-9._-]+")
+MANAGED_BRANCH = re.compile(r"worktree-[^+/]+\+[^/]+")
 RESERVED_NAMES = frozenset({SYSTMP, CANDIDATES})
 SCRATCH_NAME_BOUND = 64
 REGISTRY_NAME = "scratch-dirs.tsv"
@@ -130,14 +133,43 @@ def registered(root: Path) -> list[Row]:
 
 def register(root: Path, scratch: Path, tree: Path, now: datetime | None = None, *, task: str = "",
              source: str = "", commit: str = "", project: str | None = None) -> None:
-    """Add the scratch's line when it has none; ``project`` defaults to the tree's ``project_name``."""
+    """Add the scratch's line when it has none, or fill an empty task of its line; ``project`` defaults to the
+    tree's ``project_name``."""
     field = lambda value: re.sub(r"[\t\r\n]", " ", str(value))  # noqa: E731 - the format has no quoting
     created = (now or datetime.now(UTC)).strftime(TIME_FORMAT)
     with _locked(root):
         lines = _registry_lines(root)
-        if any(row and locations.same_path(row.scratch, scratch) for row in map(_parse, lines)):
-            return
+        for index, row in enumerate(map(_parse, lines)):
+            if row and locations.same_path(row.scratch, scratch):
+                if task and not row.task:
+                    lines[index] = "\t".join(map(field, row._replace(task=task)))
+                    _write_registry(root, lines)
+                return
         _write_registry(root, [*lines, "\t".join(map(field, (project or project_name(tree), scratch, tree, created, task, source, commit)))])
+
+
+def task_of_tree(tree: Path) -> str:
+    """The task ID of the one record whose ``branch`` is the managed worktree branch holding ``tree``; empty
+    for no such branch, or for no or several records."""
+    def run(*args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(["git", *args], cwd=tree, capture_output=True, text=True, encoding="utf-8",
+                              env=git_env(), stdin=subprocess.DEVNULL, creationflags=WINDOW_HIDDEN)
+    try:
+        top, branch = run("rev-parse", "--show-toplevel"), run("symbolic-ref", "--short", "-q", "HEAD")
+    except OSError:
+        return ""
+    name = branch.stdout.strip()
+    if top.returncode or branch.returncode or not MANAGED_BRANCH.fullmatch(name):
+        return ""
+    found = []
+    for record in sorted(Path(top.stdout.strip(), ".atc", "tasks").glob("*.yaml")):
+        try:
+            data = yaml.safe_load(record.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, yaml.YAMLError):
+            continue
+        if isinstance(data, dict) and data.get("branch") == name and isinstance(data.get("task_id"), str):
+            found.append(data["task_id"])
+    return found[0] if len(found) == 1 else ""
 
 
 def _unregister(root: Path, directory: str) -> None:
@@ -410,10 +442,38 @@ def list_scratches(*, say: Callable[[str], None] = print, environ=None, as_json:
         if row.task:
             fields.append(row.task)
         say("  ".join(fields))
-    missing = sizes.count(None)
+    missing = [os.path.basename(row.scratch) for row, size in zip(rows, sizes) if size is None]
     if missing:
-        say(f"{missing} missing; atc tmp prune")
+        say(f"{len(missing)} missing; atc tmp clean {' '.join(missing)} drops their rows")
+    leftovers = leftover_candidates(root / CANDIDATES, now)
+    for path, data in leftovers:
+        repo = data.get("repo") if data else _owning_repository(str(path))
+        try:
+            created = datetime.fromtimestamp(os.lstat(path).st_mtime, UTC).strftime(TIME_FORMAT)
+        except OSError:
+            created = ""
+        say("  ".join([f"{CANDIDATES}/{path.name}", _age(created, now), "leftover", owner.describe(data),
+                       repo or "repository gone"]))
+    if leftovers:
+        say(f"{len(leftovers)} leftover candidates; atc tmp prune removes them")
     return 0
+
+
+def leftover_candidates(parent: Path, now: datetime | None = None) -> list[tuple[Path, dict | None]]:
+    """The candidate directories under ``parent`` whose owner process is gone, or that have no owner marker and
+    are older than an hour (docs/ATC_HOME.md § Candidates)."""
+    try:
+        entries = sorted(os.scandir(parent), key=lambda entry: entry.name)
+    except OSError:
+        return []
+    found = []
+    for entry in entries:
+        if not entry.is_dir(follow_symlinks=False):
+            continue
+        verdict, data = owner.state(Path(entry.path), now)
+        if verdict == "leftover":
+            found.append((Path(entry.path), data))
+    return found
 
 
 def _old(status: os.stat_result, now: datetime) -> bool:
@@ -469,25 +529,102 @@ def _owning_repository(tree: str) -> str | None:
 
 
 def _prune_candidate(path: str, status: os.stat_result, say: Callable[[str], None]) -> int:
+    """A candidate directory goes through ``git worktree remove`` of the repository that knows it, forced; any other
+    entry is deleted, except a candidate whose owner is confirmed to run. The candidate's owner marker goes
+    with it."""
+    data = owner.read_marker(Path(path)) if stat.S_ISDIR(status.st_mode) else None
+    if data is not None and owner.confirmed(data["pid"], data.get("created")):
+        return 0
     common = None if _is_link(status) or not stat.S_ISDIR(status.st_mode) else _owning_repository(path)
     if common is None:
-        return _prune_entry(path, status, say)
-    removed = subprocess.run(["git", "--git-dir", common, "worktree", "remove", path], capture_output=True, text=True,
-                             env=git_env(), stdin=subprocess.DEVNULL, creationflags=WINDOW_HIDDEN)
-    if removed.returncode:
-        say(f"REFUSED {path} ({' '.join(removed.stderr.split())})")
+        code = _prune_entry(path, status, say)
+    else:
+        removed = subprocess.run(["git", "--git-dir", common, "worktree", "remove", "-f", "-f", path],
+                                 capture_output=True, text=True, env=git_env(), stdin=subprocess.DEVNULL,
+                                 creationflags=WINDOW_HIDDEN)
+        if removed.returncode:
+            say(f"REFUSED {path} ({' '.join(removed.stderr.split())})")
+            return 1
+        say(f"DELETED {path}")
+        code = 0
+    if not code and stat.S_ISDIR(status.st_mode):
+        owner.marker(Path(path)).unlink(missing_ok=True)
+    return code
+
+
+def forget_worktree(common: Path, candidate: Path) -> bool:
+    """Remove the one administrative directory under ``<common>/worktrees`` whose ``gitdir`` names ``candidate``,
+    compared without case; whether there was one. Other worktrees' records are left as they are."""
+    want = os.path.normcase(os.path.abspath(candidate))
+    try:
+        entries = list((common / "worktrees").iterdir())
+    except OSError:
+        return False
+    for entry in entries:
+        try:
+            gitdir = (entry / "gitdir").read_text(encoding="utf-8").strip()
+        except OSError:
+            continue
+        if os.path.normcase(os.path.abspath(os.path.dirname(gitdir))) == want:
+            why = remove_tree(str(entry), no_link, lambda _line: None)
+            if why:
+                raise OSError(f"{entry}: {why}")
+            return True
+    return False
+
+
+def _prune_orphan_marker(path: str, say: Callable[[str], None]) -> int:
+    """A marker whose candidate directory is gone: the owner's repository forgets the candidate, then the marker
+    goes, unless its owner still runs."""
+    candidate = Path(path[:-len(owner.MARKER_SUFFIX)])
+    data = owner.read_marker(candidate)
+    if data is not None and owner.alive(data["pid"], data.get("created")):
+        return 0
+    try:
+        if data is not None and data.get("repo"):
+            listed = subprocess.run(["git", "-C", data["repo"], "rev-parse", "--path-format=absolute",
+                                     "--git-common-dir"], capture_output=True, text=True, env=git_env(),
+                                    stdin=subprocess.DEVNULL, creationflags=WINDOW_HIDDEN)
+            if listed.returncode == 0 and forget_worktree(Path(listed.stdout.strip()), candidate):
+                say(f"DELETED {candidate} (worktree record)")
+        os.unlink(_extended(path))
+        say(f"DELETED {path}")
+        return 0
+    except Exception as error:  # noqa: BLE001 - an error while handling an entry is its refusal
+        say(f"REFUSED {path} (error: {error})")
         return 1
-    say(f"DELETED {path}")
-    return 0
+
+
+def _prune_leftover_candidates(parent: Path, say: Callable[[str], None], now: datetime,
+                               handled: set[str]) -> int:
+    """Candidates whose owner is gone, at any age, and markers left without their candidate; ``handled`` gets
+    each candidate taken here."""
+    code = 0
+    for path, _data in leftover_candidates(parent, now):
+        handled.add(str(path))
+        try:
+            code = max(code, _prune_candidate(str(path), os.lstat(path), say))
+        except OSError as error:
+            say(f"REFUSED {path} (error: {error})")
+            code = 1
+    try:
+        markers = sorted(entry.path for entry in os.scandir(parent) if entry.name.endswith(owner.MARKER_SUFFIX))
+    except OSError:
+        markers = []
+    for path in markers:
+        if not os.path.lexists(path[:-len(owner.MARKER_SUFFIX)]):
+            code = max(code, _prune_orphan_marker(path, say))
+    return code
 
 
 def prune(*, say: Callable[[str], None] = print, environ=None, now: datetime | None = None) -> int:
-    """``atc tmp prune``: entries of ``systmp`` and ``candidates`` older than seven days; 1 on any refusal."""
+    """``atc tmp prune``: entries of ``systmp`` and ``candidates`` older than seven days, and candidates whose owner
+    is gone; 1 on any refusal."""
     places = locations.locate(environ)
     now = now or datetime.now(UTC)
     code = 0
     for parent, handle, skip in ((places.systmp, _prune_system_entry, toolchain.system_temp_runs()),
-                                 (places.tmp / CANDIDATES, _prune_candidate, ())):
+                                 (places.tmp / CANDIDATES, _prune_candidate, (f"*{owner.MARKER_SUFFIX}",))):
         try:
             parent_status = os.lstat(parent)
         except FileNotFoundError:
@@ -504,6 +641,9 @@ def prune(*, say: Callable[[str], None] = print, environ=None, now: datetime | N
             say(f"REFUSED {parent} (not a directory)")
             code = 1
             continue
+        handled: set[str] = set()
+        if handle is _prune_candidate:
+            code = max(code, _prune_leftover_candidates(parent, say, now, handled))
         try:
             entries = sorted(os.scandir(parent), key=lambda entry: entry.name)
         except OSError as error:
@@ -511,7 +651,7 @@ def prune(*, say: Callable[[str], None] = print, environ=None, now: datetime | N
             code = 1
             continue
         for entry in entries:
-            if any(fnmatch.fnmatch(entry.name, pattern) for pattern in skip):
+            if entry.path in handled or any(fnmatch.fnmatch(entry.name, pattern) for pattern in skip):
                 continue
             try:
                 status = entry.stat(follow_symlinks=False)

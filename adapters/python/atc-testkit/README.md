@@ -168,7 +168,7 @@ The rows down to `product_module_prefixes` are required; the others are optional
 | `product_module_prefixes` | the module prefixes the verifier checks are imported from the candidate |
 | `credential_variables` | further variables the isolated environment removes |
 | `data_root_variables` | the variables that get one data directory per stage |
-| `automation_markdown_prefixes` | Markdown paths that are not documentation |
+| `automation_markdown_prefixes` | Markdown paths that are not documentation; files ATC manages there (a skill copy whose `SKILL.md` carries `managed-by: agent-traffic-control`) still count as documentation-only (`docs/TESTKIT.md` § Verifier) |
 | `lint_scope` | the paths `ruff check` reads |
 | `hook_uv_options` | the options the hook's `uv run --frozen` carries |
 | `ci_platforms` | the platforms the CI job covers |

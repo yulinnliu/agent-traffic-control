@@ -353,11 +353,17 @@ this order:
 
 - A project static check keeps its own condition on the changed paths and
   says whether it runs before the shared checks.
-- A range is documentation-only when every changed path is Markdown, the
-  selection names no test, and no path is automation Markdown (`AGENTS.md`,
-  `CLAUDE.md`, or a file under a prefix the project names). Such a range
-  skips the stages and runs the project's documentation check
-  (§ Documentation check).
+- A range is documentation-only when the selection names no test and every
+  changed path is either Markdown that is not automation Markdown
+  (`AGENTS.md`, `CLAUDE.md`, or a file under a prefix the project names) or a
+  path ATC manages: a task record `.atc/tasks/*.yaml`, `.atc/atc.lock`,
+  `.atc/README.md`, a file under `.atc/governance/`, or a file of a skill
+  copy under `.claude/skills/<name>/`, `.agents/skills/<name>/` or
+  `.dsh/skills/<name>/` whose `SKILL.md` carries
+  `managed-by: agent-traffic-control` (read at the range's base when the
+  range deletes it). A skill copy without that line is the project's own
+  and stays automation Markdown. Such a range skips the stages and runs the
+  project's documentation check (§ Documentation check).
 - After a pass the verifier writes the verification report to the path in
   `ATC_VERIFICATION_REPORT`. A report that cannot be written leaves the
   verdict a pass.

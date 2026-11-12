@@ -30,3 +30,4 @@ decisions:
   - 'Q1: claimed versions come from an optional version field of the task record (schema in shared/policies/schemas/), display only (Owner, 2026-11-12).'
   - 'Q2: atc tmp prune also removes candidates whose owner process is gone: gone means the PID and its process creation time do not match (a reused PID is gone); access denied from OpenProcess is alive; a candidate with no owner marker is removed only when older than one hour; prune stays human-run, with no automatic removal at the start of another integrate (Owner, 2026-11-12).'
   - 'Q3: git diff --check in atc integrate --check is a warning; GIT_WORKFLOW.md does not change (Owner, 2026-11-12).'
+  - 'Q4: a candidate whose owner check returns access denied counts as alive, but the seven-day rule of atc tmp prune removes it anyway; the live-owner skip applies only to a confirmed-alive owner, the PID and its creation time matching (Owner, 2026-11-12: "Yes, after 7 days").'

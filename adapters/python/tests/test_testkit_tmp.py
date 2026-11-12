@@ -2,15 +2,18 @@
 from __future__ import annotations
 
 import ast
+import json
 from datetime import UTC, datetime, timedelta
 import os
 from pathlib import Path
+import shutil
 import subprocess
+import sys
 
 import pytest
 
 import atc_testkit
-from atc_testkit import commands, isolation, locations, scratch
+from atc_testkit import commands, isolation, locations, owner, scratch
 
 
 def link_directory(link: Path, target: Path) -> None:
@@ -418,7 +421,7 @@ def test_list_prints_one_line_per_scratch_and_deletes_nothing(atc_tmp: Path, tmp
         "present  tree  3d  ATC-0008",
         "absent  tree  3d  missing",
         f"outside  {tmp_path / 'elsewhere'}  3d",
-        "1 missing; atc tmp prune",
+        "1 missing; atc tmp clean absent drops their rows",
     ]
     assert present.is_dir()
 
@@ -598,15 +601,17 @@ def test_prune_removes_a_candidate_through_its_repository(repository: Path, atc_
     assert not tree.exists() and tree.as_posix() not in git(repository, "worktree", "list", "--porcelain")
 
 
-def test_a_candidate_git_refuses_is_left_with_gits_message(repository: Path, atc_tmp: Path) -> None:
+@pytest.mark.integration
+def test_a_dirty_or_locked_candidate_is_removed(repository: Path, atc_tmp: Path) -> None:
     tree = atc_tmp / "candidates/dirty"
     git(repository, "worktree", "add", "-q", "--detach", str(tree))
+    git(repository, "worktree", "lock", str(tree))
     write(tree / "a.txt", "changed\n")
+    write(tree / "untracked.txt")
     age(tree, 8)
     code, lines = prune()
-    assert code == 1 and lines[0].startswith(f"REFUSED {tree} (") and "fatal" in lines[0]
-    assert (tree / "a.txt").is_file()
-    git(repository, "worktree", "remove", "--force", str(tree))
+    assert (code, lines) == (0, [f"DELETED {tree}"])
+    assert not tree.exists() and tree.as_posix() not in git(repository, "worktree", "list", "--porcelain")
 
 
 def test_a_tree_git_no_longer_knows_is_any_other_entry(repository: Path, atc_tmp: Path) -> None:
@@ -730,3 +735,99 @@ def test_dependent_runs_are_listed_and_taken_with_runs(atc_tmp: Path, capsys: py
     assert capsys.readouterr().out.splitlines() == [f"DELETED {run}", f"DELETED {review}"]
     assert other.is_dir() and registered_names(atc_tmp) == ["other"]
     assert commands.main(["tmp", "clean", "--with-runs"]) == 2
+
+
+# candidates and their owners
+
+
+def candidate(repository: Path, atc_tmp: Path, name: str, created: str | None) -> Path:
+    """A candidate worktree; with ``created`` an owner marker of this process's PID, the real creation time for a
+    live owner, any other for a gone one."""
+    tree = atc_tmp / "candidates" / name
+    git(repository, "worktree", "add", "-q", "--detach", str(tree))
+    if created is not None:
+        owner.write_marker(tree, "verify", repository, "ATC-0001")
+        data = json.loads(owner.marker(tree).read_text(encoding="utf-8"))
+        owner.marker(tree).write_text(json.dumps({**data, "created": created}), encoding="utf-8")
+    return tree
+
+
+@pytest.mark.integration
+def test_an_owner_is_its_pid_and_creation_time(monkeypatch: pytest.MonkeyPatch) -> None:
+    mine = owner.created(os.getpid())
+    assert mine not in (None, owner.DENIED) and owner.alive(os.getpid(), mine)
+    assert not owner.alive(os.getpid(), "0") and not owner.alive(0, mine)
+    finished = subprocess.run([sys.executable, "-c", "import os; print(os.getpid())"], capture_output=True, text=True)
+    assert owner.created(int(finished.stdout)) is None or owner.created(int(finished.stdout)) != mine
+    monkeypatch.setattr(owner, "created", lambda _pid: owner.DENIED)
+    assert owner.alive(1234, "anything")
+
+
+@pytest.mark.integration
+def test_prune_removes_candidates_whose_owner_is_gone_at_any_age(repository: Path, atc_tmp: Path) -> None:
+    gone = candidate(repository, atc_tmp, "gone", "0")
+    live = candidate(repository, atc_tmp, "live", owner.created(os.getpid()))
+    young = candidate(repository, atc_tmp, "young", None)
+    old = candidate(repository, atc_tmp, "old", None)
+    stamp = (datetime.now(UTC) - timedelta(hours=2)).timestamp()
+    os.utime(old, (stamp, stamp))
+    week = (datetime.now(UTC) - timedelta(days=8)).timestamp()
+    os.utime(live, (week, week))
+    lines: list[str] = []
+    assert scratch.prune(say=lines.append) == 0
+    assert sorted(lines) == sorted([f"DELETED {gone}", f"DELETED {old}"])
+    assert not owner.marker(gone).exists() and live.is_dir() and owner.marker(live).exists() and young.is_dir()
+    listed = git(repository, "worktree", "list", "--porcelain")
+    assert "gone" not in listed and "/old" not in listed and "live" in listed
+
+
+@pytest.mark.integration
+def test_prune_drops_a_marker_left_without_its_candidate_and_only_that_record(repository: Path, atc_tmp: Path) -> None:
+    lost = candidate(repository, atc_tmp, "lost", "0")
+    other = candidate(repository, atc_tmp, "other", owner.created(os.getpid()))
+    shutil.rmtree(lost)
+    shutil.rmtree(other)
+    lines: list[str] = []
+    assert scratch.prune(say=lines.append) == 0
+    assert lines == [f"DELETED {lost} (worktree record)", f"DELETED {owner.marker(lost)}"]
+    listed = git(repository, "worktree", "list", "--porcelain")
+    assert "lost" not in listed and "other" in listed and owner.marker(other).exists()
+
+
+@pytest.mark.integration
+def test_list_names_leftover_candidates_and_the_missing_scratches_to_clean(repository: Path, atc_tmp: Path) -> None:
+    gone = candidate(repository, atc_tmp, "gone", "0")
+    candidate(repository, atc_tmp, "live", owner.created(os.getpid()))
+    write(atc_tmp / "candidates" / "x.verify.log")
+    for name in ("a1", "b2"):
+        scratch.register(atc_tmp, atc_tmp / name, atc_tmp / name / "tree")
+    lines: list[str] = []
+    scratch.list_scratches(say=lines.append)
+    assert lines[2] == "2 missing; atc tmp clean a1 b2 drops their rows"
+    assert lines[3].split("  ")[0::2] == [f"candidates/{gone.name}", "leftover", str(repository)]
+    assert lines[3].split("  ")[3] == f"verify ATC-0001, pid {os.getpid()}"
+    assert lines[4:] == ["1 leftover candidates; atc tmp prune removes them"]
+
+
+@pytest.mark.integration
+def test_record_only_cleanup_compares_paths_without_case(repository: Path, atc_tmp: Path) -> None:
+    tree = candidate(repository, atc_tmp, "Casey", None)
+    shutil.rmtree(tree)
+    spelled = Path(str(tree).upper()) if os.name == "nt" else tree
+    assert scratch.forget_worktree(repository / ".git", spelled)
+    assert "Casey" not in git(repository, "worktree", "list", "--porcelain")
+
+
+@pytest.mark.integration
+def test_an_owner_that_cannot_be_read_keeps_its_candidate_for_seven_days(repository: Path, atc_tmp: Path,
+                                                                         monkeypatch: pytest.MonkeyPatch) -> None:
+    old = candidate(repository, atc_tmp, "old", "1")
+    young = candidate(repository, atc_tmp, "young", "1")
+    week = (datetime.now(UTC) - timedelta(days=8)).timestamp()
+    os.utime(old, (week, week))
+    monkeypatch.setattr(owner, "created", lambda _pid: owner.DENIED)
+    assert owner.state(old)[0] == owner.state(young)[0] == "in use"
+    lines: list[str] = []
+    assert scratch.prune(say=lines.append) == 0
+    assert lines == [f"DELETED {old}"]
+    assert not old.exists() and not owner.marker(old).exists() and young.is_dir() and owner.marker(young).exists()

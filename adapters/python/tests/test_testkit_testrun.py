@@ -593,3 +593,15 @@ def test_mutants_refuse_an_invalid_private_desktop_value_before_the_baseline(
                           "--python", sys.executable, "--tests", "tests"])
     captured = capsys.readouterr()
     assert code == 9 and captured.err.startswith("PRIVATE_DESKTOP_INVALID ") and "BASELINE" not in captured.out
+
+
+@pytest.mark.integration
+def test_a_run_in_a_managed_worktree_registers_its_task(tree: Path, atc_tmp: Path) -> None:
+    for args in (("init", "-q", "-b", "worktree-claude+demo"), ("config", "user.email", "t@example.com"),
+                 ("config", "user.name", "t")):
+        subprocess.run(["git", *args], cwd=tree, check=True, capture_output=True)
+    (tree / ".atc/tasks").mkdir(parents=True)
+    (tree / ".atc/tasks/DEMO-0007.yaml").write_text("task_id: DEMO-0007\nbranch: worktree-claude+demo\n",
+                                                    encoding="utf-8")
+    assert run_tests(str(tree), "s", sys.executable, "tests").returncode == 0
+    assert [row.task for row in scratch.registered(atc_tmp)] == ["DEMO-0007"]

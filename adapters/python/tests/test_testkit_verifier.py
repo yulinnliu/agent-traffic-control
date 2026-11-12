@@ -323,6 +323,60 @@ def test_automation_markdown_is_not_documentation_only(candidate: Candidate) -> 
     assert "docs.log" not in recorder.logs
 
 
+MANAGED_SKILL = "---\nname: s\nmanaged-by: agent-traffic-control\ncanonical: s\n---\n\n# S\n"
+OWN_SKILL = "---\nname: s\n---\n\n# S\n"
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("paths", [
+    [".atc/tasks/T-0001.yaml", "docs/a.md"], [".atc/tasks/T-0001.yaml"],
+    [".atc/atc.lock", ".atc/governance/CORE.md", ".atc/README.md", ".claude/skills/s/SKILL.md"]])
+def test_a_record_or_sync_range_is_documentation_only_and_runs_the_documentation_check(
+        candidate: Candidate, paths: list[str]) -> None:
+    candidate.advance(".claude/skills/s/SKILL.md", MANAGED_SKILL)
+    candidate.main = git(candidate.root, "rev-parse", "HEAD")
+    for path in paths:
+        candidate.advance(path, MANAGED_SKILL + "changed\n" if path.endswith("SKILL.md") else "x\n")
+    recorder = Recorder()
+    project = consumer(candidate.root, documentation_check=StaticCheck("docs", "DOC_FAILED", ("doc-tool",)),
+                       automation_prefixes=(".atc/", ".claude/"))
+    assert verifier.main(project, candidate.env(), recorder) == 0
+    assert "docs.log" in recorder.logs
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(("path", "files", "expected"), [
+    (".atc/tasks/T-0001.yaml", {}, True), (".atc/tasks/sub/T.yaml", {}, False), (".atc/other.md", {}, False),
+    (".agents/skills/s/references/x.md", {".agents/skills/s/SKILL.md": MANAGED_SKILL}, True),
+    (".claude/skills/s/SKILL.md", {".claude/skills/s/SKILL.md": OWN_SKILL}, False),
+    (".dsh/skills/s/SKILL.md", {}, False), ("AGENTS.md", {}, False)])
+def test_atc_managed_paths(tmp_path: Path, path: str, files: dict[str, str], expected: bool) -> None:
+    for name, text in files.items():
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_text(text, encoding="utf-8")
+    assert verifier.is_atc_managed(path, tmp_path, "0" * 40) is expected
+
+
+@pytest.mark.integration
+def test_a_deleted_managed_skill_is_read_at_the_base(candidate: Candidate) -> None:
+    candidate.advance(".claude/skills/s/SKILL.md", MANAGED_SKILL)
+    base = git(candidate.root, "rev-parse", "HEAD")
+    git(candidate.root, "rm", "-q", "-r", ".claude")
+    git(candidate.root, "commit", "-q", "-m", "drop")
+    assert verifier.is_atc_managed(".claude/skills/s/SKILL.md", candidate.root, base)
+
+
+@pytest.mark.integration
+def test_an_own_skill_beside_a_record_is_not_documentation_only(candidate: Candidate) -> None:
+    candidate.advance(".atc/tasks/T-0001.yaml", "x\n")
+    candidate.advance(".claude/skills/own/SKILL.md", OWN_SKILL)
+    recorder = Recorder()
+    project = consumer(candidate.root, documentation_check=StaticCheck("docs", "DOC_FAILED", ("doc-tool",)),
+                       automation_prefixes=(".atc/", ".claude/"))
+    assert verifier.main(project, candidate.env(), recorder) == 0
+    assert "docs.log" not in recorder.logs
+
+
 def test_a_pass_writes_the_report_and_removes_the_working_directory(candidate: Candidate, tmp_path: Path, atc_tmp: Path,
                                                                      capsys: pytest.CaptureFixture[str]) -> None:
     sha = candidate.advance()

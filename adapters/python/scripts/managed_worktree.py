@@ -32,6 +32,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 import git_preflight as gp
+from atc_testkit import locations, owner as candidate_owner
 import validate_workspace as validator
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -67,9 +68,11 @@ NEXT = {
     "CONTRACT_INCOMPATIBLE": "stop; report the contract the adapter expects and the one the workspace provides",
     "PERMISSION_DENIED": "sandbox, ACL or a busy directory; leave the directory or get approval, then retry once",
     "UNSUPPORTED_ENVIRONMENT": "a local capability is missing; stop retrying",
+    "CANDIDATE_IN_USE": "none; a running integrate or verify owns it",
+    "CANDIDATE_LEFTOVER": "run atc tmp prune",
 }
 ENVIRONMENT_CODES = {"MAP_INVALID", "UNKNOWN_PROJECT", "CONTRACT_INCOMPATIBLE", "PERMISSION_DENIED", "UNSUPPORTED_ENVIRONMENT"}
-AUDIT_NON_FINDINGS = {"OK", "LEGACY_TARGET"}
+AUDIT_NON_FINDINGS = {"OK", "LEGACY_TARGET", "CANDIDATE_IN_USE"}
 SUCCESS_CODES = {"OK", "RECOVERED"}
 
 
@@ -885,7 +888,19 @@ def cmd_cleanup(ctx: Context, owner: str, topic: str, *, abandon: bool = False, 
     return Result("OK", target, "removed", evidence)
 
 
-def cmd_audit(ctx: Context, owner: str | None, topic: str | None) -> list[Result]:
+def candidate_result(path: str, candidates: str) -> Result | None:
+    """An `atc integrate` or `atc verify` candidate under ``candidates``: in use while its owner runs, else left over."""
+    if not within(os.path.realpath(path), os.path.realpath(candidates)):
+        return None
+    verdict, data = candidate_owner.state(Path(path))
+    detail = candidate_owner.describe(data) + ("" if os.path.isdir(path) else "; record only")
+    evidence = {"owner": data, "missing": not os.path.isdir(path)}
+    if verdict == "leftover":
+        return Result("CANDIDATE_LEFTOVER", path, f"{detail}; atc tmp prune removes it", evidence)
+    return Result("CANDIDATE_IN_USE", path, detail, evidence)
+
+
+def cmd_audit(ctx: Context, owner_name: str | None, topic: str | None, environ: dict[str, str] | None = None) -> list[Result]:
     ws, project = ctx.ws, ctx.project
     results: list[Result] = []
     unverified = [r.tool for r in ctx.externals if r.path is None]
@@ -900,12 +915,20 @@ def cmd_audit(ctx: Context, owner: str | None, topic: str | None) -> list[Result
     entries = list_worktrees(project.repo)
     main_tip = git(project.repo, "rev-parse", "--verify", "--quiet", "main^{commit}", readonly=True).stdout.strip()
     registered = {key(e["worktree"]) for e in entries}
-    filtered = owner is not None or topic is not None
+    filtered = owner_name is not None or topic is not None
 
     def wanted(identity: tuple[str, str] | None) -> bool:
-        return identity is not None and owner in (None, identity[0]) and topic in (None, identity[1])
+        return identity is not None and owner_name in (None, identity[0]) and topic in (None, identity[1])
 
+    try:
+        candidates = str(locations.locate(environ).tmp / locations.CANDIDATES)
+    except locations.Refusal:
+        candidates = None
     for entry in entries[1:]:
+        found = candidate_result(entry["worktree"], candidates) if candidates and not filtered else None
+        if found is not None:
+            results.append(found)
+            continue
         identity = v1_identity(project, entry)
         if identity is None and filtered or identity is not None and not wanted(identity):
             continue
@@ -1115,7 +1138,7 @@ def run(args: argparse.Namespace, root: Path, environ: dict[str, str], home: str
                 return [Result("UNKNOWN_PROJECT", args.project, registered)]
         ctx = Context(ws, project, external_roots(ws, environ, home))
         if args.command == "audit":
-            return cmd_audit(ctx, args.owner, args.topic)
+            return cmd_audit(ctx, args.owner, args.topic, environ)
         if args.command == "create":
             return [cmd_create(ctx, args.owner, args.topic, args.session, args.base_sha)]
         if args.command == "resume":
