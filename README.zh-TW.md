@@ -2,6 +2,7 @@
 
 ![多個 agent，一條跑道，放行才能降落。](docs/assets/atc-banner.png)
 
+[![Release](https://img.shields.io/github/v/release/yulinnliu/agent-traffic-control)](https://github.com/yulinnliu/agent-traffic-control/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](adapters/python/pyproject.toml)
 ![Works with Claude Code / Codex](https://img.shields.io/badge/works%20with-Claude%20Code%20%2F%20Codex-555.svg)
