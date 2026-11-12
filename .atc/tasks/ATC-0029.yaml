@@ -26,3 +26,4 @@ decisions:
   - 'Owner ruling 11-13: a run refuses whenever any Release, draft or published, already exists for the tag; the workflow never edits or deletes a Release (design § 6).'
   - 'Owner ruling 11-13: the atc-testkit build backend setuptools>=68 stays unpinned; pinning it is out of this task.'
   - 'Owner ruling 11-13: the release badge goes in both README.md and README.zh-TW.md.'
+  - 'Review 11-13: the fourth asset atc-testkit.json from the existing build_testkit_release.py is accepted (covered by SHA256SUMS, design § 2); the Owner acknowledges it when publishing.'
