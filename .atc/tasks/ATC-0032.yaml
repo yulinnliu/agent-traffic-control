@@ -1,0 +1,23 @@
+task_id: ATC-0032
+repository: yulinnliu/agent-traffic-control
+base_sha: 4ee9d71a7c1e95c323eddc4a7ae3727cfda5dad5
+scope: 'Combined small fixes: atc close-out --check; ledger report lines reading verdict
+  null; checkout.py export dropping git stderr on early failure; check-skills.sh reporting
+  .atc/ strays'
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: 4ee9d71a7c1e95c323eddc4a7ae3727cfda5dad5
+branch: worktree-claude+small-fixes-closeout-check
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
+decisions:
+  - 'Owner 11-13 ("開合併 task"): four small adapters/python and scripts fixes in one task, base 4ee9d71. Item 5 (deny-hook design) stays a separate task.'
+  - '(1) `atc close-out --check`, named per shared/conformance/CLI.md § Flags and names (not --dry-run): deletes nothing, takes no lock, lists every item (worktree, scratches, reports) with what the real run would do (DELETED, SKIPPED with --skip or the record keep, REFUSED) and the reason, exit 0 when the real run would remove everything it names, 1 otherwise. --skip and --json apply. Update CLI.md close-out text, tests, and the atc-coordinator skill close-out step (run --check, show the Owner its items, then the real run) via shared/skills with onboard --sync --root-only.'
+  - '(2) Ledger report lines read verdict null because only writer step reports are saved as files (ATC-0026 follow-up c). Diagnose first; if the fix needs a choice between saving reviewer verdicts as files and changing what the ledger line shows, stop and report the options to the coordinator before coding this item.'
+  - '(3) checkout.py export drops git stderr when git fails before any archive bytes (a bad ref prints EXPORT_FAILED ...: empty file); surface git stderr in that error, with a test (ATC-0027 follow-up).'
+  - '(4) scripts/check-skills.sh reports .atc/ strays the way link-skills.sh and validate already do (ATC-0030 Info).'
+  - 'No version bump unless CLI.md § Versions and compatibility requires one; nothing under shared/governance/ or authorizations/ changes; no push, no tag, no publish.'
