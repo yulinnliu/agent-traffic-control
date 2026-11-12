@@ -9,13 +9,14 @@
 # is current, drifted (differs from the rendered adapter here), or orphaned
 # (no canonical skill of that name here). Also checks .atc/README.md, the
 # vendored governance under .atc/governance/, the revision in .atc/atc.lock,
-# the AGENTS.md pointer line and CLAUDE.md, and reports any of those files
-# Git ignores. Exits 1 on any drift, orphan, stale or missing pointer line,
-# ignored file, or a lock whose revision is not in this checkout's history;
-# `scripts/link-skills.sh` repairs all of them but an ignored file.
+# the AGENTS.md pointer line and CLAUDE.md, reports any of those files Git
+# ignores, and any .atc/ file that is neither sync's nor .atc/tasks/. Exits 1
+# on any drift, orphan, stray, stale or missing pointer line, ignored file, or
+# a lock whose revision is not in this checkout's history;
+# `scripts/link-skills.sh` repairs all of them but a stray or an ignored file.
 set -eu
 
-[ $# -eq 1 ] || { sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+[ $# -eq 1 ] || { sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 REPO=$(CDPATH= cd -- "$1" 2>/dev/null && pwd) || { echo "$1: no such directory" >&2; exit 1; }
 
@@ -84,7 +85,22 @@ if [ -e "$REPO/.atc/atc.lock" ] || [ -d "$REPO/.atc/governance" ]; then
       echo "drifted    .atc/governance/$name"; status=1
     fi
   done
-elif [ "$seen" -gt 0 ]; then
+fi
+# .atc/ holds README.md, atc.lock, governance/ and the repository's tasks/, as link-skills.sh and validate say.
+if [ -d "$REPO/.atc" ]; then
+  strays=$(cd "$REPO" && find .atc \( -type f -o -type l \) | sort | while IFS= read -r f; do
+    case $f in
+      .atc/README.md|.atc/atc.lock|.atc/tasks/*) ;;
+      .atc/governance/*) [ -f "$ROOT/shared/governance/${f#.atc/governance/}" ] || echo "$f" ;;
+      *) echo "$f" ;;
+    esac
+  done)
+  if [ -n "$strays" ]; then
+    echo "$strays" | while IFS= read -r f; do echo "stray      $f (not a file sync writes)"; done
+    status=1
+  fi
+fi
+if [ ! -e "$REPO/.atc/atc.lock" ] && [ ! -d "$REPO/.atc/governance" ] && [ "$seen" -gt 0 ]; then
   echo "missing    .atc/ (run link-skills.sh)"; status=1
 fi
 

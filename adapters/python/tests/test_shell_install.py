@@ -158,6 +158,20 @@ def test_a_file_sync_does_not_write_under_atc_stops_link_skills_before_writing(t
 
 
 @pytest.mark.integration
+@needs_atc_history
+@pytest.mark.parametrize("path", [".atc/notes.txt", ".atc/governance/LOCAL.md"])
+def test_check_skills_reports_a_file_sync_does_not_write_under_atc(tmp_path: Path, path: str) -> None:
+    repo = make_repo(tmp_path)
+    assert sh("link-skills.sh", repo.as_posix(), "atc-review").returncode == 0
+    write(repo / onboard_project.validator.TASKS_DIR / "X-0001.yaml", "id: X-0001\n")
+    assert sh("check-skills.sh", repo.as_posix()).returncode == 0
+    write(repo / path, "mine\n")
+    check = sh("check-skills.sh", repo.as_posix())
+    assert check.returncode == 1 and f"stray      {path} (not a file sync writes)" in check.stdout
+    assert "stray      .atc/tasks/" not in check.stdout
+
+
+@pytest.mark.integration
 def test_link_skills_writes_the_lock_and_pointer_line_then_stays_current(tmp_path: Path) -> None:
     repo = make_repo(tmp_path)
     write(repo / onboard_project.validator.TASKS_DIR / "X-0001.yaml", "id: X-0001\n")
