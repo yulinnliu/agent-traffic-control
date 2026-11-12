@@ -215,3 +215,12 @@ def test_a_failed_git_archive_is_refused_with_its_stderr(stand_in) -> None:
     _tree, [refused] = stand_in(tail=10240, noise=0, message="fatal: not a tree object", code=128)
     assert isinstance(refused, checkout.Refusal) and refused.token == "EXPORT_FAILED"
     assert "fatal: not a tree object" in refused.detail
+
+
+def test_a_bad_ref_is_refused_with_gits_stderr_before_any_archive_bytes(source: tuple[Path, str],
+                                                                       tmp_path: Path) -> None:
+    repo, _sha = source
+    with pytest.raises(checkout.Refusal) as refused:
+        checkout.export(repo, "no-such-ref", tmp_path / "tree")
+    assert refused.value.token == "EXPORT_FAILED"
+    assert "; git: fatal: " in refused.value.detail and "no-such-ref" in refused.value.detail.split("; git: ")[1]

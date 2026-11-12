@@ -65,12 +65,17 @@ def export(worktree: Path, commit: str, tree: Path) -> None:
         archive.kill()
         archive.wait()
         reader.join()
-        raise Refusal("EXPORT_FAILED", f"{commit} into {tree}: {error}") from error
+        errors = _text(stderr)
+        raise Refusal("EXPORT_FAILED", f"{commit} into {tree}: {error}" + (f"; git: {errors}" if errors else "")) \
+            from error
     code = archive.wait()
     reader.join()
     if code != 0:
-        errors = b"".join(stderr).decode("utf-8", errors="replace").strip()
-        raise Refusal("EXPORT_FAILED", f"{commit} into {tree}: {errors}")
+        raise Refusal("EXPORT_FAILED", f"{commit} into {tree}: {_text(stderr)}")
+
+
+def _text(stderr: list[bytes]) -> str:
+    return b"".join(stderr).decode("utf-8", errors="replace").strip()
 
 
 def sync(directory: Path, environ: Mapping[str, str], run: SyncRun | None = None) -> Path:
