@@ -1,0 +1,21 @@
+task_id: ATC-0028
+repository: yulinnliu/agent-traffic-control
+base_sha: 30869831b956438326c5c765d09639241ae0556a
+scope: 'Archive the finished plan docs TASK_CONTRACT_PLAN, ATC_LAYOUT_PLAN and ROOT_WORKTREE_PLAN:
+  confirm nothing is left open, move live content into the specs, and repoint git_integrate.py
+  and atc_cli/__init__.py'
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: 30869831b956438326c5c765d09639241ae0556a
+branch: worktree-claude+archive-plans
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
+decisions:
+  - 'Queue item 3, opened by the Owner 11-12 ("Open ATC-0028") after groups A (ATC-0025) and B (ATC-0026) integrated; base 3086983.'
+  - 'First step is an inventory, before any doc moves: for each of docs/TASK_CONTRACT_PLAN.md, docs/ATC_LAYOUT_PLAN.md and docs/ROOT_WORKTREE_PLAN.md, list each section as done (in a spec or in code), live (normative content no spec holds yet) or open (unfinished work), with the target spec for each live part. Report it to the coordinator for review before moving content; anything open goes to the Owner.'
+  - 'Live content moves into the existing specs under docs/ (TASKS.md, WORKFLOW.md, LAYOUT.md, TESTKIT.md, ENFORCEMENT.md, ATC_HOME.md), written as current state, not history. Nothing under shared/governance/ changes; if live content belongs in governance, stop and ask the Owner.'
+  - 'The plan files are then removed from the tree (history stays in git), and every citer is repointed to the spec section that now holds the content: adapters/python/scripts/git_integrate.py:1439, adapters/python/src/atc_cli/__init__.py:109, and the two plans that cite each other. Task records ATC-0001..0004 are history and stay unchanged. No registered project cites these files (checked 11-12). No version bump.'
