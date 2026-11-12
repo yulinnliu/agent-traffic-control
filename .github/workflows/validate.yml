@@ -16,9 +16,11 @@ permissions:
   contents: read
 
 # Keep only the newest validation run for the same branch or pull request.
-# A release run is keyed by its tag and never cancelled halfway.
+# A release run is keyed by its tag ref, the same for a tag push and a dispatch
+# naming that tag, so the second waits and finds the first one's draft; a
+# release run is never cancelled halfway.
 concurrency:
-  group: ${{ github.workflow }}-${{ inputs.tag || github.ref }}
+  group: ${{ github.workflow }}-${{ inputs.tag && format('refs/tags/{0}', inputs.tag) || github.ref }}
   cancel-in-progress: ${{ github.ref_type != 'tag' && !inputs.tag }}
 
 jobs:
@@ -146,7 +148,7 @@ jobs:
           if ! printf '%s\n' "$TAG" | grep -Eqx 'v[0-9]+\.[0-9]+\.[0-9]+'; then echo "not a release tag: $TAG" >&2; exit 1; fi
           git rev-parse -q --verify "refs/tags/$TAG^{commit}" >/dev/null || { echo "no tag $TAG" >&2; exit 1; }
           git merge-base --is-ancestor "refs/tags/$TAG" origin/main || { echo "$TAG is not on main; push main first" >&2; exit 1; }
-          test "$(git rev-parse HEAD)" = "$(git rev-parse "refs/tags/$TAG^{commit}")"
+          test "$(git rev-parse HEAD)" = "$(git rev-parse "refs/tags/$TAG^{commit}")" || { echo "checkout is not $TAG" >&2; exit 1; }
           atc=$(python3 -c 'import tomllib; print(tomllib.load(open("adapters/python/pyproject.toml", "rb"))["project"]["version"])')
           testkit=$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' adapters/python/atc-testkit/src/atc_testkit/__init__.py)
           test "$TAG" = "v$atc" || { echo "$TAG does not name atc $atc" >&2; exit 1; }
