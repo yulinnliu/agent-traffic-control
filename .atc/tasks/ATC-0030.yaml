@@ -1,0 +1,22 @@
+task_id: ATC-0030
+repository: yulinnliu/agent-traffic-control
+base_sha: dd815c4d51659b6603e12d5eb58a47d1f168ef59
+scope: 'Remove the legacy .atc/governance.yaml fallback now that every project has
+  .atc/atc.lock: bound_governance''s fallback (task_records.py) and its tests; inventory
+  the migration branches in link-skills.sh, onboard_project.py and check-skills.sh
+  and decide with the Owner whether they go too, within shared/conformance/CLI.md
+  § Versions and compatibility'
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: dd815c4d51659b6603e12d5eb58a47d1f168ef59
+branch: worktree-claude+legacy-fallback
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
+decisions:
+  - 'Queue item 4b (from the ATC-0028 inventory O1, Owner 11-12), opened by the Owner 11-13 ("開 4b") after ATC-0029 integrated; base dd815c4.'
+  - 'First step is an inventory, before any removal: every reader or writer of .atc/governance.yaml (bound_governance in task_records.py, link-skills.sh, onboard_project.py, check-skills.sh, tests, docs), what each does today, whether any registered project still lacks .atc/atc.lock or still carries .atc/governance.yaml, and what shared/conformance/CLI.md § Versions and compatibility requires for removing a supported input (deprecation window, version bump). Commit it as docs/design/ATC-0030.md and report to the coordinator; the Owner rules on which migration branches go before any code changes.'
+  - 'Nothing under shared/governance/ changes; if the compatibility rule needs a governance change, stop and ask the Owner. No version bump in this task unless the Owner rules one after the inventory.'
