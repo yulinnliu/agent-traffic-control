@@ -963,7 +963,7 @@ def state_evidence(repo: str, entry: dict, main_tip: str) -> dict:
     evidence["clean"] = status.returncode == 0 and not status.stdout.strip()
     if main_tip and head:
         evidence["merged"] = git(repo, "merge-base", "--is-ancestor", head, main_tip, readonly=True).returncode == 0
-    # `cleanup_preflight()`'s REMOVABLE condition over the evidence above (plan D.7).
+    # `cleanup_preflight()`'s REMOVABLE condition over the evidence above (`adapters/python/README.md`, the `worktree` row).
     evidence["removable"] = evidence["clean"] and evidence.get("merged") is True
     return evidence
 

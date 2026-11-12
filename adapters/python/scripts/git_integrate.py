@@ -36,7 +36,7 @@ from git_preflight import GitError, git, is_ancestor, merge_preflight, render, r
 from integration_slot import IntegrationSlot
 
 FULL_SHA = re.compile(r"[0-9a-f]{40}")
-# `--reviewed` and `--rebased`: the full SHA or a unique prefix (plan D.14).
+# `--reviewed` and `--rebased`: the full SHA or a unique prefix (governance `GIT_WORKFLOW.md` § Integrate).
 MIN_PREFIX = 12
 SHA_FORM = "the full SHA or a unique prefix of 12 or more hexadecimal characters"
 CANDIDATE_ID_BYTES = 6
@@ -154,7 +154,7 @@ def distinguishing(ids: list[str], floor: int) -> list[str]:
 
 
 def resolve_commit(repo: Path, value: str, flag: str) -> str:
-    """The full SHA of the one commit ``value`` names, resolved once (plan D.14); else the stop."""
+    """The full SHA of the one commit ``value`` names, resolved once (governance `GIT_WORKFLOW.md` § Integrate); else the stop."""
     found = git(repo, "rev-parse", "--verify", "--quiet", f"{value}^{{commit}}", check=False).stdout.strip()
     # A ref whose name is hex wins over an abbreviated ID, and a tag's prefix
     # peels to its commit; the flag names a commit, so the ID must start with it.
@@ -1222,7 +1222,8 @@ def build_and_verify(
 ):
     """Build the candidate `atc integrate` would build in a detached worktree under `<tmp>/candidates` (the
     reviewed commit on `FF`, the merge on `NO_FF`), verify it with the verifier, or the record check for a
-    records-only range, and remove it when the block ends. It takes no slot and creates no ref (plan D.27).
+    records-only range, and remove it when the block ends. It takes no slot and creates no ref (`atc verify`,
+    governance `VERIFICATION.md` § Independent review).
 
     With ``reuse``, a passing `atc verify` record of the same candidate stands in for the verifier: an `FF`
     candidate is the reviewed commit and needs no worktree, a `NO_FF` one is built and must hold its tree."""
@@ -1436,7 +1437,7 @@ def resolve_binding(
     args: argparse.Namespace, repo: Path, main: str, main_tip: str, branch: str | None, branch_source: str,
     reviewed: str,
 ) -> Binding:
-    """The tasks and authority of the run (`docs/TASK_CONTRACT_PLAN.md` § B), or the stop that refuses them."""
+    """The tasks and authority of the run (`docs/TASKS.md` § Authority on `main`), or the stop that refuses them."""
     words = {"kind": "owner_words", "quote": args.owner_words} if args.owner_words is not None else None
     match = ta.RECORD_ID.fullmatch(args.task or "")
     record_task = args.task if match and task_records.main_prefix(repo, main) == match["prefix"] else None
@@ -1467,7 +1468,7 @@ def resolve_binding(
 
 def _authority(args: argparse.Namespace, repo: Path, main: str, main_tip: str, record_task: str | None,
                tasks: list[str], words: dict | None) -> dict:
-    """The run's authority; under `--check` a missing grant is reported as `missing`, not a stop (plan D.5)."""
+    """The run's authority; under `--check` a missing grant is reported as `missing`, not a stop (governance `GIT_WORKFLOW.md` § Integrate)."""
     try:
         return resolve_authority_of(repo, main, main_tip, args.task, record_task, tasks, words)
     except ta.Stop as missing:

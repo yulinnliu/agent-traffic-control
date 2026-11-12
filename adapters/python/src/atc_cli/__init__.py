@@ -106,7 +106,7 @@ def _escape_unencodable_output() -> None:
 
 
 def _child_encoding() -> None:
-    """Every child `atc` starts writes UTF-8 to its pipes (docs/TASK_CONTRACT_PLAN.md D.9); tests pass `argv`."""
+    """Every child `atc` starts writes UTF-8 to its pipes (docs/TESTKIT.md § Isolated environment); tests pass `argv`."""
     from atc_testkit.isolation import CHILD_ENCODING
     os.environ[CHILD_ENCODING[0]] = CHILD_ENCODING[1]
 
