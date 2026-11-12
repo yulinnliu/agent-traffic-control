@@ -26,3 +26,7 @@ decisions:
   - 'atc task list shows file overlap and claimed versions across open tasks, and infers the project root when run at the canonical checkout.'
   - 'atc tmp list: its last line names atc tmp prune for missing rows, but prune deletes only systmp and candidates entries older than seven days; atc tmp clean <name> drops a missing row. Fix the hint and docs/ATC_HOME.md.'
   - 'Leftover candidates: 2026-11-11 integrations left three detached candidate worktrees and one stale worktree record under ~/.atc/tmp/candidates (removed 2026-11-12 with the Owner''s word). Find the atc integrate or atc verify path that skips removing its candidate, fix it, and make leftovers visible in atc tmp list or atc worktree audit.'
+  - 'Design docs/design/ATC-0026.md reviewed PASS at bc60cc4 (coordinator, 2026-11-12); its non-blocking findings are folded into the design before code.'
+  - 'Q1: claimed versions come from an optional version field of the task record (schema in shared/policies/schemas/), display only (Owner, 2026-11-12).'
+  - 'Q2: atc tmp prune also removes candidates whose owner process is gone: gone means the PID and its process creation time do not match (a reused PID is gone); access denied from OpenProcess is alive; a candidate with no owner marker is removed only when older than one hour; prune stays human-run, with no automatic removal at the start of another integrate (Owner, 2026-11-12).'
+  - 'Q3: git diff --check in atc integrate --check is a warning; GIT_WORKFLOW.md does not change (Owner, 2026-11-12).'
