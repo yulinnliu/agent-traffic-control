@@ -3,7 +3,7 @@ requires = ["hatchling==1.27.0"]
 build-backend = "hatchling.build"
 
 [project]
-name = "atc-python-adapter"
+name = "agent-traffic-control"
 version = "0.4.0"
 description = "Python reference implementation of the Agent Traffic Control contract tools"
 requires-python = ">=3.12,<3.13"

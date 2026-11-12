@@ -139,6 +139,11 @@ Skills that run a tool (`atc-worktree`, `atc-review`, `atc-coordinator`,
 uv tool install -e atc/adapters/python
 ```
 
+This installs the distribution `agent-traffic-control`, whose command is
+`atc`. A machine with `atc` installed under the earlier name
+`atc-python-adapter` runs `uv tool uninstall atc-python-adapter` first
+(`adapters/python/README.md`).
+
 ### Full workspace
 
 ```sh

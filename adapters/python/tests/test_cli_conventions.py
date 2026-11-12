@@ -76,10 +76,15 @@ def test_top_level_help_groups_every_command(capsys: pytest.CaptureFixture[str])
 
 
 def test_version_names_both_packages(capsys: pytest.CaptureFixture[str]) -> None:
+    import tomllib
+
     from atc_testkit import __version__
+    pyproject = Path(atc_cli.__file__).resolve().parents[2] / "pyproject.toml"
+    project = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]
+    assert project["name"] == "agent-traffic-control"
     assert atc_cli.main(["--version"]) == 0
     out = capsys.readouterr().out
-    assert out.startswith("atc ") and f"(atc-testkit {__version__})" in out
+    assert out.startswith(f"atc {project['version']} ") and f"(atc-testkit {__version__})" in out
 
 
 @pytest.mark.parametrize(("argv", "root", "rest"), [

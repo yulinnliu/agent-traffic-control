@@ -150,7 +150,7 @@ def version() -> str:
 
     from atc_testkit import __version__ as testkit
     try:
-        atc = metadata.version("atc-python-adapter")
+        atc = metadata.version("agent-traffic-control")
     except metadata.PackageNotFoundError:
         atc = "unknown"
     return f"atc {atc} (atc-testkit {testkit})"

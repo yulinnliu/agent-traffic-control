@@ -129,6 +129,10 @@ skill 會呼叫 `atc` 指令，所以每台機器要先裝一次，讓它在 PAT
 uv tool install -e atc/adapters/python
 ```
 
+這會安裝 distribution `agent-traffic-control`，指令名稱是 `atc`。機器上如果
+已經用舊名稱 `atc-python-adapter` 裝過 `atc`，要先跑
+`uv tool uninstall atc-python-adapter`（見 `adapters/python/README.md`）。
+
 ### 完整 workspace
 
 ```sh

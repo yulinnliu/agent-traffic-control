@@ -3,7 +3,7 @@ revision = 3
 requires-python = "==3.12.*"
 
 [[package]]
-name = "atc-python-adapter"
+name = "agent-traffic-control"
 version = "0.4.0"
 source = { editable = "." }
 dependencies = [

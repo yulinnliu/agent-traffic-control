@@ -8,7 +8,8 @@ directory.
 
 One command fronts the scripts: `uv run atc <command>` here, or
 `uv tool install -e .` once per machine to have `atc` on PATH, which is how
-the skills call it.
+the skills call it. The distribution is `agent-traffic-control`; its console
+script is `atc`.
 `atc` resolves the checkout from `--root`, `ATC_ROOT`,
 the nearest `workspace.yaml` above the working directory, or its own install
 location, in that order.
@@ -20,6 +21,15 @@ that changes the dependencies in `pyproject.toml` or
 `atc`, by `uv tool install -e "<checkout>/adapters/python" --force`. Until
 then a command that imports a new dependency stops with
 `ModuleNotFoundError`, and `uv run --locked atc` from here works.
+
+A host whose `atc` is installed under the earlier distribution name
+`atc-python-adapter` (`uv tool list` shows it) uninstalls that tool before
+installing this one, since both provide the `atc` executable:
+
+```sh
+uv tool uninstall atc-python-adapter
+uv tool install -e "<checkout>/adapters/python"
+```
 
 ## Commands
 
