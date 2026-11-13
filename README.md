@@ -211,7 +211,7 @@ with the evidence. `GLOSSARY.md` defines the terms the rules use.
 
 ## Status
 
-Version 0.4.0, the version the Python adapter carries. Governance, policies, schemas, skills, conformance fixtures and
+Version 0.5.0, the version the Python adapter carries. Governance, policies, schemas, skills, conformance fixtures and
 the Python reference implementation are in place. The `validate.yml` GitHub
 Actions workflow runs when dispatched by hand or when the Owner pushes a
 release tag: it checks the policy examples against their schemas and runs the

@@ -1,4 +1,4 @@
 """Development-only test contracts, selection, isolation, running and verification."""
 
 # The package version: pyproject.toml reads it, and README.md names it.
-__version__ = "0.11.0"
+__version__ = "0.12.0"

@@ -198,7 +198,7 @@ render 出來的檔案都帶有 `managed-by: agent-traffic-control` 標記；沒
 
 ## 狀態
 
-目前版本是 0.4.0，也就是 Python adapter 的版號。
+目前版本是 0.5.0，也就是 Python adapter 的版號。
 governance、policy、schema、skill、conformance fixture 和 Python 參考實作都
 已經到位。GitHub Actions 的 `validate.yml` 在手動觸發或 Owner 推送 release
 tag 時執行：它會用 schema 檢查 policy 範例，並在 Linux 和 Windows 上跑 shell
