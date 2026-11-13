@@ -1,7 +1,7 @@
 ## Claude Code constants
 
-- A session that starts another session for a role starts it fresh, without
-  the inherited conversation, so the cold read holds, in the checkout the
+- A session started for a role starts fresh, without the inherited
+  conversation, so the cold read holds. It works in the checkout the
   repository's `AGENTS.md` prescribes: its own worktree for a registered
   project, and for the workspace root whatever the root's `AGENTS.md`
   § Changing this repo states.

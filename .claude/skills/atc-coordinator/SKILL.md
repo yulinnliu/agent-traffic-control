@@ -229,7 +229,7 @@ For a status question, read `atc task list --all`.
 
 ## Claude Code constants
 
-- A session the coordinator starts starts fresh, without the inherited
+- The coordinator starts each session fresh, without the inherited
   conversation, with its working directory at the task's place (step 3).
 - Model by role (§ Sessions and decisions): Opus for the strongest tier,
   Sonnet for the middle, Haiku for the lightest; the effort setting follows

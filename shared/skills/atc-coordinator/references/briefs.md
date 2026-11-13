@@ -3,9 +3,9 @@
 Two skeletons, one per session the coordinator starts; `atc-review` points
 here. Scope and authority come from the task record, rules from the
 project's `AGENTS.md` and the skills, so a brief restates neither; the
-fixed-text fields below are the only rules a brief carries. Each field is
-filled with its real value before the brief is sent; a brief with a field
-still open is not ready. The line under each field says what it holds.
+fixed-text fields below are the only rules a brief carries. A brief is
+ready to send once every field holds its real value. The line under each
+field says what it holds.
 
 ## Writer brief
 
@@ -18,7 +18,7 @@ Worktree: <worktree path>
 Plan: <plan section>
   The spec or plan section the task implements, by path and section.
 Rulings: <the Owner's special rulings>
-  Only when the Owner gave any; otherwise the field is left out.
+  Present only when the Owner gave any.
 Integration: none. The Owner runs it after the reviewer's PASS; your work
   ends at the PASS unless the coordinator sends a rebase or the verdict
   sends work back (atc-review "Writer: after a PASS").
@@ -54,10 +54,10 @@ Hard rules:
 Task: <task ID>
   The task record's ID.
 SHA: <full tip SHA>
-  The exact tip SHA the step report names.
+  The tip SHA the step report names.
 Report: <report path>
   The step report's path, relayed verbatim.
 Verdict: ~/.atc/reports/<task ID>-<short SHA>-review.md
-  The file the reviewer writes itself, subagent or session; its reply's
+  The reviewer, subagent or session, writes this file itself; its reply's
   first line is the conclusion plus this path.
 ```
