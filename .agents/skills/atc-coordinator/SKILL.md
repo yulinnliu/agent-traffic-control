@@ -9,9 +9,9 @@ canonical: atc-coordinator
 
 A coordinator opens one task, starts a **writer** session and a **reviewer**
 session, carries messages between them and hands the **Owner** the commands
-the Owner runs for integration and push. It is the holder of the carrier the `atc-review` skill,
-installed beside this one, describes; that skill defines the step report,
-the review and the verdict block. The coordinator does not run the review
+the Owner runs for integration and push. It is the holder the `atc-review`
+skill, installed beside this one, describes; that skill defines the step
+report, the review and the verdict block. The coordinator does not run the review
 steps and keeps them out of its own context: it reads a verdict, it never
 produces one.
 
@@ -58,9 +58,8 @@ from durable sources, never from memory: the task record and
 `atc task list` (the queue is `atc task list --status planned`), git (the
 topic branch tip and `main`), `atc worktree audit`,
 `<git common dir>/atc/integrations.jsonl`, the previous coordinator
-hand-over and the session list. A truncated notification, or a verdict
-whose full text is missing, is not enough to proceed; obtain the full
-content from its sender first. An integration that `integrations.jsonl`
+hand-over and the session list. A truncated notification or a verdict
+whose full text is missing is handled as § Stops says. An integration that `integrations.jsonl`
 does not record has not happened; its command goes to the Owner again.
 
 The task record receives only what the project's `AGENTS.md` lets a topic's
@@ -117,36 +116,35 @@ the map from task ID to session and nothing a record, Git or
    `atc task new` issues, never a number the coordinator picks; where the
    project's `AGENTS.md` declares a ticketing system, that system's; in any
    other project the Owner names it, and an instruction without one is
-   answered by asking the Owner for it. The reads above confirm that neither
-   the task ID nor the branch name is taken; a collision stops the step and
-   is reported to the Owner. Done when the task ID and the branch name are
-   shown free.
+   answered by asking the Owner for it. A task ID or branch name already
+   taken is a collision (§ Stops). Done when the reads show the task ID and
+   the branch name free.
 2. **Open the task record** in the project's form where the project
    declares `## Task records`: `atc task start <ID>` in the topic worktree
    for a planned task, `atc task new --scope` for work that was never
-   queued. Its scope and authority are the writer's contract. Commit it on the topic branch; it reaches
-   `main` with the topic's first integration. A task the Owner
-   pre-authorizes is bound on `main` before its work: commit the record alone as the topic's first
-   commit and give the Owner that commit's integration command (step 5).
-   Such a records-only range needs no review (governance `VERIFICATION.md`
-   § Documentation-only verification). Done when the record is written, and
-   bound on `main` when the Owner pre-authorized the task.
+   queued. Its scope and authority are the writer's contract. Commit it on
+   the topic branch; it reaches `main` with the topic's first integration.
+   A task the Owner pre-authorizes is bound on `main` before its work:
+   commit the record alone as the topic's first commit and give the Owner
+   that commit's integration command (step 5). Such a records-only range
+   needs no review (governance `VERIFICATION.md` § Documentation-only
+   verification). Done when the record is written, and bound on `main` when
+   the Owner pre-authorized the task.
 3. **Start the writer session**, named as § Sessions and decisions says, with
-   the writer brief of
-   [`references/briefs.md`](references/briefs.md), its working directory
-   at the task's place: a project task at the project's checkout folder, a
-   root task at its root worktree. The writer sends its
+   the writer brief of [`references/briefs.md`](references/briefs.md), its
+   working directory at the task's place: a project task at the project's
+   checkout folder, a root task at its root worktree. The writer sends its
    step report's path to the coordinator only (governance `DELIVERY.md`
    § 8.1). Done when the session is started and the brief delivered.
 4. **Start the reviewer session** with the reviewer brief of
    `references/briefs.md`, relaying the step report verbatim as its path.
    The reviewer is a fresh subagent or a separate session that has not seen
-   the writer's conversation; it continues the last reviewer only as governance
-   `VERIFICATION.md` § Independent review states. The reviewer, subagent
-   or session, saves its verdict file itself; relay that path, never a
-   transcription of the verdict, and relay findings to the writer as the
-   same path; never review the work yourself. Done when the verdict's file
-   is there and read whole.
+   the writer's conversation; it continues the last reviewer only as
+   governance `VERIFICATION.md` § Independent review states. The reviewer,
+   subagent or session, saves its verdict file itself; relay that path,
+   never a transcription of the verdict, and relay findings to the writer as
+   the same path; never review the work yourself. Done when the verdict's
+   file is there and read whole.
 5. **Hand the Owner the integration.** A PASS does not by itself trigger an
    integration. On a PASS that carries an integration instruction, run
    `atc integrate --check --json` with the instruction's arguments; it
@@ -161,8 +159,7 @@ the map from task ID to session and nothing a record, Git or
      `--owner-words` for `FF` (§ Task and authority).
    - On a `refusal` whose `next` names a rebase (`REBASE_REQUIRED`, or
      `OVERLAP` or `CONFLICT` of an unpublished topic), the writer rebases
-     and reports the new tip.
-     Run
+     and reports the new tip. Run
      `atc integrate --check --json --reviewed <reviewed SHA> --rebased <rebased tip>`
      as governance `GIT_WORKFLOW.md` § After formal review states. When the
      carry-over holds, give the Owner the command for the rebased tip,
