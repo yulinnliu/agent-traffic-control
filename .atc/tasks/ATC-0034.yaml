@@ -1,0 +1,26 @@
+task_id: ATC-0034
+repository: yulinnliu/agent-traffic-control
+base_sha: 44835994a05b9eb39ccfee4fefa63caba2752243
+scope: 'atc-coordinator skill pass: session naming, decision prompts, design-phase
+  rule, model per role, writer-brief template, one-question close-out, Claude adapter
+  notes'
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: 44835994a05b9eb39ccfee4fefa63caba2752243
+branch: worktree-claude+coordinator-skill
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
+decisions:
+  - "(0) Principle (Owner 2026-11-13: agents fly by their own manual; the tower (Owner) does not clear every step): atc-coordinator separates Owner clearances from standard procedure. Clearances: integrating each main SHA, every push/tag/publish, scope or design rulings, governance changes, deletions outside the standard close-out. Standard procedure, no question: worktree and record, writer and reviewer sessions, relaying reports and verdicts, fix re-review, integrate --check, preflight push, close-out and archive after a confirmed push."
+  - "(1) Close-out (Owner: 標準程序不問，除非有問的需要就是例外要刪除的): once git ls-remote confirms the push, the coordinator runs atc close-out --check then atc close-out and archives the task's writer session(s) without asking, and reports the result. It asks only about exceptions: REFUSED items, unregistered leftover scratches, kept worktrees, anything outside the task. Rewrite atc-coordinator steps 5-6 accordingly (today step 5 shows each item; archive is a separate step)."
+  - "(2) Session naming: title `[<task ID>] <topic>`, name `<task id lowercased>-<topic>`, record created first."
+  - "(3) Decision prompts: tool-neutral rule in SKILL.md (one decision per question, the Owner's language, recommendation first); the Claude specifics (wrap_up box for one decision, AskUserQuestion for 2-4) in adapters/claude.md. On Claude desktop the wrap_up recap and closing message are atc-review step 5's one line."
+  - "(4) Design-phase rule: design is the writer's first step under atc-review; the design doc and release notes are committed to the repo (close-out deletes ~/.atc/reports); Owner decisions go in the task record; no new status or role. Owner authorized the governance change this needs (2026-11-11)."
+  - "(5) Model and effort per role: the strongest model for design writers and first reviews; a fix-only re-review continues the same reviewer; a cheaper model for verify-only and mechanical work; the lightest for research and reading."
+  - "(6) A fixed writer-brief template in references/briefs.md: step-5 one-line reply; targeted tests by explicit file list through `atc test run --scratch <name> --tree <worktree> -- <files>` (atc-review § writer); the reviewer's verify is the one full run; amend before review, new commits after; no background shells or polling; no version bump unless CLI.md requires it; the hard rules; Owner commands as plain `atc ...` lines with no env prefix."
+  - "(7) adapters/claude.md: on Windows, every command that spawns tests (atc verify, atc test run, integrate --check) runs through the PowerShell tool, never the Bash tool (Bash-tool child processes leave nonpaged pool allocations behind on this platform; root cause not found)."
+  - "No version bump unless shared/conformance/CLI.md requires it; never authorizations/**; governance only as decision (4) needs; no push, tag or publish."
