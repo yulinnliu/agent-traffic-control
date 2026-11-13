@@ -3,9 +3,10 @@
 Two skeletons, one per session the coordinator starts; `atc-review` points
 here. Scope and authority come from the task record, rules from the
 project's `AGENTS.md` and the skills, so a brief restates neither; the
-fixed-text fields below are the only rules a brief carries. A brief is
-ready to send once every field holds its real value. The line under each
-field says what it holds.
+fixed-text fields below, with the lines the coordinator's tool adapter adds
+to them, are the only rules a brief carries. A brief is ready to send once
+every field holds its real value. The line under each field says what it
+holds.
 
 ## Writer brief
 
@@ -54,7 +55,7 @@ Hard rules:
 Task: <task ID>
   The task record's ID.
 SHA: <full tip SHA>
-  The tip SHA the step report names.
+  The exact tip SHA the step report names.
 Report: <report path>
   The step report's path, relayed verbatim.
 Verdict: ~/.atc/reports/<task ID>-<short SHA>-review.md

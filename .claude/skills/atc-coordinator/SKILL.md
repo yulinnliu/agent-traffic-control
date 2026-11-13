@@ -12,9 +12,9 @@ A coordinator opens one task, starts a **writer** session and a **reviewer**
 session, carries messages between them and hands the **Owner** the commands
 the Owner runs for integration and push. It is the holder the `atc-review`
 skill, installed beside this one, describes; that skill defines the step
-report, the review and the verdict block. The coordinator does not run the review
-steps and keeps them out of its own context: it reads a verdict, it never
-produces one.
+report, the review and the verdict block. The coordinator does not run the
+review steps and keeps them out of its own context: it reads a verdict, it
+never produces one.
 
 The writer and the reviewer are different sessions. The reviewer has not
 seen the writer's conversation, and neither session is the coordinator.
@@ -60,8 +60,9 @@ from durable sources, never from memory: the task record and
 topic branch tip and `main`), `atc worktree audit`,
 `<git common dir>/atc/integrations.jsonl`, the previous coordinator
 hand-over and the session list. A truncated notification or a verdict
-whose full text is missing is handled as § Stops says. An integration that `integrations.jsonl`
-does not record has not happened; its command goes to the Owner again.
+whose full text is missing is handled as § Stops says. An integration that
+`integrations.jsonl` does not record has not happened; its command goes to
+the Owner again.
 
 The task record receives only what the project's `AGENTS.md` lets a topic's
 own commits write; session names belong only in the hand-over, which keeps
@@ -192,23 +193,26 @@ the map from task ID to session and nothing a record, Git or
    - Confirm `main` at the integrated SHA and the task record at its
      post-integration state.
    - From outside the task's worktree run
-     `atc close-out --task <task> --check`, then `atc close-out --task <task>`,
-     with the same `--skip` items on an intermediate batch of a multi-batch
+     `atc close-out --task <task> --check`, then
+     `atc close-out --task <task>`, with the same `--skip` items on an intermediate batch of a multi-batch
      topic. In a repository without managed worktrees remove the topic branch
      with `git -C <main checkout> branch -d <topic branch>`; `-d` deletes
      only a branch `main` already contains.
    - Archive the task's sessions, then run `atc close-out --task <task>`
-     again for what a session's working directory held. A refused archive
-     is read through the session's state: a running session's writer ends
-     its work; a pinned or idle one goes to the Owner.
+     again, with the same `--skip` items, for what a session's working
+     directory held. A refused archive is read through the session's state:
+     a running session's writer ends its work; a pinned or idle one goes to
+     the Owner.
+   - Leave the items the task record's `keep` lists.
    - Check with `atc tmp list` and `atc worktree list` that no scratch,
      dependent run or worktree of the task is left, and that
-     `~/.atc/reports/<task>-*.md` is gone; remove what is.
-   - Leave the items the task record's `keep` lists.
+     `~/.atc/reports/<task>-*.md` is gone. Remove a leftover the task owns:
+     its report files and the scratches registered to it. An unregistered
+     scratch, a kept worktree or anything else is the Owner's question.
    - Report the result to the Owner. Ask the Owner only about the
-     exceptions `DELIVERY.md` § Close-out sends there: `REFUSED` and
-     `ANOMALY` lines, a refused archive, an unregistered leftover scratch, a
-     kept worktree, anything outside the task.
+     exceptions: those `DELIVERY.md` § Close-out sends there (`REFUSED` and
+     `ANOMALY` lines, items outside the task, a pinned or idle session's
+     refused archive) and the leftovers the item above puts to the Owner.
 
    Done when each item is removed, kept by the record's `keep`, left by
    `--skip` for a later batch or put to the Owner as an exception.
@@ -239,8 +243,9 @@ For a status question, read `atc task list --all`.
 - On Windows every command that spawns tests (`atc verify`, `atc test run`,
   `atc integrate --check`) runs through the PowerShell tool, never the Bash
   tool: Bash-tool child processes leave nonpaged pool allocations behind on
-  this platform, root cause not found. A writer or reviewer brief to a
-  Claude session carries this line.
+  this platform, root cause not found. A writer brief to a Claude session
+  carries this line as the last line of its `Work rules`; a reviewer brief
+  to a Claude session carries it as a `Work rules:` field after `Verdict`.
 - Sessions are addressed by the exact name ListAgents shows.
 - Subscribe to the writer's idle notice where the harness offers it,
   instead of polling.

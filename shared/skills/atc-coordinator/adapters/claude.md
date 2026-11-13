@@ -10,8 +10,9 @@
 - On Windows every command that spawns tests (`atc verify`, `atc test run`,
   `atc integrate --check`) runs through the PowerShell tool, never the Bash
   tool: Bash-tool child processes leave nonpaged pool allocations behind on
-  this platform, root cause not found. A writer or reviewer brief to a
-  Claude session carries this line.
+  this platform, root cause not found. A writer brief to a Claude session
+  carries this line as the last line of its `Work rules`; a reviewer brief
+  to a Claude session carries it as a `Work rules:` field after `Verdict`.
 - Sessions are addressed by the exact name ListAgents shows.
 - Subscribe to the writer's idle notice where the harness offers it,
   instead of polling.
