@@ -1,0 +1,21 @@
+task_id: ATC-0036
+repository: yulinnliu/agent-traffic-control
+base_sha: d0d0d5cc2915091019d63dc1e94b32699e357c91
+scope: atc enforce renders a matching PowerShell(...) deny beside every Bash(...)
+  deny, so Claude Code keeps the PowerShell tool enabled and hard denies also block
+  it
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: d0d0d5cc2915091019d63dc1e94b32699e357c91
+branch: worktree-claude+enforce-powershell-deny
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
+decisions:
+  - "claude_settings() in adapters/python/scripts/generate_enforcement.py emits, for every commands.deny entry, a PowerShell(<argv_prefix> *) deny beside the Bash(<argv_prefix>:*) deny. Reason: on Windows with Git Bash, any Bash deny silently disables Claude Code's PowerShell tool unless a PowerShell(...) rule exists (code.claude.com/docs/en/tools-reference § PowerShell tool), and PowerShell is otherwise unbounded by the hard denies."
+  - "Tests and docs describing the rendered Claude settings are updated; the conformance fixture or golden output follows if one exists. Check whether atc enforce --check or validate compares rendered output and keep it passing."
+  - "No re-render of project settings in this task: each project's .claude/settings.json is re-rendered by atc enforce in that project after this integrates, under its own Owner-approved integration."
+  - "No allow rules are rendered; enforce stays deny-only. No authorizations/**, no governance edit, no version bump unless CLI.md requires one, no push, tag or publish."
