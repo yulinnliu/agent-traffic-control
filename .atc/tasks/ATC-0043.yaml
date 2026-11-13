@@ -1,0 +1,28 @@
+task_id: ATC-0043
+repository: yulinnliu/agent-traffic-control
+base_sha: 091a25ffdfc076b4f595553fb689e7a2b9e44ef8
+scope: Rename atc onboard to atc sync with a simpler CLI (positional project, default
+  all, --check, --root, prune by default; onboard kept one release as a deprecated
+  alias), add a per-project skill_tools choice of skill target tools (claude/codex/dsh,
+  default all), create a minimal AGENTS.md when a project has none, and update the
+  docs, conformance and skill text that name the command.
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: 091a25ffdfc076b4f595553fb689e7a2b9e44ef8
+branch: worktree-claude+sync-command
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
+decisions:
+  - "Owner 11-14: open ATC-0043 after design discussion; all points below are Owner rulings."
+  - "CLI: `atc onboard` becomes `atc sync`. `atc sync` with no project = every registered project; `atc sync <name>` = one project (positional, replaces --project/--all); default action writes and commits (old --sync); `--check` writes nothing; `--root` replaces --root-only; `--revision SHA`, `--json`, `--verbose` unchanged. `atc onboard` stays for one release as a deprecated alias that prints the new form, removed in a later release (precedent: ATC-0022)."
+  - "Prune by default: sync deletes orphaned managed adapters (no canonical skill) and adapters in tool dirs a project no longer selects; deletions land in the sync commit and `--check` lists them first. `--prune` is retired (accepted by the alias only if cheap; otherwise dropped)."
+  - "skill_tools: a top-level map in workspace.yaml, project name -> list of tools or `all`; values are tool names claude/codex/dsh (codex = .agents/skills/, matching the overlay names in shared/skills/<name>/adapters/). A project not listed, and the ATC root, mean all. `all` = every tool ATC supports at that version, so a newly supported tool joins `all` in its release. Every selected dir gets a complete copy (canonical body + that tool's overlay); this replaces the rule that only contract skills get a .dsh copy. No warning when dsh and codex are both selected; docs say DSH also reads .agents/skills/ and prefers .dsh/skills/."
+  - "skill_tools must be top-level, never a key under projects.<name>: HQT's dev path (trading-cli profiles.py) requires every project entry to be exactly {repo, worktrees, state} and ignores unknown top-level keys. Do not edit the live workspace.yaml in this task."
+  - "AGENTS.md: a project with none gets a minimal AGENTS.md (title, the pointer line, one line saying project rules go here); after that only the pointer line is ATC-owned. A file with no section heading gets the pointer line appended at the end instead of a collision."
+  - "Docs move with the code: README.md, README.zh-TW.md, adapters/python/README.md, docs/LAYOUT.md, docs/WORKFLOW.md, shared/conformance/CLI.md, shared/skills/atc-shared-skill/SKILL.md (re-render adapters with sync --root), root AGENTS.md. Do not edit docs/releases/ or docs/design/ history."
+  - "shared/governance/GIT_WORKFLOW.md names `atc onboard --sync` twice; it is out of scope until the Owner authorizes that topic. The deprecated alias keeps that text correct meanwhile; report the two lines in the step report."
+  - "Release: version bump to atc 0.6.0 belongs to this task's batch only on Owner word; do not bump here."
