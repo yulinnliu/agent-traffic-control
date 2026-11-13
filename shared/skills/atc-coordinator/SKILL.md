@@ -194,8 +194,9 @@ the map from task ID to session and nothing a record, Git or
      `atc close-out --task <task> --check`, then
      `atc close-out --task <task>`, with the same `--skip` items on an
      intermediate batch of a multi-batch topic. In a repository without
-     managed worktrees remove the topic branch with `git -C <main checkout> branch -d <topic branch>`; `-d` deletes
-     only a branch `main` already contains.
+     managed worktrees remove the topic branch with
+     `git -C <main checkout> branch -d <topic branch>`; `-d` deletes only a
+     branch `main` already contains.
    - Archive the task's sessions, then run `atc close-out --task <task>`
      again, with the same `--skip` items, for what a session's working
      directory held. A refused archive is read through the session's state:

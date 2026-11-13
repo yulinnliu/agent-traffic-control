@@ -255,12 +255,13 @@ as a subagent, you write its file
   of a record ID adds `--project <name>`, `--project root` for the workspace
   root. When the record on `main` does not grant the integration, the holder
   adds `--owner-run` and gives the filled instruction to the Owner
-  (governance `GIT_WORKFLOW.md` § Task and authority). The command names no branch, verifier or timeout: the tool
-  takes the branch from the record's `branch` (a task identity string: the
-  one local branch at the reviewed SHA) and reads the verifier from the
-  `## Integration verification` section of `AGENTS.md` at `main`. In a
-  repository without managed worktrees, where the topic branch lives in the
-  main checkout, `git -C <main checkout> switch main` comes before it.
+  (governance `GIT_WORKFLOW.md` § Task and authority). The command names no
+  branch, verifier or timeout: the tool takes the branch from the record's
+  `branch` (a task identity string: the one local branch at the reviewed
+  SHA) and reads the verifier from the `## Integration verification` section
+  of `AGENTS.md` at `main`. In a repository without managed worktrees, where
+  the topic branch lives in the main checkout,
+  `git -C <main checkout> switch main` comes before it.
 
   Cleanup never rides on a PASS: it follows governance `DELIVERY.md`
   § Close-out. A conditional PASS or FAIL carries no integration

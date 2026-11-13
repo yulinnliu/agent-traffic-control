@@ -202,9 +202,10 @@ several, the working directory's.
    `role` is `reviewer` for `<ID>-<sha>-review.md`, else `unknown` with `sha`
    `null`; a reviewer's `verdict` is the first whole word `CONDITIONAL PASS`,
    `PASS` or `FAIL` of the file's first non-empty line, a leading `#` ignored
-   and a word after `NO` or `NOT` skipped, else `null`. A line that cannot be written ends the
-   file `REFUSED` with the error and keeps it. Readers of integrations take
-   only lines with a `candidate_sha`, so these lines change no status.
+   and a word after `NO` or `NOT` skipped, else `null`. A line that cannot be
+   written ends the file `REFUSED` with the error and keeps it. Readers of
+   integrations take only lines with a `candidate_sha`, so these lines change
+   no status.
 
 An item the record's `keep` names ends `SKIPPED (keep)` on every run; `keep`
 is permanent. An item a `--skip` names (`worktree`, `scratches` or
