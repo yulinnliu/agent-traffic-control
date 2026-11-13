@@ -1,0 +1,22 @@
+task_id: ATC-0039
+repository: yulinnliu/agent-traffic-control
+base_sha: 3bcc2abef9dd2830d1bee64b8521de9f90eefa99
+scope: 'Release pipeline and tag-only sync: validate.yml tag trigger, release assets
+  (conformance fixtures, testkit wheel, SHA-256), projects sync to the latest release
+  tag by default, first release v0.5.0; PyPI name check only'
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: 3bcc2abef9dd2830d1bee64b8521de9f90eefa99
+branch: worktree-claude+release-pipeline
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
+decisions:
+  - "Owner 2026-11-13: ATC is stable enough that projects sync to formal releases; release automation makes releasing cheap. Scope: release pipeline, tag-only sync by default, first release v0.5.0 through it. PyPI: name availability check for agent-traffic-control and atc-testkit only, reported; no publish, no publishing job."
+  - "Governance authorized for this task (Owner 2026-11-13, 「開，授權 governance」): the governance version-resolution rule changes from the canonical main tip to the latest release tag of governance_source, with an Owner-named SHA as the exception; routed through GOVERNANCE_CHANGES.md. AGENTS.md's bootloader and `atc onboard --sync`'s default follow it. No other governance edit."
+  - "CI: validate.yml also runs on a pushed release tag and keeps workflow_dispatch; a tag push is the Owner's act, so the rule 'full CI is Owner-dispatched only' holds. On a release tag a job builds the testkit wheel, the conformance fixtures archive and SHA-256 sums and attaches them to a draft GitHub Release; the Owner publishes the draft."
+  - "Release notes are committed in the repo (governance DELIVERY.md) and form the Release body; no CHANGELOG. The release commit (atc 0.5.0, testkit next version per CLI.md) is the task's last step, made on top of main as it stands then; notes cover everything since v0.4.0."
+  - "Agents create no tag, push or publish. ATC-0038 runs in parallel and edits GIT_WORKFLOW.md, GOVERNANCE_CHANGES.md and the enforcement code; avoid those files except the GOVERNANCE_CHANGES.md entry this task needs, and expect a rebase."
