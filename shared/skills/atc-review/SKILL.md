@@ -33,15 +33,15 @@ the `atc-coordinator` skill's `references/briefs.md`.
   are already known to both sessions and stay out of the block, and so does
   what the receiver can read: a reviewer reads the code at the named SHA, so a
   report gives results rather than narrating the implementation.
-- On session messaging, a report or verdict is saved as a file under
-  `~/.atc/reports/`, and the message's first line is its conclusion plus
-  that path. A reviewer running as a subagent saves its verdict the same
-  way, and the verdict it returns starts with the same first line. The session that integrates the task deletes its report files
-  at close-out (governance `DELIVERY.md` § Close-out). A notification that truncates (a
+- On session messaging, and for a reviewer running as a subagent, a report
+  or verdict is saved as a file under `~/.atc/reports/`, and the message's
+  or returned verdict's first line is its conclusion plus that path. The
+  session that integrates the task deletes its report files at close-out
+  (governance `DELIVERY.md` § Close-out). A notification that truncates (a
   short note, a preview) is a pointer, never the report.
 - On the paste carrier, the report or verdict goes inline, in full, in the
   one code block the user pastes whole; the file and path are for session
-  messaging only. A prompt that is long and revised repeatedly, or a
+  messaging and subagent reviewers only. A prompt that is long and revised repeatedly, or a
   lasting template, goes in a file.
 - A block the user pastes must not contain nested code fences: internal
   triple backticks prematurely close the outer block. Put commands, scripts
@@ -213,10 +213,9 @@ tip.
 ## Reviewer: the verdict block
 
 The verdict takes the shape governance `VERIFICATION.md` § Independent review
-gives. Deliver it as "Every block you write" says. Whether you run as a
-subagent or a session, you write its file
-`~/.atc/reports/<task>-<short sha>-review.md` yourself, and what you
-return or send starts with the conclusion plus that path.
+gives. Deliver it as "Every block you write" says; on session messaging or
+as a subagent, you write its file
+`~/.atc/reports/<task>-<short sha>-review.md` yourself.
 
 - The verified line: test counts, mutant results, `atc verify`'s last line,
   read-only host evidence.
