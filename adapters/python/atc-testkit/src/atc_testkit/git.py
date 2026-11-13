@@ -112,6 +112,28 @@ def baseline_deltas(push_lines: Iterable[str], git: Callable[..., str], baseline
     return {name: BaselineDelta(added.get(name, False), frozenset(removed.get(name, ()))) for name in touched}
 
 
+def published_tag_lines(push_lines: Iterable[str], git: Callable[..., str]) -> tuple[list[str], list[str]]:
+    """``(kept, published)``: a tag push whose commit a remote-tracking ref already holds brings no commit."""
+    kept: list[str] = []
+    published: list[str] = []
+    for line in push_lines:
+        fields = line.split()
+        if len(fields) == 4 and fields[2].startswith("refs/tags/") and _on_a_remote(git, fields[1]):
+            published.append(line)
+        else:
+            kept.append(line)
+    return kept, published
+
+
+def _on_a_remote(git: Callable[..., str], oid: str) -> bool:
+    try:
+        commit = git("rev-parse", "--verify", "--quiet", f"{oid}^{{commit}}").strip()
+    except SelectionError:
+        return False
+    return bool(commit) and bool(git("for-each-ref", "--contains", commit, "--format=%(refname)",
+                                     "refs/remotes/").strip())
+
+
 def verify_push_checkout(push_lines: Iterable[str], git: Callable[..., str]) -> None:
     """Require the tested tree to be the commit being published."""
     commits=[]

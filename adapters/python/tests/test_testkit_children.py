@@ -241,6 +241,17 @@ def test_run_ends_the_tree_on_a_timeout(tmp_path: Path) -> None:
         assert not alive(int(pid_file.read_text()))
 
 
+
+@pytest.mark.integration
+def test_run_holds_the_tree_before_ending_it_on_a_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = []
+    hold, terminate = children._Tree.hold_members, children._Tree.terminate
+    monkeypatch.setattr(children._Tree, "hold_members", lambda self: (calls.append("hold"), hold(self))[1])
+    monkeypatch.setattr(children._Tree, "terminate", lambda self: (calls.append("terminate"), terminate(self))[1])
+    with pytest.raises(subprocess.TimeoutExpired):
+        children.run([sys.executable, "-c", SLEEP], timeout=0.5)
+    assert calls[:3] == ["hold", "terminate", "hold"]
+
 @windows
 def test_a_child_gets_a_windowless_console_its_children_inherit(tmp_path: Path) -> None:
     (tmp_path / "visible.py").write_text(CONSOLE_VISIBLE, encoding="utf-8")

@@ -218,7 +218,9 @@ tip.
 The verdict takes the shape governance `VERIFICATION.md` § Independent review
 gives. Deliver it as "Every block you write" says; on session messaging or
 as a subagent, you write its file
-`~/.atc/reports/<task>-<short sha>-review.md` yourself.
+`~/.atc/reports/<task>-<short sha>-review.md` yourself. The file's first line
+is the verdict token, with no title above it: close-out reads the ledger's
+verdict from that line alone.
 
 - The verified line: test counts, mutant results, `atc verify`'s last line,
   read-only host evidence.

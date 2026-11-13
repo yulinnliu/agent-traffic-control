@@ -377,3 +377,53 @@ def test_an_unsuitable_root_stops_before_anything_runs(repo: Path, capsys: pytes
 
 def test_pushed_commits_are_unique_and_skip_deletions() -> None:
     assert gate.pushed_commits([f"a {'1' * 40} b {ZERO}", f"a {'1' * 40} b {ZERO}", f"a {ZERO} b {'2' * 40}", ""]) == ["1" * 40]
+
+
+def publish(root: Path, sha: str) -> None:
+    git(root, "update-ref", "refs/remotes/origin/main", sha)
+
+
+@pytest.mark.integration
+def test_a_tag_on_a_published_commit_needs_no_checkout_and_runs_nothing(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    released = commit(repo, "a.py")
+    publish(repo, released)
+    git(repo, "tag", "-a", "-m", "release", "v1", released)
+    commit(repo, "b.py")
+    (repo / "b.py").write_text("dirty\n", encoding="utf-8")
+    recorder = Recorder()
+    line = f"refs/tags/v1 {git(repo, 'rev-parse', 'v1')} refs/tags/v1 {ZERO}\n"
+    assert gate.main(project(repo), ["--run"], [line], recorder) == 0
+    assert "refs/tags/v1 skipped" in capsys.readouterr().out and recorder.calls == []
+
+
+@pytest.mark.integration
+def test_a_tag_on_an_unpublished_commit_keeps_the_checkout_rule(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    base = git(repo, "rev-parse", "HEAD")
+    publish(repo, base)
+    sha = commit(repo, "a.py")
+    git(repo, "tag", "v1", sha)
+    git(repo, "checkout", "-q", base)
+    recorder = Recorder()
+    assert gate.main(project(repo), ["--run"], [f"refs/tags/v1 {sha} refs/tags/v1 {ZERO}\n"], recorder) == 2
+    assert "check out the commit being pushed" in capsys.readouterr().err and recorder.calls == []
+
+
+@pytest.mark.integration
+def test_a_published_tag_beside_a_branch_leaves_the_branch_rule(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    base = git(repo, "rev-parse", "HEAD")
+    publish(repo, base)
+    git(repo, "tag", "v1", base)
+    sha = commit(repo, "a.py")
+    git(repo, "checkout", "-q", base)
+    lines = [f"refs/tags/v1 {base} refs/tags/v1 {ZERO}\n", push_line(repo, base, sha)]
+    assert gate.main(project(repo), ["--run"], lines, Recorder()) == 2
+    assert "check out the commit being pushed" in capsys.readouterr().err
+
+
+@pytest.mark.integration
+def test_a_branch_push_to_a_published_commit_keeps_the_checkout_rule(repo: Path) -> None:
+    base = git(repo, "rev-parse", "HEAD")
+    sha = commit(repo, "a.py")
+    publish(repo, sha)
+    git(repo, "checkout", "-q", base)
+    assert gate.main(project(repo), ["--run"], [push_line(repo, base, sha)], Recorder()) == 2

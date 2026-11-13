@@ -200,17 +200,22 @@ def start(args, **options) -> subprocess.Popen:
     return process
 
 
+def _stop(tree: _Tree) -> None:
+    """End the tree inside its hold: a member that leaves the Job's list during teardown is already held."""
+    try:
+        tree.hold_members()
+    finally:
+        tree.terminate()
+    tree.hold_members()
+
+
 def _end(process: subprocess.Popen, tree: _Tree, seconds: float = REAP_SECONDS) -> None:
     """End every process of the child's tree and return once the child and every member have finished.
 
     The tree is told to end and its handles close on every path, also when the wait raises.
     """
     try:
-        try:
-            tree.hold_members()
-        finally:
-            tree.terminate()
-        tree.hold_members()
+        _stop(tree)
         process.wait(seconds)
         deadline = time.monotonic() + seconds
         while tree.active():
@@ -234,7 +239,7 @@ def run(args, *, input=None, capture_output=False, timeout=None, check=False, **
     try:
         stdout, stderr = process.communicate(input, timeout=timeout)
     except subprocess.TimeoutExpired as expired:
-        entry[1].terminate()
+        _stop(entry[1])
         stdout, stderr = process.communicate()
         raise subprocess.TimeoutExpired(process.args, expired.timeout, output=stdout, stderr=stderr) from None
     finally:

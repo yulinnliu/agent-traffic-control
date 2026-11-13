@@ -10,7 +10,7 @@ import sys
 
 from . import evidence, isolation, locations, scratch, selection, stages, timing, workers as workers_module
 from .evidence import Decision
-from .git import SelectionError, baseline_deltas, changed_paths, git_env, verify_push_checkout
+from .git import SelectionError, baseline_deltas, changed_paths, git_env, published_tag_lines, verify_push_checkout
 from .project import Project, StaticCheck
 
 LOG_PATTERN = "prepush-*.log"
@@ -146,6 +146,15 @@ def main(project: Project, argv: Sequence[str] | None = None, stdin: Iterable[st
             return refusal.code
     git = _git(project.root)
     push_lines = [] if args.paths else list(sys.stdin if stdin is None else stdin)
+    try:
+        push_lines, published = published_tag_lines(push_lines, git)
+    except Exception as error:  # noqa: BLE001 - any selection failure stops the push
+        print(f"pre-push: test selection failed, push aborted: {error}", file=sys.stderr)
+        return SELECTION_FAILED_EXIT
+    for line in published:
+        print(f"pre-push: {line.split()[2]} skipped: its commit is already on a remote-tracking ref", flush=True)
+    if published and not any(line.split() for line in push_lines):
+        return 0
     try:
         chosen, paths = _selection(project, push_lines, args.paths, args.run, git)
         pytest_paths = chosen.pytest_paths()

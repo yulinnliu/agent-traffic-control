@@ -304,7 +304,10 @@ The output rule every `atc` command follows is governance `GIT_WORKFLOW.md`
 `<gate> --run` reads the pushed refs from stdin; `<gate> --paths <path>...`
 prints the selection for those paths and runs nothing.
 
-1. Check that the pushed commits are what the checkout holds.
+1. Set aside each `refs/tags/*` line whose commit a remote-tracking ref
+   already contains, printing `pre-push: <ref> skipped`: it brings no new
+   commit. A push of such lines only finishes here. Then check that the
+   pushed commits of the other lines are what the checkout holds.
 2. Select tests from the changed paths with the project's selection policy
    and print the selection. A selection failure aborts the push (exit 2).
 3. Run the project's static checks that the changed paths select.
