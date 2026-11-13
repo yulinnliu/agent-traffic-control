@@ -1,0 +1,22 @@
+task_id: ATC-0035
+repository: yulinnliu/agent-traffic-control
+base_sha: d0d0d5cc2915091019d63dc1e94b32699e357c91
+scope: atc integrate --owner-run; close-out ledger drops writer report lines; coordinator
+  suggests /compact after a task; SKILL.md wrap fix
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: d0d0d5cc2915091019d63dc1e94b32699e357c91
+branch: worktree-claude+owner-run-ledger-compact
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
+decisions:
+  - "(1) New `atc integrate --owner-run` option, equivalent to `--owner-words \"Owner run: approve integration\"` (same authority kind owner_words and same recorded quote, so integrations.jsonl readers see no difference). `--owner-words` stays, not deprecated, documented as quoting the Owner's actual words (a record grant's binding integration, a paste-only setup). The two are mutually exclusive. Every command template in docs, skills, adapters and governance that uses the fixed label switches to `--owner-run`. Update CLI.md (new option, not breaking per § Versions), tests, and conformance fixtures if they cover the option list."
+  - "(2) Governance (Owner authorized 2026-11-13: 「授權改 governance，併成一個 task」): GIT_WORKFLOW.md § Owner-run commands and § Integrate (and any other governance line showing the fixed-label command) use `--owner-run`; the text that `--owner-words` carries the Owner's quote stays for real quotes. Only these lines; no other governance change."
+  - "(3) `atc close-out` no longer appends a ledger line for writer report files (`<ID>-<sha>.md`); it still deletes them. Reviewer (`-review.md`) and `unknown` lines stay. Update close_out.py, tests, TASKS.md § Close-out step 4 and close-out --check output text."
+  - "(4) atc-coordinator `adapters/claude.md`: after a task's close-out and archive, when the session context is large (about 200K tokens or more), the coordinator's report suggests the Owner run `/compact` (the agent cannot run it); never mid-task. Goal: token and work efficiency."
+  - "(5) Rewrap shared/skills/atc-coordinator/SKILL.md:195 (106 columns) to the file's width."
+  - "Version: bump only if shared/conformance/CLI.md § Versions requires it; never authorizations/**; no push, tag or publish."
