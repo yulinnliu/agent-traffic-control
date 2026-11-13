@@ -102,6 +102,19 @@ def test_check_rehearses_a_leftover_directory(done, capsys: pytest.CaptureFixtur
     assert (code, lines[0]) == (0, f"DELETED {topic} (empty leftover directory)") and topic.is_dir()
 
 
+def test_check_refuses_a_worktree_the_audit_names_no_result_for(done, capsys: pytest.CaptureFixture[str],
+                                                                monkeypatch: pytest.MonkeyPatch) -> None:
+    ws, topic, environ = done
+
+    def audit(*_args: object, **_kwargs: object) -> int:
+        print(json.dumps({"results": [{"reason": "OK", "target": str(topic.parent / "other"), "detail": "removable",
+                                       "evidence": {"removable": True}}]}))
+        return 0
+    monkeypatch.setattr(close_out.hw, "main", audit)
+    code, lines, _err = close(ws, environ, capsys, ws.root, "--check", "--skip", "scratches", "--skip", "reports")
+    assert (code, lines[0]) == (1, f"REFUSED {topic} (worktree audit names no result for it)")
+
+
 def test_the_working_directorys_worktree_is_skipped(done, capsys: pytest.CaptureFixture[str]) -> None:
     ws, topic, environ = done
     code, lines, _err = close(ws, environ, capsys, topic)

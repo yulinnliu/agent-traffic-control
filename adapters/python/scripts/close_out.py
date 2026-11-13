@@ -169,9 +169,9 @@ def rehearse_worktree(root: Path, name: str, worktree: Path, owner: str, topic: 
         results = json.loads(out.getvalue())["results"]
     except (ValueError, KeyError):
         return f"REFUSED {worktree} (worktree audit gave no result)"
-    mine = [result for result in results if hw.key(result["target"]) == hw.key(str(worktree))] or results[:1]
+    mine = [result for result in results if hw.key(result["target"]) == hw.key(str(worktree))]
     if not mine:
-        return f"REFUSED {worktree} (worktree audit gave no result)"
+        return f"REFUSED {worktree} (worktree audit names no result for it)"
     result = mine[0]
     if result["reason"] == "OK" and result["evidence"].get("removable"):
         return f"DELETED {worktree} (removable)"
