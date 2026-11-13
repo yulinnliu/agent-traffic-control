@@ -31,7 +31,7 @@ Work rules:
   Fixed text, one line each, in this order:
   - Reply in the Owner's language, role terms in English.
   - Run the targeted tests by an explicit file list through
-    `atc test run --scratch <name> --tree <worktree> -- <files>`
+    `atc test run --scratch <name> --tree <worktree> --task <ID> -- <files>`
     (atc-review "Writer: the step report"); never the full suite: the
     reviewer's `atc verify` is the one full run.
   - Amend before review; after review, new commits, except after a FAIL

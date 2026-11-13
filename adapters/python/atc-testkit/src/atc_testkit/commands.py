@@ -17,7 +17,7 @@ HELP_OPTIONS = ("-h", "--help")
 WITH_RUNS_OPTION = "--with-runs"
 
 USAGES = {
-    ("test", "run"): "usage: atc test run --scratch NAME [--tree DIR] [--python PATH] [--select SHA] "
+    ("test", "run"): "usage: atc test run --scratch NAME [--tree DIR] [--python PATH] [--task ID] [--select SHA] "
                      "[--label NAME] [--timeout SECONDS] [--progress] [--wide | --touched] [-- PYTEST_ARG...]",
     ("test", "status"): "usage: atc test status [--json]",
     ("test", "mutants"): "usage: atc test mutants NAME SHA DIR FILE --python PATH --tests ARG...",

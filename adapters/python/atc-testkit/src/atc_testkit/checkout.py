@@ -5,7 +5,6 @@ import argparse
 from collections.abc import Callable, Mapping, Sequence
 import os
 from pathlib import Path
-import re
 import subprocess
 import tarfile
 import threading
@@ -14,7 +13,6 @@ from . import locations, scratch, toolchain as toolchains
 from .git import git_env
 from .locations import Refusal
 
-TASK_ID = re.compile(r"[A-Z][A-Z0-9]*-[0-9]+")
 SHORT_SHA = 7
 TREE = "tree"
 PIPE_CHUNK = 1 << 16
@@ -102,7 +100,7 @@ def checkout(argv: Sequence[str], environ: Mapping[str, str] | None = None, run:
                         help="the directory under the tree that holds uv.lock, where `atc test run` runs (default: the tree)")
     args = parser.parse_args(argv)
     environ = os.environ if environ is None else environ
-    if not TASK_ID.fullmatch(args.task):
+    if not scratch.TASK_ID.fullmatch(args.task):
         raise Refusal("TASK_INVALID", f"{args.task!r} is not a task ID such as ATC-0008")
     worktree = source_worktree(args.worktree)
     commit = resolve_commit(worktree, args.sha)

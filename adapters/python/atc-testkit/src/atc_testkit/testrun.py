@@ -625,7 +625,7 @@ def summary(result: Result | None, log: Path) -> tuple[str, int]:
 
 
 def run(argv: Sequence[str], environ: MutableMapping[str, str] | None = None) -> int:
-    """``atc test run --scratch <name> [--tree <tree>] [--python <py>] [--select <base>] [-- <pytest args>]``."""
+    """``atc test run --scratch <name> [--tree <tree>] [--python <py>] [--task <ID>] [<option>...] [-- <pytest args>]``."""
     argv = list(argv)
     pytest_arguments: list[str] = []
     if "--" in argv:
@@ -643,6 +643,9 @@ def run(argv: Sequence[str], environ: MutableMapping[str, str] | None = None) ->
     parser.add_argument("--tree", metavar="DIR", help="the tree the tests run in (default: the tree the scratch's registry line "
                                        "names, as `atc tmp checkout` records it)")
     parser.add_argument("--python", metavar="PATH", help="interpreter that runs pytest (default: the tree's .venv)")
+    parser.add_argument("--task", metavar="ID",
+                        help="the task ID a newly registered scratch records (default: the task of the managed "
+                             "worktree holding the tree)")
     parser.add_argument("--select", metavar="SHA",
                         help="run only the tests the tree's declared selector picks for the paths changed since SHA")
     parser.add_argument("--label", default="run", metavar="NAME", help="name of the run, in its log's file name")
@@ -658,6 +661,8 @@ def run(argv: Sequence[str], environ: MutableMapping[str, str] | None = None) ->
         parser.error("--wide and --touched take --select")
     if args.wide and args.touched:
         parser.error("--wide and --touched exclude each other")
+    if args.task is not None and not scratch.TASK_ID.fullmatch(args.task):
+        raise Refusal("TASK_INVALID", f"{args.task!r} is not a task ID such as ATC-0008")
     environ = os.environ if environ is None else environ
     root, place = prepare_scratch(args.scratch, environ)
     row = _registered_row(root, place)
@@ -668,7 +673,7 @@ def run(argv: Sequence[str], environ: MutableMapping[str, str] | None = None) ->
     else:
         raise Refusal("TREE_NOT_FOUND", f"the scratch {place.name} names no tree; pass --tree")
     python = resolve_python(args.python) if args.python else toolchains.for_tree(tree).interpreter(tree)
-    scratch.register(root, place, tree, task=scratch.task_of_tree(tree))
+    scratch.register(root, place, tree, task=args.task or scratch.task_of_tree(tree))
     paths = changed_paths(tree, args.select, row) if args.select else None
     environ["PYTHONUNBUFFERED"] = "1"
     private = isolate(tree, place, python, environ)

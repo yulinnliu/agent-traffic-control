@@ -586,14 +586,15 @@ that imports a module the installed `atc` lacks stops with
 `ERROR MISSING_DEPENDENCY` (exit 2) naming the module and the reinstall
 command of the root's `AGENTS.md`.
 
-### `atc test run --scratch <name> [--tree <tree>] [--python <py>] [--select <base> [--wide | --touched]] [--label <label>] [--timeout <s>] [--progress] [-- <pytest args>]`
+### `atc test run --scratch <name> [--tree <tree>] [--python <py>] [--task <ID>] [--select <base> [--wide | --touched]] [--label <label>] [--timeout <s>] [--progress] [-- <pytest args>]`
 
 One isolated pytest run inside a tree, a worktree or an exported copy, in
 the scratch `<name>` (`ATC_HOME.md` § Test scratch), its output kept in a
 log. In order:
 
-1. Before the run, each refusal exits 9 and runs no test. Check and create
-   the scratch: `SCRATCH_OUTSIDE_TMP`, `SCRATCH_PATH_TOO_LONG`,
+1. Before the run, each refusal exits 9 and runs no test. `--task` has the
+   task form `ATC-0008`; another form stops with `TASK_INVALID`. Check and
+   create the scratch: `SCRATCH_OUTSIDE_TMP`, `SCRATCH_PATH_TOO_LONG`,
    `SCRATCH_NOT_RESOLVED`, `SCRATCH_NOT_CREATED`. Resolve `--tree` and a
    path-form `--python` against the caller's directory:
    `TREE_NOT_FOUND`, `PYTHON_NOT_FOUND`. `--tree` defaults to the tree the
@@ -601,7 +602,10 @@ log. In order:
    either, `TREE_NOT_FOUND`. `--python` defaults to the interpreter of the
    tree's environment (§ Toolchain); without one, `VENV_MISSING`, which
    names `atc tmp checkout` and the project's `AGENTS.md` preparation, and
-   never another Python.
+   never another Python. The scratch then gets its registry line
+   (`ATC_HOME.md` § Scratch registry), with the task `--task` names, else
+   the task of the one record whose `branch` is the managed worktree
+   branch holding the tree.
 2. `--select <base>` runs the tree's `[tool.atc-testkit]` `selector`, a
    list of strings: the argv of a command that takes changed paths as
    arguments and prints the test paths to run as a JSON array on its last

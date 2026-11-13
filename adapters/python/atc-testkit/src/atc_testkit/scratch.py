@@ -24,6 +24,7 @@ from .locations import CANDIDATES, Refusal, SYSTMP, is_link as _is_link
 
 SCRATCH_NAME = re.compile(r"[A-Za-z0-9._-]+")
 MANAGED_BRANCH = re.compile(r"worktree-[^+/]+\+[^/]+")
+TASK_ID = re.compile(r"[A-Z][A-Z0-9]*-[0-9]+")
 RESERVED_NAMES = frozenset({SYSTMP, CANDIDATES})
 SCRATCH_NAME_BOUND = 64
 REGISTRY_NAME = "scratch-dirs.tsv"

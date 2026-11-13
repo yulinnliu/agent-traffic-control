@@ -110,10 +110,12 @@ reports the new tip.
 
 Where the project runs its tests through `atc-testkit`, run targeted tests
 against the worktree with
-`atc test run --scratch <scratch> --tree <worktree> [--python <py>] -- <pytest args...>`;
+`atc test run --scratch <scratch> --tree <worktree> --task <task> [--python <py>] -- <pytest args...>`;
 elsewhere the targeted test commands are the ones the project's `AGENTS.md`
-names. `<scratch>` is a name; the run creates it as `<tmp>/<scratch>`, where
-`<tmp>` is `~/.atc/tmp`, or `ATC_TMP` when that is set. The run removes every
+names. `--task` records the scratch under the task, so close-out removes it
+whatever tree a run used. `<scratch>` is a name; the run creates it as
+`<tmp>/<scratch>`, where `<tmp>` is `~/.atc/tmp`, or `ATC_TMP` when that is
+set. The run removes every
 `HAMI_*` variable so the host's project settings stay out of it, points each
 data-root variable the tree's `[tool.atc-testkit]` names, or
 `QUANT_DATA_ROOT` when it names none, at `<scratch>/qdr`, makes the scratch

@@ -4,13 +4,15 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import sys
 
 import pytest
 
 import close_out
 import git_preflight
 import managed_worktree as hw
-from atc_testkit import scratch
+from atc_testkit import scratch, testrun
+from atc_testkit.locations import Refusal
 from test_task_records import PROJECT, Workspace, commit, record, run_git, ws  # noqa: F401 - the fixture
 
 pytestmark = pytest.mark.integration
@@ -75,6 +77,18 @@ def test_check_lists_what_the_run_would_do_and_deletes_nothing(done, atc_tmp: Pa
     assert code == 0 and f"DELETED {atc_tmp / 'mine'} (registered scratch)" in lines, (lines, err)
     assert len(scratch.registered(atc_tmp)) == 2
     assert close(ws, environ, capsys, ws.root)[0] == 0 and not topic.exists()
+
+
+def test_check_lists_a_test_run_scratch_of_the_task_whose_tree_is_outside_its_worktree(
+        done, atc_tmp: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    ws, topic, environ = done
+    # The run registers its scratch before the selection, whose unknown base then stops it.
+    with pytest.raises(Refusal, match="SELECTION_BASE_UNKNOWN"):
+        testrun.run(["--scratch", "base", "--tree", str(ws.repo), "--python", sys.executable, "--task", TASK,
+                     "--select", "0" * 40], environ=dict(environ))
+    assert not Path(os.path.realpath(ws.repo)).is_relative_to(os.path.realpath(topic))
+    code, lines, err = close(ws, environ, capsys, ws.root, "--check")
+    assert code == 0 and f"DELETED {atc_tmp / 'base'} (registered scratch)" in lines, (lines, err)
 
 
 def test_check_exits_1_when_an_item_would_be_refused(done, capsys: pytest.CaptureFixture[str]) -> None:

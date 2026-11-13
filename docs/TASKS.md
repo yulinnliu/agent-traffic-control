@@ -193,7 +193,9 @@ several, the working directory's.
    inside the task's worktree (paths compared as real paths without case),
    with their dependent runs (`ATC_HOME.md` § Deleting), go through
    `atc tmp clean`. `atc test run` fills the `task` of the line it registers
-   from the tree's branch when one record names that branch.
+   from its `--task`, else from the tree's branch when one record names that
+   branch, so a run whose tree lies outside the task's worktree passes
+   `--task`.
 4. Each report file `~/.atc/reports/<ID>-*.md` is deleted. A writer report
    `<ID>-<sha>.md` is deleted with no ledger line (`--check`:
    `writer report, no ledger line`); any other first appends one line to the

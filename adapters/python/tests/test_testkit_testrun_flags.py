@@ -94,6 +94,34 @@ def test_the_tree_comes_from_the_registry_and_python_from_its_venv(tree: Path, a
 
 
 @pytest.mark.integration
+@pytest.mark.parametrize(("branch", "given", "expected"), [
+    ("main", ["--task", "DEMO-0007"], "DEMO-0007"),
+    ("worktree-claude+widget", [], "DEMO-0001"),
+    ("worktree-claude+widget", ["--task", "DEMO-0007"], "DEMO-0007")])
+def test_a_new_scratch_records_the_given_task_else_its_worktree_task(tree: Path, atc_tmp: Path, branch: str,
+                                                                    given: list[str], expected: str) -> None:
+    (tree / ".atc/tasks").mkdir(parents=True)
+    (tree / ".atc/tasks/DEMO-0001.yaml").write_text("task_id: DEMO-0001\nbranch: worktree-claude+widget\n",
+                                                   encoding="utf-8")
+    git(tree, "init", "-q", "-b", branch)
+    git(tree, "add", ".")
+    git(tree, "commit", "-q", "-m", "x")
+    common = ("--scratch", "f9", "--tree", str(tree), "--python", sys.executable, "--select", "HEAD")
+    for task in (given, ["--task", "DEMO-0008"]):
+        run = run_command(*common, *task)
+        assert run.returncode == 0, run.stdout + run.stderr
+    [row] = scratch.registered(atc_tmp)
+    assert row.task == expected
+
+
+@pytest.mark.integration
+def test_a_task_that_is_no_task_id_is_refused_before_the_scratch(tree: Path, atc_tmp: Path) -> None:
+    run = run_command("--scratch", "f10", "--tree", str(tree), "--task", "atc-1")
+    assert run.returncode == 9 and run.stderr.startswith("TASK_INVALID ")
+    assert not (atc_tmp / "f10").exists() and scratch.registered(atc_tmp) == []
+
+
+@pytest.mark.integration
 def test_a_timeout_reports_the_tail_and_never_a_pass(tree: Path, atc_tmp: Path) -> None:
     (tree / "tests/test_slow.py").write_text("import time\ndef test_slow():\n    time.sleep(60)\n", encoding="utf-8")
     run = run_command("--scratch", "f5", "--tree", str(tree), "--python", sys.executable, "--timeout", "3",
