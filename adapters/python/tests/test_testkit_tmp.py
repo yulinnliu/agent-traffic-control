@@ -313,6 +313,16 @@ def test_a_missing_dir_is_skipped_and_drops_its_registry_line(atc_tmp: Path) -> 
     assert registered_names(atc_tmp) == []
 
 
+@pytest.mark.unit
+def test_the_check_of_a_missing_dir_keeps_its_registry_line(atc_tmp: Path) -> None:
+    gone = atc_tmp / "gone"
+    add(atc_tmp, gone)
+    lines: list[str] = []
+    assert scratch.clean([str(gone)], say=lines.append, check=True) == 0
+    assert lines == [f"SKIPPED {gone} (not found)"]
+    assert registered_names(atc_tmp) == ["gone"]
+
+
 def test_an_error_while_handling_a_dir_is_its_refusal_and_the_rest_continue(atc_tmp: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     first, second = scratch_dir(atc_tmp, "first"), scratch_dir(atc_tmp, "second")
     original = scratch.remove_tree
