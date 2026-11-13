@@ -25,6 +25,22 @@ BASH_DECLARE = {"export", "declare", "typeset", "local", "readonly"}
 EXPAND = "\0"
 QUOTED = "\1"
 
+def cd_reason(tool: str, target: str) -> str:
+    where = "at the top level of a Bash call" if tool == "Bash" else "in a PowerShell call"
+    subshell = (
+        ", or wrap the commands that need it in a subshell: `( cd <path> && ... )`"
+        if tool == "Bash"
+        else "; for commands that must run inside the tree, use the Bash tool with a subshell `( cd <path> && ... )`"
+    )
+    return (
+        f"Refused: changing directory to {target} {where} makes the worktree the session's "
+        f"working directory for every later call, which keeps it busy and makes "
+        f"`atc worktree clean` stop halfway. Run Git as `git -C <path> ...` and pass absolute "
+        f"paths{subshell}. To prove tests import the worktree's code, set `PYTHONPATH` to its "
+        f"`packages/*/src` directories instead of entering it."
+    )
+
+
 HEREDOC = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][\w-]*)\1")
 ASSIGNMENT = re.compile(r"^([A-Za-z_]\w*)(\+?)=")
 VARIABLE = re.compile(r"\0(?:\{([A-Za-z_]\w*)\}|([A-Za-z_]\w*))")
@@ -355,5 +371,3 @@ def native(path: str, cwd: str) -> str:
 
 def within(path: str, root: str) -> bool:
     return path == root or path.startswith(root.rstrip("\\") + "\\")
-
-

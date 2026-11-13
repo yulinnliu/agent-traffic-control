@@ -126,6 +126,13 @@ def test_a_push_without_a_refspec_reads_the_checked_out_branch(tmp_path, command
     assert "`git-push-main`" in decide("Bash", cwd=str(topic), rules=rules, command=f"git -C '{main}' {command[4:]}")
 
 
+@pytest.mark.parametrize("option", ["--all", "--mirror", "--branches"])
+def test_a_push_of_every_branch_is_refused_from_a_topic_branch(tmp_path, option):
+    topic = git_repo(tmp_path / "topic", "topic")
+    assert "`git-push-main`" in decide("Bash", cwd=str(topic), command=f"git push {option} origin")
+    assert decide("Bash", cwd=str(topic), command="git push --tags origin") is None
+
+
 def test_a_linked_worktree_reads_its_own_head(tmp_path):
     gitdir = tmp_path / "repo" / ".git" / "worktrees" / "t"
     gitdir.mkdir(parents=True)
@@ -276,6 +283,8 @@ def test_codex_reads_a_shell_call_as_bash_and_as_powershell():
     assert "outside the directories" in decide("Bash", harness="codex", command="Remove-Item C:\\out -Recurse")
     assert "outside the directories" in decide("Bash", harness="codex", command="rm -rf /c/out")
     assert "`git-reset-hard`" in decide("Bash", harness="codex", command="& git reset --hard")
+    assert "`git-reset-hard`" in decide("Bash", harness="codex", command="Start-Job { git reset --hard }")
+    assert decide("Bash", command="Start-Job { git reset --hard }") is None
 
 
 def test_codex_apply_patch_paths_are_checked():

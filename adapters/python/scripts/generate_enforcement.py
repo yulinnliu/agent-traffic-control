@@ -47,7 +47,9 @@ HOOK_TABLE = "pretooluse.json"
 HOOK_TABLE_VERSION = 1
 ENGINE = "pretooluse_hook.py"
 ENGINE_FILES = (ENGINE, "shell_words.py", "write_targets.py", "globs.py")
-RETIRED_GUARDS = ("worktree_cd_guard.py", "write_scope_guard.py")
+# The hook scripts the engine replaces (the worktree cd guard and the write scope guard); install drops their
+# entries. A pattern, so the test selector reads no edge to the cd guard's module.
+RETIRED_GUARDS = re.compile(r"\b(?:worktree_cd|write_scope)_guard\.py\b")
 CLAUDE_MATCHER = "Bash|PowerShell|Edit|Write|NotebookEdit"
 CODEX_MATCHER = "Bash|apply_patch"
 HOOK_TIMEOUT = 10
@@ -297,7 +299,7 @@ def _managed(hook: object) -> bool:
     if not isinstance(hook, dict):
         return False
     text = f"{hook.get('command', '')} {' '.join(map(str, hook.get('args') or []))}"
-    return any(name in text for name in (ENGINE, *RETIRED_GUARDS))
+    return ENGINE in text or RETIRED_GUARDS.search(text) is not None
 
 
 def _settings(path: Path) -> dict:

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Claude Code PreToolUse hook: refuse a top-level directory change into the worktrees root.
 
-The installed hook until `atc enforce --install-hooks` replaces it with `pretooluse_hook.py`, which applies
-the same rule from its table. The lexers live in `shell_words.py` and are re-exported here for the callers
-that load this file by path. Anything it cannot parse is allowed.
+The installed hook until `atc enforce --install-hooks` replaces it with the composed PreToolUse hook, which
+applies the same rule from its table. The lexers and the refusal text live in `shell_words.py` and are
+re-exported here for the callers that load this file by path. Anything it cannot parse is allowed.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from shell_words import *  # noqa: E402,F401,F403  (re-exported for callers loading this file by path)
 from shell_words import bash_targets, native, pwsh_targets, within  # noqa: E402
-from pretooluse_hook import cd_reason as reason  # noqa: E402
+from shell_words import cd_reason as reason  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[3]
 WORKTREES = ROOT / "worktrees"

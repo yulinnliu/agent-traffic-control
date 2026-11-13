@@ -1,0 +1,7 @@
+{
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": ["bash", "-lc", "git push origin main"]
+  },
+  "cwd": "C:\\ws\\repo"
+}

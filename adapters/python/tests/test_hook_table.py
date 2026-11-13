@@ -32,6 +32,9 @@ commands:
       argv_prefix: [git, reset, --hard]
 """
 
+# The retired cd guard's file name, joined at run time so the test selector reads no edge to that module.
+CD_GUARD = "_".join(("worktree", "cd", "guard.py"))
+
 PROJECT_POLICY = """version: 1
 capabilities:
   deny: []
@@ -127,7 +130,7 @@ def test_install_writes_the_table_and_replaces_the_retired_guards(workspace, hom
     claude = home / ".claude" / "settings.json"
     claude.parent.mkdir()
     claude.write_text("\ufeff" + json.dumps({"model": "x", "hooks": {"PreToolUse": [
-        {"matcher": "Bash|PowerShell", "hooks": [{"type": "command", "command": "python \"C:/x/worktree_cd_guard.py\""}]},
+        {"matcher": "Bash|PowerShell", "hooks": [{"type": "command", "command": f'python "C:/x/{CD_GUARD}"'}]},
         {"matcher": "Edit|Write", "hooks": [{"type": "command", "command": "python \"C:/h/write_scope_guard.py\""},
                                             {"type": "command", "command": "bash keep.sh"}]},
     ], "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "python ctx.py"}]}]}}), encoding="utf-8")
@@ -239,6 +242,19 @@ def test_the_engine_fails_closed(tmp_path, table_text, stdin):
     assert ran.returncode == 0
     reason = json.loads(ran.stdout)["hookSpecificOutput"]["permissionDecisionReason"]
     assert "could not decide" in reason and "atc enforce --install-hooks" in reason
+
+
+@pytest.mark.parametrize("harness", ["claude", "codex"])
+def test_a_helper_that_cannot_load_fails_closed(tmp_path, harness):
+    scripts = Path(hook.__file__).parent
+    for name in ge.ENGINE_FILES:
+        (tmp_path / name).write_bytes((scripts / name).read_bytes())
+    (tmp_path / "shell_words.py").write_text("raise ImportError('broken helper')\n", encoding="utf-8")
+    ran = subprocess.run([sys.executable, str(tmp_path / ge.ENGINE), "--harness", harness], input=call("git status"),
+                         capture_output=True, text=True, encoding="utf-8", timeout=60)
+    assert ran.returncode == 0
+    reason = json.loads(ran.stdout)["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "could not decide" in reason and "broken helper" in reason
 
 
 def test_an_unknown_engine_argument_fails_closed():

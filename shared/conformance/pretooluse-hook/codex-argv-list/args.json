@@ -1,0 +1,1 @@
+["--harness", "codex", "--table", "{input}/table.json", "--payload", "{input}/payload.json"]

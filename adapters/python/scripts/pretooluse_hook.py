@@ -14,12 +14,18 @@ import json
 import ntpath
 import os
 import re
+import shlex
 import sys
 from pathlib import Path
 
-import globs
-import shell_words as g
-import write_targets as w
+try:  # a helper that cannot load makes main deny every call
+    import globs
+    import shell_words as g
+    import write_targets as w
+except Exception as exc:
+    IMPORT_ERROR: Exception | None = exc
+else:
+    IMPORT_ERROR = None
 
 TABLE_VERSION = 1
 DEFAULT_TABLE = Path.home() / ".atc" / "enforcement" / "pretooluse.json"
@@ -48,22 +54,6 @@ PUSH_EVERYTHING = {"--all", "--mirror", "--branches"}
 
 class TableError(Exception):
     pass
-
-
-def cd_reason(tool: str, target: str) -> str:
-    where = "at the top level of a Bash call" if tool == "Bash" else "in a PowerShell call"
-    subshell = (
-        ", or wrap the commands that need it in a subshell: `( cd <path> && ... )`"
-        if tool == "Bash"
-        else "; for commands that must run inside the tree, use the Bash tool with a subshell `( cd <path> && ... )`"
-    )
-    return (
-        f"Refused: changing directory to {target} {where} makes the worktree the session's "
-        f"working directory for every later call, which keeps it busy and makes "
-        f"`atc worktree clean` stop halfway. Run Git as `git -C <path> ...` and pass absolute "
-        f"paths{subshell}. To prove tests import the worktree's code, set `PYTHONPATH` to its "
-        f"`packages/*/src` directories instead of entering it."
-    )
 
 
 def load_table(path: Path) -> dict:
@@ -342,7 +332,7 @@ def cd_denial(table: dict, tool: str, text: str, cwd: str) -> str | None:
     for target in targets:
         path = g.native(target, cwd)
         if any(g.within(path, root) for root in table["worktrees"]):
-            return cd_reason(tool, target)
+            return g.cd_reason(tool, target)
     return None
 
 
@@ -360,8 +350,8 @@ def decide(payload: dict, table: dict, harness: str) -> str | None:
     if tool not in ("Bash", "PowerShell"):
         return None
     text = tool_input.get("command", "")
-    if isinstance(text, list):
-        text = " ".join(text)
+    if isinstance(text, list):  # an argv list keeps each word's boundary through POSIX quoting
+        text = shlex.join(str(word) for word in text)
     background = bool(tool_input.get("run_in_background"))
     reason = command_denial(table, tool, text, harness, cwd, background)
     if reason:
@@ -401,6 +391,8 @@ def parse(argv: list[str]) -> dict[str, str]:
 
 def main(argv: list[str] | None = None) -> int:
     try:
+        if IMPORT_ERROR is not None:
+            raise IMPORT_ERROR
         options = parse(sys.argv[1:] if argv is None else argv)
         raw = Path(options["--payload"]).read_text(encoding="utf-8") if options["--payload"] else sys.stdin.read()
         payload = json.loads(raw)
