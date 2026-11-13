@@ -37,6 +37,9 @@ Operational description of the tree; governance semantics live under
   `atc-testkit/`, the pytest adapter of the verification contract. Other
   languages add a sibling directory and run the same fixtures.
 - `workspace.yaml.example` — the shape of the machine-local map.
+- `policies/hard-deny.yaml` — the workspace policy: what no agent on the
+  machine may do, composed first into the PreToolUse hook's table
+  (`docs/ENFORCEMENT.md` § PreToolUse hook).
 - `.atc/tasks/<task_id>.yaml` — this repository's task records, under the
   `ATC` prefix its `AGENTS.md` declares (`docs/TASKS.md`). This repository is
   the governance source: it reads `shared/governance/` and binds its own

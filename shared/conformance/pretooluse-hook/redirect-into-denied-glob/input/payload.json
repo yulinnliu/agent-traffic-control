@@ -1,0 +1,7 @@
+{
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "echo k=v > /c/ws/worktrees/repo/claude+t/.env"
+  },
+  "cwd": "C:\\ws\\repo"
+}

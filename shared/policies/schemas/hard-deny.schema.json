@@ -39,6 +39,10 @@
             "properties": {
               "id": { "$ref": "#/$defs/slug" },
               "argv_prefix": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+              "with_args": { "$ref": "#/$defs/argList", "description": "Hook-only: denied only when one of these arguments (or <arg>=...) follows the prefix." },
+              "unless_args": { "$ref": "#/$defs/argList", "description": "Hook-only: denied unless one of these arguments (or <arg>=...) follows the prefix." },
+              "push_targets": { "$ref": "#/$defs/argList", "description": "Hook-only, for a git push prefix: denied when the push may update one of these branches." },
+              "background": { "const": true, "description": "Hook-only: denied only when the command runs in the background." },
               "reason": { "type": "string" }
             }
           }
@@ -48,6 +52,7 @@
   },
   "$defs": {
     "slug": { "type": "string", "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$" },
+    "argList": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
     "capability": {
       "type": "object",
       "required": ["id"],

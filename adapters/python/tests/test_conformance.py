@@ -26,6 +26,7 @@ TOOLS = {
     "validate-adapters": "validate_workspace.py",
     "load-policies": "policies.py",
     "generate-enforcement": "generate_enforcement.py",
+    "pretooluse-hook": "pretooluse_hook.py",
     "classify-change": "classify_change.py",
     "task-records": "task_records.py",
 }

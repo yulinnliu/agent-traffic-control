@@ -1,0 +1,7 @@
+{
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "env GIT_TRACE=1 git clean -fdx"
+  },
+  "cwd": "C:\\ws\\repo"
+}

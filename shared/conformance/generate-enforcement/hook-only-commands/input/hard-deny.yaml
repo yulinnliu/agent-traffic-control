@@ -1,0 +1,21 @@
+version: 1
+
+capabilities:
+  deny: []
+
+commands:
+  deny:
+    - id: atc-integrate
+      argv_prefix: [atc, integrate]
+      unless_args: [--check]
+    - id: git-push-main
+      argv_prefix: [git, push]
+      push_targets: [main]
+    - id: atc-verify-background
+      argv_prefix: [atc, verify]
+      background: true
+    - id: atc-enforce-hook-install
+      argv_prefix: [atc, enforce]
+      with_args: [--hook-out, --install-hooks]
+    - id: git-reset-hard
+      argv_prefix: [git, reset, --hard]

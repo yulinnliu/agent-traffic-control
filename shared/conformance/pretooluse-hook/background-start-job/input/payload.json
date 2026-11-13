@@ -1,0 +1,7 @@
+{
+  "tool_name": "PowerShell",
+  "tool_input": {
+    "command": "Start-Job { atc verify --task ATC-1 }"
+  },
+  "cwd": "C:\\ws\\repo"
+}

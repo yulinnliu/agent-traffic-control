@@ -1,0 +1,7 @@
+{
+  "tool_name": "PowerShell",
+  "tool_input": {
+    "command": "Remove-Item C:\\ws\\state\\p-data\\raw -Recurse"
+  },
+  "cwd": "C:\\ws\\repo"
+}

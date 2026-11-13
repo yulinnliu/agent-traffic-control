@@ -29,6 +29,14 @@ governance_source: <owner>/agent-traffic-control
 
 workspace_root: /absolute/path/to/this/workspace
 
+# Directories outside workspace_root an agent may write to; %VAR%, $VAR and ~
+# expand when `atc enforce --hook-out` composes the PreToolUse hook's table.
+# Optional; workspace_root is always one.
+agent_write_roots:
+  - "%TEMP%"
+  - ~/.claude
+  - ~/.atc
+
 projects:
   # One entry per repo you've placed under projects/<name>/. Add or remove
   # entries freely — there's no fixed or required project.

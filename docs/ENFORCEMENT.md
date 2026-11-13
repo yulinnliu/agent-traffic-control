@@ -20,6 +20,10 @@ Reference implementation: `adapters/python/scripts/generate_enforcement.py`
 Capability ids (`capabilities.deny`) have no harness-native form; they bind
 through review, project CI and the runtime adapter.
 
+A command entry carrying `with_args`, `unless_args`, `push_targets` or
+`background` is hook-only: none of these outputs renders it, since a prefix
+rule would deny more than it means. The PreToolUse hook below enforces it.
+
 ## Filesystem rules
 
 A `filesystem.deny` entry is a bare glob, which denies every access mode, or
@@ -69,7 +73,7 @@ same deny entries into the user-level `~/.claude/settings.json`;
 Only the file tools are covered. A command deny is an argv prefix, which
 cannot name a path argument in every position, a relative path, or a shell
 redirection, so `rm`, `mv` and `>` into a state root stay outside this
-segment. For the same reason Codex, whose rules are argv prefixes only, gets
+segment; the PreToolUse hook covers them from the command text. For the same reason Codex, whose rules are argv prefixes only, gets
 no machine-local block.
 
 ## Mapping
@@ -117,6 +121,101 @@ exits 0 and says so. The generator writes it with mode 0755; an installed
 copy must stay executable (commit it with `git update-index --chmod=+x`), or
 Git skips it on Linux and macOS.
 
+## PreToolUse hook
+
+One hook binds every Claude Code and Codex session on the machine: the engine
+`adapters/python/scripts/pretooluse_hook.py` in the canonical checkout,
+standard library only, reading one composed table. The hook sees the text of
+a tool call, not what a program does once it runs; it turns a mistaken
+command into a refusal with a reason and is not a security boundary.
+
+**Table.** `atc enforce --workspace <map> --hook-out <dir>` writes
+`<dir>/pretooluse.json` (LF, deterministic) from, in order:
+
+1. the workspace policy, `policies/hard-deny.yaml` of this repository; its
+   repository-relative globs apply under `workspace_root` and
+   `worktrees/root/*`;
+2. each registered project's `policies/hard-deny.yaml`, read from its
+   checkout; its repository-relative globs apply under its `repo` and its
+   `worktrees/*`;
+3. the workspace map: each `state` root (an edit/write deny), the
+   `worktrees` roots, and the write roots: `workspace_root` plus each
+   `agent_write_roots` entry, with `%VAR%`, `$VAR` and `~` expanded.
+
+Command rules apply to every session, whatever their source; `~`-rooted globs
+apply everywhere. A rule already composed from an earlier source is not
+repeated. Paths are stored absolute, long-form and case-folded. The engine
+files and the table directory are write-protected in every call.
+
+**Command entries.** The schema adds four hook-only fields to a
+`commands.deny` entry; all the conditions of one entry hold for it to deny:
+
+| Field | Denies when |
+| --- | --- |
+| `with_args` | one of these arguments, or `<arg>=...`, follows the prefix |
+| `unless_args` | none of these arguments, or `<arg>=...`, follows the prefix |
+| `push_targets` | the `git push` may update one of these branches |
+| `background` | the command runs in the background |
+
+**Matching.** Each Bash or PowerShell call splits into simple commands at
+any depth, with the lexers of `shell_words.py`. Before an argv compares, token
+by token, with a rule's `argv_prefix`:
+
+- leading assignments and `env`, `command`, `exec`, `builtin`, `nohup`,
+  `time`, PowerShell's `&` and `.` are dropped;
+- `uv run [options]`, `uvx`, `python -m <module>` (`atc_cli` reads as
+  `atc`), `cmd /c` and `Start-Process -FilePath ... -ArgumentList ...` resolve
+  to the command they launch;
+- `bash -c`, `sh -c`, `pwsh -Command` and `powershell -Command` strings are
+  lexed again, one level deep;
+- `argv[0]` compares by basename, case-folded, without `.exe`;
+- git's options before the subcommand are dropped; `-C <path>` becomes the
+  command's directory.
+
+A push target is the destination of each refspec (after `:`, else the whole
+refspec, without `+` and `refs/heads/`); a glob refspec, `--all`, `--mirror`
+and `--branches` always match, and `HEAD` or no refspec reads the branch from
+the directory's `HEAD` file, counting a directory it cannot resolve as on
+a listed branch. A command runs in the background when the call sets
+`run_in_background`, when a lone `&` ends it, or when PowerShell starts it
+with `Start-Job`, `Start-ThreadJob` or `Start-Process` without `-Wait`.
+
+A Codex `Bash` call carries no shell name, so it is read both as Bash and as
+PowerShell. Codex `apply_patch` targets come from its `*** Add File:`,
+`*** Update File:`, `*** Delete File:` and `*** Move to:` lines.
+
+**Paths.** A file tool's path, an `apply_patch` target, and each write target
+of a shell call (`write_targets.py`: the writing verbs, redirections,
+`cmd /c`, `--basetemp`, .NET file writes) is refused when it lies in a
+protected path, matches a filesystem rule denying `edit` or `write`, or lies
+outside every write root. A target that cannot be resolved is allowed.
+
+**Worktree cd.** In Claude Code, a top-level Bash `cd`/`pushd`, or any
+PowerShell location change, into a worktrees root is refused. Codex starts
+each command in the session's `cwd`.
+
+**Failure.** Any error of the engine (an unreadable payload, a missing or
+invalid table) prints a deny naming the error and the Owner's repair,
+`atc enforce --install-hooks`. The Claude Code entry also sets
+`"onFailure": "block"` (Claude Code 2.1.295 or later) and `"timeout": 10`,
+so a hook that cannot start, crashes or stalls blocks the call. Codex offers
+no such option: there a hook that cannot start lets the call run.
+
+**Installation.** `atc enforce --install-hooks`, run by the Owner, writes the
+table (to `--hook-out`, default `~/.atc/enforcement`) and replaces, in
+`~/.claude/settings.json` and `~/.codex/hooks.json`, every PreToolUse entry
+running the engine, `worktree_cd_guard.py` or `write_scope_guard.py` with:
+
+| Harness | Matcher | Command |
+| --- | --- | --- |
+| Claude Code | `Bash\|PowerShell\|Edit\|Write\|NotebookEdit` | `python "<root>/adapters/python/scripts/pretooluse_hook.py" --harness claude` |
+| Codex | `Bash\|apply_patch` | the same with `--harness codex` |
+
+A table outside the default directory adds `--table "<file>"`. Codex then
+asks the Owner to trust the entry once in `/hooks`. The workspace policy
+denies agents `atc enforce --hook-out` and `--install-hooks`, so both run
+from the Owner's terminal, which no hook sees.
+
 ## Drift
 
 `--check` regenerates in memory and exits 1, printing `drift:` and the
@@ -130,6 +229,9 @@ normalisation:
 | `--live-claude-local PATH` | the machine-local segment of the file's `permissions.deny` list, in order, against the `--workspace` render |
 | `--live-codex PATH` | the `# BEGIN atc hard-deny` ... `# END atc hard-deny` block, markers included; a file without exactly one block drifts |
 | `--live-hook PATH` | the whole hook file |
+| `--live-hook-table PATH` | the whole PreToolUse hook table, against a fresh compose (needs `--workspace`) |
+| `--live-claude-hooks PATH` | the PreToolUse entries of a Claude settings file that run the engine or a retired guard: exactly the rendered entry |
+| `--live-codex-hooks PATH` | the same for a Codex `hooks.json` |
 
 `--check` compares content only, never file modes. A consuming project runs
 it in CI against its committed copy, and `atc validate --projects` fails a
@@ -137,4 +239,6 @@ project whose `generated/enforcement/` differs from its
 `policies/hard-deny.yaml`, so the enforcement surface changes only through a
 reviewed diff of the policy. It also reports, without failing or writing, a
 project whose `.claude/settings.local.json` lacks the machine-local segment
-or holds one that differs from the map.
+or holds one that differs from the map, and an installed hook table or entry
+that differs from a fresh compose; `atc doctor` lists the same as its
+`pretooluse hook` check.

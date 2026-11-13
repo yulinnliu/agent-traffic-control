@@ -1,0 +1,7 @@
+{
+  "tool_name": "PowerShell",
+  "tool_input": {
+    "command": "& git.exe push --all origin"
+  },
+  "cwd": "C:\\ws\\repo"
+}

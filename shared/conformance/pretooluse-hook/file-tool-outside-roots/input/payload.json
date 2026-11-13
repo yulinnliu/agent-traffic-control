@@ -1,0 +1,7 @@
+{
+  "tool_name": "Edit",
+  "tool_input": {
+    "file_path": "C:\\elsewhere\\f.txt"
+  },
+  "cwd": "C:\\ws\\repo"
+}

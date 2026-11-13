@@ -1,0 +1,7 @@
+{
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "Remove-Item -LiteralPath 'C:\\elsewhere' -Recurse"
+  },
+  "cwd": "C:\\ws\\repo"
+}

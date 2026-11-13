@@ -1,0 +1,150 @@
+{
+  "version": 2,
+  "commands": [
+    {
+      "id": "atc-integrate-owner-voice",
+      "argv_prefix": [
+        "atc",
+        "integrate"
+      ],
+      "with_args": [
+        "--owner-run",
+        "--owner-words"
+      ],
+      "unless_args": [
+        "--check"
+      ],
+      "reason": "These flags carry the Owner's own words.",
+      "source": "policies/hard-deny.yaml"
+    },
+    {
+      "id": "atc-integrate",
+      "argv_prefix": [
+        "atc",
+        "integrate"
+      ],
+      "unless_args": [
+        "--check"
+      ],
+      "reason": "Integration is the Owner's act.",
+      "source": "policies/hard-deny.yaml"
+    },
+    {
+      "id": "git-push-main",
+      "argv_prefix": [
+        "git",
+        "push"
+      ],
+      "push_targets": [
+        "main"
+      ],
+      "reason": "main moves only through atc integrate.",
+      "source": "policies/hard-deny.yaml"
+    },
+    {
+      "id": "atc-verify-background",
+      "argv_prefix": [
+        "atc",
+        "verify"
+      ],
+      "background": true,
+      "reason": "Verification runs in the foreground.",
+      "source": "policies/hard-deny.yaml"
+    },
+    {
+      "id": "atc-test-run-background",
+      "argv_prefix": [
+        "atc",
+        "test",
+        "run"
+      ],
+      "background": true,
+      "reason": "Tests run in the foreground.",
+      "source": "policies/hard-deny.yaml"
+    },
+    {
+      "id": "git-push-force",
+      "argv_prefix": [
+        "git",
+        "push",
+        "--force"
+      ],
+      "reason": "Rewrites history.",
+      "source": "projects.p"
+    },
+    {
+      "id": "git-reset-hard",
+      "argv_prefix": [
+        "git",
+        "reset",
+        "--hard"
+      ],
+      "reason": "Discards work.",
+      "source": "projects.p"
+    },
+    {
+      "id": "git-clean-fdx",
+      "argv_prefix": [
+        "git",
+        "clean",
+        "-fdx"
+      ],
+      "reason": "Deletes untracked files.",
+      "source": "projects.p"
+    }
+  ],
+  "filesystem": [
+    {
+      "id": "filesystem.deny[0]",
+      "glob": "**/.env",
+      "modes": [
+        "read",
+        "edit",
+        "write"
+      ],
+      "scope": [
+        {
+          "base": "c:\\ws\\repo",
+          "depth": 0
+        },
+        {
+          "base": "c:\\ws\\worktrees\\repo",
+          "depth": 1
+        }
+      ],
+      "reason": "Environment files hold credentials.",
+      "source": "projects.p"
+    },
+    {
+      "id": "filesystem.deny[1]",
+      "glob": "**/*.pem",
+      "modes": [
+        "read"
+      ],
+      "scope": null,
+      "reason": "Read-only rule; writes pass.",
+      "source": "projects.p"
+    },
+    {
+      "id": "state.p",
+      "glob": "c:/ws/state/p-data/**",
+      "modes": [
+        "edit",
+        "write"
+      ],
+      "scope": null,
+      "reason": "Persistent project data.",
+      "source": "workspace.yaml"
+    }
+  ],
+  "worktrees": [
+    "c:\\ws\\worktrees"
+  ],
+  "write_roots": [
+    "c:\\ws"
+  ],
+  "protected": [
+    "c:\\home\\.atc\\enforcement",
+    "c:\\ws\\adapters\\python\\scripts\\pretooluse_hook.py"
+  ]
+}

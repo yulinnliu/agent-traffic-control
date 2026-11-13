@@ -1,0 +1,144 @@
+# The workspace policy: what no agent on this machine may do, whatever its project.
+# `atc enforce --hook-out` composes it, first, with every registered project's own
+# policy into the PreToolUse hook's table (docs/ENFORCEMENT.md § PreToolUse hook).
+version: 1
+
+capabilities:
+  deny:
+    - id: credential-access
+      reason: Credentials are read by humans and CI, never by an agent session.
+
+filesystem:
+  deny:
+    - glob: "**/.env"
+      reason: Environment files hold credentials.
+    - glob: "**/.env.*"
+      reason: Variants of environment files hold credentials too.
+    - glob: "**/*.pem"
+      reason: Private keys and certificates.
+    - glob: "**/id_rsa*"
+      reason: SSH private keys.
+    - glob: "~/.ssh/**"
+      reason: SSH keys and host configuration.
+    - glob: "~/.aws/**"
+      reason: Cloud credentials.
+    - glob: "~/.codex/**"
+      reason: Codex user configuration, including its rules and hooks.
+    - glob: "~/.claude/.credentials.json"
+      reason: Claude Code login credentials.
+    - glob: "~/.claude/settings.json"
+      reason: Claude Code user settings, including permissions and hooks.
+    - glob: "~/.claude/settings.local.json"
+      reason: Claude Code local user settings.
+    - glob: "~/.claude/hooks/**"
+      modes: [edit, write]
+      reason: User-level hooks are programs every Claude Code session runs.
+    - glob: "~/.claude/CLAUDE.md"
+      modes: [edit, write]
+      reason: User-level instructions every Claude Code session loads.
+
+commands:
+  deny:
+    - id: atc-integrate-owner-voice
+      argv_prefix: [atc, integrate]
+      with_args: [--owner-run, --owner-words]
+      unless_args: [--check]
+      reason: These flags carry the Owner's own words; an agent never speaks them.
+    - id: atc-integrate
+      argv_prefix: [atc, integrate]
+      unless_args: [--check]
+      reason: Integration is the Owner's act; an agent runs only --check (governance GIT_WORKFLOW.md § Integrate).
+    - id: git-push-main
+      argv_prefix: [git, push]
+      push_targets: [main]
+      reason: main moves only through atc integrate, and its push is the Owner's.
+    - id: atc-verify-background
+      argv_prefix: [atc, verify]
+      background: true
+      reason: Verification runs in the foreground (governance DELIVERY.md § Background work).
+    - id: atc-test-run-background
+      argv_prefix: [atc, test, run]
+      background: true
+      reason: Tests run in the foreground (governance DELIVERY.md § Background work).
+    - id: atc-enforce-hook-install
+      argv_prefix: [atc, enforce]
+      with_args: [--hook-out, --install-hooks]
+      reason: The hook's table and settings entries change only from the Owner's own terminal.
+    - id: git-push-force
+      argv_prefix: [git, push, --force]
+      reason: Rewrites published history.
+    - id: git-push-f
+      argv_prefix: [git, push, -f]
+      reason: Short form of a force push.
+    - id: git-push-force-with-lease
+      argv_prefix: [git, push, --force-with-lease]
+      reason: Still rewrites published history.
+    - id: git-reset-hard
+      argv_prefix: [git, reset, --hard]
+      reason: Discards uncommitted work without recovery.
+    - id: git-clean-f
+      argv_prefix: [git, clean, -f]
+      reason: Deletes untracked files without recovery.
+    - id: git-clean-fd
+      argv_prefix: [git, clean, -fd]
+      reason: Deletes untracked files and directories.
+    - id: git-clean-x
+      argv_prefix: [git, clean, -x]
+      reason: Deletes ignored files, including local state and virtual environments.
+    - id: git-clean-fx
+      argv_prefix: [git, clean, -fx]
+      reason: Forced clean of ignored files.
+    - id: git-clean-df
+      argv_prefix: [git, clean, -df]
+      reason: Forced clean of untracked directories, flags reordered.
+    - id: git-clean-xf
+      argv_prefix: [git, clean, -xf]
+      reason: Forced clean of ignored files, flags reordered.
+    - id: git-clean-fdx
+      argv_prefix: [git, clean, -fdx]
+      reason: Deletes every untracked and ignored file and directory.
+    - id: git-clean-fxd
+      argv_prefix: [git, clean, -fxd]
+      reason: Same as -fdx, flags reordered.
+    - id: git-clean-dfx
+      argv_prefix: [git, clean, -dfx]
+      reason: Same as -fdx, flags reordered.
+    - id: git-clean-dxf
+      argv_prefix: [git, clean, -dxf]
+      reason: Same as -fdx, flags reordered.
+    - id: git-clean-xdf
+      argv_prefix: [git, clean, -xdf]
+      reason: Same as -fdx, flags reordered.
+    - id: git-clean-xfd
+      argv_prefix: [git, clean, -xfd]
+      reason: Same as -fdx, flags reordered.
+    - id: git-clean-long-force
+      argv_prefix: [git, clean, --force]
+      reason: Long form of -f.
+    - id: git-clean-d-then-f
+      argv_prefix: [git, clean, -d, -f]
+      reason: Forced directory clean with separate flags.
+    - id: git-clean-f-then-d
+      argv_prefix: [git, clean, -f, -d]
+      reason: Forced directory clean with separate flags.
+    - id: git-clean-x-then-f
+      argv_prefix: [git, clean, -x, -f]
+      reason: Forced clean of ignored files with separate flags.
+    - id: git-clean-f-then-x
+      argv_prefix: [git, clean, -f, -x]
+      reason: Forced clean of ignored files with separate flags.
+    - id: git-worktree-remove
+      argv_prefix: [git, worktree, remove]
+      reason: Worktree removal goes through atc worktree clean, which refuses unsafe targets.
+    - id: gh-secret
+      argv_prefix: [gh, secret]
+      reason: Repository secrets are managed by the Owner only.
+    - id: gh-variable
+      argv_prefix: [gh, variable]
+      reason: Repository and environment variables are managed by the Owner only.
+    - id: gh-auth-token
+      argv_prefix: [gh, auth, token]
+      reason: Prints the GitHub credential.
+    - id: gh-auth-logout
+      argv_prefix: [gh, auth, logout]
+      reason: Breaks GitHub access for every automation on this machine.

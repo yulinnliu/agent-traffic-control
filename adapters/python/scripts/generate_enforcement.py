@@ -10,6 +10,10 @@ Writes three files under --out, deterministically, so a consuming project can co
 --workspace adds the machine-local segment: an Edit deny on every registered project's state root, as
 absolute paths, written to --local-out (never under --out). A filesystem glob holding a ${...} token is
 refused (`unresolved-token`).
+
+--hook-out composes the PreToolUse hook's table from the workspace policy, every registered project's policy
+and the workspace map; --install-hooks (the Owner's) also writes the hook entries into the Claude Code and
+Codex settings. Command entries with a hook-only condition reach the table only.
 """
 
 from __future__ import annotations
@@ -37,6 +41,21 @@ LOCAL_FILE = "claude-code/settings.local.json"
 # Claude Code's absolute-path form; policy globs are repository-relative or ~-rooted, so never take it.
 MACHINE_LOCAL = re.compile(r"^\w+\(//")
 DRIVE = re.compile(r"^([A-Za-z]):/(.*)$")
+# A command entry carrying one of these is enforced by the PreToolUse hook only; a prefix rule would deny more.
+HOOK_ONLY = ("with_args", "unless_args", "push_targets", "background")
+HOOK_TABLE = "pretooluse.json"
+HOOK_TABLE_VERSION = 1
+ENGINE = "pretooluse_hook.py"
+ENGINE_FILES = (ENGINE, "shell_words.py", "write_targets.py", "globs.py")
+RETIRED_GUARDS = ("worktree_cd_guard.py", "write_scope_guard.py")
+CLAUDE_MATCHER = "Bash|PowerShell|Edit|Write|NotebookEdit"
+CODEX_MATCHER = "Bash|apply_patch"
+HOOK_TIMEOUT = 10
+STATE_REASON = "Persistent project data is written only by the project's own tools."
+
+
+def hook_only(command: dict) -> bool:
+    return any(key in command for key in HOOK_ONLY)
 
 
 def unresolved_tokens(hard: dict) -> list[str]:
@@ -52,6 +71,8 @@ def unresolved_tokens(hard: dict) -> list[str]:
 def claude_settings(hard: dict) -> str:
     deny: list[str] = []
     for command in hard.get("commands", {}).get("deny", []):
+        if hook_only(command):
+            continue
         prefix = " ".join(command["argv_prefix"])
         # A Bash deny alone turns off the PowerShell tool on Windows with Git Bash; a PowerShell rule keeps it on.
         deny += [f"Bash({prefix}:*)", f"PowerShell({prefix} *)"]
@@ -70,7 +91,8 @@ def codex_rules(hard: dict) -> str:
         CODEX_BEGIN,
     ]
     for command in hard.get("commands", {}).get("deny", []):
-        lines.append(f'prefix_rule(pattern={json.dumps(command["argv_prefix"])}, decision="forbidden")')
+        if not hook_only(command):
+            lines.append(f'prefix_rule(pattern={json.dumps(command["argv_prefix"])}, decision="forbidden")')
     lines.append(CODEX_END)
     return "\n".join(lines) + "\n"
 
@@ -153,6 +175,185 @@ def local_settings(roots: list[str]) -> str:
     return json.dumps({"permissions": {"deny": deny}}, indent=2) + "\n"
 
 
+def _workspace_doc(workspace: Path) -> tuple[Path, dict]:
+    doc = yaml.safe_load(workspace.read_text(encoding="utf-8")) or {}
+    base = doc.get("workspace_root") if isinstance(doc, dict) else None
+    if not isinstance(base, str) or not _absolute(base.replace("\\", "/")):
+        raise ValueError(f"{workspace}: workspace_root must be an absolute path")
+    return Path(base), doc
+
+
+def _norm(path: str | Path, base: Path) -> str:
+    """The hook's form of a path: absolute, long, case-folded Windows form (shell_words.native)."""
+    import shell_words
+    import write_targets
+    return write_targets.long_form(shell_words.native(str(path), str(base)))
+
+
+def _expand_root(entry: str) -> str:
+    import ntpath
+    entry = ntpath.expandvars(entry)
+    return str(Path.home()) + entry[1:] if entry.startswith("~") else entry
+
+
+def _hook_sources(base: Path, doc: dict) -> list[tuple[str, Path, list[tuple[Path, int]]]]:
+    """(label, policy directory, scopes of its repository-relative globs), the workspace policy first."""
+    sources = [("policies/hard-deny.yaml", base / "policies", [(base, 0), (base / "worktrees" / "root", 1)])]
+    for name, entry in (doc.get("projects") or {}).items():
+        if not isinstance(entry, dict) or not isinstance(entry.get("repo"), str):
+            continue
+        repo = base / entry["repo"]
+        scopes = [(repo, 0)]
+        if isinstance(entry.get("worktrees"), str):
+            scopes.append((base / entry["worktrees"], 1))
+        sources.append((f"projects.{name}", repo / "policies", scopes))
+    return sources
+
+
+def hook_table(workspace: Path, table_dir: Path, schemas: Path = policies.SCHEMAS) -> str:
+    """The PreToolUse hook's table (docs/ENFORCEMENT.md § PreToolUse hook); raises PolicyError or ValueError."""
+    base, doc = _workspace_doc(workspace)
+    commands: list[dict] = []
+    filesystem: list[dict] = []
+    seen: set[str] = set()
+    for label, directory, scopes in _hook_sources(base, doc):
+        if not (directory / "hard-deny.yaml").is_file():
+            continue
+        try:
+            hard = policies.load(directory, schemas)["hard-deny"]
+        except policies.PolicyError as exc:
+            raise policies.PolicyError([f"{label}: {problem}" for problem in exc.problems]) from exc
+        problems = unresolved_tokens(hard)
+        if problems:
+            raise policies.PolicyError([f"{label}: {problem}" for problem in problems])
+        for command in hard.get("commands", {}).get("deny", []):
+            condition = {k: command[k] for k in ("argv_prefix", *HOOK_ONLY) if k in command}
+            key = json.dumps(condition, sort_keys=True)
+            if key not in seen:
+                seen.add(key)
+                commands.append({"id": command["id"], **condition, "reason": command.get("reason", ""),
+                                 "source": label})
+        entries = hard.get("filesystem", {}).get("deny", [])
+        for index, (glob, modes) in enumerate(policies.filesystem_rules(hard)):
+            entry = entries[index]
+            reason = entry.get("reason", "") if isinstance(entry, dict) else ""
+            if glob.startswith("~"):
+                rule_glob, scope = _norm(str(Path.home()) + glob[1:], base).replace("\\", "/"), None
+            else:
+                rule_glob, scope = glob, [{"base": _norm(path, base), "depth": depth} for path, depth in scopes]
+            key = json.dumps([rule_glob, modes, scope])
+            if key not in seen:
+                seen.add(key)
+                filesystem.append({"id": f"filesystem.deny[{index}]", "glob": rule_glob, "modes": list(modes),
+                                   "scope": scope, "reason": reason, "source": label})
+    projects = {n: e for n, e in (doc.get("projects") or {}).items() if isinstance(e, dict)}
+    for name, entry in projects.items():
+        state = entry.get("state")
+        if isinstance(state, str) and state.strip():
+            filesystem.append({"id": f"state.{name}", "glob": _norm(base / state, base).replace("\\", "/") + "/**",
+                               "modes": ["edit", "write"], "scope": None, "reason": STATE_REASON,
+                               "source": "workspace.yaml"})
+    worktrees = [_norm(base / "worktrees", base)]
+    for entry in projects.values():
+        if isinstance(entry.get("worktrees"), str):
+            path = _norm(base / entry["worktrees"], base)
+            if not any(path == root or path.startswith(root + "\\") for root in worktrees):
+                worktrees.append(path)
+    write_roots = [_norm(base, base)]
+    for root in doc.get("agent_write_roots") or []:
+        if not isinstance(root, str) or not root.strip():
+            raise ValueError(f"{workspace}: agent_write_roots holds a non-string or empty entry")
+        path = _norm(_expand_root(root), base)
+        if path not in write_roots:
+            write_roots.append(path)
+    scripts = base / "adapters" / "python" / "scripts"
+    protected = [_norm(table_dir, base)] + [_norm(scripts / name, base) for name in ENGINE_FILES]
+    table = {"version": HOOK_TABLE_VERSION, "commands": commands, "filesystem": filesystem,
+             "worktrees": worktrees, "write_roots": write_roots, "protected": protected}
+    return json.dumps(table, indent=2, ensure_ascii=False) + "\n"
+
+
+def default_table_dir() -> Path:
+    return Path.home() / ".atc" / "enforcement"
+
+
+def engine_command(workspace: Path, harness: str, table_dir: Path) -> str:
+    """The hook command: the canonical checkout's engine, run by `python`, named by forward-slash path."""
+    base, _ = _workspace_doc(workspace)
+    command = f'python "{(base / "adapters" / "python" / "scripts" / ENGINE).as_posix()}" --harness {harness}'
+    if _norm(table_dir, base) != _norm(default_table_dir(), base):
+        command += f' --table "{(table_dir / HOOK_TABLE).as_posix()}"'
+    return command
+
+
+def hook_group(harness: str, command: str) -> dict:
+    hook = {"type": "command", "command": command, "timeout": HOOK_TIMEOUT}
+    if harness == "claude":
+        hook["onFailure"] = "block"
+    return {"matcher": CLAUDE_MATCHER if harness == "claude" else CODEX_MATCHER, "hooks": [hook]}
+
+
+def _managed(hook: object) -> bool:
+    if not isinstance(hook, dict):
+        return False
+    text = f"{hook.get('command', '')} {' '.join(map(str, hook.get('args') or []))}"
+    return any(name in text for name in (ENGINE, *RETIRED_GUARDS))
+
+
+def _settings(path: Path) -> dict:
+    text = _read(path)
+    if text is None:
+        return {}
+    doc = json.loads(text.removeprefix("﻿"))
+    if not isinstance(doc, dict):
+        raise ValueError(f"{path}: top level is not a JSON object")
+    return doc
+
+
+def install_hook(path: Path, group: dict) -> None:
+    """Replace every PreToolUse entry running the engine or a retired guard with `group`; keep the rest."""
+    doc = _settings(path)
+    hooks = doc.setdefault("hooks", {})
+    kept = []
+    for entry in hooks.get("PreToolUse") or []:
+        items = [hook for hook in entry.get("hooks", []) if not _managed(hook)] if isinstance(entry, dict) else []
+        if items:
+            kept.append({**entry, "hooks": items})
+    hooks["PreToolUse"] = [*kept, group]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(doc, indent=2, ensure_ascii=False) + "\n", encoding="utf-8", newline="\n")
+
+
+def hooks_current(path: Path, group: dict) -> bool:
+    """The file's PreToolUse entries that run the engine or a retired guard are exactly `group`."""
+    try:
+        doc = _settings(path)
+    except ValueError:
+        return False
+    entries = (doc.get("hooks") or {}).get("PreToolUse") or []
+    managed = [e for e in entries if isinstance(e, dict) and any(_managed(h) for h in e.get("hooks", []))]
+    return managed == [group]
+
+
+def hook_drift(workspace: Path, home: Path | None = None) -> list[str] | None:
+    """None when no hook table is installed; else what differs from a fresh compose (empty when current)."""
+    home = home or Path.home()
+    table_dir = home / ".atc" / "enforcement"
+    installed = table_dir / HOOK_TABLE
+    if not installed.is_file():
+        return None
+    try:
+        expected = hook_table(workspace, table_dir)
+        groups = {h: hook_group(h, engine_command(workspace, h, table_dir)) for h in ("claude", "codex")}
+    except (policies.PolicyError, OSError, ValueError, yaml.YAMLError) as exc:
+        return [f"cannot compose ({exc})"]
+    found = [] if _read(installed) == expected else [f"table {installed}"]
+    for harness, path in (("claude", home / ".claude" / "settings.json"), ("codex", home / ".codex" / "hooks.json")):
+        if not hooks_current(path, groups[harness]):
+            found.append(f"{harness} hook entry in {path}")
+    return found
+
+
 def render(hard: dict) -> dict[str, str]:
     return {
         "claude-code/settings.json": claude_settings(hard),
@@ -230,15 +431,17 @@ def drift(files: dict[str, str], out: Path) -> list[str]:
     return [rel for rel, content in files.items() if _read(out / rel) != content]
 
 
+
+
 def main(argv: list[str] | None = None) -> int:
     import cli_conventions
     parser = argparse.ArgumentParser(prog="atc enforce", allow_abbrev=False, **cli_conventions.form(
         __doc__.splitlines()[0], "\n".join(__doc__.strip().splitlines()[2:]),
         exit="0 generated, or current under --check; 1 drift under --check, or a policy problem; 2 usage error",
-        see="docs/ENFORCEMENT.md § Outputs, § Drift"))
-    parser.add_argument("--policies", type=Path, required=True, metavar="DIR",
-                        help="the policy directory holding hard-deny.yaml")
-    parser.add_argument("--out", type=Path, required=True, metavar="DIR",
+        see="docs/ENFORCEMENT.md § Outputs, § Drift, § PreToolUse hook"))
+    parser.add_argument("--policies", type=Path, metavar="DIR",
+                        help="the policy directory holding hard-deny.yaml (required with --out)")
+    parser.add_argument("--out", type=Path, metavar="DIR",
                         help="where the generated files go (committed by the consuming project)")
     parser.add_argument("--check", action="store_true",
                         help="write nothing; exit 1 when --out or a --live-* copy differs from the generated output")
@@ -256,15 +459,41 @@ def main(argv: list[str] | None = None) -> int:
                              "(atc passes the root's own when present)")
     parser.add_argument("--local-out", type=Path, metavar="DIR",
                         help=f"with --workspace: directory for the machine-local {LOCAL_FILE}")
+    parser.add_argument("--hook-out", type=Path, metavar="DIR",
+                        help=f"with --workspace: write the PreToolUse hook's {HOOK_TABLE} to DIR")
+    parser.add_argument("--install-hooks", action="store_true",
+                        help="with --workspace, the Owner's: write the hook table (to --hook-out, default "
+                             "~/.atc/enforcement) and the hook entries of ~/.claude/settings.json and "
+                             "~/.codex/hooks.json, replacing the retired guards' entries")
+    parser.add_argument("--live-hook-table", type=Path, metavar="FILE",
+                        help="with --check and --workspace: an installed hook table that must match")
+    parser.add_argument("--live-claude-hooks", type=Path, metavar="FILE",
+                        help="with --check and --workspace: a Claude settings file whose hook entry must match")
+    parser.add_argument("--live-codex-hooks", type=Path, metavar="FILE",
+                        help="with --check and --workspace: a Codex hooks.json whose hook entry must match")
     parser.add_argument("--schemas", type=Path, default=policies.SCHEMAS, metavar="DIR",
                         help="policy schema directory (default: shared/policies/schemas)")
     cli_conventions.add_json(parser)
     args = parser.parse_args(argv)
-    if not args.check and (args.live_claude or args.live_claude_local or args.live_codex or args.live_hook):
-        parser.error("--live-claude, --live-claude-local, --live-codex and --live-hook require --check")
+    native_live = args.live_claude or args.live_claude_local or args.live_codex or args.live_hook
+    live_hooks = args.live_hook_table or args.live_claude_hooks or args.live_codex_hooks
+    hook_write = args.hook_out is not None or args.install_hooks
+    if (args.policies is None) != (args.out is None):
+        parser.error("--policies and --out go together")
+    if not args.check and (native_live or live_hooks):
+        parser.error("the --live-* options require --check")
+    if args.policies is None and not hook_write and not (args.check and live_hooks):
+        parser.error("--policies and --out are required unless --hook-out, --install-hooks or a --live-*-hooks "
+                     "check is given")
+    if args.policies is None and native_live:
+        parser.error("--live-claude, --live-claude-local, --live-codex and --live-hook require --policies and --out")
+    if args.check and hook_write:
+        parser.error("--hook-out and --install-hooks write; with --check use --live-hook-table")
+    if (hook_write or live_hooks) and not args.workspace:
+        parser.error("--hook-out, --install-hooks and the --live-*-hooks checks require --workspace")
     if args.local_out and not args.workspace:
         parser.error("--local-out requires --workspace")
-    if args.local_out and args.local_out.resolve().is_relative_to(args.out.resolve()):
+    if args.local_out and args.out and args.local_out.resolve().is_relative_to(args.out.resolve()):
         parser.error("--local-out must lie outside --out, which is committed and holds no absolute path")
 
     def done(verdict: str, lines: list[str], code: int, **fields) -> int:
@@ -274,39 +503,64 @@ def main(argv: list[str] | None = None) -> int:
             print("\n".join(lines))
         return code
 
-    try:
-        loaded = policies.load(args.policies, args.schemas)
-    except policies.PolicyError as exc:
-        return done("PROBLEMS", list(exc.problems), 1, problems=list(exc.problems))
-    if "hard-deny" not in loaded:
-        problem = f"missing hard-deny.yaml in {args.policies}"
-        return done("PROBLEMS", [problem], 1, problems=[problem])
-    problems = unresolved_tokens(loaded["hard-deny"])
-    if problems:
+    def problem(problems: list[str]) -> int:
         return done("PROBLEMS", problems, 1, problems=problems)
-    files = render(loaded["hard-deny"])
+
+    files: dict[str, str] = {}
+    if args.policies is not None:
+        try:
+            loaded = policies.load(args.policies, args.schemas)
+        except policies.PolicyError as exc:
+            return problem(list(exc.problems))
+        if "hard-deny" not in loaded:
+            return problem([f"missing hard-deny.yaml in {args.policies}"])
+        problems = unresolved_tokens(loaded["hard-deny"])
+        if problems:
+            return problem(problems)
+        files = render(loaded["hard-deny"])
     local = None
-    if args.workspace:
+    if args.workspace and args.policies is not None:
         try:
             roots = state_roots(args.workspace)
         except (OSError, ValueError, yaml.YAMLError) as exc:
-            return done("PROBLEMS", [f"workspace: {exc}"], 1, problems=[f"workspace: {exc}"])
+            return problem([f"workspace: {exc}"])
         local = {LOCAL_FILE: local_settings(roots)} if roots else None
+    table = None
+    groups: dict[str, dict] = {}
+    table_dir = args.hook_out or default_table_dir()
+    if hook_write or live_hooks:
+        try:
+            table = hook_table(args.workspace, table_dir, args.schemas)
+            groups = {h: hook_group(h, engine_command(args.workspace, h, table_dir)) for h in ("claude", "codex")}
+        except policies.PolicyError as exc:
+            return problem(list(exc.problems))
+        except (OSError, ValueError, yaml.YAMLError) as exc:
+            return problem([f"workspace: {exc}"])
     if args.check:
-        found = drift(files, args.out) + live_drift(
-            files, args.live_claude, args.live_codex, args.live_hook, local, args.live_claude_local
-        )
-        if local and args.local_out:
-            found += [f"machine-local {rel}" for rel in drift(local, args.local_out)]
+        found = []
+        if args.policies is not None:
+            found += drift(files, args.out) + live_drift(
+                files, args.live_claude, args.live_codex, args.live_hook, local, args.live_claude_local
+            )
+            if local and args.local_out:
+                found += [f"machine-local {rel}" for rel in drift(local, args.local_out)]
+        if args.live_hook_table and _read(args.live_hook_table) != table:
+            found.append(f"live-hook-table ({args.live_hook_table})")
+        if args.live_claude_hooks and not hooks_current(args.live_claude_hooks, groups["claude"]):
+            found.append(f"live-claude-hooks ({args.live_claude_hooks})")
+        if args.live_codex_hooks and not hooks_current(args.live_codex_hooks, groups["codex"]):
+            found.append(f"live-codex-hooks ({args.live_codex_hooks})")
         if found:
             return done("DRIFT", ["drift: " + ", ".join(found)], 1, drift=found)
         return done("CURRENT", ["ok: enforcement configs are current"], 0, drift=[])
-    for rel, content in files.items():
-        target = args.out / rel
-        target.parent.mkdir(parents=True, exist_ok=True)
-        write_if_changed(target, content)
-    os.chmod(args.out / "git-hooks/pre-commit", 0o755)
-    lines = ["generated: " + ", ".join(files)]
+    lines = []
+    if args.policies is not None:
+        for rel, content in files.items():
+            target = args.out / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            write_if_changed(target, content)
+        os.chmod(args.out / "git-hooks/pre-commit", 0o755)
+        lines.append("generated: " + ", ".join(files))
     local_target = None
     if local and args.local_out:
         local_target = args.local_out / LOCAL_FILE
@@ -315,7 +569,25 @@ def main(argv: list[str] | None = None) -> int:
         lines.append(f"machine-local: {local_target} (from {args.workspace})")
     elif local:
         lines.append(f"machine-local: {args.workspace} names state roots; pass --local-out DIR to write {LOCAL_FILE}")
-    return done("GENERATED", lines, 0, files=list(files), local=str(local_target) if local_target else None)
+    table_target = None
+    installed: list[str] = []
+    if table is not None:
+        table_target = table_dir / HOOK_TABLE
+        table_target.parent.mkdir(parents=True, exist_ok=True)
+        write_if_changed(table_target, table)
+        lines.append(f"hook-table: {table_target}")
+    if args.install_hooks:
+        for harness, path in (("claude", Path.home() / ".claude" / "settings.json"),
+                              ("codex", Path.home() / ".codex" / "hooks.json")):
+            try:
+                install_hook(path, groups[harness])
+            except (OSError, ValueError) as exc:
+                return problem([f"install: {path}: {exc}"])
+            installed.append(str(path))
+            lines.append(f"installed: {path}")
+        lines.append("codex: review and trust the hook once in Codex's /hooks")
+    return done("GENERATED", lines, 0, files=list(files), local=str(local_target) if local_target else None,
+                hook_table=str(table_target) if table_target else None, installed=installed)
 
 
 if __name__ == "__main__":

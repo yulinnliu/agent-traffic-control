@@ -1,0 +1,7 @@
+{
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "cd /c/ws/worktrees/repo/claude+t && git status"
+  },
+  "cwd": "C:\\ws\\repo"
+}

@@ -1,0 +1,7 @@
+{
+  "tool_name": "PowerShell",
+  "tool_input": {
+    "command": "atc integrate --task ATC-1 --owner-run"
+  },
+  "cwd": "C:\\ws\\repo"
+}

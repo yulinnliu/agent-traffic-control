@@ -1,0 +1,7 @@
+{
+  "exit_code": 0,
+  "output_contains": [
+    "\"permissionDecision\": \"deny\"",
+    "git-push-force"
+  ]
+}

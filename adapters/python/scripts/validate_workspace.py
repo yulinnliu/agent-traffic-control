@@ -721,6 +721,16 @@ def report_machine_local(project_path: Path, label: str, workspace_yaml: Path) -
         print(f"--projects: {label}: machine-local state deny in .claude/settings.local.json differs from {workspace_yaml.name}; run atc enforce --local-out and merge")
 
 
+def report_hook(workspace_yaml: Path) -> None:
+    """Report, never fail: an installed PreToolUse hook table or entry that differs from the policies."""
+    import generate_enforcement
+    if not workspace_yaml.is_file():
+        return
+    found = generate_enforcement.hook_drift(workspace_yaml)
+    if found:
+        print(f"--projects: pretooluse hook differs from the policies: {'; '.join(found)}; the Owner runs atc enforce --install-hooks")
+
+
 def check_atc_dir(project_path: Path, label: str) -> None:
     """The project's `.atc/`: a valid lock, the current bootloader and vendored governance, nothing else but `tasks/`."""
     for stray in atc_strays(project_path):
@@ -922,6 +932,7 @@ def check_projects(canonical: dict[str, dict], project_checkouts: dict[str, Path
         )
         prefixes[f"projects.{name}"] = check_task_records(project_path, label=f"projects.{name}")
     check_unique_prefixes(prefixes)
+    report_hook(real_workspace_yaml)
 
 
 def main(argv: list[str] | None = None) -> int:

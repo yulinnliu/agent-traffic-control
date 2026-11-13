@@ -1,0 +1,7 @@
+{
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "uv run --locked atc integrate --task ATC-1 --reviewed abc"
+  },
+  "cwd": "C:\\ws\\repo"
+}

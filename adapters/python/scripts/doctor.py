@@ -138,6 +138,18 @@ def memory_checks(environ: dict[str, str], found: dict | None = None) -> list[Ch
     return [Check("memory", "WARN", warning) for warning in found["warnings"]]
 
 
+def hook_check(workspace_file: Path, home: Path | None = None) -> Check:
+    """The PreToolUse hook's installed table and entries against the policies (docs/ENFORCEMENT.md § Drift)."""
+    import generate_enforcement
+    found = generate_enforcement.hook_drift(workspace_file, home)
+    if found is None:
+        return Check("pretooluse hook", "NOT_INITIALIZED", "no hook table; the Owner runs atc enforce --install-hooks")
+    if found:
+        return Check("pretooluse hook", "ERROR", f"differs from the policies: {'; '.join(found)}; "
+                                                  "the Owner runs atc enforce --install-hooks")
+    return Check("pretooluse hook", "READY", "table and entries current")
+
+
 def diagnose(root: Path = ROOT, environ: dict[str, str] | None = None, checkout: Path = ROOT) -> list[Check]:
     environ = environ if environ is not None else dict(os.environ)
     checks = [Check("workspace root", "READY", str(root.resolve())), checkout_check(checkout)]
@@ -242,6 +254,9 @@ def diagnose(root: Path = ROOT, environ: dict[str, str] | None = None, checkout:
         else:
             managed = sum(1 for item in plan if "managed adapter" in item.detail)
             checks.append(Check(f"projects.{name}.integration", "READY", f"{managed} managed adapters current"))
+
+    if workspace_file.is_file() and not validator.FAILURES:
+        checks.append(hook_check(workspace_file))
 
     try:
         incidents, resolutions = friction.project_state(friction.load_records(root / "state/workspace-friction/events.jsonl"))

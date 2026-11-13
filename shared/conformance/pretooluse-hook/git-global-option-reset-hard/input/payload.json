@@ -1,0 +1,7 @@
+{
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "git -C /c/ws/repo reset --hard HEAD~1"
+  },
+  "cwd": "C:\\ws\\repo"
+}

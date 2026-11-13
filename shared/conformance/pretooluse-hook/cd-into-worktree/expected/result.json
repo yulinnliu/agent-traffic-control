@@ -1,0 +1,7 @@
+{
+  "exit_code": 0,
+  "output_contains": [
+    "\"permissionDecision\": \"deny\"",
+    "changing directory to /c/ws/worktrees/repo/claude+t"
+  ]
+}

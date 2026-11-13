@@ -1,0 +1,8 @@
+{
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "atc test run --scratch s -- tests/x.py",
+    "run_in_background": true
+  },
+  "cwd": "C:\\ws\\repo"
+}
