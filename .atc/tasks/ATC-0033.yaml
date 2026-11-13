@@ -1,0 +1,20 @@
+task_id: ATC-0033
+repository: yulinnliu/agent-traffic-control
+base_sha: b321397ce4c378ffaf2f8d444b5c5335d4f78af5
+scope: integrate --check runs the records check on a records-only range; --task/branch
+  trap docs and messages; scratch.clean check= test
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: b321397ce4c378ffaf2f8d444b5c5335d4f78af5
+branch: worktree-claude+integrate-check-records
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
+decisions:
+  - "(1) `atc integrate --check` on a records-only range runs the same `_check_records` the real run does (git_integrate.py: real run :1286, check path :1732 returns RECORDS_ONLY without it), so a missing `## Task records` declaration or an unparseable record is reported at check time; test covers it."
+  - "(2) The two integrate traps get clearer docs or error messages, not behaviour changes: `--task` must name a record the range changes (USAGE); that record's `branch` must point at the reviewed SHA (NO_BRANCH_AT_REVIEWED). Docs in CLI.md/TASKS.md where they describe integrate."
+  - "(3) A test that `scratch.clean(check=True)` keeps the registry line when a scratch is missing (the surviving ATC-0032 mutant scratch-check-unregisters)."
+  - "No version bump unless shared/conformance/CLI.md requires it; no shared/governance/ or authorizations/** changes; no push, tag or publish."
