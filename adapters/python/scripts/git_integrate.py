@@ -1384,10 +1384,12 @@ def record_branch(repo: Path, reviewed: str, main_tip: str, record_task: str | N
     branch = record.get("branch")
     tip = rev(repo, f"refs/heads/{branch}") if isinstance(branch, str) and branch else None
     where = f"{gp.REASONS['NO_BRANCH_AT_REVIEWED']}: {reviewed}; {ta.record_path(record_task)} names branch {branch}"
+    fix = (f"; the record's branch is the branch integrated, so point {branch} at {reviewed} "
+           "or correct the record's branch and re-review")
     if tip is None:
-        raise stop("NO_BRANCH_AT_REVIEWED", f"{where}, which is no local branch")
+        raise stop("NO_BRANCH_AT_REVIEWED", f"{where}, which is no local branch{fix}")
     if tip != reviewed and ta.scan(repo, git(repo, "merge-base", main_tip, reviewed).stdout.strip(), reviewed).records_only:
-        raise stop("NO_BRANCH_AT_REVIEWED", f"{where}, which is not at the reviewed SHA of this records-only range")
+        raise stop("NO_BRANCH_AT_REVIEWED", f"{where}, which is not at the reviewed SHA of this records-only range{fix}")
     return branch, "record"
 
 
@@ -1457,7 +1459,10 @@ def resolve_binding(
     if rng.records_only:
         tasks = rng.task_ids
         if args.task is not None and args.task not in tasks:
-            raise Refused("USAGE", f"--task {args.task} names no record this records-only range changes: {', '.join(tasks)}")
+            raise Refused("USAGE", f"--task {args.task} names no record this records-only range changes: "
+                                   f"{', '.join(tasks)}; a records-only range integrates under one of the records "
+                                   f"it changes, so name one of them with --task, or add the record of "
+                                   f"{args.task} to the range")
     else:
         tasks = [] if args.task is None else [args.task]
     ta.check_range(repo, rng, main_tip, reviewed, may_change=rng.records_only and words is not None)
@@ -1717,6 +1722,9 @@ def check(t: Target, as_json: bool) -> int:
         except Refused as refusal:
             _print_refusal(refusal, {**payload, "preflight": asdict(report)}, as_json)
             return refusal.code
+    if t.binding.records_only and (refusal := check_records_tree(t, report.verdict, report.evidence["main_tip"])):
+        _print_refusal(refusal, {**payload, "preflight": asdict(report)}, as_json)
+        return refusal.code
     reuse = check_reuse(t, report.verdict, report.evidence["main_tip"])
     if as_json:
         print(json.dumps({**payload, "preflight": asdict(report), **({"carried_over": carried} if carried else {}),
@@ -1724,6 +1732,19 @@ def check(t: Target, as_json: bool) -> int:
     else:
         print(render_check(report.verdict, report.reason, t, report.evidence["topic_tip"], carried, reuse))
     return 0
+
+
+def check_records_tree(t: Target, verdict: str, main_tip: str) -> Refused | None:
+    """The stop `_check_records` would raise, made on the tree the candidate will hold, which `--check` reads
+    without building it."""
+    tree = candidate_tree(t.repo, verdict, main_tip, t.reviewed)
+    if tree is None:
+        return stop("VERIFICATION_FAILED", f"the record check cannot read the candidate tree of {t.reviewed}")
+    problems = task_records.tree_problems(t.repo, tree)
+    if not problems:
+        return None
+    return stop("VERIFICATION_FAILED", f"the record check fails for the candidate of {t.reviewed}: {problems[0]}",
+                extra=[f"  {problem}" for problem in problems])
 
 
 def check_reuse(t: Target, verdict: str, main_tip: str) -> str:

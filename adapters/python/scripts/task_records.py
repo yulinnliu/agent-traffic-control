@@ -130,22 +130,43 @@ def prefix_problem(declared: str | None) -> str | None:
 
 def problems(repo: Path) -> list[str]:
     """Problems of the declaration and the records in the working tree of ``repo``."""
-    declared = declared_prefix(repo)
-    found = [p for p in (prefix_problem(declared),) if p]
     directory = repo / TASKS_DIR
     files = sorted(directory.glob("*.yaml")) if directory.is_dir() else []
+    return _problems(declared_prefix(repo), [(path.name, path.read_bytes()) for path in files])
+
+
+def tree_problems(repo: Path, tree: str) -> list[str]:
+    """Problems of the declaration and the records in ``tree`` of ``repo``, the check `problems` makes of a
+    checkout of it."""
+    agents = git(repo, "cat-file", "-p", f"{tree}:AGENTS.md", check=False)
+    declared = task_section.prefix(agents.stdout) if agents.returncode == 0 else None
+    listed = git(repo, "ls-tree", "-z", tree, "--", f"{TASKS_DIR}/").stdout
+    entries = []
+    for line in filter(None, listed.split("\0")):
+        meta, _, path = line.partition("\t")
+        name = path.rsplit("/", 1)[-1]
+        if meta.split()[1] == "blob" and name.endswith(".yaml"):
+            entries.append((name, meta.split()[2]))
+    entries.sort()
+    blobs = read_blob_bytes(repo, [sha for _, sha in entries])
+    return _problems(declared, [(name, blobs.get(sha, b"")) for name, sha in entries])
+
+
+def _problems(declared: str | None, files: list[tuple[str, bytes]]) -> list[str]:
+    """Problems of the declared prefix ``declared`` and the record ``files`` as (name, content) pairs."""
+    found = [p for p in (prefix_problem(declared),) if p]
     if files and declared is None:
         found.append(f"no-declaration: {TASKS_DIR}/ holds {len(files)} record(s) but AGENTS.md has no "
                      f"'{task_section.HEADING}' section")
     valid_prefix = None if prefix_problem(declared) else declared
     schema = validator()
-    for path in files:
+    for name, content in files:
         try:
-            text = path.read_text(encoding="utf-8")
+            text = content.decode("utf-8")
         except UnicodeDecodeError as exc:
-            found.append(f"invalid-yaml: {path.name}: not UTF-8 ({exc.reason})")
+            found.append(f"invalid-yaml: {name}: not UTF-8 ({exc.reason})")
             continue
-        found.extend(record_problems(path.name, text, valid_prefix, schema))
+        found.extend(record_problems(name, text, valid_prefix, schema))
     return found
 
 
@@ -471,6 +492,11 @@ def amend(root: Path, environ: dict[str, str], cwd: str, task_id: str, project: 
 
 def read_blobs(repo: Path, shas: list[str]) -> dict[str, str]:
     """Blob contents by SHA through one `git cat-file --batch`."""
+    return {sha: data.decode("utf-8", "replace") for sha, data in read_blob_bytes(repo, shas).items()}
+
+
+def read_blob_bytes(repo: Path, shas: list[str]) -> dict[str, bytes]:
+    """Raw blob contents by SHA through one `git cat-file --batch`."""
     if not shas:
         return {}
     run = subprocess.run(["git", "-C", str(repo), "cat-file", "--batch"], input="".join(f"{s}\n" for s in shas).encode(),
@@ -485,7 +511,7 @@ def read_blobs(repo: Path, shas: list[str]) -> dict[str, str]:
             position = end + 1
             continue
         size = int(header[2])
-        blobs[sha] = data[end + 1:end + 1 + size].decode("utf-8", "replace")
+        blobs[sha] = data[end + 1:end + 1 + size]
         position = end + 1 + size + 1
     return blobs
 

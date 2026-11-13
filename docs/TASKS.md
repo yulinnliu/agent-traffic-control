@@ -71,6 +71,16 @@ The rule of what a record grants and who writes it is governance
   records-only range.
 - A narrowed or revoked grant reaches the record as a records-only range
   integrated with `--owner-words`.
+- A records-only range integrates under one of the records it changes:
+  `--task` names one of them, or the run stops `USAGE`. The `branch` of that
+  record is the branch integrated and must point at the reviewed SHA, or the
+  run stops `NO_BRANCH_AT_REVIEWED`; a record committed on a topic whose
+  branch has another name, or whose branch moved past the reviewed SHA,
+  trips it.
+- `atc integrate --check` of a records-only range runs the record check
+  `atc integrate` runs in place of the verifier on the tree the candidate
+  will hold, without building it: a missing `## Task records` section or a
+  record the schema refuses stops `VERIFICATION_FAILED` at the check.
 - The grant's commit is the most recent commit on `main`'s first-parent
   history of the record whose parsed `authority` or `authority_basis`
   differs from its first parent's copy, the commit that creates the record

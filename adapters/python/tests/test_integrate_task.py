@@ -178,6 +178,29 @@ def test_the_check_of_a_records_only_range_reports_the_record_check_for_reuse(
     assert data["verification_reuse"] == "RECORDS_ONLY"
 
 
+def test_the_check_of_a_records_only_range_runs_the_record_check(
+    tasks_repo: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    broken = record("DEMO-0001", "work").replace("scope: plan § 1\n", "")
+    tip = on_branch(tasks_repo, "work", {".atc/tasks/DEMO-0001.yaml": broken})
+    before = main_tip(tasks_repo)
+    status, data, _ = run_json(tasks_repo, capsys, tip, "--task", "DEMO-0001", "--owner-words", WORDS, "--check")
+    assert (status, data["refusal"]["reason"]) == (1, "VERIFICATION_FAILED")
+    assert "schema-violation: DEMO-0001.yaml" in data["refusal"]["detail"]
+    assert main_tip(tasks_repo) == before
+
+
+def test_the_check_reads_the_record_check_on_the_merge_of_a_no_ff_records_only_range(
+    tasks_repo: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    tip = on_branch(tasks_repo, "work", {".atc/tasks/DEMO-0001.yaml": record("DEMO-0001", "work")})
+    publish(tasks_repo, "work")
+    put(tasks_repo, {"AGENTS.md": "# AGENTS.md\n\n## Other\n"}, "drop the task records section on main")
+    status, data, _ = run_json(tasks_repo, capsys, tip, "--task", "DEMO-0001", "--owner-words", WORDS, "--check")
+    assert (status, data["refusal"]["reason"]) == (1, "VERIFICATION_FAILED")
+    assert "no-declaration: .atc/tasks/ holds 1 record(s)" in data["refusal"]["detail"]
+
+
 def test_a_records_only_range_needs_no_verification_section(tasks_repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     put(tasks_repo, {"AGENTS.md": "# AGENTS.md\n\n## Task records\n\n- Task prefix: DEMO\n"})
     tip = on_branch(tasks_repo, "work", {".atc/tasks/DEMO-0001.yaml": record("DEMO-0001", "work", GRANT)})
@@ -405,7 +428,18 @@ def test_a_records_only_range_whose_record_names_another_branch_stops(
     assert (status, data["refusal"]["reason"]) == (1, "NO_BRANCH_AT_REVIEWED")
     expected = "which is not at the reviewed SHA" if elsewhere else "which is no local branch"
     assert expected in data["refusal"]["detail"]
+    assert f"point two at {tip} or correct the record's branch" in data["refusal"]["detail"]
     assert (main_tip(tasks_repo), lines(tasks_repo)) == (before, [])
+
+
+def test_a_records_only_range_integrates_under_a_record_it_changes(
+    tasks_repo: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    tip = on_branch(tasks_repo, "work", {".atc/tasks/DEMO-0001.yaml": record("DEMO-0001", "work")})
+    assert run(tasks_repo, tip, "--task", "DEMO-0002", "--owner-words", WORDS, "--check") == 2
+    assert capsys.readouterr().err.startswith(
+        "ERROR USAGE --task DEMO-0002 names no record this records-only range changes: DEMO-0001; a records-only "
+        "range integrates under one of the records it changes, so name one of them with --task")
 
 
 # A recovered candidate resolves its authority as any other run

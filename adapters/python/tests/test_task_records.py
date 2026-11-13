@@ -347,6 +347,24 @@ def test_a_broken_schema_fails_the_check(tmp_path: Path, monkeypatch: pytest.Mon
         task_records.problems(tmp_path)
 
 
+def test_the_check_of_a_tree_finds_what_the_check_of_its_checkout_finds(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    run_git(repo, "init", "-q", "-b", "main")
+    commit(repo, {"AGENTS.md": agents("DEMO"), f"{TASKS_DIR}/DEMO-0001.yaml": record("DEMO-0001", "b"),
+                  f"{TASKS_DIR}/DEMO-0002.yaml": record("DEMO-0003", "b"), f"{TASKS_DIR}/notes.txt": "not a record\n",
+                  f"{TASKS_DIR}/nested/DEMO-0004.yaml": "{"})
+    (repo / TASKS_DIR / "DEMO-0005.yaml").write_bytes(b"scope: \xff\n")
+    run_git(repo, "add", "--", TASKS_DIR)
+    head = commit(repo, {"AGENTS.md": "# AGENTS.md\n"})
+    tree = run_git(repo, "rev-parse", f"{head}^{{tree}}")
+    found = task_records.problems(repo)
+    assert found[0].startswith("no-declaration: .atc/tasks/ holds 3 record(s)")
+    assert any(p.startswith("id-mismatch: DEMO-0002.yaml") for p in found)
+    assert any(p.startswith("invalid-yaml: DEMO-0005.yaml: not UTF-8") for p in found)
+    assert task_records.tree_problems(repo, tree) == found
+
+
 # --project root and the prefix of a record --task
 
 
