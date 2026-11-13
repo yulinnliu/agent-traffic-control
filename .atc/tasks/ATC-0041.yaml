@@ -1,0 +1,22 @@
+task_id: ATC-0041
+repository: yulinnliu/agent-traffic-control
+base_sha: 4099af87fdd16fb105174cae267bd26bc6684100
+scope: 'Fix the 3 tests that fail on Linux in the v0.5.0 tag CI (atc-testkit worker
+  pool: msvcrt NameError at workers.py:219, IDLE prefix at test_testkit_status.py:59,
+  None .log at test_testkit_workers.py:545); bring docs/releases/v0.5.0.md up to the
+  re-tag commit; add a pre-tag CI run on main to the release procedure'
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: 4099af87fdd16fb105174cae267bd26bc6684100
+branch: worktree-claude+linux-testkit-fix
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
+decisions:
+  - "Owner 11-14: delete the v0.5.0 tag (its tag CI failed, no Release) and re-tag v0.5.0 at the fixed commit; the version stays 0.5.0, no bump."
+  - "Fix the cause on POSIX, not the test: platform-specific locking (msvcrt) needs a POSIX path or a guard, and the tests reflect the intended output. Failing log: GitHub Actions run 43454269712, job python-adapter (ubuntu-latest)."
+  - "docs/releases/v0.5.0.md lists every task through ATC-0041 (ATC-0040 landed after b9ee49a)."
+  - "Release procedure gains one step: before tagging, dispatch the validate workflow on main and tag only on green; written where the release procedure is documented."
