@@ -204,7 +204,7 @@ no such option: there a hook that cannot start lets the call run.
 **Installation.** `atc enforce --install-hooks`, run by the Owner, writes the
 table (to `--hook-out`, default `~/.atc/enforcement`) and replaces, in
 `~/.claude/settings.json` and `~/.codex/hooks.json`, every PreToolUse entry
-running the engine, `worktree_cd_guard.py` or `write_scope_guard.py` with:
+running the engine or one of the retired guards (`worktree_cd_guard.py`, `write_scope_guard.py`) with:
 
 | Harness | Matcher | Command |
 | --- | --- | --- |

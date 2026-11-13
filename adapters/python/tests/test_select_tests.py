@@ -22,8 +22,6 @@ def chosen(graph: select_tests.Graph, *paths: str) -> list[str] | None:
 
 
 def test_a_script_selects_its_own_tests(graph):
-    assert chosen(graph, f"{ADAPTER}/scripts/worktree_cd_guard.py") == [
-        "tests/test_select_tests.py", "tests/test_worktree_cd_guard.py"]
     assert chosen(graph, f"{ADAPTER}/scripts/build_testkit_release.py") == [
         "tests/test_select_tests.py", "tests/test_testkit_release.py"]
 
@@ -31,13 +29,13 @@ def test_a_script_selects_its_own_tests(graph):
 def test_a_script_selects_the_tests_that_reach_it_through_another_module(graph):
     selected = chosen(graph, f"{ADAPTER}/scripts/git_preflight.py")
     assert {"tests/test_git_preflight.py", "tests/test_managed_worktree.py", "tests/test_git_integrate.py"} <= set(selected)
-    assert "tests/test_worktree_cd_guard.py" not in selected
+    assert "tests/test_testkit_release.py" not in selected
 
 
 def test_a_testkit_module_selects_the_tests_that_reach_it(graph):
     selected = chosen(graph, f"{ADAPTER}/atc-testkit/src/atc_testkit/verifier.py")
     assert {"tests/test_integration_verify.py", "tests/test_testkit_gate.py", "tests/test_testkit_verifier.py"} <= set(selected)
-    assert "tests/test_worktree_cd_guard.py" not in selected
+    assert "tests/test_pretooluse_hook.py" not in selected
 
 
 def test_a_testkit_module_selects_the_tests_that_scan_the_whole_package(graph):
@@ -200,7 +198,7 @@ def test_a_guarded_path_no_declared_test_reads_selects_by_kind(graph, monkeypatc
 ])
 def test_a_full_trigger_selects_the_full_suite(graph, path):
     assert chosen(graph, path) == []
-    assert chosen(graph, f"{ADAPTER}/scripts/worktree_cd_guard.py", path) == []
+    assert chosen(graph, f"{ADAPTER}/scripts/build_testkit_release.py", path) == []
 
 
 @pytest.mark.parametrize("path", [
@@ -216,7 +214,7 @@ def test_an_unmapped_path_falls_back_to_the_full_suite(graph, path):
 def test_shared_paths_select_the_tests_that_read_their_area(graph):
     selected = chosen(graph, "shared/conformance/generate-enforcement/example-policies/hard-deny.yaml")
     assert {"tests/test_conformance.py", "tests/test_codex_rules.py", "tests/test_generate_enforcement.py"} <= set(selected)
-    assert "tests/test_worktree_cd_guard.py" not in selected
+    assert "tests/test_testkit_release.py" not in selected
 
 
 @pytest.mark.parametrize("path", [
@@ -240,7 +238,7 @@ def test_markdown_no_test_names_selects_nothing(graph):
 
 
 def test_the_command_prints_a_summary_and_explains_on_request(capsys):
-    paths = ["--paths", f"{ADAPTER}/scripts/worktree_cd_guard.py", "docs/NO_TEST_NAMES_THIS.md"]
+    paths = ["--paths", f"{ADAPTER}/scripts/build_testkit_release.py", "docs/NO_TEST_NAMES_THIS.md"]
     assert select_tests.main(paths) == 0
     out = capsys.readouterr().out.splitlines()
     assert out[0].startswith("test selection: 2 of ")
@@ -248,14 +246,14 @@ def test_the_command_prints_a_summary_and_explains_on_request(capsys):
     assert "  docs/NO_TEST_NAMES_THIS.md: Markdown no declared test reads" in out
     assert select_tests.main([*paths, "--explain"]) == 0
     out = capsys.readouterr().out.splitlines()
-    assert f"  tests/test_worktree_cd_guard.py  <- {ADAPTER}/scripts/worktree_cd_guard.py" in out
+    assert f"  tests/test_testkit_release.py  <- {ADAPTER}/scripts/build_testkit_release.py" in out
 
 
 def test_the_json_form_prints_the_files_to_run(capsys):
-    guard = f"{ADAPTER}/scripts/worktree_cd_guard.py"
+    guard = f"{ADAPTER}/scripts/build_testkit_release.py"
     assert select_tests.main(["--json", "--paths", guard]) == 0
     files = json.loads(capsys.readouterr().out)
-    assert "tests/test_worktree_cd_guard.py" in files and all(not f.startswith(ADAPTER) for f in files)
+    assert "tests/test_testkit_release.py" in files and all(not f.startswith(ADAPTER) for f in files)
     assert select_tests.main(["--json", "--paths", "docs/NO_TEST_NAMES_THIS.md"]) == 0
     assert json.loads(capsys.readouterr().out) == []
     assert select_tests.main(["--json", "--paths", f"{ADAPTER}/tests/root_reads.py"]) == 0
@@ -277,9 +275,9 @@ def test_the_declared_selector_prints_the_json_form():
 
     adapter = Path(select_tests.__file__).resolve().parents[1]
     selector = tomllib.loads((adapter / "pyproject.toml").read_text(encoding="utf-8"))["tool"]["atc-testkit"]["selector"]
-    done = subprocess.run([sys.executable, *selector, f"{ADAPTER}/scripts/worktree_cd_guard.py"], cwd=adapter,
+    done = subprocess.run([sys.executable, *selector, f"{ADAPTER}/scripts/build_testkit_release.py"], cwd=adapter,
                           capture_output=True, text=True, check=True)
-    assert "tests/test_worktree_cd_guard.py" in json.loads(done.stdout)
+    assert "tests/test_testkit_release.py" in json.loads(done.stdout)
 
 
 def test_direct_is_the_changed_tests_and_the_tests_one_edge_from_a_changed_module(graph, capsys):
@@ -288,5 +286,5 @@ def test_direct_is_the_changed_tests_and_the_tests_one_edge_from_a_changed_modul
     assert set(select_tests.direct([preflight], graph)) < set(chosen(graph, preflight))
     assert select_tests.direct([f"{ADAPTER}/tests/test_tooling.py", "docs/NO_TEST_NAMES_THIS.md"], graph) == [
         "tests/test_tooling.py"]
-    assert select_tests.main(["--json", "--paths", f"{ADAPTER}/scripts/worktree_cd_guard.py", "--direct"]) == 0
-    assert json.loads(capsys.readouterr().out) == ["tests/test_worktree_cd_guard.py"]
+    assert select_tests.main(["--json", "--paths", f"{ADAPTER}/scripts/build_testkit_release.py", "--direct"]) == 0
+    assert json.loads(capsys.readouterr().out) == ["tests/test_testkit_release.py"]

@@ -1,26 +1,25 @@
-"""The PreToolUse guard refuses a persistent directory change into the worktrees root."""
+"""The engine refuses a top-level directory change into a worktrees root (the cd rule of docs/ENFORCEMENT.md § PreToolUse hook)."""
 from __future__ import annotations
-
-import json
-import os
-import subprocess
-import sys
-from pathlib import Path, PureWindowsPath
 
 import pytest
 
-import worktree_cd_guard as guard
+import pretooluse_hook as hook
+
+pytestmark = pytest.mark.unit
 
 ROOT = r"C:\Users\Some One\Hami"
-WORKTREES = PureWindowsPath(ROOT, "worktrees")
 TREE = "worktrees/hami-quant-trading/claude+exp007-demo-confirm"
 WIN = rf"{ROOT}\worktrees\hami-quant-trading\claude+exp007-demo-confirm"
 FWD = WIN.replace("\\", "/")
 POSIX = "/c" + FWD[2:]
+QUANT = "/c" + ROOT[2:].replace("\\", "/") + "/worktrees/hami-quant/claude+signal-feed-job-object"
+TABLE = {"version": 1, "commands": [], "filesystem": [], "worktrees": [ROOT.lower() + "\\worktrees"],
+         "write_roots": [ROOT], "protected": []}
 
 
-def check(tool: str, command: str, cwd: str = ROOT) -> str | None:
-    return guard.blocked(tool, command, cwd, WORKTREES)
+def check(tool: str, command: str, cwd: str = ROOT, harness: str = "claude") -> str | None:
+    payload = {"tool_name": tool, "tool_input": {"command": command}, "cwd": cwd}
+    return hook.decide(payload, TABLE, harness)
 
 
 @pytest.mark.parametrize("command", [
@@ -75,6 +74,8 @@ def test_bash_subshell_git_c_and_other_paths_are_allowed(command):
     f'& {{ cd "{WIN}" }}',
     f'git status; set-location "{WIN}"',
     f"cd {TREE}",
+    f'Set-Location -ErrorAction Stop -Path "{WIN}"',
+    f'Set-Location -ea 0 "{WIN}"',
 ])
 def test_powershell_location_change_into_worktrees_is_refused(command):
     assert check("PowerShell", command) is not None
@@ -94,17 +95,6 @@ def test_powershell_other_commands_are_allowed(command):
     assert check("PowerShell", command) is None
 
 
-@pytest.mark.parametrize("command", [
-    f'Set-Location -ErrorAction Stop -Path "{WIN}"',
-    f'Set-Location -ea 0 "{WIN}"',
-])
-def test_powershell_common_parameter_values_are_skipped(command):
-    assert check("PowerShell", command) is not None
-
-
-QUANT = "/c" + ROOT[2:].replace("\\", "/") + "/worktrees/hami-quant/claude+signal-feed-job-object"
-
-
 @pytest.mark.parametrize("command, cwd", [
     (f'W="{QUANT}"; cd "$W" && git log --oneline -1 && for f in a b; do echo "===== $f"; cat -n "$f"; done',
      rf"{ROOT}\projects\hami-quant"),
@@ -121,9 +111,7 @@ def test_bash_cd_to_a_literal_variable_is_refused(command, cwd):
 
 
 def test_refusal_names_the_resolved_path_with_later_variables_left_as_written():
-    target = check("Bash", f'W="{QUANT}"; cd "$W/$Y"')
-    assert target == f"{QUANT}/$Y"
-    assert f"{QUANT}/$Y" in guard.reason("Bash", target)
+    assert f"{QUANT}/$Y" in check("Bash", f'W="{QUANT}"; cd "$W/$Y"')
 
 
 @pytest.mark.parametrize("command", [
@@ -169,34 +157,13 @@ def test_relative_target_resolves_against_the_session_cwd():
     assert check("Bash", "cd ../../..", cwd=WIN) is None
 
 
-def test_other_tools_are_ignored():
+def test_other_tools_and_the_codex_harness_are_not_checked():
     assert check("Read", f'cd "{POSIX}"') is None
+    assert check("Bash", f'cd "{POSIX}"', harness="codex") is None
 
 
-def run_hook(payload: dict) -> subprocess.CompletedProcess:
-    script = Path(guard.__file__)
-    return subprocess.run([sys.executable, str(script)], input=json.dumps(payload),
-                          env={**os.environ, "PYTHONIOENCODING": "utf-8"}, capture_output=True, text=True,
-                          encoding="utf-8", timeout=60)
-
-
-def test_hook_prints_a_deny_naming_the_alternatives():
-    target = guard.WORKTREES / "some-project" / "claude+topic"
-    ran = run_hook({"tool_name": "Bash", "tool_input": {"command": f'cd "{target}"'}, "cwd": str(guard.ROOT)})
-    assert ran.returncode == 0, ran.stderr
-    decision = json.loads(ran.stdout)["hookSpecificOutput"]
-    assert decision["permissionDecision"] == "deny"
+def test_the_refusals_name_the_alternatives():
+    bash = check("Bash", f'cd "{POSIX}"')
     for alternative in ("git -C <path>", "absolute", "( cd <path> && ... )", "`PYTHONPATH`"):
-        assert alternative in decision["permissionDecisionReason"]
-
-
-def test_powershell_refusal_names_the_import_alternative():
-    assert "`PYTHONPATH` to its `packages/*/src`" in guard.reason("PowerShell", WIN)
-
-
-def test_hook_allows_silently_and_fails_open():
-    allowed = run_hook({"tool_name": "Bash", "tool_input": {"command": "git status"}, "cwd": str(guard.ROOT)})
-    assert (allowed.returncode, allowed.stdout) == (0, "")
-    broken = subprocess.run([sys.executable, guard.__file__], input="not json",
-                            capture_output=True, text=True, timeout=60)
-    assert (broken.returncode, broken.stdout) == (0, "")
+        assert alternative in bash
+    assert "`PYTHONPATH` to its `packages/*/src`" in check("PowerShell", f'Set-Location "{WIN}"')
