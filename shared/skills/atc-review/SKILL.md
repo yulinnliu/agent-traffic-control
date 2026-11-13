@@ -35,7 +35,8 @@ the `atc-coordinator` skill's `references/briefs.md`.
   report gives results rather than narrating the implementation.
 - On session messaging, a report or verdict is saved as a file under
   `~/.atc/reports/`, and the message's first line is its conclusion plus
-  that path. The session that integrates the task deletes its report files
+  that path. A reviewer running as a subagent saves its verdict the same
+  way, and the verdict it returns starts with the same first line. The session that integrates the task deletes its report files
   at close-out (governance `DELIVERY.md` § Close-out). A notification that truncates (a
   short note, a preview) is a pointer, never the report.
 - On the paste carrier, the report or verdict goes inline, in full, in the
@@ -212,8 +213,10 @@ tip.
 ## Reviewer: the verdict block
 
 The verdict takes the shape governance `VERIFICATION.md` § Independent review
-gives. Deliver it as "Every block you write" says; on session messaging its
-file is `~/.atc/reports/<task>-<short sha>-review.md`.
+gives. Deliver it as "Every block you write" says. Whether you run as a
+subagent or a session, you write its file
+`~/.atc/reports/<task>-<short sha>-review.md` yourself, and what you
+return or send starts with the conclusion plus that path.
 
 - The verified line: test counts, mutant results, `atc verify`'s last line,
   read-only host evidence.

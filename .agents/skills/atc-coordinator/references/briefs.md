@@ -56,4 +56,7 @@ SHA: <full tip SHA>
   The exact tip SHA the step report names.
 Report: <report path>
   The step report's path, relayed verbatim.
+Verdict: ~/.atc/reports/<task ID>-<short SHA>-review.md
+  The file the reviewer writes itself, subagent or session; its reply's
+  first line is the conclusion plus this path.
 ```

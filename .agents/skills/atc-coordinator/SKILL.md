@@ -128,9 +128,11 @@ the map from task ID to session and nothing a record, Git or
    `references/briefs.md`, relaying the step report verbatim as its path.
    The reviewer is a fresh subagent or a separate session that has not seen
    the writer's conversation; it continues the last reviewer only as governance
-   `VERIFICATION.md` § Independent review states. Relay findings to the
-   writer verbatim as the verdict's path; never review the work yourself.
-   Done when the verdict is received whole.
+   `VERIFICATION.md` § Independent review states. The reviewer, subagent
+   or session, saves its verdict file itself; relay that path, never a
+   transcription of the verdict, and relay findings to the writer as the
+   same path; never review the work yourself. Done when the verdict's file
+   is there and read whole.
 5. **Hand the Owner the integration.** A PASS does not by itself trigger an
    integration. On a PASS that carries an integration instruction, run
    `atc integrate --check --json` with the instruction's arguments; it
