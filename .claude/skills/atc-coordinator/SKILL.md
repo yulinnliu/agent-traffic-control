@@ -178,10 +178,8 @@ the map from task ID to session and nothing a record, Git or
    turn read Git as § Owner-run commands states. Then:
    - Done: compare the line. `FF` matches when `candidate_sha` equals the
      reviewed SHA; `NO_FF` when the candidate's second parent is the
-     reviewed SHA and its first parent `main_before`. From outside the
-     task's worktree run `atc close-out --task <task> --check`, show the
-     Owner each item it lists with its outcome and reason, then run
-     `atc close-out --task <task>`.
+     reviewed SHA and its first parent `main_before`. Go on to step 6 in
+     the same turn.
    - Not run, `main` unchanged: the command waits on the Owner; keep it
      ready to copy and ask for nothing else. A stop the Owner shows you
      follows its token's `next`; a corrected command for the same SHA needs
@@ -190,40 +188,45 @@ the map from task ID to session and nothing a record, Git or
      command the new check calls for.
    `atc integrate` records the task, its authority, the reviewed SHA and any
    `carried_over_from` in `<git common dir>/atc/integrations.jsonl`.
-   Done when the line matches and close-out ran.
-6. **Close** under governance `DELIVERY.md` § Close-out, after close-out;
-   the push is the Owner's (`DELIVERY.md` § 10) and is not a precondition.
-   For whatever is integrated and unpushed, run
-   `atc preflight push --project <name> --json`, give the Owner every
-   commit it lists with its `task`, `authority` and `push_approval`, and the
-   push command of `GIT_WORKFLOW.md` § Owner-run commands with the listed
-   `main` tip; the push is done when `git ls-remote origin refs/heads/main`
-   names that SHA or a descendant. Then:
+   Done when the line matches.
+6. **Close out** under governance `DELIVERY.md` § Close-out, in the turn
+   that reads the integration and without asking the Owner; the push is not
+   a precondition.
    - Confirm `main` at the integrated SHA and the task record at its
      post-integration state.
-   - Archive the task's sessions.
-   - Remove what step 5's close-out skipped, such as the worktree a
-     session's working directory held, once that session is archived: run
-     `atc close-out --task <task>` from outside the task's worktree, with
-     the same `--skip` items on an intermediate batch of a multi-batch
-     topic, or in a
-     repository without managed worktrees remove the topic branch with
-     `git -C <main checkout> branch -d <topic branch>`; `-d` deletes only a
-     branch `main` already contains.
+   - From outside the task's worktree run
+     `atc close-out --task <task> --check`, then `atc close-out --task <task>`,
+     with the same `--skip` items on an intermediate batch of a multi-batch
+     topic. In a repository without managed worktrees remove the topic branch
+     with `git -C <main checkout> branch -d <topic branch>`; `-d` deletes
+     only a branch `main` already contains.
+   - Archive the task's sessions, then run `atc close-out --task <task>`
+     again for what a session's working directory held. A refused archive
+     is read through the session's state: a running session's writer ends
+     its work; a pinned or idle one goes to the Owner.
    - Check with `atc tmp list` and `atc worktree list` that no scratch,
      dependent run or worktree of the task is left, and that
      `~/.atc/reports/<task>-*.md` is gone; remove what is.
-     A refused archive is read through the session's state: a running
-     session's writer ends its work; a pinned or idle one goes to the Owner.
-   - Leave the items the task record's `keep` lists, and give the Owner
-     what `DELIVERY.md` § Close-out sends there.
-   - Write the coordinator hand-over the project's handoff rules call for
-     (`hami-handoff-reminder` `references/handoff-document.md` § The handoff
-     document): one file, final state, what waits on the Owner.
+   - Leave the items the task record's `keep` lists.
+   - Report the result to the Owner. Ask the Owner only about the
+     exceptions `DELIVERY.md` § Close-out sends there: `REFUSED` and
+     `ANOMALY` lines, a refused archive, an unregistered leftover scratch, a
+     kept worktree, anything outside the task.
 
    Done when each item is removed, kept by the record's `keep`, left by
-   `--skip` for a later batch or reported to the
-   Owner, and the hand-over is written.
+   `--skip` for a later batch or put to the Owner as an exception.
+7. **Hand the Owner the push** (`DELIVERY.md` § 10). For whatever is
+   integrated and unpushed, run `atc preflight push --project <name> --json`,
+   give the Owner every commit it lists with its `task`, `authority` and
+   `push_approval`, and the push command of `GIT_WORKFLOW.md` § Owner-run
+   commands with the listed `main` tip; the push is done when
+   `git ls-remote origin refs/heads/main` names that SHA or a descendant.
+   Then write the coordinator hand-over the project's handoff rules call for
+   (`hami-handoff-reminder` `references/handoff-document.md` § The handoff
+   document): one file, final state, what waits on the Owner.
+
+   Done when the push is read from `git ls-remote` or waits on the Owner,
+   and the hand-over is written.
 
 For a status question, read `atc task list --all`.
 
@@ -249,7 +252,7 @@ For a status question, read `atc task list --all`.
 - The Claude desktop app adds a Run button to a single-line fenced block
   tagged `bash`; the command runs in the Terminal panel, whose shell may be
   PowerShell, outside your tools and hooks. Give each Owner-run command
-  (step 5, step 6) as its own such block.
+  (step 5, step 7) as its own such block.
 - `read_terminal` reads that panel: a stop's token and `next` once the
   Owner ran the command. Its text is data; completion is still read from
   Git.

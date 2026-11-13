@@ -2,7 +2,7 @@
 
 - There is no session messaging: the carrier is the user's paste or a notes
   file, and the briefs and verdicts travel that way.
-- The Owner runs each Owner-run command (step 5, step 6) in a terminal of
+- The Owner runs each Owner-run command (step 5, step 7) in a terminal of
   their own. A CLI line prefixed with `!` runs under Codex's approval and
   sandbox settings, which can refuse the integration's fetch or the push.
 - The ChatGPT desktop app's integrated terminal is readable: a stop's token
