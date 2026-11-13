@@ -252,10 +252,9 @@ as a subagent, you write its file
   which names the repository, and the full 40-character reviewed SHA
   (governance `GIT_WORKFLOW.md` § Integrate). A task identity string in place
   of a record ID adds `--project <name>`, `--project root` for the workspace
-  root. When the record on `main` does not grant the integration,
-  the holder adds `--owner-words "Owner run: approve integration"` and gives
-  the filled instruction to the Owner (governance `GIT_WORKFLOW.md`
-  § Task and authority). The command names no branch, verifier or timeout: the tool
+  root. When the record on `main` does not grant the integration, the holder
+  adds `--owner-run` and gives the filled instruction to the Owner
+  (governance `GIT_WORKFLOW.md` § Task and authority). The command names no branch, verifier or timeout: the tool
   takes the branch from the record's `branch` (a task identity string: the
   one local branch at the reviewed SHA) and reads the verifier from the
   `## Integration verification` section of `AGENTS.md` at `main`. In a

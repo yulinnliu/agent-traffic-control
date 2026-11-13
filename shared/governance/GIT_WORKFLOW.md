@@ -448,8 +448,9 @@ exactly one source.
   (`root` for the workspace root); it integrates the one local branch at the
   reviewed SHA.
 - The authority is either the record on `main` with `integrate_main: true`,
-  or `--owner-words <quote>`: the Owner's words quoted, or the decision
-  label of a command the Owner runs.
+  or `--owner-words <quote>` with the Owner's words quoted, or `--owner-run`
+  on a command the Owner runs, which records the decision label
+  `Owner run: approve integration` as the `--owner-words` quote.
 - A range whose changed paths all lie under `.atc/tasks/` is records-only: the
   record check runs in place of the verifier.
 - Recovering an interrupted integration takes `--task`.
@@ -463,11 +464,10 @@ The Owner runs every `atc integrate` but `--check`; no agent runs it.
 Authority is split by flag:
 
 - on the record's authority the Owner runs `atc integrate --task <ID>`
-  without `--owner-words` (§ Owner-run commands);
+  without `--owner-run` (§ Owner-run commands);
 - only the coordinator, who hears the Owner, writes a record's `authority`;
-- `--owner-words` carries the Owner's decision: the Owner runs the
-  integration command the coordinator gives (§ Owner-run commands), with
-  the decision label `Owner run: approve integration` as the quote. The
+- `--owner-run` carries the Owner's decision: the Owner runs the
+  integration command the coordinator gives (§ Owner-run commands). The
   coordinator never runs it and never relays it to a writer. The Owner
   running the command is the authority; no local artifact attests it.
 
@@ -502,12 +502,12 @@ line that runs unchanged in PowerShell and in a POSIX shell:
 - every SHA in full, 40 characters.
 
 ```text
-atc integrate --task <task> --reviewed <40-character SHA> --owner-words "Owner run: approve integration"
+atc integrate --task <task> --reviewed <40-character SHA> --owner-run
 git -C "<main checkout>" push origin <40-character SHA>:refs/heads/main
 ```
 
 A task identity string adds `--project <name>`; a record on `main` that
-grants `integrate_main` for `FF` drops `--owner-words`. A records-only range
+grants `integrate_main` for `FF` drops `--owner-run`. A records-only range
 takes the same form.
 
 The coordinator reads completion from Git, never from a report that the

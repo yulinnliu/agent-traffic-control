@@ -147,8 +147,16 @@ def report_summary(task: str, report: Path) -> dict:
             "closed_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
 
 
+def is_writer_report(task: str, report: Path) -> bool:
+    """A writer report (`<ID>-<sha>.md`) is deleted with no ledger line."""
+    match = REPORT_NAME.fullmatch(report.name)
+    return match is not None and match["task"] == task and not match["review"]
+
+
 def record_report(repo: Path, task: str, report: Path) -> None:
-    """Append the report's summary line to the repository's ``integrations.jsonl``."""
+    """Append the report's summary line to the repository's ``integrations.jsonl``; a writer report has none."""
+    if is_writer_report(task, report):
+        return
     common = git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip()
     if not common:
         raise OSError(f"no git common directory for {repo}")
@@ -201,6 +209,8 @@ def rehearse_leftover(root: Path, name: str, directory: Path, branch: str, envir
 
 def rehearse_report(repo: Path, task: str, report: Path) -> str:
     """What the real run would do to a report: its ledger line, previewed, then the deletion."""
+    if is_writer_report(task, report):
+        return f"DELETED {report} (writer report, no ledger line)"
     common = git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip()
     if not common:
         return f"REFUSED {report} (ledger: no git common directory for {repo})"

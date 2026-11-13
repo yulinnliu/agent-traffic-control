@@ -39,6 +39,7 @@ FULL_SHA = re.compile(r"[0-9a-f]{40}")
 # `--reviewed` and `--rebased`: the full SHA or a unique prefix (governance `GIT_WORKFLOW.md` § Integrate).
 MIN_PREFIX = 12
 SHA_FORM = "the full SHA or a unique prefix of 12 or more hexadecimal characters"
+OWNER_RUN_QUOTE = "Owner run: approve integration"  # the quote `--owner-run` records (GIT_WORKFLOW.md § Owner-run commands)
 CANDIDATE_ID_BYTES = 6
 BUDGET_EXCEEDED = "test budget exceeded: optimise the tests or ask the Owner; a retry does not help"
 WORKTREE_BRANCH = re.compile(r"worktree-[^+]+\+(?P<topic>.+)")
@@ -1634,10 +1635,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="the task: a record ID with a declared prefix (it names the repository and the branch), or a task "
         "identity string",
     )
-    parser.add_argument(
+    owner = parser.add_mutually_exclusive_group()
+    owner.add_argument(
         "--owner-words", metavar="QUOTE",
-        help="the Owner's words granting this integration, quoted; without it the record on main must grant "
-        "integrate_main, which covers FF only",
+        help="the Owner's words granting this integration, quoted; without it or --owner-run the record on main "
+        "must grant integrate_main, which covers FF only",
+    )
+    owner.add_argument(
+        "--owner-run", dest="owner_words", action="store_const", const=OWNER_RUN_QUOTE,
+        help=f"the Owner runs this command, which is their decision; records the quote \"{OWNER_RUN_QUOTE}\"",
     )
     parser.add_argument(
         "--verify-timeout", type=float, metavar="SECONDS",

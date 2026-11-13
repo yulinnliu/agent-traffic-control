@@ -158,7 +158,7 @@ the map from task ID to session and nothing a record, Git or
      seconds; any other value runs the verifier, up to its timeout) and the
      command of governance `GIT_WORKFLOW.md` § Owner-run commands, filled
      in. A record on `main` that grants `integrate_main` drops
-     `--owner-words` for `FF` (§ Task and authority).
+     `--owner-run` for `FF` (§ Task and authority).
    - On a `refusal` whose `next` names a rebase (`REBASE_REQUIRED`, or
      `OVERLAP` or `CONFLICT` of an unpublished topic), the writer rebases
      and reports the new tip. Run
@@ -194,9 +194,9 @@ the map from task ID to session and nothing a record, Git or
      post-integration state.
    - From outside the task's worktree run
      `atc close-out --task <task> --check`, then
-     `atc close-out --task <task>`, with the same `--skip` items on an intermediate batch of a multi-batch
-     topic. In a repository without managed worktrees remove the topic branch
-     with `git -C <main checkout> branch -d <topic branch>`; `-d` deletes
+     `atc close-out --task <task>`, with the same `--skip` items on an
+     intermediate batch of a multi-batch topic. In a repository without
+     managed worktrees remove the topic branch with `git -C <main checkout> branch -d <topic branch>`; `-d` deletes
      only a branch `main` already contains.
    - Archive the task's sessions, then run `atc close-out --task <task>`
      again, with the same `--skip` items, for what a session's working
@@ -251,6 +251,9 @@ For a status question, read `atc task list --all`.
   instead of polling.
 - Sessions are archived at close-out (step 6) through the session
   management tools.
+- After a task's close-out and archive, when this session's context is
+  about 200K tokens or more, the report to the Owner ends by suggesting
+  they run `/compact`, which only the Owner can run. Never mid-task.
 - The Claude desktop app adds a Run button to a single-line fenced block
   tagged `bash`; the command runs in the Terminal panel, whose shell may be
   PowerShell, outside your tools and hooks. Give each Owner-run command

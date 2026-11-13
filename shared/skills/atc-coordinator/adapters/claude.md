@@ -18,6 +18,9 @@
   instead of polling.
 - Sessions are archived at close-out (step 6) through the session
   management tools.
+- After a task's close-out and archive, when this session's context is
+  about 200K tokens or more, the report to the Owner ends by suggesting
+  they run `/compact`, which only the Owner can run. Never mid-task.
 - The Claude desktop app adds a Run button to a single-line fenced block
   tagged `bash`; the command runs in the Terminal panel, whose shell may be
   PowerShell, outside your tools and hooks. Give each Owner-run command

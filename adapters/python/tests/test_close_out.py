@@ -257,18 +257,22 @@ def ledger_reports(ws: Workspace) -> list[dict]:
             if entry.get("kind") == "report"]
 
 
-def test_each_deleted_report_leaves_a_summary_line(done, capsys: pytest.CaptureFixture[str]) -> None:
+def test_each_deleted_report_but_a_writer_report_leaves_a_summary_line(
+        done, capsys: pytest.CaptureFixture[str]) -> None:
     ws, _topic, environ = done
     reports = Path(environ["HOME"]) / ".atc" / "reports"
-    (reports / f"{TASK}-1a2b3c4.md").write_text("step report, tip 1a2b3c4\n", encoding="utf-8")
+    writer = reports / f"{TASK}-1a2b3c4.md"
+    writer.write_text("step report, tip 1a2b3c4\n", encoding="utf-8")
     (reports / f"{TASK}-1a2b3c4-review.md").write_text("\n# CONDITIONAL PASS at 1a2b3c4\n", encoding="utf-8")
-    code, _lines, err = close(ws, environ, capsys, ws.root)
+    code, lines, err = close(ws, environ, capsys, ws.root, "--check")
+    assert code == 0 and f"DELETED {writer} (writer report, no ledger line)" in lines, (lines, err)
+    code, lines, err = close(ws, environ, capsys, ws.root)
     assert code == 0, err
+    assert f"DELETED {writer}" in lines and not writer.exists()
     rows = {entry["file"]: entry for entry in ledger_reports(ws)}
-    assert set(rows) == {f"{TASK}-abc.md", f"{TASK}-abc-review.md", f"{TASK}-1a2b3c4.md", f"{TASK}-1a2b3c4-review.md"}
+    assert set(rows) == {f"{TASK}-abc.md", f"{TASK}-abc-review.md", f"{TASK}-1a2b3c4-review.md"}
     assert (rows[f"{TASK}-1a2b3c4-review.md"]["role"], rows[f"{TASK}-1a2b3c4-review.md"]["sha"],
             rows[f"{TASK}-1a2b3c4-review.md"]["verdict"]) == ("reviewer", "1a2b3c4", "CONDITIONAL PASS")
-    assert (rows[f"{TASK}-1a2b3c4.md"]["role"], rows[f"{TASK}-1a2b3c4.md"]["verdict"]) == ("writer", None)
     assert (rows[f"{TASK}-abc.md"]["role"], rows[f"{TASK}-abc.md"]["sha"]) == ("unknown", None)
     assert all(entry["task"] == TASK and "candidate_sha" not in entry for entry in rows.values())
     assert [entry["task"] for entry in git_preflight.read_integrations(ws.repo)] == [TASK]

@@ -157,7 +157,7 @@ the map from task ID to session and nothing a record, Git or
      seconds; any other value runs the verifier, up to its timeout) and the
      command of governance `GIT_WORKFLOW.md` § Owner-run commands, filled
      in. A record on `main` that grants `integrate_main` drops
-     `--owner-words` for `FF` (§ Task and authority).
+     `--owner-run` for `FF` (§ Task and authority).
    - On a `refusal` whose `next` names a rebase (`REBASE_REQUIRED`, or
      `OVERLAP` or `CONFLICT` of an unpublished topic), the writer rebases
      and reports the new tip. Run
@@ -193,9 +193,9 @@ the map from task ID to session and nothing a record, Git or
      post-integration state.
    - From outside the task's worktree run
      `atc close-out --task <task> --check`, then
-     `atc close-out --task <task>`, with the same `--skip` items on an intermediate batch of a multi-batch
-     topic. In a repository without managed worktrees remove the topic branch
-     with `git -C <main checkout> branch -d <topic branch>`; `-d` deletes
+     `atc close-out --task <task>`, with the same `--skip` items on an
+     intermediate batch of a multi-batch topic. In a repository without
+     managed worktrees remove the topic branch with `git -C <main checkout> branch -d <topic branch>`; `-d` deletes
      only a branch `main` already contains.
    - Archive the task's sessions, then run `atc close-out --task <task>`
      again, with the same `--skip` items, for what a session's working

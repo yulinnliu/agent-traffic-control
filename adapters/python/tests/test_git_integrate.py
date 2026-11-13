@@ -1425,12 +1425,20 @@ def test_a_verifier_that_cannot_start_is_an_error(repo: Path, capsys: pytest.Cap
     ["--reviewed", "0" * 40, "--authority-reference", "x"],
     ["--reviewed", "0" * 40, *TASK, "--branch", "topic"],
     ["--reviewed", "0" * 40, *TASK, "--repo", "."],
-], ids=["no reviewed", "verify command", "no task", "check without task", "authority reference", "branch", "repo"])
+    ["--reviewed", "0" * 40, *TASK, "--owner-run"],
+], ids=["no reviewed", "verify command", "no task", "check without task", "authority reference", "branch", "repo",
+        "owner words and owner run"])
 def test_argument_errors_take_the_error_form(repo: Path, capsys: pytest.CaptureFixture[str], args: list[str]) -> None:
     assert gi.main(["--project", "repo", *args], root=repo.parent) == 2
     lines = capsys.readouterr().err.splitlines()
     assert lines[0].startswith("ERROR USAGE ")
     assert len(lines) == 1
+
+
+@pytest.mark.unit
+def test_owner_run_records_the_owner_run_quote_as_owner_words() -> None:
+    args = gi.build_parser().parse_args(["--reviewed", "0" * 40, "--task", "ATC-0001", "--owner-run"])
+    assert args.owner_words == "Owner run: approve integration"
 
 
 @pytest.mark.integration

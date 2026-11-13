@@ -119,7 +119,7 @@ gives the Owner one command to run (`GIT_WORKFLOW.md` § Owner-run
 commands):
 
 ```text
-atc integrate --task <ID> --reviewed <40-character sha> --owner-words "Owner run: approve integration"
+atc integrate --task <ID> --reviewed <40-character sha> --owner-run
 ```
 
 The record ID names the repository by its prefix and the branch by the

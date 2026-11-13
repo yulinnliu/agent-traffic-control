@@ -53,7 +53,9 @@ records with a YAML serializer, so every string is quoted where YAML needs it.
 
 The rule of what a record grants and who writes it is governance
 `GIT_WORKFLOW.md` § Task and authority; this section is the mechanism
-`atc integrate` implements.
+`atc integrate` implements. `--owner-run` is `--owner-words` with the quote
+`Owner run: approve integration`, for a command the Owner runs; the two are
+mutually exclusive, and `--owner-words` below covers both.
 
 - A task the Owner pre-authorizes is bound on `main` before its work: the
   coordinator commits the record alone as the topic's first commit and
@@ -192,14 +194,15 @@ several, the working directory's.
    with their dependent runs (`ATC_HOME.md` § Deleting), go through
    `atc tmp clean`. `atc test run` fills the `task` of the line it registers
    from the tree's branch when one record names that branch.
-4. Each report file `~/.atc/reports/<ID>-*.md` first appends one line to the
-   repository's `integrations.jsonl`, then is deleted:
+4. Each report file `~/.atc/reports/<ID>-*.md` is deleted. A writer report
+   `<ID>-<sha>.md` is deleted with no ledger line (`--check`:
+   `writer report, no ledger line`); any other first appends one line to the
+   repository's `integrations.jsonl`:
    `{"kind": "report", "task", "role", "sha", "verdict", "file", "closed_at"}`.
-   `role` is `writer` for `<ID>-<sha>.md`, `reviewer` for
-   `<ID>-<sha>-review.md`, else `unknown` with `sha` `null`; a reviewer's
-   `verdict` is the first whole word `CONDITIONAL PASS`, `PASS` or `FAIL` of
-   the file's first non-empty line, a leading `#` ignored and a word after
-   `NO` or `NOT` skipped, else `null`. A line that cannot be written ends the
+   `role` is `reviewer` for `<ID>-<sha>-review.md`, else `unknown` with `sha`
+   `null`; a reviewer's `verdict` is the first whole word `CONDITIONAL PASS`,
+   `PASS` or `FAIL` of the file's first non-empty line, a leading `#` ignored
+   and a word after `NO` or `NOT` skipped, else `null`. A line that cannot be written ends the
    file `REFUSED` with the error and keeps it. Readers of integrations take
    only lines with a `candidate_sha`, so these lines change no status.
 
