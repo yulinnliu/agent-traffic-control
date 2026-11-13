@@ -2,10 +2,15 @@
   "permissions": {
     "deny": [
       "Bash(git push --force:*)",
+      "PowerShell(git push --force *)",
       "Bash(git push -f:*)",
+      "PowerShell(git push -f *)",
       "Bash(git reset --hard:*)",
+      "PowerShell(git reset --hard *)",
       "Bash(git clean -fdx:*)",
+      "PowerShell(git clean -fdx *)",
       "Bash(git worktree remove:*)",
+      "PowerShell(git worktree remove *)",
       "Read(**/.env)",
       "Edit(**/.env)",
       "Read(**/.env.*)",

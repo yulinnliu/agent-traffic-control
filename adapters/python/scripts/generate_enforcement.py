@@ -52,7 +52,9 @@ def unresolved_tokens(hard: dict) -> list[str]:
 def claude_settings(hard: dict) -> str:
     deny: list[str] = []
     for command in hard.get("commands", {}).get("deny", []):
-        deny.append(f"Bash({' '.join(command['argv_prefix'])}:*)")
+        prefix = " ".join(command["argv_prefix"])
+        # A Bash deny alone turns off the PowerShell tool on Windows with Git Bash; a PowerShell rule keeps it on.
+        deny += [f"Bash({prefix}:*)", f"PowerShell({prefix} *)"]
     for glob, modes in policies.filesystem_rules(hard):
         deny.extend(f"{tool}({glob})" for tool, covers in CLAUDE_TOOLS if covers & set(modes))
     return json.dumps({"permissions": {"deny": deny}}, indent=2) + "\n"

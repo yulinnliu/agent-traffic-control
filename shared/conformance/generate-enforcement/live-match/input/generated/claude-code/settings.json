@@ -2,6 +2,7 @@
   "permissions": {
     "deny": [
       "Bash(git push --force:*)",
+      "PowerShell(git push --force *)",
       "Read(**/.env)",
       "Edit(**/.env)",
       "Edit(~/.claude/hooks/**)",

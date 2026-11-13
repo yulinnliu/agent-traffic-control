@@ -75,7 +75,12 @@ no machine-local block.
 ## Mapping
 
 **Claude Code.** In policy order: each command becomes
-`Bash(<argv joined by single spaces>:*)`; each filesystem rule becomes one
+`Bash(<argv joined by single spaces>:*)` followed by
+`PowerShell(<argv joined by single spaces> *)`. On Windows with Git Bash a
+`Bash` deny alone silently turns off the PowerShell tool, and the `PowerShell`
+rule both keeps that tool on and binds it to the same deny (see "Bash deny
+rules also turn off the PowerShell tool" in
+https://code.claude.com/docs/en/tools-reference). Each filesystem rule becomes one
 entry per tool, in the order `Read(<glob>)`, `Edit(<glob>)`: `read` renders
 `Read`, and `edit` or `write` renders one `Edit`, not repeated when both are
 present. Claude Code checks path rules only for `Read(path)` and `Edit(path)`,
