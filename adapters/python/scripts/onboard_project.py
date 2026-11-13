@@ -8,11 +8,14 @@ the canonical skill, so a project needs nothing from this checkout at run
 time. `.atc/tasks/` is the project's; an adapter without an ownership marker
 is project-owned; neither is ever rewritten.
 
-`--sync` with `--project` or `--all` commits what it writes on each project's
-`main` and records the commit in `integrations.jsonl`; `--root-only` renders
-the adapters of the checkout it runs in and commits nothing. The rules:
-GIT_WORKFLOW.md "Governance sync commits". `apply()` creates a new project's
-missing files, updates nothing and commits nothing (`atc bootstrap add`).
+`--check` and `--sync` with `--project` or `--all` render the sync target: the
+latest release tag on `main`, or the SHA the Owner names with `--revision`
+(CORE.md § Effective authority and revocation, docs/LAYOUT.md). `--sync`
+commits what it writes on each project's `main` and records the commit in
+`integrations.jsonl`; `--root-only` renders the adapters of the checkout it
+runs in and commits nothing. The rules: GIT_WORKFLOW.md "Governance sync
+commits". `apply()` creates a new project's missing files from the same
+target, updates nothing and commits nothing (`atc bootstrap add`).
 """
 
 from __future__ import annotations
@@ -25,6 +28,8 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -37,8 +42,11 @@ import cli_conventions
 from integration_slot import IntegrationSlot
 
 ROOT = Path(__file__).resolve().parents[3]
+MAIN = "main"
 # The `--json` result: one entry per checkout `run` plans, None outside `--json` (shared/conformance/CLI.md § Output).
 EVENTS: list[dict] | None = None
+# The `--json` result's `target`: the revision projects were rendered from, None until resolved.
+TARGET_EVENT: dict | None = None
 POINTER_LINE = re.compile(rf"^{re.escape(validator.POINTER_MARKER)}.*$", re.MULTILINE)
 VERIFIER_SOURCE_HEADING = re.compile(r"^#+ Integration verifier source\s*$", re.MULTILINE)
 
@@ -49,6 +57,15 @@ class PlanItem:
     path: Path
     detail: str
     content: str | None = None
+
+
+@dataclass(frozen=True)
+class Target:
+    """What sync renders and locks: ``tree`` holds the sources of ``revision``."""
+    tree: Path
+    revision: str
+    tag: str | None = None
+    named: bool = False
 
 
 def load_projects(root: Path = ROOT) -> dict[str, dict]:
@@ -174,11 +191,12 @@ def atc_plan(project_path: Path, root: Path) -> list[PlanItem]:
     return plan
 
 
-def lock_plan(project_path: Path, root: Path, changed: bool) -> PlanItem:
-    """`.atc/atc.lock` moves to the ATC HEAD when sync changes any file it writes (GIT_WORKFLOW.md § Lock advancement)."""
+def lock_plan(project_path: Path, root: Path, changed: bool, revision: str) -> PlanItem:
+    """`.atc/atc.lock` moves to the sync target ``revision`` when sync changes any file it writes
+    (GIT_WORKFLOW.md § Lock advancement)."""
     path = project_path / validator.ATC_LOCK
     source = governance_source(root)
-    content = validator.render_lock(source, governance_revision(root))
+    content = validator.render_lock(source, revision)
     lock = validator.read_lock(project_path)
     if lock is None:
         return PlanItem("create", path, "ATC lock", content)
@@ -192,19 +210,27 @@ def lock_plan(project_path: Path, root: Path, changed: bool) -> PlanItem:
     return PlanItem("skip", path, "ATC lock is current")
 
 
-def build_plan(project_path: Path, root: Path = ROOT, prune: bool = False) -> list[PlanItem]:
+def checkout_target(root: Path) -> Target:
+    """The ATC checkout as it stands, locked at its HEAD."""
+    return Target(root, governance_revision(root))
+
+
+def build_plan(project_path: Path, root: Path = ROOT, prune: bool = False, target: Target | None = None) -> list[PlanItem]:
     """Every file sync writes, in its write order: `.atc/` bootloader and governance, the pointer line,
-    `CLAUDE.md`, the adapters, then the lock."""
-    template_path = validator.pointer_template_path(root)
+    `CLAUDE.md`, the adapters, then the lock. Rendered from ``target`` (the checkout ``root`` by default);
+    the source name and the lock's history check come from ``root``."""
+    target = target or checkout_target(root)
+    tree = target.tree
+    template_path = validator.pointer_template_path(tree)
     if not template_path.exists():
         raise ValueError(f"{template_path}: missing canonical pointer line template")
-    if not validator.atc_readme_template_path(root).exists():
-        raise ValueError(f"{validator.atc_readme_template_path(root)}: missing canonical bootloader template")
-    plan: list[PlanItem] = atc_plan(project_path, root)
+    if not validator.atc_readme_template_path(tree).exists():
+        raise ValueError(f"{validator.atc_readme_template_path(tree)}: missing canonical bootloader template")
+    plan: list[PlanItem] = atc_plan(project_path, tree)
     atc_collision = any(item.action == "collision" for item in plan)
-    plan.append(pointer_plan(project_path, validator.pointer_line(root)))
+    plan.append(pointer_plan(project_path, validator.pointer_line(tree)))
 
-    claude_source = (root / "CLAUDE.md").read_text(encoding="utf-8")
+    claude_source = (tree / "CLAUDE.md").read_text(encoding="utf-8")
     claude_target = project_path / "CLAUDE.md"
     if not claude_target.exists():
         plan.append(PlanItem("create", claude_target, "workspace entrypoint", claude_source))
@@ -226,45 +252,46 @@ def build_plan(project_path: Path, root: Path = ROOT, prune: bool = False) -> li
                              testkit_record,
                              '; '.join(problems) if problems else 'testkit contract current; project configuration preserved'))
 
-    canonical = canonical_skills(root)
+    canonical = canonical_skills(tree)
     for skill, metadata in canonical.items():
         baseline = metadata.get("adoption") == "baseline"
         for tool_dir in validator.adapter_dirs(metadata):
-            target = project_path / tool_dir / "skills" / skill / "SKILL.md"
-            if not baseline and not target.exists():
+            adapter = project_path / tool_dir / "skills" / skill / "SKILL.md"
+            if not baseline and not adapter.exists():
                 continue
-            expected = validator.render_adapter(root, skill, tool_dir)
-            if not target.exists() and holds_files(target.parent):
-                plan.append(PlanItem("collision", target, UNOWNED_DIRECTORY))
-            elif not target.exists():
-                plan.append(PlanItem("create", target, "baseline managed adapter", expected))
-            elif not managed_adapter(target, skill):
+            expected = validator.render_adapter(tree, skill, tool_dir)
+            if not adapter.exists() and holds_files(adapter.parent):
+                plan.append(PlanItem("collision", adapter, UNOWNED_DIRECTORY))
+            elif not adapter.exists():
+                plan.append(PlanItem("create", adapter, "baseline managed adapter", expected))
+            elif not managed_adapter(adapter, skill):
                 plan.append(
                     PlanItem(
                         "collision",
-                        target,
+                        adapter,
                         "adapter ownership or canonical identity is invalid or uncertain; refusing to modify",
                     )
                 )
-            elif validator.normalise(target.read_text(encoding="utf-8")) != expected:
-                plan.append(PlanItem("update", target, "managed adapter drift", expected))
+            elif validator.normalise(adapter.read_text(encoding="utf-8")) != expected:
+                plan.append(PlanItem("update", adapter, "managed adapter drift", expected))
             else:
-                plan.append(PlanItem("skip", target, "managed adapter is current"))
+                plan.append(PlanItem("skip", adapter, "managed adapter is current"))
             if plan[-1].action != "collision":
-                plan.extend(supporting_plan(root, skill, target.parent))
+                plan.extend(supporting_plan(tree, skill, adapter.parent))
     plan.extend(orphan_plan(project_path, set(canonical)))
     if not atc_collision:
         changed = any(item.action in ("create", "update") or (prune and item.action == "prune") for item in plan)
-        plan.append(lock_plan(project_path, root, changed))
+        plan.append(lock_plan(project_path, root, changed, target.revision))
     return plan
 
 
-def verification_gate(project_path: Path, root: Path) -> str | None:
-    """Why the lock cannot advance to the ATC HEAD (GIT_WORKFLOW.md § Lock advancement), or ``None``.
+def verification_gate(project_path: Path, tree: Path) -> str | None:
+    """Why the lock cannot advance to the sync target whose sources ``tree`` holds
+    (GIT_WORKFLOW.md § Lock advancement), or ``None``.
 
-    Applies once the governance at HEAD carries § Integration verifier source;
+    Applies once the target's governance carries § Integration verifier source;
     the section is parsed as `atc integrate` parses it."""
-    workflow = root / "shared" / "governance" / "GIT_WORKFLOW.md"
+    workflow = tree / "shared" / "governance" / "GIT_WORKFLOW.md"
     if not workflow.is_file() or not VERIFIER_SOURCE_HEADING.search(workflow.read_text(encoding="utf-8")):
         return None
     agents_md = project_path / "AGENTS.md"
@@ -458,13 +485,13 @@ def changed_paths(repo: Path) -> list[str]:
     return paths
 
 
-def root_commit_revision(root: Path) -> str:
-    """The ATC revision a sync commit names: HEAD of the ATC checkout on main with no tracked change."""
+def root_commit_revision(root: Path, target: Target) -> str:
+    """The ATC revision a sync commit names: the target, synced from the ATC checkout on main with no tracked change."""
     if validator.lock_state(root, "HEAD") != "current":
         raise SyncStop("ROOT_NOT_MAIN", "sync commits render from the ATC checkout on main; in a topic run --root-only")
     if _git(root, "status", "--porcelain", "--untracked-files=no").stdout.strip():
         raise SyncStop("ROOT_DIRTY", "the ATC checkout has uncommitted tracked changes")
-    return governance_revision(root)
+    return target.revision
 
 
 def check_project_checkout(project_path: Path) -> None:
@@ -482,16 +509,74 @@ def check_project_checkout(project_path: Path) -> None:
         raise SyncStop("BEHIND_ORIGIN", "local main does not contain origin/main; bring main up to date first")
 
 
-RELEASE_TAGS = "v[0-9]*"
+RELEASE_TAG = re.compile(r"v([0-9]+)\.([0-9]+)\.([0-9]+)")
+FULL_SHA = re.compile(r"[0-9a-f]{40}")
+
+
+def merged_release_tags(root: Path, ref: str) -> list[tuple[str, str]]:
+    """``(tag, commit)`` of every ``vMAJOR.MINOR.PATCH`` tag in the history of ``ref``, highest version first,
+    read from the ATC checkout's local tags."""
+    listed = _git(root, "for-each-ref", "--merged", ref, "--format=%(refname:short)%09%(*objectname)%09%(objectname)",
+                  "refs/tags", check=False)
+    tags = []
+    for line in listed.stdout.splitlines() if listed.returncode == 0 else []:
+        name, peeled, direct = line.split("\t")
+        version = RELEASE_TAG.fullmatch(name)
+        if version:
+            tags.append((tuple(int(part) for part in version.groups()), name, peeled or direct))
+    return [(name, commit) for _, name, commit in sorted(tags, reverse=True)]
 
 
 def release_tags(root: Path, revision: str) -> tuple[str | None, str | None]:
     """The release tag at ``revision``, else the latest release tag before it, read in the ATC checkout."""
-    exact = _git(root, "describe", "--tags", "--match", RELEASE_TAGS, "--exact-match", revision, check=False)
-    if exact.returncode == 0:
-        return exact.stdout.strip(), None
-    after = _git(root, "describe", "--tags", "--match", RELEASE_TAGS, "--abbrev=0", revision, check=False)
-    return None, (after.stdout.strip() or None) if after.returncode == 0 else None
+    tags = merged_release_tags(root, revision)
+    exact = next((name for name, commit in tags if commit == revision), None)
+    if exact:
+        return exact, None
+    return None, tags[0][0] if tags else None
+
+
+def resolve_target(root: Path, revision: str | None) -> tuple[str, str | None, bool]:
+    """``(revision, tag, named)`` sync renders: the latest release tag on main, or the Owner-named SHA on main."""
+    if revision is not None:
+        known = _git(root, "rev-parse", "--verify", "-q", f"{revision}^{{commit}}", check=False)
+        if known.returncode or _git(root, "merge-base", "--is-ancestor", revision, f"refs/heads/{MAIN}", check=False).returncode:
+            raise SyncStop("REVISION_NOT_ON_MAIN", f"{revision} is not a commit in the history of the ATC checkout's {MAIN}")
+        return revision, release_tags(root, revision)[0], True
+    tags = merged_release_tags(root, f"refs/heads/{MAIN}")
+    if not tags:
+        raise SyncStop("NO_RELEASE_TAG", f"no vMAJOR.MINOR.PATCH tag in the history of {MAIN} in this checkout; "
+                                         "fetch the tags or name a SHA with --revision")
+    name, commit = tags[0]
+    return commit, name, False
+
+
+@contextlib.contextmanager
+def exported_target(root: Path, revision: str | None) -> Iterator[Target]:
+    """The sync target with its sources exported to a temporary tree for the duration of the block."""
+    commit, tag, named = resolve_target(root, revision)
+    with tempfile.TemporaryDirectory(prefix="atc-sync-", ignore_cleanup_errors=True) as temporary:
+        tree = Path(temporary) / "tree"
+        try:
+            validator.export_revision(root, commit, tree)
+        except ValueError as exc:
+            raise SyncStop("EXPORT_FAILED", str(exc)) from None
+        yield Target(tree, commit, tag, named)
+
+
+def behind_lock(project_path: Path, root: Path, target: Target) -> str | None:
+    """The locked revision when the default target is a strict ancestor of it, which sync never moves back to."""
+    if target.named:
+        return None
+    try:
+        lock = validator.read_lock(project_path)
+    except ValueError:
+        return None
+    if lock is None or lock["revision"] == target.revision:
+        return None
+    if _git(root, "merge-base", "--is-ancestor", target.revision, lock["revision"], check=False).returncode:
+        return None
+    return lock["revision"]
 
 
 def sync_label(revision: str, tags: tuple[str | None, str | None]) -> str:
@@ -552,8 +637,11 @@ def sync_and_commit(project_path: Path, plan: list[PlanItem], prune: bool, sourc
         slot.release()
 
 
-def run(mode: str, targets: list[tuple[str, Path]], root: Path = ROOT, prune: bool = False, commit: bool = False, verbose: bool = False) -> int:
-    """``commit`` makes a sync commit on each project's main (GIT_WORKFLOW.md "Governance sync commits")."""
+def run(mode: str, targets: list[tuple[str, Path]], root: Path = ROOT, prune: bool = False, commit: bool = False,
+        verbose: bool = False, target: Target | None = None) -> int:
+    """``commit`` makes a sync commit on each project's main (GIT_WORKFLOW.md "Governance sync commits").
+    Projects are rendered from ``target``, the checkout ``root`` as it stands by default."""
+    target = target or checkout_target(root)
     has_collision = False
     has_pending = False
     has_updates = False
@@ -569,7 +657,7 @@ def run(mode: str, targets: list[tuple[str, Path]], root: Path = ROOT, prune: bo
         try:
             if any(item.action in ("create", "update", "collision") for item in root_plan):
                 raise SyncStop("ROOT_ADAPTER_DRIFT", "the ATC checkout's own adapters are not current; render them in the topic that changed the skill")
-            revision = root_commit_revision(root)
+            revision = root_commit_revision(root, target)
         except SyncStop as stop:
             _stop(stop.code, stop.detail)
             return cli_conventions.STOP
@@ -584,9 +672,16 @@ def run(mode: str, targets: list[tuple[str, Path]], root: Path = ROOT, prune: bo
             if EVENTS is not None:
                 EVENTS.append({"project": name, "path": str(project_path), "mode": mode, "readiness": "NOT_INITIALIZED"})
             continue
-        plan = build_plan(project_path, root, prune)
+        ahead = behind_lock(project_path, root, target)
+        if ahead:
+            plan = [PlanItem("skip", project_path / validator.ATC_LOCK,
+                             f"locked at {ahead}, ahead of {target.tag or target.revision}; "
+                             "sync never moves a project back without --revision")]
+            print_plan(name, project_path, plan, mode, prune, verbose=True)
+            continue
+        plan = build_plan(project_path, root, prune, target)
         print_plan(name, project_path, plan, mode, prune, verbose)
-        gate = verification_gate(project_path, root)
+        gate = verification_gate(project_path, target.tree)
         ignored = ignored_outputs(project_path, plan)
         if gate or ignored:
             if gate:
@@ -629,11 +724,18 @@ def _stop(code: str, detail: str) -> None:
         EVENTS[-1].setdefault("stops", []).append({"reason": code, "detail": detail})
 
 
+def full_sha(value: str) -> str:
+    if not FULL_SHA.fullmatch(value):
+        raise argparse.ArgumentTypeError("expects a full 40-hex commit SHA")
+    return value
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="atc onboard", allow_abbrev=False, **cli_conventions.form(
         "Check or sync the files Agent Traffic Control owns inside projects.",
         "Owned: CLAUDE.md when absent, the AGENTS.md pointer line, .atc/ (README.md, atc.lock,\n"
-        "governance/) and one managed adapter per baseline skill. --sync commits on each project's main.",
+        "governance/) and one managed adapter per baseline skill, rendered from the latest release tag on\n"
+        "main or the --revision SHA. --sync commits on each project's main.",
         exit="0 current or synced; 1 STOP (drift under --check, a collision, a sync precondition); 2 ERROR",
         see="docs/LAYOUT.md § Inside a consuming repository; GIT_WORKFLOW.md § Governance sync commits"))
     modes = parser.add_mutually_exclusive_group(required=True)
@@ -646,6 +748,8 @@ def build_parser() -> argparse.ArgumentParser:
     targets.add_argument("--all", action="store_true", help="every project registered in workspace.yaml")
     targets.add_argument("--root-only", action="store_true",
                          help="render only the adapters of the ATC checkout holding the working directory; commits nothing")
+    parser.add_argument("--revision", metavar="SHA", type=full_sha,
+                        help="render this 40-hex SHA on main instead of the latest release tag (the Owner names it)")
     parser.add_argument("--verbose", action="store_true", help="also list the items already current")
     parser.add_argument("--prune", action="store_true",
                         help="with --sync: delete orphaned managed adapters (canonical skill renamed or removed)")
@@ -654,21 +758,45 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None, root: Path = ROOT) -> int:
-    global EVENTS
+    global EVENTS, TARGET_EVENT
     parser = build_parser()
     args = parser.parse_args(argv)
     if args.prune and args.mode != "sync":
         parser.error("--prune only applies with --sync")
+    if args.revision and args.root_only:
+        parser.error("--revision applies to --project and --all; --root-only renders the checkout it runs in")
     if not args.json:
         return _run(args, root)
     EVENTS = []
     try:
         with contextlib.redirect_stdout(sys.stderr):
             code = _run(args, root)
-        print(json.dumps({"mode": args.mode, "checkouts": EVENTS}, indent=2))
+        result = {"mode": args.mode, "checkouts": EVENTS}
+        if TARGET_EVENT is not None:
+            result["target"] = TARGET_EVENT
+        print(json.dumps(result, indent=2))
         return code
     finally:
-        EVENTS = None
+        EVENTS = TARGET_EVENT = None
+
+
+def run_at_target(mode: str, targets: list[tuple[str, Path]], root: Path, revision: str | None = None, prune: bool = False,
+                  commit: bool = False, verbose: bool = False) -> int:
+    """``run`` against the sync target: the latest release tag on main, or ``revision`` (the Owner's SHA)."""
+    global TARGET_EVENT
+    try:
+        with exported_target(root, revision) as target:
+            label = f"{target.tag} ({target.revision})" if target.tag else target.revision
+            print(f"target: {label}{' (named)' if target.named else ''}")
+            if EVENTS is not None:
+                TARGET_EVENT = {"revision": target.revision, "tag": target.tag, "named": target.named}
+            return run(mode, targets, root, prune, commit=commit, verbose=verbose, target=target)
+    except SyncStop as stop:
+        print(f"  stop: {stop.code} {stop.detail}")
+        if EVENTS is not None:
+            TARGET_EVENT = {"revision": None, "tag": None, "named": revision is not None,
+                            "stops": [{"reason": stop.code, "detail": stop.detail}]}
+        return cli_conventions.STOP
 
 
 def _run(args: argparse.Namespace, root: Path) -> int:
@@ -684,7 +812,8 @@ def _run(args: argparse.Namespace, root: Path) -> int:
         else:
             selected = [(args.project, projects[args.project])]
         targets = [(name, (root / entry["repo"]).resolve()) for name, entry in selected]
-        return run(args.mode, targets, root, args.prune, commit=args.mode == "sync", verbose=args.verbose)
+        return run_at_target(args.mode, targets, root, args.revision, args.prune, commit=args.mode == "sync",
+                             verbose=args.verbose)
     except ValueError as exc:
         print(f"ERROR ONBOARD {exc}", file=sys.stderr)
         return cli_conventions.ERROR
@@ -697,7 +826,7 @@ def apply(name: str, root: Path = ROOT) -> int:
         if name not in projects:
             print(f"ERROR PROJECT_UNKNOWN '{name}' is not registered in workspace.yaml", file=sys.stderr)
             return cli_conventions.ERROR
-        return run("apply", [(name, (root / projects[name]["repo"]).resolve())], root, False)
+        return run_at_target("apply", [(name, (root / projects[name]["repo"]).resolve())], root)
     except ValueError as exc:
         print(f"ERROR ONBOARD {exc}", file=sys.stderr)
         return cli_conventions.ERROR

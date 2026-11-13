@@ -10,7 +10,7 @@ import shutil
 import bootstrap
 import onboard_project
 import validate_workspace as validator
-from test_tooling import VERIFICATION_SECTION, make_workspace, run_git, write
+from test_tooling import VERIFICATION_SECTION, make_workspace, release_workspace, run_git, write
 
 
 def test_init_writes_map_and_directories(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -49,6 +49,7 @@ def test_add_registers_onboards_and_validates(tmp_path: Path) -> None:
     run_git(project, "init", "-q", "-b", "main")
     write(project / "AGENTS.md", "# AGENTS.md\n\nIntro.\n\n## What this is\n\nSecond.\n\n" + VERIFICATION_SECTION)
     write(project / "scripts/integration-verify.json", '["python", "-c", "pass"]\n')
+    release_workspace(root)
 
     assert bootstrap.add(root, "second", None, []) == 0
 
@@ -99,6 +100,7 @@ def test_add_installs_requested_opt_in_adapter(tmp_path: Path) -> None:
     run_git(project, "init", "-q", "-b", "main")
     write(project / "AGENTS.md", "# AGENTS.md\n\n## What this is\n\nThird.\n\n" + VERIFICATION_SECTION)
     write(project / "scripts/integration-verify.json", '["python", "-c", "pass"]\n')
+    release_workspace(root)
 
     assert bootstrap.add(root, "third", None, ["optional-skill"]) == 0
     assert (project / ".claude/skills/optional-skill/SKILL.md").read_text(encoding="utf-8") == adapter

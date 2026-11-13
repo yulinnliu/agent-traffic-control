@@ -38,6 +38,7 @@ import posixpath
 import re
 import subprocess
 import sys
+import tempfile
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -441,9 +442,9 @@ def adapter_extras(adapter_dir: Path, expected: dict[str, str]) -> list[Path]:
     )
 
 
-def check_supporting_files(adapter_dir: Path, name: str) -> None:
+def check_supporting_files(adapter_dir: Path, name: str, source: Path | None = None) -> None:
     try:
-        expected = supporting_files(ROOT, name)
+        expected = supporting_files(source or ROOT, name)
     except ValueError:
         return  # reported once against the canonical skill by load_canonical_skills
     for relative, content in expected.items():
@@ -456,7 +457,7 @@ def check_supporting_files(adapter_dir: Path, name: str) -> None:
         fail(f"{extra}: not in shared/skills/{name}/ — run sync to remove it")
 
 
-def check_one_adapter(adapter_file: Path, name: str, canonical_fm: dict) -> bool:
+def check_one_adapter(adapter_file: Path, name: str, canonical_fm: dict, source: Path | None = None) -> bool:
     """Check one adapter's SKILL.md; return whether it is managed."""
     adapter_fm, _ = parse_frontmatter(adapter_file)
 
@@ -467,11 +468,12 @@ def check_one_adapter(adapter_file: Path, name: str, canonical_fm: dict) -> bool
             "sync must not modify it"
         )
         return False
-    check_managed_adapter(adapter_file, name, canonical_fm, adapter_fm)
+    check_managed_adapter(adapter_file, name, canonical_fm, adapter_fm, source)
     return True
 
 
-def check_managed_adapter(adapter_file: Path, name: str, canonical_fm: dict, adapter_fm: dict) -> None:
+def check_managed_adapter(adapter_file: Path, name: str, canonical_fm: dict, adapter_fm: dict,
+                          source: Path | None = None) -> None:
     if adapter_fm.get("canonical") != name:
         fail(f"{adapter_file}: canonical must be '{name}'")
     if adapter_fm.get("name") != canonical_fm.get("name"):
@@ -487,7 +489,7 @@ def check_managed_adapter(adapter_file: Path, name: str, canonical_fm: dict, ada
         return
     tool_dir = adapter_file.parents[2].name
     try:
-        expected = render_adapter(ROOT, name, tool_dir)
+        expected = render_adapter(source or ROOT, name, tool_dir)
     except (ValueError, KeyError) as exc:
         fail(f"{adapter_file}: cannot render the expected adapter ({exc})")
         return
@@ -503,8 +505,10 @@ def check_adapter_tree(
     canonical: dict[str, dict],
     label: str,
     required: set[str],
+    source: Path | None = None,
 ) -> None:
-    """Check .claude/skills, .agents/skills and .dsh/skills under adapters_root.
+    """Check .claude/skills, .agents/skills and .dsh/skills under adapters_root
+    against the canonical skills of ``source`` (this checkout by default).
 
     Every skill in ``required`` must have an adapter in each of its
     ``adapter_dirs`` here: the workspace
@@ -546,8 +550,8 @@ def check_adapter_tree(
             if not adapter_file.exists():
                 fail(f"{adapter_file}: directory exists but SKILL.md missing")
                 continue
-            if check_one_adapter(adapter_file, name, canonical[name]):
-                check_supporting_files(adapter_file.parent, name)
+            if check_one_adapter(adapter_file, name, canonical[name], source):
+                check_supporting_files(adapter_file.parent, name, source)
 
 
 def check_templates() -> None:
@@ -580,7 +584,7 @@ def check_no_hardcoded_governance_source() -> None:
             fail(f"{path}: hard-codes a governance source instead of referring to governance_source")
 
 
-def check_project_pointer(project_path: Path, label: str) -> None:
+def check_project_pointer(project_path: Path, label: str, source: Path | None = None) -> None:
     """AGENTS.md carries the current pointer line before its first section."""
     agents_md = project_path / "AGENTS.md"
     if not agents_md.exists():
@@ -592,7 +596,7 @@ def check_project_pointer(project_path: Path, label: str) -> None:
     if pointer is None:
         fail(f"{label}: AGENTS.md has no {POINTER_MARKER} pointer line — run sync")
         return
-    if lines[pointer] != pointer_line():
+    if lines[pointer] != pointer_line(source):
         fail(f"{label}: AGENTS.md pointer line differs from shared/templates/PROJECT_AGENTS.md — run sync")
     heading = next((index for index, line in enumerate(lines) if line.startswith("## ")), None)
     if heading is not None and heading < pointer:
@@ -681,6 +685,47 @@ def lock_state(root: Path, revision: str) -> str:
         return "unverifiable"
 
 
+def export_revision(root: Path, revision: str, tree: Path) -> None:
+    """The files of ``revision`` in the checkout at ``root`` written into the new directory ``tree``; ValueError on failure."""
+    from atc_testkit import checkout, locations
+    try:
+        checkout.export(root, revision, tree)
+    except locations.Refusal as refusal:
+        raise ValueError(f"{refusal.token} {refusal.detail}") from None
+
+
+def locked_sources(project_path: Path, label: str, trees: dict[str, Path], scratch: Path) -> Path | None:
+    """The tree of the project's locked revision, exported once per revision under ``scratch``; None when the lock
+    is missing, unreadable or not in the history of main, which check_atc_dir reports."""
+    try:
+        lock = read_lock(project_path)
+    except ValueError:
+        return None
+    if lock is None or lock_state(ROOT, lock["revision"]) != "current":
+        return None
+    revision = lock["revision"]
+    if revision not in trees:
+        tree = scratch / revision
+        try:
+            export_revision(ROOT, revision, tree)
+        except ValueError as exc:
+            fail(f"{label}: {ATC_LOCK.as_posix()} revision {revision}: cannot read its files ({exc})")
+            return None
+        trees[revision] = tree
+    return trees[revision]
+
+
+def canonical_frontmatter(source: Path) -> dict[str, dict]:
+    """``{name: frontmatter}`` of the canonical skills in ``source``, read without checking them."""
+    canonical: dict[str, dict] = {}
+    for skill_file in sorted((source / "shared" / "skills").glob("*/SKILL.md")):
+        parts = split_frontmatter(skill_file.read_text(encoding="utf-8"))
+        fm = yaml.safe_load(parts[0]) if parts else None
+        if isinstance(fm, dict):
+            canonical[skill_file.parent.name] = fm
+    return canonical
+
+
 def check_project_enforcement(project_path: Path, label: str) -> None:
     """A project with policies/hard-deny.yaml commits generated/enforcement/ rendered from it."""
     if not (project_path / "policies" / "hard-deny.yaml").is_file():
@@ -731,8 +776,9 @@ def report_hook(workspace_yaml: Path) -> None:
         print(f"--projects: pretooluse hook differs from the policies: {'; '.join(found)}; the Owner runs atc enforce --install-hooks")
 
 
-def check_atc_dir(project_path: Path, label: str) -> None:
-    """The project's `.atc/`: a valid lock, the current bootloader and vendored governance, nothing else but `tasks/`."""
+def check_atc_dir(project_path: Path, label: str, source: Path | None = None) -> None:
+    """The project's `.atc/`: a valid lock, the bootloader and vendored governance of ``source`` (the locked
+    revision's tree; this checkout by default), nothing else but `tasks/`."""
     for stray in atc_strays(project_path):
         fail(f"{label}: {stray.as_posix()} is not a file sync writes; .atc/ holds README.md, atc.lock, governance/ and the project's tasks/")
     try:
@@ -748,22 +794,22 @@ def check_atc_dir(project_path: Path, label: str) -> None:
     readme = project_path / ATC_README
     if not readme.is_file():
         fail(f"{label}: {ATC_README.as_posix()} missing — run sync")
-    elif normalise(readme.read_text(encoding="utf-8")) != normalise(atc_readme_template_path().read_text(encoding="utf-8")):
+    elif normalise(readme.read_text(encoding="utf-8")) != normalise(atc_readme_template_path(source).read_text(encoding="utf-8")):
         fail(f"{label}: {ATC_README.as_posix()} differs from shared/templates/ATC_README.md — run sync")
     for module in vendored_governance_modules():
-        source = ROOT / "shared" / "governance" / module
+        canonical = (source or ROOT) / "shared" / "governance" / module
         target = project_path / VENDORED_GOVERNANCE / module
         if not target.is_file():
             fail(f"{label}: {(VENDORED_GOVERNANCE / module).as_posix()} missing — run sync")
-        elif source.is_file() and normalise(target.read_text(encoding="utf-8")) != normalise(source.read_text(encoding="utf-8")):
+        elif canonical.is_file() and normalise(target.read_text(encoding="utf-8")) != normalise(canonical.read_text(encoding="utf-8")):
             fail(f"{label}: {(VENDORED_GOVERNANCE / module).as_posix()} differs from shared/governance/{module} — run sync")
 
 
-def sync_written_paths(project_path: Path, canonical: dict[str, dict]) -> list[str]:
+def sync_written_paths(project_path: Path, canonical: dict[str, dict], source: Path | None = None) -> list[str]:
     """The repository-relative paths sync writes that exist in ``project_path``."""
     paths = ["AGENTS.md", ATC_README.as_posix(), ATC_LOCK.as_posix(), VENDORED_GOVERNANCE.as_posix()]
     claude = project_path / "CLAUDE.md"
-    if claude.is_file() and normalise(claude.read_text(encoding="utf-8")) == normalise((ROOT / "CLAUDE.md").read_text(encoding="utf-8")):
+    if claude.is_file() and normalise(claude.read_text(encoding="utf-8")) == normalise(((source or ROOT) / "CLAUDE.md").read_text(encoding="utf-8")):
         paths.append("CLAUDE.md")
     paths += [f"{tool_dir}/skills/{name}" for name in canonical for tool_dir in TOOL_DIRS]
     return [path for path in paths if (project_path / path).exists()]
@@ -777,13 +823,13 @@ def git_toplevel(path: Path) -> bool:
     return result.returncode == 0 and os.path.normcase(os.path.realpath(result.stdout.strip())) == os.path.normcase(os.path.realpath(path))
 
 
-def check_tracked(project_path: Path, label: str, canonical: dict[str, dict]) -> None:
+def check_tracked(project_path: Path, label: str, canonical: dict[str, dict], source: Path | None = None) -> None:
     """Every file sync writes is committed (GIT_WORKFLOW.md § Governance sync commits).
 
     A file Git ignores or excludes can never be committed and fails; a file
     not committed yet, as `atc bootstrap add` leaves its first onboarding, is
     reported."""
-    paths = sync_written_paths(project_path, canonical)
+    paths = sync_written_paths(project_path, canonical, source)
     if not paths or not git_toplevel(project_path):
         return
     env = {k: v for k, v in os.environ.items() if not k.upper().startswith("GIT_")}
@@ -909,28 +955,32 @@ def check_projects(canonical: dict[str, dict], project_checkouts: dict[str, Path
     for name in sorted(set(project_checkouts) - set(safe_projects)):
         fail(f"--project-checkout names unregistered project {name!r}")
 
-    for name, entry in safe_projects.items():
-        explicit_candidate = name in project_checkouts
-        project_path = project_checkouts.get(name, ROOT / entry["repo"]).expanduser().resolve()
-        if not project_path.is_dir():
-            if explicit_candidate:
-                fail(f"projects.{name}: explicit candidate checkout {project_path} is not a directory")
-            else:
-                print(f"--projects: '{name}' -> {project_path} not present, skipping")
-            continue
-        import testkit_contract
-        for problem in testkit_contract.problems(project_path):
-            fail(f"projects.{name}.testkit: {problem}")
-        check_project_pointer(project_path, label=f"projects.{name}")
-        check_atc_dir(project_path, label=f"projects.{name}")
-        check_tracked(project_path, f"projects.{name}", canonical)
-        check_project_integration_verifier(project_path, label=f"projects.{name}")
-        check_project_enforcement(project_path, label=f"projects.{name}.enforcement")
-        report_machine_local(project_path, f"projects.{name}.machine-local", real_workspace_yaml)
-        check_adapter_tree(
-            project_path, canonical, label=f"projects.{name}", required=baseline_skills(canonical)
-        )
-        prefixes[f"projects.{name}"] = check_task_records(project_path, label=f"projects.{name}")
+    trees: dict[str, Path] = {}
+    with tempfile.TemporaryDirectory(prefix="atc-validate-", ignore_cleanup_errors=True) as scratch:
+        for name, entry in safe_projects.items():
+            explicit_candidate = name in project_checkouts
+            project_path = project_checkouts.get(name, ROOT / entry["repo"]).expanduser().resolve()
+            if not project_path.is_dir():
+                if explicit_candidate:
+                    fail(f"projects.{name}: explicit candidate checkout {project_path} is not a directory")
+                else:
+                    print(f"--projects: '{name}' -> {project_path} not present, skipping")
+                continue
+            label = f"projects.{name}"
+            # Synced files are current when they equal what the locked revision renders (docs/LAYOUT.md).
+            source = locked_sources(project_path, label, trees, Path(scratch))
+            synced = canonical if source is None else canonical_frontmatter(source)
+            import testkit_contract
+            for problem in testkit_contract.problems(project_path):
+                fail(f"{label}.testkit: {problem}")
+            check_project_pointer(project_path, label=label, source=source)
+            check_atc_dir(project_path, label=label, source=source)
+            check_tracked(project_path, label, synced, source)
+            check_project_integration_verifier(project_path, label=label)
+            check_project_enforcement(project_path, label=f"{label}.enforcement")
+            report_machine_local(project_path, f"{label}.machine-local", real_workspace_yaml)
+            check_adapter_tree(project_path, synced, label=label, required=baseline_skills(synced), source=source)
+            prefixes[label] = check_task_records(project_path, label=label)
     check_unique_prefixes(prefixes)
     report_hook(real_workspace_yaml)
 

@@ -159,7 +159,8 @@ repository 更新之後，要做的是重新 render，而不是手動去改：
 ```sh
 atc/scripts/check-skills.sh path/to/your-repo                           # current / drifted / orphaned / stale
 atc/scripts/link-skills.sh --prune path/to/your-repo                    # 修復
-atc onboard --sync --all --prune                                        # 所有已登記的專案，各自在 main 上 commit
+atc onboard --sync --all --prune                                        # 所有已登記的專案，各自在 main 上 commit（最新 release）
+atc onboard --sync --all --revision <sha>                               # 最新 release 以外，改用 Owner 指定的 SHA
 ```
 
 render 出來的檔案都帶有 `managed-by: agent-traffic-control` 標記；沒有這個
@@ -199,9 +200,10 @@ render 出來的檔案都帶有 `managed-by: agent-traffic-control` 標記；沒
 
 目前版本是 0.4.0，也就是 Python adapter 的版號。
 governance、policy、schema、skill、conformance fixture 和 Python 參考實作都
-已經到位。GitHub Actions 的 `validate.yml` 只在手動觸發時執行：它會用 schema
-檢查 policy 範例，並在 Linux 和 Windows 上跑 shell 安裝腳本與完整的 Python
-測試。
+已經到位。GitHub Actions 的 `validate.yml` 在手動觸發或 Owner 推送 release
+tag 時執行：它會用 schema 檢查 policy 範例，並在 Linux 和 Windows 上跑 shell
+安裝腳本與完整的 Python 測試；遇到 release tag 時，接著用
+`docs/releases/<tag>.md` 的內容建立 GitHub Release 草稿。
 
 ## 授權
 

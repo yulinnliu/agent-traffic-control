@@ -80,12 +80,23 @@ def make_workspace(tmp_path: Path, *, create_project: bool = True) -> tuple[Path
     return root, project
 
 
-def commit_workspace(root: Path, project: Path) -> None:
-    """Commit the ATC checkout on main and make the project its own repository on main, as sync commits need."""
+RELEASE = "v0.0.1"
+
+
+def release_workspace(root: Path, tag: str = RELEASE) -> str:
+    """Commit the ATC checkout on main and tag the commit as the release sync renders by default; its SHA."""
     write(root / ".gitignore", "projects/\n")
     commit = ("-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q", "-m")
     run_git(root, "add", "-A")
     run_git(root, *commit, "release")
+    run_git(root, "tag", tag)
+    return subprocess.check_output(["git", "-C", str(root), "rev-parse", "HEAD"], text=True).strip()
+
+
+def commit_workspace(root: Path, project: Path) -> None:
+    """Commit and tag the ATC checkout on main and make the project its own repository on main, as sync commits need."""
+    release_workspace(root)
+    commit = ("-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q", "-m")
     run_git(project, "init", "-q", "-b", "main")
     run_git(project, "config", "user.name", "t")
     run_git(project, "config", "user.email", "t@example.invalid")
@@ -526,7 +537,7 @@ def test_lock_outside_main_history_is_stale_and_resynced(tmp_path: Path, monkeyp
         return subprocess.check_output(["git", "-C", str(root), "rev-parse", "HEAD"], text=True).strip()
 
     def lock_item() -> onboard_project.PlanItem:
-        return onboard_project.lock_plan(project, root, changed=False)
+        return onboard_project.lock_plan(project, root, changed=False, revision=head())
 
     run_git(root, "add", "-A")
     run_git(root, *commit, "release")

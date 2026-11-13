@@ -46,7 +46,11 @@ Operational description of the tree; governance semantics live under
   `main`, so its `.atc/` holds `tasks/` alone, with no bootloader, lock or
   vendored governance. Validation applies the path rule of a consuming
   repository's `.atc/` to it with no sync-owned file expected.
-- `docs/` — operational documentation. `.out-of-scope/` — recorded rejections.
+- `docs/` — operational documentation; `docs/design/<task_id>.md` — a
+  task's committed design; `docs/releases/v<version>.md` — the notes of the
+  `atc` release `v<version>`, committed in its release commit and used
+  verbatim as its GitHub Release body. `.out-of-scope/` — recorded
+  rejections.
 
 ## Inside a consuming repository
 
@@ -78,16 +82,25 @@ Operational description of the tree; governance semantics live under
   Readers drop carriage returns first, since a `core.autocrlf` checkout may
   hold the file with CRLF. A lock that does not parse, has a `version` other
   than `1`, or lacks a non-empty `source` or `revision` is a collision for
-  sync and a failure for validation. Sync writes the lock with the ATC `HEAD`
-  as `revision` when the lock is missing, when its `source` differs from the
-  governance repository, when sync changes any file it writes into the
-  repository, or when the recorded revision is not in the history of ATC
-  `main`. `scripts/link-skills.sh` reads the lock without parsing it, so it
-  also rewrites a lock with an empty `revision`, and checks the recorded
-  revision against its checkout's `HEAD`. On `main`, `atc validate
-  --projects` checks that this revision is in `main`'s history. The files
-  sync writes carry no format version of their own: they are current when they equal what the locked
-  revision renders, and sync replaces them otherwise.
+  sync and a failure for validation. `atc onboard` renders and locks the
+  sync target: the highest `vMAJOR.MINOR.PATCH` tag in the history of ATC
+  `main`, or the SHA on `main` the Owner names with `--revision` (governance
+  `CORE.md` § Effective authority and revocation). It reads the tags of the
+  ATC checkout and never fetches, so that checkout holds the release tags:
+  the Owner creates each one there, and another host fetches tags first. Sync
+  writes the lock with the target as `revision` when the lock is missing,
+  when its `source` differs from the governance repository, when sync changes
+  any file it writes into the repository, or when the recorded revision is
+  not in the history of ATC `main`. When the locked revision is ahead of the
+  latest release, sync writes nothing into that repository until a later
+  release or a named `--revision`. `scripts/link-skills.sh` installs the
+  checkout it runs from, at its `HEAD`; it reads the lock without parsing
+  it, so it also rewrites a lock with an empty `revision`, and checks the
+  recorded revision against that `HEAD`. On `main`, `atc validate
+  --projects` checks that this revision is in `main`'s history and compares
+  the synced files with that revision's tree. The files sync writes carry no
+  format version of their own: they are current when they equal what the
+  locked revision renders, and sync replaces them otherwise.
 - `.atc/tasks/<task_id>.yaml` — the repository's own task records, declared by
   `## Task records` in its `AGENTS.md` (`docs/TASKS.md`).
 - `.claude/skills/<name>/`, `.agents/skills/<name>/`, `.dsh/skills/<name>/` —

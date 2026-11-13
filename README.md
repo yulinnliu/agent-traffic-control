@@ -171,7 +171,8 @@ this repository changes they are re-rendered, never edited:
 ```sh
 atc/scripts/check-skills.sh path/to/your-repo                           # current / drifted / orphaned / stale
 atc/scripts/link-skills.sh --prune path/to/your-repo                    # repair
-atc onboard --sync --all --prune                                        # every registered project, committed on its main
+atc onboard --sync --all --prune                                        # every registered project, committed on its main (latest release)
+atc onboard --sync --all --revision <sha>                               # a SHA on main the Owner names instead
 ```
 
 Every rendered file carries `managed-by: agent-traffic-control`; a file
@@ -212,9 +213,11 @@ with the evidence. `GLOSSARY.md` defines the terms the rules use.
 
 Version 0.4.0, the version the Python adapter carries. Governance, policies, schemas, skills, conformance fixtures and
 the Python reference implementation are in place. The `validate.yml` GitHub
-Actions workflow runs only when dispatched by hand: it checks the policy
-examples against their schemas and runs the shell installer and the full
-Python suite on Linux and Windows.
+Actions workflow runs when dispatched by hand or when the Owner pushes a
+release tag: it checks the policy examples against their schemas and runs the
+shell installer and the full Python suite on Linux and Windows; on a release
+tag it then drafts the GitHub Release with its notes from
+`docs/releases/<tag>.md`.
 
 ## License
 
