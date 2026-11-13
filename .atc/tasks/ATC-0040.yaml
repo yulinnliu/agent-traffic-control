@@ -1,0 +1,20 @@
+task_id: ATC-0040
+repository: yulinnliu/agent-traffic-control
+base_sha: 2b8a1d514ab0644bd480e9704f90cf31b9d911d8
+scope: 'Retire worktree_cd_guard.py (ATC-0038 design § 5 step 4): remove the wrapper
+  and its tests once the engine''s tests cover every case they hold'
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: 2b8a1d514ab0644bd480e9704f90cf31b9d911d8
+branch: worktree-claude+retire-cd-guard
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
+decisions:
+  - "The Owner installed the ATC-0038 hook 2026-11-13; settings no longer run adapters/python/scripts/worktree_cd_guard.py, now a thin wrapper over shell_words.cd_reason. Design docs/design/ATC-0038.md § 5 step 4 retires it."
+  - "Before deleting tests/test_worktree_cd_guard.py, map each of its cases (Bash and PowerShell cd forms, literal and expanded variables, subshells, pushd) to an engine test or conformance fixture; port any uncovered case to the engine's tests first."
+  - "Remove the wrapper and its test; update every reference (docs, test selection expectations such as tests/test_select_tests.py, ENFORCEMENT.md). Keep RETIRED_GUARDS in generate_enforcement.py so install still replaces old entries. Final-state wording."
+  - "Out of scope: the bypassPermissions smoke (an Owner session step). No governance edit, no authorizations/**, no version bump, no push."
