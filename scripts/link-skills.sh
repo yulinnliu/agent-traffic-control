@@ -84,7 +84,7 @@ if [ -n "$ignored" ]; then
 fi
 
 # .atc/ holds README.md, atc.lock, governance/ and the repository's tasks/; anything
-# else is a collision and, as in onboard, nothing in the repository is written.
+# else is a collision and, as in sync, nothing in the repository is written.
 atc_ok=1
 if [ -d "$REPO/.atc" ]; then
   strays=$(cd "$REPO" && find .atc \( -type f -o -type l \) | sed 's|^\./||' | sort | while IFS= read -r f; do

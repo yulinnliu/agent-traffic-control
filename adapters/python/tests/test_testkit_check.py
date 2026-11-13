@@ -117,25 +117,25 @@ def test_workspace_bridge_only_inspects_opted_in_projects(repository, tmp_path):
 
 
 def test_onboarding_reports_testkit_drift_without_rewriting_project_config(repository,tmp_path,monkeypatch):
-    import onboard_project
+    import sync_project
     workspace=tmp_path/'workspace'
     (workspace/'shared/templates').mkdir(parents=True)
     (workspace/'shared/templates/PROJECT_AGENTS.md').write_text('<!-- atc:governance -->pointer')
     (workspace/'shared/templates/ATC_README.md').write_text('bootloader')
     (workspace/'CLAUDE.md').write_text('workspace entrypoint')
     (repository/'CLAUDE.md').write_text('project-owned guidance')
-    monkeypatch.setattr(onboard_project,'canonical_skills',lambda root:{})
-    monkeypatch.setattr(onboard_project,'atc_plan',lambda project,root:[])
-    monkeypatch.setattr(onboard_project,'lock_plan',lambda project,root,changed,revision:onboard_project.PlanItem('skip',project/'.atc/atc.lock','lock current'))
-    monkeypatch.setattr(onboard_project,'pointer_plan',lambda project,line:onboard_project.PlanItem('skip',project/'AGENTS.md','pointer current'))
+    monkeypatch.setattr(sync_project,'canonical_skills',lambda root:{})
+    monkeypatch.setattr(sync_project,'atc_plan',lambda project,root:[])
+    monkeypatch.setattr(sync_project,'lock_plan',lambda project,root,changed,revision:sync_project.PlanItem('skip',project/'.atc/atc.lock','lock current'))
+    monkeypatch.setattr(sync_project,'pointer_plan',lambda project,line:sync_project.PlanItem('skip',project/'AGENTS.md','pointer current'))
     before={str(p):p.read_bytes() for p in repository.rglob('*') if p.is_file()}
-    plan=onboard_project.build_plan(repository,workspace)
+    plan=sync_project.build_plan(repository,workspace)
     assert any('testkit contract current' in item.detail for item in plan)
-    onboard_project.apply_plan(plan,'sync')
+    sync_project.apply_plan(plan,'sync')
     assert before=={str(p):p.read_bytes() for p in repository.rglob('*') if p.is_file()}
     path=repository/'pyproject.toml'
     path.write_text(path.read_text().replace('atc-testkit==0.2.0','atc-testkit>=0.2.0'))
-    plan=onboard_project.build_plan(repository,workspace)
+    plan=sync_project.build_plan(repository,workspace)
     assert any(item.action=='collision' and item.path.name=='atc-testkit.json' for item in plan)
 
 

@@ -19,7 +19,7 @@ from atc_testkit import locations, stages, workers as host_workers
 import checkout_guard
 import cli_conventions
 import friction
-import onboard_project
+import sync_project
 import validate_workspace as validator
 
 try:
@@ -206,7 +206,7 @@ def diagnose(root: Path = ROOT, environ: dict[str, str] | None = None, checkout:
     if validator.FAILURES:
         checks.append(Check("workspace-managed adapters", "ERROR", f"{len(validator.FAILURES)} problem(s)"))
     else:
-        adapters = sum(len(validator.adapter_dirs(fm)) for fm in canonical.values())
+        adapters = len(canonical) * len(validator.TOOL_DIRS)
         checks.append(Check("workspace-managed adapters", "READY", f"{adapters} adapters current"))
 
     if managed_worktree is None:
@@ -233,7 +233,8 @@ def diagnose(root: Path = ROOT, environ: dict[str, str] | None = None, checkout:
             checks.append(Check(f"projects.{name}.testkit", "ERROR" if problems else "READY",
                                 '; '.join(problems) if problems else 'version, artifact, hook and CI contract current'))
         try:
-            plan = onboard_project.build_plan(project_path, root)
+            plan = sync_project.build_plan(project_path, root,
+                                           tool_dirs=validator.load_skill_tools(workspace_file).get(name, validator.TOOL_DIRS))
         except ValueError as exc:
             checks.append(Check(f"projects.{name}.integration", "ERROR", str(exc)))
             continue

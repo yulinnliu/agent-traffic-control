@@ -4,8 +4,8 @@
 `init` writes `workspace.yaml` with this checkout as `workspace_root`, creates `projects/`, `worktrees/` and
 `state/`, and prints how to put the `atc` command on PATH. `add` registers one project: clones `--url` into
 `projects/NAME` or expects a checkout there, appends the entry to `workspace.yaml`, creates its worktree and
-state directories, installs the requested opt-in skills, runs onboarding's apply step and validates. `status`
-runs doctor and `atc onboard --check --all`.
+state directories, installs the requested opt-in skills into the tool directories its `skill_tools` selects,
+runs sync's apply step and validates. `status` runs doctor and `atc sync --check`.
 Project-owned files are never rewritten.
 """
 
@@ -27,7 +27,7 @@ import yaml
 import cli_conventions
 import doctor
 import validate_workspace
-import onboard_project
+import sync_project
 
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPTS = Path(__file__).resolve().parent
@@ -113,21 +113,21 @@ def register(root: Path, name: str) -> dict:
     return entry
 
 
-def install_opt_in(root: Path, project: Path, skills: list[str]) -> None:
+def install_opt_in(root: Path, project: Path, skills: list[str],
+                   tool_dirs: tuple[str, ...] = validate_workspace.TOOL_DIRS) -> None:
     for skill in skills:
         if not (root / "shared" / "skills" / skill / "SKILL.md").is_file():
             raise SystemExit(_error("SKILL_UNKNOWN", f"{skill}; see shared/skills/"))
-        metadata = onboard_project.canonical_skills(root)[skill]
-        for tool_dir in onboard_project.validator.adapter_dirs(metadata):
+        for tool_dir in tool_dirs:
             target = project / tool_dir / "skills" / skill / "SKILL.md"
             if target.exists():
                 continue
-            if onboard_project.holds_files(target.parent):
+            if sync_project.holds_files(target.parent):
                 raise SystemExit(_stop("COLLISION", f"{target.relative_to(project).as_posix()}: "
-                                                    f"{onboard_project.UNOWNED_DIRECTORY}"))
+                                                    f"{sync_project.UNOWNED_DIRECTORY}"))
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(onboard_project.validator.render_adapter(root, skill, tool_dir), encoding="utf-8", newline="\n")
-            onboard_project.apply_plan(onboard_project.supporting_plan(root, skill, target.parent), "sync")
+            target.write_text(sync_project.validator.render_adapter(root, skill, tool_dir), encoding="utf-8", newline="\n")
+            sync_project.apply_plan(sync_project.supporting_plan(root, skill, target.parent), "sync")
             print(f"installed opt-in adapter {target.relative_to(project).as_posix()}")
 
 
@@ -159,9 +159,10 @@ def add(root: Path, name: str, url: str | None, skills: list[str]) -> int:
     entry = register(root, name)
     for key in ("worktrees", "state"):
         (root / entry[key]).mkdir(parents=True, exist_ok=True)
-    install_opt_in(root, project, skills)
-    print(f"$ onboard apply {name}")
-    applied = onboard_project.apply(name, root=root)
+    install_opt_in(root, project, skills,
+                   validate_workspace.load_skill_tools(root / "workspace.yaml").get(name, validate_workspace.TOOL_DIRS))
+    print(f"$ sync apply {name}")
+    applied = sync_project.apply(name, root=root)
     if applied:
         return applied
     return validate(root)
@@ -173,16 +174,16 @@ def status(root: Path, as_json: bool = False) -> int:
     if as_json:
         buffer = io.StringIO()
         with contextlib.redirect_stdout(buffer):
-            code = onboard_project.main(["--check", "--all", "--json"], root=root)
+            code = sync_project.main(["--check", "--json"], root=root)
         code = code or (cli_conventions.STOP if errors else cli_conventions.OK)
         print(json.dumps({"verdict": "NOT_READY" if code else "READY",
                           "doctor": [{"name": c.name, "status": c.status, "detail": c.detail} for c in checks],
-                          "onboard": json.loads(buffer.getvalue())}, indent=2))
+                          "sync": json.loads(buffer.getvalue())}, indent=2))
         return code
     for check in checks:
         print(f"{check.status:15} {check.name}: {check.detail}")
-    print(f"\nDoctor: {errors} error(s).\n$ atc onboard --check --all")
-    return onboard_project.main(["--check", "--all"], root=root) or (1 if errors else 0)
+    print(f"\nDoctor: {errors} error(s).\n$ atc sync --check")
+    return sync_project.main(["--check"], root=root) or (1 if errors else 0)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -198,16 +199,17 @@ def build_parser() -> argparse.ArgumentParser:
     p_init.add_argument("--governance-source", metavar="OWNER/REPO",
                         help="the repository governance is read from (default: this checkout's origin)")
     p_init.add_argument("--force", action="store_true", help="overwrite an existing workspace.yaml")
-    p_add = sub.add_parser("add", allow_abbrev=False, help="register one project and onboard it",
-                           **cli_conventions.form("Register one project, onboard it and validate the result.",
-                                                  exit="0 registered and onboarded; 1 STOP from onboard or "
+    p_add = sub.add_parser("add", allow_abbrev=False, help="register one project and create its ATC files",
+                           **cli_conventions.form("Register one project, create the files ATC owns in it and "
+                                                  "validate the result.",
+                                                  exit="0 registered and its files created; 1 STOP from sync or "
                                                        "validate; 2 ERROR (invalid name or URL, a failed clone)",
                                                   see="README.md § Installation"))
     cli_conventions.add_project(p_add, help="the project's name in workspace.yaml and under projects/", required=True)
     p_add.add_argument("--url", metavar="URL", help="git URL to clone into projects/NAME")
     p_add.add_argument("--skills", default="", metavar="NAME,...", help="comma-separated opt-in skills to install")
-    p_status = sub.add_parser("status", allow_abbrev=False, help="run doctor and atc onboard --check --all",
-                              **cli_conventions.form("Run doctor and `atc onboard --check --all`; changes nothing.",
+    p_status = sub.add_parser("status", allow_abbrev=False, help="run doctor and atc sync --check",
+                              **cli_conventions.form("Run doctor and `atc sync --check`; changes nothing.",
                                                      exit="0 ready and current; 1 an error or drift; 2 usage error",
                                                      see="README.md § Keeping installed files current"))
     cli_conventions.add_json(p_status)

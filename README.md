@@ -68,7 +68,7 @@ the one thing every agent and every language already has.
 | `shared/governance/` | The rules every agent reads at a pinned revision: `CORE.md` plus modules routed by `INDEX.md` |
 | `shared/policies/` | JSON Schemas and examples for hard deny, approval required, permission presets and the escalation gate |
 | `shared/skills/` | Canonical skills shared across tools and repositories; `.claude/`, `.agents/` and `.dsh/` hold the managed copies rendered from them |
-| `shared/templates/` | The pointer line onboarding inserts into a project's `AGENTS.md` and the bootloader it writes to `.atc/README.md` |
+| `shared/templates/` | The pointer line sync places in a project's `AGENTS.md` and the bootloader it writes to `.atc/README.md` |
 | `shared/conformance/` | Language-neutral fixtures every tool implementation must pass |
 | `scripts/` | POSIX sh entry points that need no language runtime: install and check skill adapters |
 | `adapters/python/` | The Python reference implementation of the tools |
@@ -151,8 +151,8 @@ git clone https://github.com/yulinnliu/agent-traffic-control.git atc
 uv tool install -e atc/adapters/python
 cd atc
 atc bootstrap init                          # workspace.yaml, projects/ worktrees/ state/
-atc bootstrap add --project my-project --url <url>    # clone, register, onboard, validate
-atc bootstrap status                        # doctor plus a dry onboarding check
+atc bootstrap add --project my-project --url <url>    # clone, register, create its ATC files, validate
+atc bootstrap status                        # doctor plus atc sync --check
 ```
 
 `add` also takes `--skills atc-worktree,hami-writing-for-agents` to install
@@ -171,12 +171,17 @@ this repository changes they are re-rendered, never edited:
 ```sh
 atc/scripts/check-skills.sh path/to/your-repo                           # current / drifted / orphaned / stale
 atc/scripts/link-skills.sh --prune path/to/your-repo                    # repair
-atc onboard --sync --all --prune                                        # every registered project, committed on its main (latest release)
-atc onboard --sync --all --revision <sha>                               # a SHA on main the Owner names instead
+atc sync                                                               # every registered project, committed on its main (latest release)
+atc sync my-project --check                                            # one project, writing nothing
+atc sync --revision <sha>                                              # a SHA on main the Owner names instead
 ```
 
 Every rendered file carries `managed-by: agent-traffic-control`; a file
-without it is project-owned and never touched.
+without it is project-owned and never touched. `atc sync` also deletes a managed
+copy whose canonical skill is gone. `skill_tools` in `workspace.yaml` picks
+which of `.claude/`, `.agents/` and `.dsh/` a project gets copies in
+(`docs/LAYOUT.md`); `atc onboard` is the deprecated spelling of `atc sync`
+until atc 0.7.0.
 
 ## Commands
 

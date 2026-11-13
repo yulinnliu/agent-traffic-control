@@ -61,7 +61,7 @@ agent、哪種語言，git 都已經在那裡了。
 | `shared/governance/` | 每個 agent 都依固定 revision 讀取的規則：`CORE.md`，加上 `INDEX.md` 依情況導向的各模組 |
 | `shared/policies/` | hard deny、approval required、permission preset、escalation gate 的 JSON Schema 和範例 |
 | `shared/skills/` | 跨工具、跨 repository 共用的 skill 正本；`.claude/`、`.agents/`、`.dsh/` 裡的是從正本 render 出來的受管副本 |
-| `shared/templates/` | onboarding 插進專案 `AGENTS.md` 的那行指標，以及寫進 `.atc/README.md` 的 bootloader |
+| `shared/templates/` | sync 放進專案 `AGENTS.md` 的那行指標，以及寫進 `.atc/README.md` 的 bootloader |
 | `shared/conformance/` | 與語言無關的 fixture，每一種工具實作都要通過 |
 | `scripts/` | 不需要任何語言 runtime 的 POSIX sh 腳本：安裝與檢查 skill adapter |
 | `adapters/python/` | 這些工具的 Python 參考實作 |
@@ -140,8 +140,8 @@ git clone https://github.com/yulinnliu/agent-traffic-control.git atc
 uv tool install -e atc/adapters/python
 cd atc
 atc bootstrap init                          # 建立 workspace.yaml 和 projects/ worktrees/ state/
-atc bootstrap add --project my-project --url <url>    # clone、登記、onboard、驗證
-atc bootstrap status                        # doctor 加上一次不寫入的 onboarding 檢查
+atc bootstrap add --project my-project --url <url>    # clone、登記、建立 ATC 檔案、驗證
+atc bootstrap status                        # doctor 加上 atc sync --check
 ```
 
 `add` 可以再加 `--skills atc-worktree,hami-writing-for-agents`，在 baseline
@@ -159,12 +159,16 @@ repository 更新之後，要做的是重新 render，而不是手動去改：
 ```sh
 atc/scripts/check-skills.sh path/to/your-repo                           # current / drifted / orphaned / stale
 atc/scripts/link-skills.sh --prune path/to/your-repo                    # 修復
-atc onboard --sync --all --prune                                        # 所有已登記的專案，各自在 main 上 commit（最新 release）
-atc onboard --sync --all --revision <sha>                               # 最新 release 以外，改用 Owner 指定的 SHA
+atc sync                                                               # 所有已登記的專案，各自在 main 上 commit（最新 release）
+atc sync my-project --check                                            # 只看一個專案，不寫入
+atc sync --revision <sha>                                              # 最新 release 以外，改用 Owner 指定的 SHA
 ```
 
 render 出來的檔案都帶有 `managed-by: agent-traffic-control` 標記；沒有這個
-標記的檔案就是專案自己的，工具永遠不會碰。
+標記的檔案就是專案自己的，工具永遠不會碰。`atc sync` 也會刪掉正本已經不存在的
+受管副本。`workspace.yaml` 的 `skill_tools` 決定每個專案要在 `.claude/`、
+`.agents/`、`.dsh/` 哪幾個目錄放副本（見 `docs/LAYOUT.md`）；`atc onboard` 是
+`atc sync` 的舊名，保留到 atc 0.7.0 移除。
 
 ## 指令
 

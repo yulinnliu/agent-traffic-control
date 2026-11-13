@@ -76,6 +76,52 @@ MAX_DESCRIPTION = 500
 TOOL_DIRS = (".claude", ".agents", ".dsh")
 # Tool directory -> the overlay name a canonical skill may ship under adapters/.
 TOOL_KEYS = {".claude": "claude", ".agents": "codex", ".dsh": "dsh"}
+# workspace.yaml's top-level map: project name -> the tools (TOOL_KEYS values) or `all` (docs/LAYOUT.md).
+SKILL_TOOLS = "skill_tools"
+ALL_TOOLS = "all"
+
+
+def tool_dirs_for(value: object) -> tuple[str, ...]:
+    """The tool directories one ``skill_tools`` value selects, in TOOL_DIRS order; absent or `all` is every one."""
+    if value is None or value == ALL_TOOLS or not isinstance(value, list):
+        return TOOL_DIRS
+    return tuple(tool_dir for tool_dir in TOOL_DIRS if TOOL_KEYS[tool_dir] in value)
+
+
+def skill_tools_problems(value: object, projects: object) -> list[str]:
+    """Shape problems of workspace.yaml's ``skill_tools``: a mapping from a registered project to `all` or a
+    non-empty list of distinct tool names."""
+    if not isinstance(value, dict):
+        return [f"'{SKILL_TOOLS}' must be a mapping of project name to a list of tools or '{ALL_TOOLS}'"]
+    names = ", ".join(TOOL_KEYS.values())
+    problems = []
+    for name, tools in value.items():
+        if not isinstance(projects, dict) or name not in projects:
+            problems.append(f"{SKILL_TOOLS}.{name}: not a registered project")
+        if tools == ALL_TOOLS:
+            continue
+        if not isinstance(tools, list) or not tools:
+            problems.append(f"{SKILL_TOOLS}.{name} must be '{ALL_TOOLS}' or a non-empty list of {names}")
+            continue
+        unknown = [tool for tool in tools if tool not in TOOL_KEYS.values()]
+        if unknown:
+            problems.append(f"{SKILL_TOOLS}.{name}: unknown tool {', '.join(map(repr, unknown))}; one of {names}")
+        elif len(set(tools)) != len(tools):
+            problems.append(f"{SKILL_TOOLS}.{name} lists a tool twice")
+    return problems
+
+
+def load_skill_tools(path: Path) -> dict[str, tuple[str, ...]]:
+    """{project: tool directories} for every project ``skill_tools`` in ``path`` names; an unlisted project
+    gets every tool directory. Shape problems are load_and_check_workspace_yaml's to report."""
+    try:
+        doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError):
+        return {}
+    value = doc.get(SKILL_TOOLS) if isinstance(doc, dict) else None
+    if not isinstance(value, dict):
+        return {}
+    return {name: tool_dirs_for(tools) for name, tools in value.items()}
 
 
 def pointer_template_path(root: Path | None = None) -> Path:
@@ -253,6 +299,9 @@ def load_and_check_workspace_yaml(path: Path) -> tuple[str | None, dict[str, dic
                 fail(f"{path}: projects.{name}: {reserved}")
                 continue
             safe_projects[name] = entry
+    if SKILL_TOOLS in doc:
+        for problem in skill_tools_problems(doc[SKILL_TOOLS], projects):
+            fail(f"{path}: {problem}")
     return root_val, safe_projects
 
 
@@ -357,22 +406,9 @@ def valid_contract(value: object) -> bool:
 
 
 def declares_contract(canonical_fm: dict) -> bool:
-    """Whether the frontmatter declares a contract the contract check accepts.
-
-    The same predicate the check applies, so an invalid declaration never pulls in
-    the DSH adapter requirement on its way to being rejected.
-    """
+    """Whether the frontmatter declares a contract the contract check accepts, which
+    adapters then carry as ``requires-contract``."""
     return valid_contract(canonical_fm.get("contract"))
-
-
-def adapter_dirs(canonical_fm: dict) -> tuple[str, ...]:
-    """Tool directories a canonical skill needs adapters in.
-
-    Every skill gets a Claude Code and a Codex-compatible adapter (DSH also
-    discovers the latter). A skill that declares a ``contract`` binds the
-    calling harness's identity, so DSH needs its own higher-priority adapter.
-    """
-    return TOOL_DIRS if declares_contract(canonical_fm) else TOOL_DIRS[:2]
 
 
 def render_adapter(root: Path, name: str, tool_dir: str) -> str:
@@ -506,18 +542,19 @@ def check_adapter_tree(
     label: str,
     required: set[str],
     source: Path | None = None,
+    tool_dirs: tuple[str, ...] = TOOL_DIRS,
 ) -> None:
     """Check .claude/skills, .agents/skills and .dsh/skills under adapters_root
     against the canonical skills of ``source`` (this checkout by default).
 
-    Every skill in ``required`` must have an adapter in each of its
-    ``adapter_dirs`` here: the workspace
-    root requires every canonical skill, a registered project requires the
+    Every skill in ``required`` must have an adapter in each of ``tool_dirs``,
+    the directories ``skill_tools`` selects: the workspace root requires every
+    canonical skill in every directory, a registered project requires the
     ``adoption: baseline`` ones. Other canonical skills are optional for a
-    project and are checked only when adopted. Orphaned adapters are always
-    flagged, and so is a local skill whose name collides with a canonical
-    skill's name (ambiguous for agent discovery); unrelated local skills are
-    ignored.
+    project and are checked only when adopted. A managed adapter in a directory
+    outside ``tool_dirs`` is flagged, orphaned adapters are always flagged, and
+    so is a local skill whose name collides with a canonical skill's name
+    (ambiguous for agent discovery); unrelated local skills are ignored.
     """
     for tool_dir in (d.removeprefix(".") for d in TOOL_DIRS):
         tool_skills_dir = adapters_root / f".{tool_dir}" / "skills"
@@ -541,8 +578,12 @@ def check_adapter_tree(
                 "updating this)"
             )
 
-        needed = {name for name in required if f".{tool_dir}" in adapter_dirs(canonical[name])}
-        for name in sorted(needed - actual_names):
+        if f".{tool_dir}" not in tool_dirs:
+            for name in sorted(adapter_like & set(canonical)):
+                fail(f"{label}: .{tool_dir}/skills/{name}/ is a managed adapter in a tool directory "
+                     f"{SKILL_TOOLS} does not select — run sync")
+            continue
+        for name in sorted(set(required) - actual_names):
             fail(f"{label}: .{tool_dir}/skills/{name}/ missing")
 
         for name in sorted(actual_names & set(canonical)):
@@ -827,7 +868,7 @@ def check_tracked(project_path: Path, label: str, canonical: dict[str, dict], so
     """Every file sync writes is committed (GIT_WORKFLOW.md § Governance sync commits).
 
     A file Git ignores or excludes can never be committed and fails; a file
-    not committed yet, as `atc bootstrap add` leaves its first onboarding, is
+    not committed yet, as `atc bootstrap add` leaves its first sync, is
     reported."""
     paths = sync_written_paths(project_path, canonical, source)
     if not paths or not git_toplevel(project_path):
@@ -942,6 +983,7 @@ def check_projects(canonical: dict[str, dict], project_checkouts: dict[str, Path
         return
 
     root_val, safe_projects = load_and_check_workspace_yaml(real_workspace_yaml)
+    selected_tools = load_skill_tools(real_workspace_yaml)
 
     if root_val is not None:
         configured_root = Path(root_val).expanduser().resolve()
@@ -979,7 +1021,8 @@ def check_projects(canonical: dict[str, dict], project_checkouts: dict[str, Path
             check_project_integration_verifier(project_path, label=label)
             check_project_enforcement(project_path, label=f"{label}.enforcement")
             report_machine_local(project_path, f"{label}.machine-local", real_workspace_yaml)
-            check_adapter_tree(project_path, synced, label=label, required=baseline_skills(synced), source=source)
+            check_adapter_tree(project_path, synced, label=label, required=baseline_skills(synced), source=source,
+                               tool_dirs=selected_tools.get(name, TOOL_DIRS))
             prefixes[label] = check_task_records(project_path, label=label)
     check_unique_prefixes(prefixes)
     report_hook(real_workspace_yaml)

@@ -252,15 +252,15 @@ def bound_governance(name: str, root: Path, worktree: Path) -> tuple[str, str]:
     """The governance (source, revision) a new task of ``name`` binds: the root's `main`, or a project's lock."""
     import validate_workspace as validator
     if name == "root":
-        import onboard_project
-        return onboard_project.governance_source(root), git(root, "rev-parse", f"refs/heads/{MAIN}").stdout.strip()
+        import sync_project
+        return sync_project.governance_source(root), git(root, "rev-parse", f"refs/heads/{MAIN}").stdout.strip()
     lock_path = worktree / validator.ATC_LOCK
     try:
         lock = validator.read_lock(worktree)
     except (OSError, ValueError) as exc:
-        raise Refused("NO_GOVERNANCE_BINDING", f"{lock_path}: {exc}; run atc onboard --sync") from None
+        raise Refused("NO_GOVERNANCE_BINDING", f"{lock_path}: {exc}; run atc sync") from None
     if lock is None:
-        raise Refused("NO_GOVERNANCE_BINDING", f"{lock_path} is missing; run atc onboard --sync")
+        raise Refused("NO_GOVERNANCE_BINDING", f"{lock_path} is missing; run atc sync")
     return lock["source"], lock["revision"]
 
 

@@ -149,10 +149,10 @@ def test_bootstrap_init_exits_2_on_an_invalid_governance_source_and_writes_nothi
 
 
 def test_onboard_apply_names_an_unknown_project(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    import onboard_project
+    import sync_project
     (tmp_path / "workspace.yaml").write_text(f"version: 1\nworkspace_root: {tmp_path.as_posix()}\nprojects: {{}}\n",
                                              encoding="utf-8")
-    assert onboard_project.apply("absent", root=tmp_path) == 2
+    assert sync_project.apply("absent", root=tmp_path) == 2
     assert capsys.readouterr().err.startswith("ERROR PROJECT_UNKNOWN ")
 
 
@@ -200,3 +200,44 @@ def test_doctor_takes_json_and_refuses_unknown_arguments(monkeypatch: pytest.Mon
     with pytest.raises(SystemExit) as stop:
         doctor.main(["--bogus"])
     assert stop.value.code == 2
+
+
+@pytest.mark.parametrize(("argv", "root", "rest"), [
+    (["sync", "--root"], None, ["--root"]),
+    (["--root", "R", "sync", "--root", "--check"], "R", ["--root", "--check"]),
+    (["--root=R", "sync", "demo"], "R", ["demo"]),
+], ids=["root flag", "global root before", "global root equals"])
+def test_after_sync_root_is_its_own_flag(argv: list[str], root: str | None, rest: list[str],
+                                          monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list = []
+    monkeypatch.setattr(atc_cli, "_guard", lambda *args: None)
+    monkeypatch.setattr(atc_cli, "_dispatch", lambda command, rest, root: seen.append((command, rest, root)) or 0)
+    assert atc_cli.main(argv) == 0
+    assert seen == [("sync", rest, root)]
+
+
+@pytest.mark.parametrize(("argv", "translated"), [
+    (["--sync", "--all"], []),
+    (["--sync", "--all", "--prune"], []),
+    (["--check", "--project", "demo", "--verbose", "--json"], ["demo", "--check", "--verbose", "--json"]),
+    (["--sync", "--root-only"], ["--root"]),
+    (["--sync", "--project", "demo", "--revision", "a" * 40], ["demo", "--revision", "a" * 40]),
+], ids=lambda value: " ".join(value) if isinstance(value, list) else value)
+def test_onboard_warns_and_runs_the_sync_call_it_stands_for(argv: list[str], translated: list[str], tmp_path: Path,
+                                                            monkeypatch: pytest.MonkeyPatch,
+                                                            capsys: pytest.CaptureFixture[str]) -> None:
+    import sync_project
+    seen: list = []
+    monkeypatch.setattr(sync_project, "main", lambda argv, root: seen.append((argv, root)) or 1)
+    assert sync_project.onboard_main(argv, root=tmp_path) == 1
+    assert seen == [(translated, tmp_path)]
+    assert capsys.readouterr().err == (f"WARNING DEPRECATED atc onboard: use {' '.join(['atc sync', *translated])}; "
+                                       f"removed in atc {cli_conventions.NEXT_RELEASE}\n")
+
+
+def test_cli_md_lists_every_deprecated_form_and_names_the_next_release() -> None:
+    root = Path(atc_cli.__file__).resolve().parents[4]
+    text = (root / "shared" / "conformance" / "CLI.md").read_text(encoding="utf-8")
+    section = text.split("## Deprecated forms", 1)[1]
+    assert "`atc onboard" in section and "`atc sync" in section
+    assert f"| {cli_conventions.NEXT_RELEASE} |" in section

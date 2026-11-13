@@ -23,8 +23,8 @@ Operational description of the tree; governance semantics live under
   as the files the shell installer copies into other repositories. Each
   carries the canonical body, `managed-by` and `canonical`; nothing in them
   refers back to this checkout.
-- `shared/templates/PROJECT_AGENTS.md` — the pointer line onboarding inserts
-  into a project's `AGENTS.md`, sending every session to `.atc/README.md`.
+- `shared/templates/PROJECT_AGENTS.md` — the pointer line sync places
+  in a project's `AGENTS.md`, sending every session to `.atc/README.md`.
   `shared/templates/ATC_README.md` — the content sync writes to a project's
   `.atc/README.md`: the governance bootloader.
 - `shared/conformance/<tool>/<case>/` — language-neutral fixtures: `input/`,
@@ -84,7 +84,7 @@ Operational description of the tree; governance semantics live under
   Readers drop carriage returns first, since a `core.autocrlf` checkout may
   hold the file with CRLF. A lock that does not parse, has a `version` other
   than `1`, or lacks a non-empty `source` or `revision` is a collision for
-  sync and a failure for validation. `atc onboard` renders and locks the
+  sync and a failure for validation. `atc sync` renders and locks the
   sync target: the highest `vMAJOR.MINOR.PATCH` tag in the history of ATC
   `main`, or the SHA on `main` the Owner names with `--revision` (governance
   `CORE.md` § Effective authority and revocation). It reads the tags of the
@@ -106,10 +106,17 @@ Operational description of the tree; governance semantics live under
 - `.atc/tasks/<task_id>.yaml` — the repository's own task records, declared by
   `## Task records` in its `AGENTS.md` (`docs/TASKS.md`).
 - `.claude/skills/<name>/`, `.agents/skills/<name>/`, `.dsh/skills/<name>/` —
-  the rendered skill copies. These directories also hold the project's own
-  skills, so each rendered copy carries `managed-by`.
-- One marked pointer line in `AGENTS.md`, placed before its first section;
-  the rest of `AGENTS.md` is the project's. `CLAUDE.md`, when the repository
+  the rendered skill copies: every baseline skill, and every opt-in skill the
+  project adopted, as a complete copy (the canonical body plus that tool's
+  overlay) in each tool directory the project's `skill_tools` selects. DSH
+  also reads `.agents/skills/` and prefers `.dsh/skills/`. Sync deletes a
+  managed copy whose canonical skill is gone and every managed copy in a tool
+  directory the project no longer selects. These directories also hold the
+  project's own skills, so each rendered copy carries `managed-by`.
+- One marked pointer line in `AGENTS.md`, placed before its first section, or
+  at its end when it has none. A repository without `AGENTS.md` gets a minimal
+  one (a title, the pointer line, one line saying the project's rules go
+  there); after that the rest of `AGENTS.md` is the project's. `CLAUDE.md`, when the repository
   had none, imports `AGENTS.md`. Sync also replaces a `CLAUDE.md` byte-equal
   to the root `CLAUDE.md` of the form before it imported `AGENTS.md`; any
   other existing `CLAUDE.md` is the project's.
@@ -125,6 +132,13 @@ argv file exist (`GIT_WORKFLOW.md` § Lock advancement).
 ## Machine-local, never committed
 
 - `workspace.yaml` — absolute paths for this machine; one copy per clone.
+  Its optional top-level `skill_tools` maps a project name to the tools whose
+  skill directories it gets copies in: `claude` (`.claude/skills/`), `codex`
+  (`.agents/skills/`), `dsh` (`.dsh/skills/`), or `all`. A project it does
+  not name, and this checkout, get `all`: every tool the running `atc`
+  supports, so a tool supported in a later release joins `all` there. The
+  map stays top-level; a `projects.<name>` entry holds exactly `repo`,
+  `worktrees` and `state`.
 - `projects/<name>/` — independent repositories brought in by the owner. This
   repository never tracks their content.
 - `worktrees/<name>/<owner>+<topic>/` — disposable per-topic worktrees whose

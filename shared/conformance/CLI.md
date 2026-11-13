@@ -10,13 +10,14 @@ the nearest parent of the working directory that holds `workspace.yaml` and
 `shared/governance/`, else the checkout the installed `atc` comes from.
 `--root` is one global flag and may stand before or after the command
 (`atc --root DIR validate` and `atc validate --root DIR` are the same call);
-everything after a `--` belongs to the command, and `atc test` takes `--root`
-only before the command.
+everything after a `--` belongs to the command, and `atc test` and `atc sync`
+take the global `--root DIR` only before the command.
 
-`atc onboard --root-only` renders the ATC checkout that holds the working
-directory, which in a linked worktree has no `workspace.yaml`; `--root` and
-`$ATC_ROOT` still win. Every command names a repository with `--project`,
-resolved in that root's `workspace.yaml`; `root` names the workspace root.
+After `sync`, `--root` is sync's own flag: `atc sync --root` renders the ATC
+checkout that holds the working directory, which in a linked worktree has no
+`workspace.yaml`; a global `--root DIR` and `$ATC_ROOT` still win. Every other
+command names a repository with `--project`, resolved in that root's
+`workspace.yaml`; `root` names the workspace root.
 
 ## Canonical checkout guard
 
@@ -25,7 +26,7 @@ no linked worktree), every command but `doctor`, `--help` and `--version`
 stops with `ERROR CHECKOUT_NOT_MAIN` while that checkout is off `main`, stops
 with `ERROR CHECKOUT_UNREADABLE` when its Git state cannot be read, and warns
 with `WARNING CHECKOUT_DIRTY` while it has tracked modifications.
-`onboard --root-only` stops with `ERROR CHECKOUT_CANONICAL` when the checkout
+`sync --root` stops with `ERROR CHECKOUT_CANONICAL` when the checkout
 it would render is the canonical one. A module the installed `atc` lacks stops
 the command with `ERROR MISSING_DEPENDENCY` and the reinstall command.
 
@@ -35,7 +36,7 @@ the command with `ERROR MISSING_DEPENDENCY` and the reinstall command.
 | --- | --- |
 | Task lifecycle | `task`, `worktree`, `verify`, `integrate`, `close-out`, `preflight` |
 | Testing | `test`, `tmp` |
-| Workspace | `bootstrap`, `onboard`, `doctor`, `validate` |
+| Workspace | `bootstrap`, `sync`, `doctor`, `validate` |
 | Policy | `policies`, `enforce`, `classify` |
 | Log | `friction` |
 
@@ -123,16 +124,18 @@ pass their output through.
   builds no candidate, and answers whether the gate would pass: exit 0 when
   it would (the files are current, or the integration would proceed), 1 when
   it would not, each reason on its own line.
-- `--project NAME` is the only way to name a project. A positional argument is
-  the operand of its verb: a directory to check or clean, an event to resolve.
+- `--project NAME` names a project, except in `atc sync [NAME]`, whose operand
+  is the project and whose absence means every registered project. Any other
+  positional argument is the operand of its verb: a directory to check or
+  clean, an event to resolve.
   `validate --project-checkout NAME=PATH` maps a project to a checkout.
 - `clean` deletes the targets you name, after its safety checks
   (`worktree clean`, `tmp clean`); `prune` deletes what the command finds
-  orphaned (`tmp prune`, `onboard --sync --prune`). `close-out` is the
+  orphaned (`tmp prune`; `sync` prunes orphaned managed adapters on every
+  run). `close-out` is the
   task-lifecycle step that cleans one integrated task; `close-out --check`
   lists what it would delete, skip and refuse.
-- `onboard --sync` is the one command that converges projects' ATC-owned
-  files.
+- `sync` is the one command that converges projects' ATC-owned files.
 
 ## Versions and compatibility
 
@@ -166,9 +169,11 @@ adapter's internal module and script paths are not part of the CLI. A change
 that cannot keep an alias (an exit code, a `--json` field's meaning, the
 record or lock format) lands in a minor version and the release notes mark it
 BREAKING; `atc` reads the `atc.lock` and task records of the previous minor
-version, and `onboard --sync` migrates them. A breaking change to a governance
+version, and `sync` migrates them. A breaking change to a governance
 contract also goes through governance `GOVERNANCE_CHANGES.md`.
 
 ## Deprecated forms
 
-No form is deprecated.
+| Form | Use | Removed in |
+| --- | --- | --- |
+| `atc onboard --sync\|--check --project NAME\|--all\|--root-only [--prune]` | `atc sync [NAME] [--check] [--root]`; `--prune` has no effect, since sync always prunes | 0.7.0 |

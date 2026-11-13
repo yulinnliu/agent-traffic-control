@@ -41,7 +41,9 @@ Merge preflight (`FF`, `NO_FF`, `STOP`), push preflight (`PUSH`, `STOP`) and
 worktree identity (`CREATED`, `RESUMED`, `IDENTITY_MISMATCH`,
 `IDENTITY_AMBIGUOUS`, `ALREADY_EXISTS`, `REMOVABLE`) and task records
 (`atc task new` and `list`) need live git
-repositories. Their cases are the Python suites `tests/test_git_preflight.py`,
+repositories, and so does `atc sync` (prune by default, `skill_tools`, the
+minimal `AGENTS.md`, the sync commit), whose cases are `tests/test_sync_prune.py`
+and `tests/test_sync_commit.py`. Their cases are the Python suites `tests/test_git_preflight.py`,
 `tests/test_integrate_moving_main.py`, `tests/test_managed_worktree.py` and
 `tests/test_task_records.py`, which build
 each repository in code; a second implementation ports those suites until

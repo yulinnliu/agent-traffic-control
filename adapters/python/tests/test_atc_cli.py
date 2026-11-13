@@ -20,7 +20,7 @@ SUBCOMMANDS = [
     ("preflight",), ("preflight", "push"),
     ("integrate",), ("verify",), ("close-out",),
     ("task",), ("task", "new"), ("task", "plan"), ("task", "start"), ("task", "rank"), ("task", "drop"), ("task", "list"),
-    ("task", "check"), ("validate",), ("onboard",),
+    ("task", "check"), ("validate",), ("sync",), ("onboard",),
     ("bootstrap",), ("bootstrap", "init"), ("bootstrap", "add"), ("bootstrap", "status"),
     ("doctor",), ("policies",), ("policies", "check"), ("enforce",), ("classify",),
     ("friction",), ("friction", "add"), ("friction", "list"), ("friction", "summary"), ("friction", "resolve"),
@@ -127,12 +127,12 @@ def nested_checkouts(tmp_path: Path) -> tuple[Path, Path]:
     for checkout in (workspace, worktree):
         (checkout / "shared" / "governance").mkdir(parents=True)
         (checkout / "adapters" / "python" / "scripts").mkdir(parents=True)
-        (checkout / "adapters" / "python" / "scripts" / "onboard_project.py").write_text("", encoding="utf-8")
+        (checkout / "adapters" / "python" / "scripts" / "validate_workspace.py").write_text("", encoding="utf-8")
     (workspace / "workspace.yaml").write_text("version: 1\n", encoding="utf-8")
     return workspace, worktree
 
 
-def test_root_only_onboard_renders_the_linked_worktree_not_the_workspace_above(tmp_path: Path) -> None:
+def test_sync_root_renders_the_linked_worktree_not_the_workspace_above(tmp_path: Path) -> None:
     workspace, worktree = nested_checkouts(tmp_path)
     cwd = worktree / "adapters" / "python"
     assert atc_cli.resolve_root(None, {}, cwd) == workspace.resolve()
@@ -140,22 +140,25 @@ def test_root_only_onboard_renders_the_linked_worktree_not_the_workspace_above(t
     assert atc_cli.resolve_checkout(None, {"ATC_ROOT": str(workspace)}, cwd) == workspace.resolve()
 
 
-@pytest.mark.parametrize(("args", "expected"), [(["--sync", "--root-only"], "worktree"), (["--check", "--project", "demo"], "workspace")])
-def test_onboard_dispatch_picks_the_root_by_target(
+@pytest.mark.parametrize(("args", "expected"), [
+    (["sync", "--root"], "worktree"), (["sync", "demo", "--check"], "workspace"), (["sync"], "workspace"),
+    (["onboard", "--sync", "--root-only"], "worktree"), (["onboard", "--check", "--project", "demo"], "workspace"),
+], ids=" ".join)
+def test_sync_dispatch_picks_the_root_by_target(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, args: list[str], expected: str,
 ) -> None:
     workspace, worktree = nested_checkouts(tmp_path)
-    import onboard_project
+    import sync_project
     seen: dict[str, Path] = {}
 
     def record(rest: list[str], root: Path) -> int:
         seen["root"] = root
         return 0
 
-    monkeypatch.setattr(onboard_project, "main", record)
+    monkeypatch.setattr(sync_project, "main", record)
     monkeypatch.delenv("ATC_ROOT", raising=False)
     monkeypatch.chdir(worktree / "adapters" / "python")
-    assert atc_cli.main(["onboard", *args]) == 0
+    assert atc_cli.main(args) == 0
     assert seen["root"] == {"worktree": worktree, "workspace": workspace}[expected].resolve()
 
 
@@ -202,7 +205,7 @@ def test_a_canonical_checkout_off_main_refuses_every_command_but_doctor_and_help
     git(canonical, "switch", "-q", "-c", "topic")
     assert atc_cli.main(["validate"], checkout=canonical) == 2
     assert capsys.readouterr().err.startswith(f"ERROR CHECKOUT_NOT_MAIN {canonical} is on topic;")
-    for command in ("worktree", "integrate", "task", "onboard", "test", "tmp"):
+    for command in ("worktree", "integrate", "task", "sync", "onboard", "test", "tmp"):
         assert atc_cli._guard(command, [], canonical) == 2
     assert atc_cli._guard("doctor", [], canonical) is None
     assert atc_cli._guard("integrate", ["--help"], canonical) is None
@@ -227,15 +230,16 @@ def test_a_linked_worktree_and_a_checkout_without_the_map_are_not_canonical(cano
     assert atc_cli._guard("validate", [], canonical) is None
 
 
-def test_root_only_onboard_refuses_the_canonical_checkout(
+@pytest.mark.parametrize("argv", [["sync", "--root"], ["onboard", "--sync", "--root-only"]], ids=" ".join)
+def test_sync_root_refuses_the_canonical_checkout(argv: list[str],
     canonical: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:
     (canonical / "shared" / "governance").mkdir(parents=True)
     (canonical / "adapters" / "python" / "scripts").mkdir(parents=True)
-    (canonical / "adapters" / "python" / "scripts" / "onboard_project.py").write_text("", encoding="utf-8")
+    (canonical / "adapters" / "python" / "scripts" / "validate_workspace.py").write_text("", encoding="utf-8")
     monkeypatch.delenv("ATC_ROOT", raising=False)
     monkeypatch.chdir(canonical)
-    assert atc_cli.main(["onboard", "--sync", "--root-only"]) == 2
+    assert atc_cli.main(argv) == 2
     assert capsys.readouterr().err.startswith(f"ERROR CHECKOUT_CANONICAL {canonical.resolve()} ")
 
 

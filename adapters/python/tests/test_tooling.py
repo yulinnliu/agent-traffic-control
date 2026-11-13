@@ -13,7 +13,7 @@ import pytest
 import check_workspace
 import doctor
 import friction
-import onboard_project
+import sync_project
 import validate_workspace as validator
 
 
@@ -76,7 +76,7 @@ def make_workspace(tmp_path: Path, *, create_project: bool = True) -> tuple[Path
         root / "shared/skills/demo-skill/SKILL.md",
         "---\nname: demo-skill\ndescription: test skill\nadoption: baseline\n---\n\n# Demo\n",
     )
-    onboard_project.apply_plan(onboard_project.root_adapter_plan(root), "sync")
+    sync_project.apply_plan(sync_project.root_adapter_plan(root), "sync")
     return root, project
 
 
@@ -105,29 +105,29 @@ def commit_workspace(root: Path, project: Path) -> None:
     run_git(project, *commit, "init")
 
 
-def changed(plan: list[onboard_project.PlanItem]) -> list[onboard_project.PlanItem]:
+def changed(plan: list[sync_project.PlanItem]) -> list[sync_project.PlanItem]:
     return [item for item in plan if item.action in ("create", "update", "collision")]
 
 
 def test_onboarding_is_idempotent(tmp_path: Path) -> None:
     root, project = make_workspace(tmp_path)
-    first = onboard_project.build_plan(project, root)
-    onboard_project.apply_plan(first, "sync")
-    assert not changed(onboard_project.build_plan(project, root))
+    first = sync_project.build_plan(project, root)
+    sync_project.apply_plan(first, "sync")
+    assert not changed(sync_project.build_plan(project, root))
 
 
 def test_missing_canonical_template_fails_without_project_reference(tmp_path: Path) -> None:
     root, project = make_workspace(tmp_path)
     (root / "shared/templates/PROJECT_AGENTS.md").unlink()
     with pytest.raises(ValueError, match="canonical pointer line template"):
-        onboard_project.build_plan(project, root)
+        sync_project.build_plan(project, root)
 
 
 def test_malformed_workspace_yaml_is_rejected(tmp_path: Path) -> None:
     root, _ = make_workspace(tmp_path)
     write(root / "workspace.yaml", "projects: [not, a, mapping\n")
     with pytest.raises(ValueError, match="not valid YAML"):
-        onboard_project.load_projects(root)
+        sync_project.load_projects(root)
 
 
 @pytest.mark.unit
@@ -168,40 +168,40 @@ def test_unmanaged_collision_is_never_modified(tmp_path: Path) -> None:
     target = project / ".agents/skills/demo-skill/SKILL.md"
     original = "---\nname: demo-skill\ndescription: local\n---\n\n# Local\n"
     write(target, original)
-    plan = onboard_project.build_plan(project, root)
+    plan = sync_project.build_plan(project, root)
     assert any(item.action == "collision" and item.path == target for item in plan)
-    onboard_project.apply_plan(plan, "sync")
+    sync_project.apply_plan(plan, "sync")
     assert target.read_text(encoding="utf-8") == original
 
 
 def test_managed_adapter_sync_and_second_sync_zero_diff(tmp_path: Path) -> None:
     root, project = make_workspace(tmp_path)
-    onboard_project.apply_plan(onboard_project.build_plan(project, root), "sync")
+    sync_project.apply_plan(sync_project.build_plan(project, root), "sync")
     target = project / ".agents/skills/demo-skill/SKILL.md"
     write(target, managed_adapter("demo-skill") + "\ndrift\n")
-    plan = onboard_project.build_plan(project, root)
+    plan = sync_project.build_plan(project, root)
     assert any(item.action == "update" and item.path == target for item in plan)
-    onboard_project.apply_plan(plan, "sync")
+    sync_project.apply_plan(plan, "sync")
     assert target.read_text(encoding="utf-8") == (root / ".agents/skills/demo-skill/SKILL.md").read_text(encoding="utf-8")
-    assert not changed(onboard_project.build_plan(project, root))
+    assert not changed(sync_project.build_plan(project, root))
 
 
-def claude_item(plan: list[onboard_project.PlanItem], project: Path) -> onboard_project.PlanItem:
+def claude_item(plan: list[sync_project.PlanItem], project: Path) -> sync_project.PlanItem:
     return next(item for item in plan if item.path == project / "CLAUDE.md")
 
 
 def test_missing_claude_entrypoint_is_created_from_workspace_root(tmp_path: Path) -> None:
     root, project = make_workspace(tmp_path)
-    plan = onboard_project.build_plan(project, root)
+    plan = sync_project.build_plan(project, root)
     assert claude_item(plan, project).action == "create"
-    onboard_project.apply_plan(plan, "apply")
+    sync_project.apply_plan(plan, "apply")
     assert (project / "CLAUDE.md").read_text(encoding="utf-8") == (root / "CLAUDE.md").read_text(encoding="utf-8")
 
 
 def test_current_claude_entrypoint_is_reported_current(tmp_path: Path) -> None:
     root, project = make_workspace(tmp_path)
     (project / "CLAUDE.md").write_bytes(b"Read AGENTS.md.\r\n")
-    item = claude_item(onboard_project.build_plan(project, root), project)
+    item = claude_item(sync_project.build_plan(project, root), project)
     assert (item.action, item.detail) == ("skip", "workspace entrypoint is current")
 
 
@@ -209,11 +209,11 @@ def test_current_claude_entrypoint_is_reported_current(tmp_path: Path) -> None:
 def test_differing_claude_entrypoint_is_reported_and_never_modified(tmp_path: Path, content: str) -> None:
     root, project = make_workspace(tmp_path)
     write(project / "CLAUDE.md", content)
-    plan = onboard_project.build_plan(project, root)
+    plan = sync_project.build_plan(project, root)
     item = claude_item(plan, project)
     assert item.action == "skip"
     assert item.detail.startswith("differs from workspace entrypoint")
-    assert onboard_project.run("sync", [("demo", project)], root) == 0
+    assert sync_project.run("sync", [("demo", project)], root) == 0
     assert (project / "CLAUDE.md").read_text(encoding="utf-8") == content
 
 
@@ -241,14 +241,14 @@ def test_canonical_skill_must_not_point_back_at_the_checkout(tmp_path: Path, mon
 def test_tool_overlay_is_appended_only_to_its_tool(tmp_path: Path) -> None:
     root, project = make_workspace(tmp_path)
     write(root / "shared/skills/demo-skill/adapters/codex.md", "## Codex constants\n\n- owner: codex\n")
-    assert onboard_project.run("sync", [("demo", project)], root) == 0
+    assert sync_project.run("sync", [("demo", project)], root) == 0
     codex = (project / ".agents/skills/demo-skill/SKILL.md").read_text(encoding="utf-8")
     claude = (project / ".claude/skills/demo-skill/SKILL.md").read_text(encoding="utf-8")
     assert codex.endswith("# Demo\n\n## Codex constants\n\n- owner: codex\n")
     assert "Codex constants" not in claude
     write(root / "shared/skills/demo-skill/adapters/gemini.md", "nope\n")
     with pytest.raises(ValueError, match="overlay name must be one of"):
-        onboard_project.canonical_skills(root)
+        sync_project.canonical_skills(root)
 
 
 def test_friction_append_and_resolution_preserve_incident(tmp_path: Path) -> None:
@@ -354,7 +354,7 @@ def test_missing_registered_project_is_readiness_not_contract_failure(
 
 def test_explicit_candidate_checkout_is_validated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root, project = make_workspace(tmp_path)
-    onboard_project.apply_plan(onboard_project.build_plan(project, root), "sync")
+    sync_project.apply_plan(sync_project.build_plan(project, root), "sync")
     candidate = tmp_path / "candidate-demo"
     shutil.copytree(project, candidate)
     monkeypatch.setattr(validator, "ROOT", root)
@@ -366,7 +366,7 @@ def test_explicit_candidate_checkout_is_validated(tmp_path: Path, monkeypatch: p
 @pytest.mark.integration
 def test_projects_check_task_records_and_one_prefix_per_repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root, project = make_workspace(tmp_path)
-    onboard_project.apply_plan(onboard_project.build_plan(project, root), "sync")
+    sync_project.apply_plan(sync_project.build_plan(project, root), "sync")
     agents = project / "AGENTS.md"
     write(agents, agents.read_text(encoding="utf-8") + "\n## Task records\n\n- Task prefix: ATC\n")
     write(project / ".atc" / "tasks" / "ATC-0002.yaml", "task_id: ATC-0001\n")
@@ -415,12 +415,12 @@ def test_pointer_line_must_be_current_and_before_the_first_section(tmp_path: Pat
 @pytest.mark.integration
 def test_atc_dir_is_installed_locked_and_checked(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root, project = make_workspace(tmp_path)
-    assert onboard_project.run("sync", [("demo", project)], root) == 0
+    assert sync_project.run("sync", [("demo", project)], root) == 0
     for module in validator.vendored_governance_modules():
         assert (project / ".atc/governance" / module).read_text(encoding="utf-8") == (root / "shared/governance" / module).read_text(encoding="utf-8")
     assert (project / ".atc/README.md").read_text(encoding="utf-8") == BOOTLOADER
     lock = (project / ".atc/atc.lock").read_bytes()
-    assert lock == validator.render_lock(onboard_project.governance_source(root), onboard_project.governance_revision(root)).encode("utf-8")
+    assert lock == validator.render_lock(sync_project.governance_source(root), sync_project.governance_revision(root)).encode("utf-8")
     assert lock.startswith(b'version = 1\nsource = "') and b"\r" not in lock and lock.endswith(b'"\n') and lock.count(b"\n") == 3
     assert check_registered_projects(root, monkeypatch) == []
     write(project / ".atc/governance/CORE.md", "# edited locally\n")
@@ -428,7 +428,7 @@ def test_atc_dir_is_installed_locked_and_checked(tmp_path: Path, monkeypatch: py
     failures = check_registered_projects(root, monkeypatch)
     assert any(".atc/governance/CORE.md differs" in f for f in failures)
     assert any(".atc/README.md differs" in f for f in failures)
-    assert onboard_project.run("sync", [("demo", project)], root) == 0
+    assert sync_project.run("sync", [("demo", project)], root) == 0
     assert check_registered_projects(root, monkeypatch) == []
 
 
@@ -441,11 +441,11 @@ def test_atc_dir_is_installed_locked_and_checked(tmp_path: Path, monkeypatch: py
 ])
 def test_invalid_lock_fails_validate_and_is_a_sync_collision(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, lock: str, problem: str) -> None:
     root, project = make_workspace(tmp_path)
-    assert onboard_project.run("sync", [("demo", project)], root) == 0
+    assert sync_project.run("sync", [("demo", project)], root) == 0
     write(project / ".atc/atc.lock", lock)
     assert any(f"projects.demo: .atc/atc.lock: {problem}" in f for f in check_registered_projects(root, monkeypatch))
     write(project / ".atc/governance/CORE.md", "# edited locally\n")
-    assert onboard_project.run("sync", [("demo", project)], root) == 1
+    assert sync_project.run("sync", [("demo", project)], root) == 1
     assert (project / ".atc/atc.lock").read_text(encoding="utf-8") == lock
     assert (project / ".atc/governance/CORE.md").read_text(encoding="utf-8") == "# edited locally\n"
 
@@ -453,27 +453,27 @@ def test_invalid_lock_fails_validate_and_is_a_sync_collision(tmp_path: Path, mon
 @pytest.mark.integration
 def test_lock_with_crlf_line_ends_reads_as_current(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root, project = make_workspace(tmp_path)
-    assert onboard_project.run("sync", [("demo", project)], root) == 0
+    assert sync_project.run("sync", [("demo", project)], root) == 0
     lock = project / ".atc/atc.lock"
     lock.write_bytes(lock.read_bytes().replace(b"\n", b"\r\n"))
-    assert validator.read_lock(project)["revision"] == onboard_project.governance_revision(root)
-    assert not changed(onboard_project.build_plan(project, root))
+    assert validator.read_lock(project)["revision"] == sync_project.governance_revision(root)
+    assert not changed(sync_project.build_plan(project, root))
 
 
 @pytest.mark.integration
 def test_stray_file_under_atc_is_reported_and_blocks_the_atc_part(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root, project = make_workspace(tmp_path)
-    assert onboard_project.run("sync", [("demo", project)], root) == 0
+    assert sync_project.run("sync", [("demo", project)], root) == 0
     write(project / ".atc/notes.md", "mine\n")
     write(project / ".atc/governance/EXTRA.md", "mine\n")
     failures = check_registered_projects(root, monkeypatch)
     assert any(".atc/notes.md is not a file sync writes" in f for f in failures)
     assert any(".atc/governance/EXTRA.md is not a file sync writes" in f for f in failures)
     write(project / ".atc/governance/CORE.md", "# edited locally\n")
-    plan = onboard_project.build_plan(project, root)
+    plan = sync_project.build_plan(project, root)
     assert {i.path for i in plan if i.action == "collision"} == {project / ".atc/notes.md", project / ".atc/governance/EXTRA.md"}
     assert not any(i.path.is_relative_to(project / ".atc") and i.action != "collision" for i in plan)
-    assert onboard_project.run("sync", [("demo", project)], root) == 1
+    assert sync_project.run("sync", [("demo", project)], root) == 1
     assert (project / ".atc/governance/CORE.md").read_text(encoding="utf-8") == "# edited locally\n"
 
 
@@ -483,9 +483,9 @@ def test_task_records_under_atc_are_the_projects_and_never_touched(tmp_path: Pat
     record = project / validator.TASKS_DIR / "DEMO-0001.yaml"
     write(record, "task_id: DEMO-0001\n")
     write(project / validator.TASKS_DIR / "notes/scratch.txt", "x\n")
-    plan = onboard_project.build_plan(project, root)
+    plan = sync_project.build_plan(project, root)
     assert not any(i.path.is_relative_to(project / validator.TASKS_DIR) for i in plan)
-    assert onboard_project.run("sync", [("demo", project)], root, prune=True) == 0
+    assert sync_project.run("sync", [("demo", project)], root) == 0
     assert record.read_text(encoding="utf-8") == "task_id: DEMO-0001\n"
     assert not any(validator.TASKS_DIR.as_posix() in f and "not a file sync writes" in f for f in check_registered_projects(root, monkeypatch))
 
@@ -496,12 +496,12 @@ def test_sync_writes_the_lock_last(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     write(project / "AGENTS.md", "# AGENTS.md\n\nIntro.\n\n## What this is\n\nDemo.\n\n" + VERIFICATION_SECTION)
     write(project / ".atc/governance/CORE.md", "# older\n")
     write(project / validator.TASKS_DIR / "DEMO-0001.yaml", "task_id: DEMO-0001\n")
-    plan = onboard_project.build_plan(project, root)
+    plan = sync_project.build_plan(project, root)
     writes = [i.path.relative_to(project).as_posix() for i in plan if i.action in ("create", "update")]
     assert writes[0] == ".atc/README.md"
     assert writes.index(".atc/governance/CORE.md") < writes.index("AGENTS.md") < writes.index("CLAUDE.md")
     assert writes[-1] == ".atc/atc.lock"
-    assert onboard_project.run("sync", [("demo", project)], root) == 0
+    assert sync_project.run("sync", [("demo", project)], root) == 0
     assert sorted(p.name for p in (project / ".atc").iterdir()) == ["README.md", "atc.lock", "governance", "tasks"]
     assert (project / validator.TASKS_DIR / "DEMO-0001.yaml").read_text(encoding="utf-8") == "task_id: DEMO-0001\n"
     assert (project / "AGENTS.md").read_text(encoding="utf-8").startswith(f"# AGENTS.md\n\nIntro.\n\n{POINTER}\n\n## What this is\n")
@@ -515,17 +515,17 @@ def test_lock_advances_on_a_skill_only_change(tmp_path: Path, monkeypatch: pytes
     commit = ("-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q", "-m")
     run_git(root, "add", "-A")
     run_git(root, *commit, "release")
-    assert onboard_project.run("sync", [("demo", project)], root) == 0
+    assert sync_project.run("sync", [("demo", project)], root) == 0
     first = validator.read_lock(project)["revision"]
     write(root / "shared/skills/demo-skill/SKILL.md", "---\nname: demo-skill\ndescription: test skill\nadoption: baseline\n---\n\n# Demo, revised\n")
-    onboard_project.apply_plan(onboard_project.root_adapter_plan(root), "sync")
+    sync_project.apply_plan(sync_project.root_adapter_plan(root), "sync")
     run_git(root, "add", "-A")
     run_git(root, *commit, "skill only")
-    item = next(i for i in onboard_project.build_plan(project, root) if i.path == project / ".atc/atc.lock")
+    item = next(i for i in sync_project.build_plan(project, root) if i.path == project / ".atc/atc.lock")
     assert (item.action, item.detail) == ("update", "ATC lock moves to the synced revision")
-    assert onboard_project.run("sync", [("demo", project)], root) == 0
+    assert sync_project.run("sync", [("demo", project)], root) == 0
     assert validator.read_lock(project)["revision"] != first
-    item = next(i for i in onboard_project.build_plan(project, root) if i.path == project / ".atc/atc.lock")
+    item = next(i for i in sync_project.build_plan(project, root) if i.path == project / ".atc/atc.lock")
     assert item.action == "skip"
 
 
@@ -537,13 +537,13 @@ def test_lock_outside_main_history_is_stale_and_resynced(tmp_path: Path, monkeyp
     def head() -> str:
         return subprocess.check_output(["git", "-C", str(root), "rev-parse", "HEAD"], text=True).strip()
 
-    def lock_item() -> onboard_project.PlanItem:
-        return onboard_project.lock_plan(project, root, changed=False, revision=head())
+    def lock_item() -> sync_project.PlanItem:
+        return sync_project.lock_plan(project, root, changed=False, revision=head())
 
     run_git(root, "add", "-A")
     run_git(root, *commit, "release")
     old = head()
-    assert onboard_project.run("sync", [("demo", project)], root) == 0
+    assert sync_project.run("sync", [("demo", project)], root) == 0
     assert check_registered_projects(root, monkeypatch) == []
     # Squash: the old commit survives on a backup branch but leaves main's history.
     run_git(root, "branch", "backup", old)
@@ -556,11 +556,11 @@ def test_lock_outside_main_history_is_stale_and_resynced(tmp_path: Path, monkeyp
     run_git(root, "checkout", "-q", "-b", "topic")
     assert check_registered_projects(root, monkeypatch) == []
     assert (lock_item().action, lock_item().detail) == ("skip", "ATC lock not checked: the ATC checkout is not on main")
-    assert onboard_project.run("sync", [("demo", project)], root) == 0
+    assert sync_project.run("sync", [("demo", project)], root) == 0
     assert validator.read_lock(project)["revision"] == old
     run_git(root, "checkout", "-q", "main")
     assert (lock_item().action, lock_item().detail) == ("update", "ATC lock revision is not in the history of main")
-    assert onboard_project.run("sync", [("demo", project)], root) == 0
+    assert sync_project.run("sync", [("demo", project)], root) == 0
     assert validator.read_lock(project)["revision"] == head()
     assert check_registered_projects(root, monkeypatch) == []
 
@@ -577,13 +577,13 @@ def test_verification_gate_stops_the_project_before_writing(tmp_path: Path, caps
     ):
         write(project / "AGENTS.md", text)
         capsys.readouterr()
-        assert onboard_project.run("sync", [("demo", project)], root) == 1
+        assert sync_project.run("sync", [("demo", project)], root) == 1
         out = capsys.readouterr().out
         assert f"  stop: VERIFICATION_SECTION_MISSING AGENTS.md" in out or f"  stop: VERIFICATION_SECTION_MISSING verifier" in out
         assert problem in out
         assert not (project / ".atc").exists() and (project / "AGENTS.md").read_text(encoding="utf-8") == text
     write(project / "AGENTS.md", agents)
-    assert onboard_project.run("sync", [("demo", project)], root) == 0
+    assert sync_project.run("sync", [("demo", project)], root) == 0
     assert (project / ".atc/atc.lock").is_file()
 
 
@@ -603,7 +603,7 @@ def test_root_atc_holds_only_task_records(tmp_path: Path, monkeypatch: pytest.Mo
 
 def test_project_enforcement_must_match_its_policy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root, project = make_workspace(tmp_path)
-    assert onboard_project.run("sync", [("demo", project)], root) == 0
+    assert sync_project.run("sync", [("demo", project)], root) == 0
     assert check_registered_projects(root, monkeypatch) == []
     write(project / "policies/hard-deny.yaml", "version: 1\ncapabilities:\n  deny: []\nfilesystem:\n  deny:\n    - \"**/.env\"\n")
     assert any("projects.demo.enforcement: generated/enforcement/ differs" in f for f in check_registered_projects(root, monkeypatch))
@@ -616,7 +616,7 @@ def test_project_enforcement_must_match_its_policy(tmp_path: Path, monkeypatch: 
 
 def test_registered_project_must_name_an_existing_integration_verifier(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root, project = make_workspace(tmp_path)
-    assert onboard_project.run("sync", [("demo", project)], root) == 0
+    assert sync_project.run("sync", [("demo", project)], root) == 0
     assert check_registered_projects(root, monkeypatch) == []
 
     argv_file = project / "scripts/integration-verify.json"
@@ -686,7 +686,7 @@ def test_legacy_only_project_bootstrap_is_rejected(tmp_path: Path, monkeypatch: 
     validator.check_project_pointer(project, "projects.demo")
     assert any("has no <!-- atc:governance --> pointer line" in failure for failure in validator.FAILURES)
     validator.FAILURES.clear()
-    item = next(i for i in onboard_project.build_plan(project, root) if i.path == project / "AGENTS.md")
+    item = next(i for i in sync_project.build_plan(project, root) if i.path == project / "AGENTS.md")
     assert item.action == "collision"
 
 
@@ -727,7 +727,7 @@ def test_unregistered_candidate_checkout_is_rejected(tmp_path: Path, monkeypatch
 
 def test_doctor_distinguishes_not_initialized_from_error(tmp_path: Path) -> None:
     root, project = make_workspace(tmp_path)
-    onboard_project.apply_plan(onboard_project.build_plan(project, root), "sync")
+    sync_project.apply_plan(sync_project.build_plan(project, root), "sync")
     checks = doctor.diagnose(root, {})
     by_name = {check.name: check.status for check in checks}
     assert by_name["projects.demo.repo"] == "READY"
@@ -815,12 +815,12 @@ def test_removed_canonical_skill_leaves_an_orphaned_workspace_adapter(tmp_path: 
 
 def test_adapter_from_an_older_release_is_stale_but_still_owned(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root, project = make_workspace(tmp_path)
-    onboard_project.apply_plan(onboard_project.build_plan(project, root), "sync")
+    sync_project.apply_plan(sync_project.build_plan(project, root), "sync")
     target = project / ".claude/skills/demo-skill/SKILL.md"
     write(target, managed_adapter("demo-skill"))
     failures = check_registered_projects(root, monkeypatch)
     assert any("content drifted from canonical" in failure for failure in failures)
-    assert onboard_project.run("sync", [("demo", project)], root) == 0
+    assert sync_project.run("sync", [("demo", project)], root) == 0
     assert target.read_text(encoding="utf-8") == validator.render_adapter(root, "demo-skill", ".claude")
     assert check_registered_projects(root, monkeypatch) == []
 
@@ -829,15 +829,15 @@ def test_supporting_files_are_copied_checked_and_pruned_with_the_adapter(tmp_pat
     root, project = make_workspace(tmp_path)
     write(root / "shared/skills/demo-skill/references/guide.md", "# Guide\n")
     write(root / "shared/skills/demo-skill/adapters/claude.md", "Claude only.\n")
-    onboard_project.apply_plan(onboard_project.root_adapter_plan(root), "sync")
-    assert onboard_project.run("sync", [("demo", project)], root) == 0
+    sync_project.apply_plan(sync_project.root_adapter_plan(root), "sync")
+    assert sync_project.run("sync", [("demo", project)], root) == 0
     for base in (root, project):
         for tool in (".claude", ".agents"):
             adapter = base / tool / "skills/demo-skill"
             assert (adapter / "references/guide.md").read_text(encoding="utf-8") == "# Guide\n"
             assert not (adapter / "adapters").exists()
     assert check_registered_projects(root, monkeypatch) == []
-    assert not changed(onboard_project.build_plan(project, root))
+    assert not changed(sync_project.build_plan(project, root))
 
     copy = project / ".agents/skills/demo-skill/references/guide.md"
     write(copy, "# Edited\n")
@@ -847,7 +847,7 @@ def test_supporting_files_are_copied_checked_and_pruned_with_the_adapter(tmp_pat
     assert any("guide.md: drifted from" in failure for failure in failures)
     assert any("stale.md: not in shared/skills/demo-skill/" in failure for failure in failures)
     assert any("guide.md: missing supporting file" in failure for failure in failures)
-    assert onboard_project.run("sync", [("demo", project)], root) == 0
+    assert sync_project.run("sync", [("demo", project)], root) == 0
     assert copy.read_text(encoding="utf-8") == "# Guide\n"
     assert not (project / ".agents/skills/demo-skill/references/stale.md").exists()
     assert check_registered_projects(root, monkeypatch) == []
@@ -858,7 +858,7 @@ def test_adapter_directory_without_a_managed_skill_md_keeps_its_files(tmp_path: 
     root, project = make_workspace(tmp_path)
     write(root / "shared/skills/demo-skill/references/guide.md", "# Guide\n")
     base = project if where == "project" else root
-    plan_for = (lambda: onboard_project.build_plan(project, root)) if where == "project" else (lambda: onboard_project.root_adapter_plan(root))
+    plan_for = (lambda: sync_project.build_plan(project, root)) if where == "project" else (lambda: sync_project.root_adapter_plan(root))
     no_skill_md = base / ".claude/skills/demo-skill"
     shutil.rmtree(no_skill_md, ignore_errors=True)
     write(no_skill_md / "notes/mine.md", "mine\n")
@@ -870,7 +870,7 @@ def test_adapter_directory_without_a_managed_skill_md_keeps_its_files(tmp_path: 
     assert any(item.action == "collision" and item.path == no_skill_md / "SKILL.md" for item in plan)
     assert any(item.action == "collision" and item.path == unmanaged / "SKILL.md" for item in plan)
     assert not [item for item in plan if item.path.is_relative_to(no_skill_md) or item.path.is_relative_to(unmanaged) if item.action != "collision"]
-    onboard_project.apply_plan(plan, "sync")
+    sync_project.apply_plan(plan, "sync")
     assert (no_skill_md / "notes/mine.md").is_file() and not (no_skill_md / "SKILL.md").exists()
     assert (unmanaged / "own.md").is_file() and not (unmanaged / "references").exists()
     monkeypatch.setattr(validator, "ROOT", root)
@@ -890,9 +890,9 @@ def test_dangling_skill_md_link_is_a_collision_and_never_written_through(tmp_pat
     except OSError:
         pytest.skip("this host cannot create symlinks")
     write(adapter / "mine.md", "mine\n")
-    plan = onboard_project.build_plan(project, root)
+    plan = sync_project.build_plan(project, root)
     assert any(item.action == "collision" and item.path == adapter / "SKILL.md" for item in plan)
-    onboard_project.apply_plan(plan, "sync")
+    sync_project.apply_plan(plan, "sync")
     assert (adapter / "mine.md").is_file() and (adapter / "SKILL.md").is_symlink() and not moved.parent.exists()
 
 
@@ -902,7 +902,7 @@ def test_supporting_file_must_be_plain_named_utf8_text_and_caches_are_ignored(tm
     cache.parent.mkdir(parents=True)
     cache.write_bytes(b"\xff\xfe")
     assert validator.supporting_files(root, "demo-skill") == {}
-    onboard_project.apply_plan(onboard_project.root_adapter_plan(root), "sync")
+    sync_project.apply_plan(sync_project.root_adapter_plan(root), "sync")
     assert not (root / ".claude/skills/demo-skill/__pycache__").exists()
 
     for name, content, message in (("logo.bin", b"\xff\xfe", "must be UTF-8 text"), ("a b.md", b"x\n", "path must use only")):
@@ -914,7 +914,7 @@ def test_supporting_file_must_be_plain_named_utf8_text_and_caches_are_ignored(tm
         assert len([failure for failure in validator.FAILURES if message in failure]) == 1
         validator.FAILURES.clear()
         before = sorted(p for p in root.rglob("*") if ".git" not in p.parts)
-        assert onboard_project.main(["--sync", "--root-only"], root) != 0
+        assert sync_project.main(["--root"], root) != 0
         assert message in capsys.readouterr().err
         assert sorted(p for p in root.rglob("*") if ".git" not in p.parts) == before
         bad.unlink()
@@ -922,7 +922,7 @@ def test_supporting_file_must_be_plain_named_utf8_text_and_caches_are_ignored(tm
 
 def test_registered_project_must_carry_every_baseline_adapter(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root, project = make_workspace(tmp_path)
-    onboard_project.apply_plan(onboard_project.build_plan(project, root), "sync")
+    sync_project.apply_plan(sync_project.build_plan(project, root), "sync")
     assert check_registered_projects(root, monkeypatch) == []
     (project / ".claude/skills/demo-skill/SKILL.md").unlink()
     (project / ".claude/skills/demo-skill").rmdir()
@@ -932,7 +932,7 @@ def test_registered_project_must_carry_every_baseline_adapter(tmp_path: Path, mo
 
 def test_registered_project_may_omit_an_optional_skill(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root, project = make_workspace(tmp_path)
-    onboard_project.apply_plan(onboard_project.build_plan(project, root), "sync")
+    sync_project.apply_plan(sync_project.build_plan(project, root), "sync")
     write(root / "shared/skills/optional-skill/SKILL.md", "---\nname: optional-skill\ndescription: optional\n---\n\n# Optional\n")
     for tool in (".agents", ".claude"):
         write(root / tool / "skills/optional-skill/SKILL.md", managed_adapter("optional-skill", "optional"))
@@ -941,7 +941,7 @@ def test_registered_project_may_omit_an_optional_skill(tmp_path: Path, monkeypat
 
 def test_registered_project_adapter_must_match_canonical_description(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root, project = make_workspace(tmp_path)
-    onboard_project.apply_plan(onboard_project.build_plan(project, root), "sync")
+    sync_project.apply_plan(sync_project.build_plan(project, root), "sync")
     write(project / ".agents/skills/demo-skill/SKILL.md", managed_adapter("demo-skill", "drifted"))
     failures = check_registered_projects(root, monkeypatch)
     assert any("description drifted from canonical" in failure for failure in failures)
@@ -991,10 +991,12 @@ def test_contract_skill_needs_a_dsh_adapter_too(tmp_path: Path, monkeypatch: pyt
     assert workspace_root_failures(root, monkeypatch) == ["workspace root: .dsh/skills/bound-skill/ missing"]
 
 
-def test_skill_without_a_contract_needs_no_dsh_adapter(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.unit
+def test_a_skill_without_a_contract_needs_a_dsh_adapter_at_the_root_too(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root, _ = make_workspace(tmp_path)
-    assert not (root / ".dsh").exists()
     assert workspace_root_failures(root, monkeypatch) == []
+    shutil.rmtree(root / ".dsh/skills/demo-skill")
+    assert workspace_root_failures(root, monkeypatch) == ["workspace root: .dsh/skills/demo-skill/ missing"]
 
 
 @pytest.mark.parametrize("requires", [2, None])
@@ -1019,9 +1021,6 @@ def test_bare_contract_key_is_rejected(tmp_path: Path, monkeypatch: pytest.Monke
     failures = list(validator.FAILURES)
     validator.FAILURES.clear()
     assert failures == [f"{canonical_file}: contract must be a positive integer, got None"]
-    # A bare key is not a declaration, so it must not pull in the DSH adapter either.
-    assert validator.adapter_dirs({"contract": None}) == validator.TOOL_DIRS[:2]
-    assert validator.adapter_dirs({"contract": 1}) == validator.TOOL_DIRS
     # Anything the contract check rejects is equally not a declaration.
     for rejected in (None, True, False, 0, -1, "1", 1.0):
         assert not validator.declares_contract({"contract": rejected}), rejected
@@ -1044,14 +1043,17 @@ def test_canonical_description_over_the_catalog_limit_is_rejected(tmp_path: Path
     validator.FAILURES.clear()
 
 
-def test_onboarding_plans_a_dsh_adapter_for_a_baseline_contract_skill(tmp_path: Path) -> None:
+@pytest.mark.unit
+@pytest.mark.parametrize("tool_dirs", [validator.TOOL_DIRS, (".claude",), (".agents", ".dsh")], ids=" ".join)
+def test_sync_plans_every_baseline_skill_in_every_selected_tool_dir(tmp_path: Path, tool_dirs: tuple[str, ...]) -> None:
     root, project = make_workspace(tmp_path)
     add_contract_skill(root)
     text = (root / "shared/skills/bound-skill/SKILL.md").read_text(encoding="utf-8")
     write(root / "shared/skills/bound-skill/SKILL.md", text.replace("contract: 1\n", "contract: 1\nadoption: baseline\n"))
-    targets = {item.path for item in onboard_project.build_plan(project, root) if item.action == "create"}
-    assert project / ".dsh/skills/bound-skill/SKILL.md" in targets
-    assert project / ".dsh/skills/demo-skill/SKILL.md" not in targets
+    targets = {item.path for item in sync_project.build_plan(project, root, tool_dirs=tool_dirs) if item.action == "create"}
+    for skill in ("bound-skill", "demo-skill"):
+        for tool_dir in validator.TOOL_DIRS:
+            assert (project / tool_dir / "skills" / skill / "SKILL.md" in targets) == (tool_dir in tool_dirs)
 
 
 def canonical_cli(root: Path) -> Path:
@@ -1142,28 +1144,29 @@ def test_doctor_starts_and_reports_a_missing_managed_worktree_module(tmp_path: P
 def test_adopted_opt_in_drift_check_sync_and_idempotence(tmp_path: Path, tool: str, capsys: pytest.CaptureFixture[str]) -> None:
     root, project = make_workspace(tmp_path)
     add_contract_skill(root)
-    onboard_project.run("sync", [("demo", project)], root)
+    sync_project.run("sync", [("demo", project)], root)
     target = project / tool / "skills/bound-skill/SKILL.md"
     expected = (root / tool / "skills/bound-skill/SKILL.md").read_text(encoding="utf-8")
     original = expected + "\ncontent drift\n"
     write(target, original)
-    assert onboard_project.run("check", [("demo", project)], root) == 1
+    assert sync_project.run("check", [("demo", project)], root) == 1
     assert "would update" in capsys.readouterr().out
     assert target.read_text(encoding="utf-8") == original
-    assert onboard_project.run("sync", [("demo", project)], root) == 0
+    assert sync_project.run("sync", [("demo", project)], root) == 0
     assert target.read_text(encoding="utf-8") == expected
-    for other in set(validator.TOOL_DIRS) - {tool}:
-        assert not (project / other / "skills/bound-skill/SKILL.md").exists()
+    for other in set(validator.TOOL_DIRS) - {tool}:  # adopted in one directory, so complete in every selected one
+        assert (project / other / "skills/bound-skill/SKILL.md").read_text(encoding="utf-8") == \
+            (root / other / "skills/bound-skill/SKILL.md").read_text(encoding="utf-8")
     before = target.read_bytes()
-    assert onboard_project.run("sync", [("demo", project)], root) == 0
+    assert sync_project.run("sync", [("demo", project)], root) == 0
     assert target.read_bytes() == before
-    assert not changed(onboard_project.build_plan(project, root))
+    assert not changed(sync_project.build_plan(project, root))
 
 
 def test_unadopted_opt_in_contract_skill_is_not_installed(tmp_path: Path) -> None:
     root, project = make_workspace(tmp_path)
     add_contract_skill(root)
-    assert onboard_project.run("sync", [("demo", project)], root) == 0
+    assert sync_project.run("sync", [("demo", project)], root) == 0
     for tool in validator.TOOL_DIRS:
         assert not (project / tool / "skills/bound-skill").exists()
 
@@ -1185,8 +1188,8 @@ def test_adapter_identity_collision_blocks_sync(tmp_path: Path, baseline: bool, 
     old_value = {"managed-by": "agent-traffic-control", "canonical": "bound-skill", "name": "bound-skill"}[field]
     original = text.replace(f"{field}: {old_value}\n", "" if value is None else f"{field}: {value}\n")
     write(target, original)
-    assert onboard_project.run("check", [("demo", project)], root) == 1
-    assert onboard_project.run("sync", [("demo", project)], root) == 1
+    assert sync_project.run("check", [("demo", project)], root) == 1
+    assert sync_project.run("sync", [("demo", project)], root) == 1
     assert target.read_text(encoding="utf-8") == original
     assert not (project / "CLAUDE.md").exists()
 
@@ -1204,12 +1207,12 @@ def test_adapter_line_endings_only_skip_but_content_drift_updates(tmp_path: Path
     target.parent.mkdir(parents=True)
     target.write_bytes(expected.replace("\n", "\r\n").encode("utf-8"))
     before = target.read_bytes()
-    plan = onboard_project.build_plan(project, root)
+    plan = sync_project.build_plan(project, root)
     assert next(item.action for item in plan if item.path == target) == "skip"
-    onboard_project.apply_plan(plan, "sync")
+    sync_project.apply_plan(plan, "sync")
     assert target.read_bytes() == before
     target.write_bytes((expected + "\nreal drift\n").replace("\n", "\r\n").encode("utf-8"))
-    plan = onboard_project.build_plan(project, root)
+    plan = sync_project.build_plan(project, root)
     assert next(item.action for item in plan if item.path == target) == "update"
 
 
@@ -1222,14 +1225,14 @@ def test_opt_in_dsh_sync_carries_the_contract_and_the_dsh_constants(tmp_path: Pa
     shutil.copytree(workspace / "shared/skills/atc-worktree", root / "shared/skills/atc-worktree")
     target = project / relative
     write(target, expected.replace("DSH_SESSION_ID", "STALE_SESSION_ID"))
-    assert onboard_project.run("sync", [("demo", project)], root) == 0
+    assert sync_project.run("sync", [("demo", project)], root) == 0
     actual = target.read_text(encoding="utf-8")
     assert actual == expected
     for constant in ("**owner:** `dsh`", "DSH_SESSION_ID", "Windows PowerShell 5.1", "--no-cache", "--squash-integrated", "atc worktree"):
         assert constant in actual
     assert "$ATC_ROOT" not in actual
     for tool in (".agents", ".claude"):
-        assert not (project / tool / "skills/atc-worktree").exists()
+        assert (project / tool / "skills/atc-worktree/SKILL.md").is_file()
 
 
 @pytest.mark.parametrize("original", ["# Local skill\n", "---\n[invalid\n---\n", "---\n- local\n---\n"])
@@ -1238,7 +1241,7 @@ def test_uncertain_opt_in_metadata_is_collision(tmp_path: Path, original: str) -
     add_contract_skill(root)
     target = project / ".dsh/skills/bound-skill/SKILL.md"
     write(target, original)
-    assert onboard_project.run("sync", [("demo", project)], root) == 1
+    assert sync_project.run("sync", [("demo", project)], root) == 1
     assert target.read_text(encoding="utf-8") == original
 
 
@@ -1248,7 +1251,7 @@ def test_root_adapter_with_foreign_identity_is_a_collision(tmp_path: Path) -> No
     source = root / ".dsh/skills/bound-skill/SKILL.md"
     foreign = contract_adapter(root).replace("canonical: bound-skill", "canonical: other-skill")
     write(source, foreign)
-    assert onboard_project.run("sync", [("demo", project)], root) == 1
+    assert sync_project.run("sync", [("demo", project)], root) == 1
     assert source.read_text(encoding="utf-8") == foreign
 
 
@@ -1259,29 +1262,30 @@ def test_root_adapter_sync_renders_invocation_flag_for_claude_only(tmp_path: Pat
         "---\nname: demo-skill\ndescription: sharper trigger\nadoption: baseline\ninvocation: user\n---\n\n# Demo\n",
     )
     claude_adapter = root / ".claude/skills/demo-skill/SKILL.md"
-    plan = onboard_project.root_adapter_plan(root)
+    plan = sync_project.root_adapter_plan(root)
     updates = [item for item in plan if item.action == "update"]
     assert {item.path for item in updates} == {
         claude_adapter,
         root / ".agents/skills/demo-skill/SKILL.md",
+        root / ".dsh/skills/demo-skill/SKILL.md",
     }
-    onboard_project.apply_plan(plan, "sync")
+    sync_project.apply_plan(plan, "sync")
     synced = claude_adapter.read_text(encoding="utf-8")
     assert "description: sharper trigger" in synced
     assert "disable-model-invocation: true" in synced
     assert "\nadoption:" not in synced and "\ninvocation:" not in synced
     assert "disable-model-invocation" not in (root / ".agents/skills/demo-skill/SKILL.md").read_text(encoding="utf-8")
-    assert not [item for item in onboard_project.root_adapter_plan(root) if item.action != "skip"]
+    assert not [item for item in sync_project.root_adapter_plan(root) if item.action != "skip"]
 
 
 def test_run_syncs_root_adapters_before_projects(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     root, project = make_workspace(tmp_path)
-    onboard_project.apply_plan(onboard_project.build_plan(project, root), "sync")
+    sync_project.apply_plan(sync_project.build_plan(project, root), "sync")
     write(
         root / "shared/skills/demo-skill/SKILL.md",
         "---\nname: demo-skill\ndescription: sharper trigger\nadoption: baseline\n---\n\n# Demo\n",
     )
-    assert onboard_project.run("sync", [("demo", project)], root) == 0
+    assert sync_project.run("sync", [("demo", project)], root) == 0
     out = capsys.readouterr().out
     assert "update (" in out
     assert "would update" not in out
@@ -1296,6 +1300,6 @@ def test_check_mode_reports_root_drift_without_writing(tmp_path: Path, capsys: p
         root / "shared/skills/demo-skill/SKILL.md",
         "---\nname: demo-skill\ndescription: sharper trigger\nadoption: baseline\n---\n\n# Demo\n",
     )
-    assert onboard_project.run("check", [("demo", project)], root) == 1
+    assert sync_project.run("check", [("demo", project)], root) == 1
     assert "would update" in capsys.readouterr().out
     assert "description: test skill" in (root / ".claude/skills/demo-skill/SKILL.md").read_text(encoding="utf-8")

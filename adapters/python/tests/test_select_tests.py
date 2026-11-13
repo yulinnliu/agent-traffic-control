@@ -51,8 +51,8 @@ def test_a_declared_reader_must_be_a_test_file(monkeypatch):
 
 def test_a_test_file_selects_itself_and_the_test_files_that_import_it(graph):
     assert chosen(graph, f"{ADAPTER}/tests/test_tooling.py") == [
-        "tests/test_bootstrap.py", "tests/test_onboard_prune.py", "tests/test_onboard_sync_commit.py",
-        "tests/test_select_tests.py", "tests/test_shell_install.py", "tests/test_tooling.py"]
+        "tests/test_bootstrap.py", "tests/test_select_tests.py", "tests/test_shell_install.py",
+        "tests/test_sync_commit.py", "tests/test_sync_prune.py", "tests/test_tooling.py"]
     assert "tests/test_integrate_moving_main.py" in chosen(graph, f"{ADAPTER}/tests/test_git_integrate.py")
 
 

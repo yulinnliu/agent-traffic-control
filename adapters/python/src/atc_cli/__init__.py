@@ -17,7 +17,8 @@ Testing:
 
 Workspace:
   bootstrap   init / add / status: set up a workspace root and its projects
-  onboard     check or sync the files ATC owns in projects
+  sync        write and commit the files ATC owns in projects, or --check them
+  onboard     deprecated spelling of sync; removed in atc 0.7.0
   doctor      diagnose runtime readiness; changes nothing
   validate    check this checkout's contract (and its projects')
 
@@ -55,7 +56,8 @@ COMMANDS = {
     "task": "task_records",
     "close-out": "close_out",
     "validate": "validate_workspace",
-    "onboard": "onboard_project",
+    "sync": "sync_project",
+    "onboard": "sync_project",
     "bootstrap": "bootstrap",
     "doctor": "doctor",
     "policies": "policies",
@@ -82,11 +84,11 @@ def resolve_root(explicit: str | None, environ: dict[str, str], cwd: Path) -> Pa
 
 
 def resolve_checkout(explicit: str | None, environ: dict[str, str], cwd: Path) -> Path:
-    """The ATC checkout holding ``cwd``, with or without ``workspace.yaml``: what `onboard --root-only` renders."""
+    """The ATC checkout holding ``cwd``, with or without ``workspace.yaml``: what `sync --root` renders."""
     if explicit or environ.get("ATC_ROOT"):
         return resolve_root(explicit, environ, cwd)
     for candidate in (cwd.resolve(), *cwd.resolve().parents):
-        if (candidate / "adapters" / "python" / "scripts" / "onboard_project.py").is_file():
+        if (candidate / "adapters" / "python" / "scripts" / "validate_workspace.py").is_file():
             return candidate
     return resolve_root(explicit, environ, cwd)
 
@@ -198,7 +200,8 @@ def main(argv: list[str] | None = None, checkout: Path | None = None) -> int:
         print(version())
         return 0
     command_at = next((i for i, arg in enumerate(args) if not arg.startswith("-") and (i == 0 or args[i - 1] != "--root")), None)
-    if command_at is not None and args[command_at] == "test":
+    # `test` and `sync` take the global --root only before the command; after `sync` it is sync's own flag.
+    if command_at is not None and args[command_at] in ("test", "sync"):
         explicit_root, head, error = _take_root(args[:command_at])
         args = head + args[command_at:]
     else:
@@ -261,7 +264,7 @@ def _dispatch(command: str, rest: list[str], explicit_root: str | None) -> int:
         from atc_testkit import commands
         return commands.main([command, *rest])
     _scripts_on_path()
-    if command == "onboard" and "--root-only" in rest:
+    if (command == "sync" and "--root" in rest) or (command == "onboard" and "--root-only" in rest):
         root = resolve_checkout(explicit_root, dict(os.environ), Path.cwd())
         import checkout_guard
         if checkout_guard.state(root).canonical:
@@ -272,7 +275,9 @@ def _dispatch(command: str, rest: list[str], explicit_root: str | None) -> int:
     else:
         root = resolve_root(explicit_root, dict(os.environ), Path.cwd())
     module = __import__(COMMANDS[command])
-    if command in ("worktree", "task", "onboard", "bootstrap", "close-out", "integrate", "preflight", "doctor"):
+    if command == "onboard":
+        return module.onboard_main(rest, root=root)
+    if command in ("worktree", "task", "sync", "bootstrap", "close-out", "integrate", "preflight", "doctor"):
         return module.main(rest, root=root)
     if command == "verify":
         return module.verify_main(rest, root=root)

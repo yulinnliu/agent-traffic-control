@@ -8,7 +8,7 @@ import yaml
 import shutil
 
 import bootstrap
-import onboard_project
+import sync_project
 import validate_workspace as validator
 from test_tooling import VERIFICATION_SECTION, make_workspace, release_workspace, run_git, write
 
@@ -93,7 +93,7 @@ def test_add_installs_requested_opt_in_adapter(tmp_path: Path) -> None:
     shutil.copyfile(bootstrap.ROOT / "workspace.yaml.example", root / "workspace.yaml.example")
     bootstrap.init(root, "owner/repo", force=True, environ={})
     write(root / "shared/skills/optional-skill/SKILL.md", "---\nname: optional-skill\ndescription: test skill\n---\n\n# Optional\n")
-    onboard_project.apply_plan(onboard_project.root_adapter_plan(root), "sync")
+    sync_project.apply_plan(sync_project.root_adapter_plan(root), "sync")
     adapter = (root / ".claude/skills/optional-skill/SKILL.md").read_text(encoding="utf-8")
     project = root / "projects" / "third"
     project.mkdir(parents=True)

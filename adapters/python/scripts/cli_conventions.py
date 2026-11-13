@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 
 OK = 0
 STOP = 1
@@ -13,6 +14,7 @@ EXIT_NAMES = {OK: "OK", STOP: "STOP", ERROR: "ERROR", PARTIAL: "PARTIAL", 8: "GU
 
 PROJECT_HELP = "registered project name from workspace.yaml; root names the workspace root"
 JSON_HELP = "print the result as one JSON object (shared/conformance/CLI.md § Output)"
+NEXT_RELEASE = "0.7.0"
 
 
 def form(summary: str, detail: str | None = None, *, exit: str, see: str) -> dict:
@@ -27,6 +29,11 @@ def add_project(parser, extra: str = "", help: str | None = None, **kwargs) -> a
 
 def add_json(parser: argparse.ArgumentParser) -> argparse.Action:
     return parser.add_argument("--json", action="store_true", help=JSON_HELP)
+
+
+def deprecated(old: str, new: str) -> None:
+    """One stderr warning per use of a deprecated form (CLI.md § Versions and compatibility)."""
+    print(f"WARNING DEPRECATED {old}: use {new}; removed in atc {NEXT_RELEASE}", file=sys.stderr)
 
 
 def envelope(command: str, exit_code: int, payload: object, list_key: str = "items") -> dict:

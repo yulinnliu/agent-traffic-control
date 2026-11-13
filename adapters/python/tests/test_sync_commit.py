@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 import git_preflight
-import onboard_project
+import sync_project
 from integration_slot import IntegrationSlot
 from test_tooling import RELEASE, commit_workspace, make_workspace, run_git, write
 
@@ -36,7 +36,7 @@ def records(project: Path) -> list[dict]:
 def test_sync_commits_on_main_and_records_it(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     root, project = committed_workspace(tmp_path)
     before = git_out(project, "rev-parse", "HEAD")
-    assert onboard_project.main(["--sync", "--project", "demo"], root=root) == 0
+    assert sync_project.main(["demo"], root=root) == 0
     head = git_out(project, "rev-parse", "HEAD")
     revision = git_out(root, "rev-parse", "HEAD")
     assert head != before and git_out(project, "status", "--porcelain") == ""
@@ -45,7 +45,7 @@ def test_sync_commits_on_main_and_records_it(tmp_path: Path, capsys: pytest.Capt
     assert (project / ".atc/atc.lock").read_text(encoding="utf-8").endswith(f'revision = "{revision}"\n')
     [record] = records(project)
     assert (record["kind"], record["candidate_sha"], record["main_before"], record["source_revision"]) == ("sync", head, before, revision)
-    assert onboard_project.main(["--sync", "--project", "demo"], root=root) == 0
+    assert sync_project.main(["demo"], root=root) == 0
     assert git_out(project, "rev-parse", "HEAD") == head
     assert "  commit: none (no tracked file changed)" in capsys.readouterr().out
     assert len(records(project)) == 1
@@ -70,7 +70,7 @@ def test_the_sync_subject_and_record_name_the_target(tmp_path: Path, case: str) 
     run_git(root, "tag", "v1-test")
     run_git(root, "tag", "v9.0")
     named = [] if case == "at tag" else ["--revision", head]
-    assert onboard_project.main(["--sync", "--project", "demo", *named], root=root) == 0
+    assert sync_project.main(["demo", *named], root=root) == 0
     label, tag, after = {"at tag": (f"{RELEASE} ({released[:7]})", RELEASE, None),
                          "after tag": (f"{head[:7]} (after {RELEASE})", None, RELEASE),
                          "no tag": (head[:7], None, None)}[case]
@@ -89,15 +89,15 @@ def test_sync_renders_the_latest_release_not_the_checkout(tmp_path: Path, capsys
     write(root / "shared/governance/CORE.md", "# CORE.md\n\nunreleased\n")
     unreleased = commit_root(root, "third")
     run_git(root, "tag", "v0.1.0-rc")
-    assert onboard_project.main(["--check", "--project", "demo"], root=root) == 1
+    assert sync_project.main(["demo", "--check"], root=root) == 1
     assert capsys.readouterr().out.startswith(f"target: v0.0.10 ({newer})\n")
-    assert onboard_project.main(["--sync", "--project", "demo"], root=root) == 0
+    assert sync_project.main(["demo"], root=root) == 0
     assert (project / ".atc/governance/CORE.md").read_text(encoding="utf-8") == "# CORE.md\n\nv0.0.2\n"
     assert (project / ".atc/atc.lock").read_text(encoding="utf-8").endswith(f'revision = "{newer}"\n')
     assert git_out(project, "log", "-1", "--format=%s") == f"chore(governance): sync from unknown v0.0.10 ({newer[:7]})"
     assert records(project)[-1]["source_revision"] == newer
     capsys.readouterr()
-    assert onboard_project.main(["--sync", "--project", "demo", "--revision", unreleased], root=root) == 0
+    assert sync_project.main(["demo", "--revision", unreleased], root=root) == 0
     assert capsys.readouterr().out.startswith(f"target: {unreleased} (named)\n")
     assert (project / ".atc/governance/CORE.md").read_text(encoding="utf-8") == "# CORE.md\n\nunreleased\n"
 
@@ -106,17 +106,17 @@ def test_a_project_ahead_of_the_latest_release_is_left_alone(tmp_path: Path, cap
     root, project = committed_workspace(tmp_path)
     write(root / "shared/governance/CORE.md", "# CORE.md\n\nahead\n")
     ahead = commit_root(root, "ahead")
-    assert onboard_project.main(["--sync", "--project", "demo", "--revision", ahead], root=root) == 0
+    assert sync_project.main(["demo", "--revision", ahead], root=root) == 0
     head = git_out(project, "rev-parse", "HEAD")
     capsys.readouterr()
-    for mode in ("--check", "--sync"):
-        assert onboard_project.main([mode, "--project", "demo"], root=root) == 0
+    for mode in (["--check"], []):
+        assert sync_project.main(["demo", *mode], root=root) == 0
         assert f"locked at {ahead}, ahead of {RELEASE}; sync never moves a project back without --revision" \
             in capsys.readouterr().out
     assert git_out(project, "rev-parse", "HEAD") == head
     assert (project / ".atc/governance/CORE.md").read_text(encoding="utf-8") == "# CORE.md\n\nahead\n"
     released = git_out(root, "rev-parse", f"{RELEASE}^{{commit}}")
-    assert onboard_project.main(["--sync", "--project", "demo", "--revision", released], root=root) == 0
+    assert sync_project.main(["demo", "--revision", released], root=root) == 0
     assert (project / ".atc/governance/CORE.md").read_text(encoding="utf-8") == "# CORE.md\n"
     assert (project / ".atc/atc.lock").read_text(encoding="utf-8").endswith(f'revision = "{released}"\n')
 
@@ -140,7 +140,7 @@ def test_an_unresolvable_target_stops_before_any_project(tmp_path: Path, capsys:
     else:
         named = ["--revision", git_out(root, "rev-parse", RELEASE)]
         expected = "REVISION_NOT_ON_MAIN"
-    assert onboard_project.main(["--sync", "--project", "demo", *named], root=root) == 1
+    assert sync_project.main(["demo", *named], root=root) == 1
     out = capsys.readouterr().out
     assert out.startswith(f"  stop: {expected} ") and "===" not in out
     assert not (project / ".atc").exists()
@@ -152,34 +152,35 @@ def test_the_verification_gate_reads_the_target_governance(tmp_path: Path, capsy
     run_git(project, "commit", "-q", "-am", "no verification section")
     write(root / "shared/governance/GIT_WORKFLOW.md", "# GIT_WORKFLOW.md\n\n## Integration verifier source\n")
     gated = commit_root(root, "gate")
-    assert onboard_project.main(["--sync", "--project", "demo"], root=root) == 0
+    assert sync_project.main(["demo"], root=root) == 0
     capsys.readouterr()
-    assert onboard_project.main(["--sync", "--project", "demo", "--revision", gated], root=root) == 1
+    assert sync_project.main(["demo", "--revision", gated], root=root) == 1
     assert "  stop: VERIFICATION_SECTION_MISSING " in capsys.readouterr().out
 
 
 def test_json_names_the_target(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     root, _ = committed_workspace(tmp_path)
-    assert onboard_project.main(["--check", "--project", "demo", "--json"], root=root) == 1
+    assert sync_project.main(["demo", "--check", "--json"], root=root) == 1
     result = json.loads(capsys.readouterr().out)
     assert result["target"] == {"revision": git_out(root, "rev-parse", f"{RELEASE}^{{commit}}"), "tag": RELEASE, "named": False}
     run_git(root, "tag", "-d", RELEASE)
-    assert onboard_project.main(["--check", "--project", "demo", "--json"], root=root) == 1
+    assert sync_project.main(["demo", "--check", "--json"], root=root) == 1
     assert json.loads(capsys.readouterr().out)["target"]["stops"][0]["reason"] == "NO_RELEASE_TAG"
 
 
-@pytest.mark.parametrize("argv", [["--revision", "abc1234"], ["--revision", "A" * 40], ["--root-only", "--revision", "0" * 40]])
-def test_revision_takes_a_full_sha_and_no_root_only(tmp_path: Path, argv: list[str]) -> None:
+@pytest.mark.parametrize("argv", [["--revision", "abc1234"], ["--revision", "A" * 40], ["--root", "--revision", "0" * 40],
+                                  ["--root", "demo"]])
+def test_revision_takes_a_full_sha_and_root_takes_neither_revision_nor_project(tmp_path: Path, argv: list[str]) -> None:
     root, _ = committed_workspace(tmp_path)
-    target = [] if "--root-only" in argv else ["--project", "demo"]
+    target = [] if "--root" in argv else ["demo"]
     with pytest.raises(SystemExit) as exit_:
-        onboard_project.main(["--check", *target, *argv], root=root)
+        sync_project.main(["--check", *target, *argv], root=root)
     assert exit_.value.code == 2
 
 
 def test_current_code_renders_the_v0_4_0_release_tree(tmp_path: Path) -> None:
     """The installed code renders an older release's sources byte-for-byte (docs/design/ATC-0039.md § 3)."""
-    source = onboard_project.ROOT
+    source = sync_project.ROOT
     if subprocess.run(["git", "-C", str(source), "rev-parse", "-q", "--verify", "refs/tags/v0.4.0^{commit}"],
                       capture_output=True).returncode:
         pytest.skip("this checkout has no v0.4.0 tag")
@@ -189,15 +190,15 @@ def test_current_code_renders_the_v0_4_0_release_tree(tmp_path: Path) -> None:
     validator.export_revision(source, revision, tree)
     project = tmp_path / "project"
     write(project / "AGENTS.md", "# AGENTS.md\n\n## What this is\n\nDemo.\n")
-    target = onboard_project.Target(tree, revision, "v0.4.0")
-    onboard_project.apply_plan(onboard_project.build_plan(project, source, target=target), "sync")
+    target = sync_project.Target(tree, revision, "v0.4.0")
+    sync_project.apply_plan(sync_project.build_plan(project, source, target=target), "sync")
     for module in validator.vendored_governance_modules():
         assert (project / ".atc/governance" / module).read_bytes() == (tree / "shared/governance" / module).read_bytes()
     assert (project / ".atc/README.md").read_bytes() == (tree / "shared/templates/ATC_README.md").read_bytes()
-    for name, metadata in onboard_project.canonical_skills(tree).items():
+    for name, metadata in sync_project.canonical_skills(tree).items():
         canonical = validator.normalise((tree / "shared/skills" / name / "SKILL.md").read_text(encoding="utf-8"))
         body = canonical.split("\n---\n", 1)[1].strip()
-        for tool_dir in validator.adapter_dirs(metadata) if metadata.get("adoption") == "baseline" else ():
+        for tool_dir in validator.TOOL_DIRS if metadata.get("adoption") == "baseline" else ():
             adapter = (project / tool_dir / "skills" / name / "SKILL.md").read_text(encoding="utf-8")
             assert adapter == validator.render_adapter(tree, name, tool_dir) and body in adapter
     assert (project / ".atc/atc.lock").read_text(encoding="utf-8").endswith(f'revision = "{revision}"\n')
@@ -221,7 +222,7 @@ def test_project_precondition_stops_before_writing(tmp_path: Path, capsys: pytes
         run_git(project, "reset", "-q", "--hard", "HEAD~1")
     head = git_out(project, "rev-parse", "HEAD")
     try:
-        assert onboard_project.main(["--sync", "--project", "demo"], root=root) == 1
+        assert sync_project.main(["demo"], root=root) == 1
     finally:
         if slot is not None:
             slot.release()
@@ -241,7 +242,7 @@ def test_atc_checkout_precondition_stops_every_project(tmp_path: Path, capsys: p
         write(root / "CLAUDE.md", "Read AGENTS.md first.\n")
     else:
         (root / ".agents/skills/demo-skill/SKILL.md").unlink()
-    assert onboard_project.main(["--sync", "--all"], root=root) == 1
+    assert sync_project.main([], root=root) == 1
     assert f"  stop: {expected} " in capsys.readouterr().out
     assert not (project / ".atc/atc.lock").exists()
     assert case != "adapter" or not (root / ".agents/skills/demo-skill/SKILL.md").exists()
@@ -251,7 +252,7 @@ def test_ignored_synced_files_stop_before_writing(tmp_path: Path, capsys: pytest
     root, project = committed_workspace(tmp_path)
     write(project / ".git/info/exclude", "/.atc/\n/CLAUDE.md\n")
     head = git_out(project, "rev-parse", "HEAD")
-    assert onboard_project.main(["--sync", "--project", "demo"], root=root) == 1
+    assert sync_project.main(["demo"], root=root) == 1
     out = capsys.readouterr().out
     assert "  stop: IGNORED_OUTPUT every file sync writes is committed; Git ignores or excludes: .atc/README.md, .atc/atc.lock" in out
     assert "CLAUDE.md" in out.split("IGNORED_OUTPUT")[1]
@@ -272,7 +273,7 @@ def test_a_short_windows_path_still_counts_as_the_top_of_its_checkout(tmp_path: 
     buffer = ctypes.create_unicode_buffer(1024)
     if not ctypes.windll.kernel32.GetShortPathNameW(str(repo), buffer, 1024) or buffer.value == str(repo):
         pytest.skip("this volume makes no 8.3 short names")
-    validator = onboard_project.validator
+    validator = sync_project.validator
     assert validator.git_toplevel(Path(buffer.value)) and validator.git_toplevel(repo)
     (repo / "sub").mkdir()
     assert not validator.git_toplevel(repo / "sub")
@@ -282,46 +283,46 @@ def test_change_outside_the_synced_files_is_left_uncommitted(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     root, project = committed_workspace(tmp_path)
-    apply_plan = onboard_project.apply_plan
+    apply_plan = sync_project.apply_plan
 
-    def apply_and_stray(plan, mode, prune=False):
-        apply_plan(plan, mode, prune)
+    def apply_and_stray(plan, mode):
+        apply_plan(plan, mode)
         write(project / "stray.txt", "written meanwhile\n")
 
-    monkeypatch.setattr(onboard_project, "apply_plan", apply_and_stray)
+    monkeypatch.setattr(sync_project, "apply_plan", apply_and_stray)
     head = git_out(project, "rev-parse", "HEAD")
-    assert onboard_project.main(["--sync", "--project", "demo"], root=root) == 1
+    assert sync_project.main(["demo"], root=root) == 1
     assert "  stop: UNMANAGED_CHANGE changed outside the synced files, left uncommitted: stray.txt" in capsys.readouterr().out
     assert git_out(project, "rev-parse", "HEAD") == head
     assert records(project) == []
 
 
-def test_root_only_sync_renders_the_topic_checkout_and_commits_nothing(tmp_path: Path) -> None:
+def test_sync_root_renders_the_topic_checkout_and_commits_nothing(tmp_path: Path) -> None:
     root, _ = committed_workspace(tmp_path)
     run_git(root, "checkout", "-q", "-b", "topic")
     adapter = root / ".agents/skills/demo-skill/SKILL.md"
     adapter.unlink()
     head = git_out(root, "rev-parse", "HEAD")
-    assert onboard_project.main(["--sync", "--root-only"], root=root) == 0
+    assert sync_project.main(["--root"], root=root) == 0
     assert adapter.exists()
     assert git_out(root, "rev-parse", "HEAD") == head
 
 
 def test_the_integration_slot_is_held_while_sync_writes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root, project = committed_workspace(tmp_path)
-    apply_plan = onboard_project.apply_plan
+    apply_plan = sync_project.apply_plan
     held: list[bool] = []
 
-    def apply_while_probing(plan, mode, prune=False):
+    def apply_while_probing(plan, mode):
         probe = IntegrationSlot(project)
         got = probe.acquire(blocking=False)
         if got:
             probe.release()
         held.append(not got)
-        apply_plan(plan, mode, prune)
+        apply_plan(plan, mode)
 
-    monkeypatch.setattr(onboard_project, "apply_plan", apply_while_probing)
-    assert onboard_project.main(["--sync", "--project", "demo"], root=root) == 0
+    monkeypatch.setattr(sync_project, "apply_plan", apply_while_probing)
+    assert sync_project.main(["demo"], root=root) == 0
     assert held == [True]
 
 
@@ -335,9 +336,9 @@ def test_checkout_dirtied_before_the_slot_is_taken_stops_inside_it(
             write(project / "notes.txt", "written between the checks\n")
             return super().acquire(blocking)
 
-    monkeypatch.setattr(onboard_project, "IntegrationSlot", DirtyingSlot)
+    monkeypatch.setattr(sync_project, "IntegrationSlot", DirtyingSlot)
     head = git_out(project, "rev-parse", "HEAD")
-    assert onboard_project.main(["--sync", "--project", "demo"], root=root) == 1
+    assert sync_project.main(["demo"], root=root) == 1
     assert "  stop: CHECKOUT_DIRTY " in capsys.readouterr().out
     assert git_out(project, "rev-parse", "HEAD") == head
     assert not (project / ".atc/atc.lock").exists()
@@ -350,7 +351,7 @@ def test_project_that_is_not_its_own_repository_stops(tmp_path: Path, capsys: py
     run_git(root, *COMMIT, "release")
     run_git(root, "tag", RELEASE)
     head = git_out(root, "rev-parse", "HEAD")
-    assert onboard_project.main(["--sync", "--project", "demo"], root=root) == 1
+    assert sync_project.main(["demo"], root=root) == 1
     assert "  stop: NOT_A_REPOSITORY " in capsys.readouterr().out
     assert git_out(root, "rev-parse", "HEAD") == head
     assert not (project / ".atc/atc.lock").exists()
@@ -361,22 +362,22 @@ def test_root_adapter_collision_stops_every_project(tmp_path: Path, capsys: pyte
     write(root / ".agents/skills/demo-skill/SKILL.md", "---\nname: demo-skill\ndescription: local\n---\n\n# Local\n")
     run_git(root, "add", "-A")
     run_git(root, *COMMIT, "unowned adapter")
-    assert onboard_project.main(["--sync", "--project", "demo"], root=root) == 1
+    assert sync_project.main(["demo"], root=root) == 1
     assert "  stop: ROOT_ADAPTER_DRIFT " in capsys.readouterr().out
     assert not (project / ".atc/atc.lock").exists()
 
 
 def test_ownership_stops_at_the_directory_boundary(tmp_path: Path) -> None:
     owner = tmp_path / "skills" / "old-skill"
-    assert onboard_project._within(owner, owner)
-    assert onboard_project._within(owner / "SKILL.md", owner)
-    assert not onboard_project._within(tmp_path / "skills" / "old-skill-2" / "SKILL.md", owner)
+    assert sync_project._within(owner, owner)
+    assert sync_project._within(owner / "SKILL.md", owner)
+    assert not sync_project._within(tmp_path / "skills" / "old-skill-2" / "SKILL.md", owner)
 
 
 def test_push_listing_names_the_sync_source(tmp_path: Path) -> None:
     root, project = committed_workspace(tmp_path)
     run_git(project, "update-ref", "refs/remotes/origin/main", "HEAD")
-    assert onboard_project.main(["--sync", "--project", "demo"], root=root) == 0
+    assert sync_project.main(["demo"], root=root) == 0
     head = git_out(project, "rev-parse", "HEAD")
     revision = git_out(root, "rev-parse", "HEAD")
     lines = git_preflight.render_push(git_preflight.push_listing(project))
@@ -391,9 +392,9 @@ def test_validate_fails_on_an_ignored_synced_file_and_notes_an_uncommitted_one(
 ) -> None:
     import validate_workspace as validator
     root, project = committed_workspace(tmp_path)
-    assert onboard_project.main(["--sync", "--project", "demo"], root=root) == 0
+    assert sync_project.main(["demo"], root=root) == 0
     monkeypatch.setattr(validator, "ROOT", root)
-    canonical = onboard_project.canonical_skills(root)
+    canonical = sync_project.canonical_skills(root)
     validator.FAILURES.clear()
     validator.check_tracked(project, "projects.demo", canonical)
     assert validator.FAILURES == []
@@ -409,12 +410,12 @@ def test_validate_fails_on_an_ignored_synced_file_and_notes_an_uncommitted_one(
 def test_validate_compares_a_project_with_its_locked_release(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from test_tooling import check_registered_projects
     root, project = committed_workspace(tmp_path)
-    assert onboard_project.main(["--sync", "--project", "demo"], root=root) == 0
+    assert sync_project.main(["demo"], root=root) == 0
     write(root / "shared/governance/CORE.md", "# CORE.md\n\nnewer\n")
     write(root / "shared/skills/demo-skill/SKILL.md",
           "---\nname: demo-skill\ndescription: test skill\nadoption: baseline\n---\n\n# Demo, newer\n")
     write(root / "shared/skills/new-skill/SKILL.md", "---\nname: new-skill\ndescription: later\nadoption: baseline\n---\n\n# New\n")
-    onboard_project.apply_plan(onboard_project.root_adapter_plan(root), "sync")
+    sync_project.apply_plan(sync_project.root_adapter_plan(root), "sync")
     commit_root(root, "unreleased")
     assert check_registered_projects(root, monkeypatch) == []
     write(project / ".atc/governance/CORE.md", "# CORE.md\n\nnewer\n")
@@ -443,4 +444,4 @@ def test_a_project_named_by_its_short_path_is_its_checkout(tmp_path: Path) -> No
     short = short_name(long_project)
     if short is None:
         pytest.skip("this volume keeps no 8.3 names")
-    onboard_project.check_project_checkout(Path(short))
+    sync_project.check_project_checkout(Path(short))

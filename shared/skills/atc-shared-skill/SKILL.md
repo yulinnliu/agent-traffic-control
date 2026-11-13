@@ -51,9 +51,9 @@ Frontmatter:
 | --- | --- |
 | `name` | kebab-case, equal to the directory name |
 | `description` | the auto-invocation contract, one plain line; copied verbatim into every adapter |
-| `adoption: baseline` | optional; new-project onboarding installs the skill by default |
+| `adoption: baseline` | optional; sync installs the skill in every registered project |
 | `invocation: user` | optional; the Claude Code adapter gets `disable-model-invocation: true` |
-| `contract: N` | optional; the skill binds the calling tool's identity, so a DSH adapter is rendered too and every adapter carries `requires-contract: N` |
+| `contract: N` | optional; the skill binds the calling tool's identity, so every adapter carries `requires-contract: N` |
 
 ## Step 2 — per-tool overlays, only when behaviour really differs
 
@@ -69,9 +69,9 @@ stay in the canonical body so they exist once.
 Adapters are generated. From the checkout:
 
 ```
-atc onboard --sync --root-only          # this checkout's own .claude/ .agents/ .dsh/, no commit
-atc onboard --sync --project <project>  # one registered project, committed on its main
-atc onboard --sync --all --prune        # every registered project, committed on its main
+atc sync --root                         # this checkout's own .claude/ .agents/ .dsh/, no commit
+atc sync <project>                      # one registered project, committed on its main
+atc sync                                # every registered project, committed on its main
 scripts/link-skills.sh <repo> <name>    # a repository outside the workspace map, no Python
 ```
 
