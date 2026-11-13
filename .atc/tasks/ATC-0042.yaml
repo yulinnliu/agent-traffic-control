@@ -1,0 +1,24 @@
+task_id: ATC-0042
+repository: yulinnliu/agent-traffic-control
+base_sha: 091a25ffdfc076b4f595553fb689e7a2b9e44ef8
+scope: 'atc-testkit fixes: (a) the pre-push gate accepts a refs/tags/* push whose
+  commit is already reachable from a remote-tracking ref without requiring it to be
+  HEAD; (b) the Windows CI flake test_run_ends_the_tree_on_a_timeout, fixed by design
+  with its class audited; (c) why the ATC-0041 reviewer ledger line recorded verdict
+  null'
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: 091a25ffdfc076b4f595553fb689e7a2b9e44ef8
+branch: worktree-claude+testkit-tag-push
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
+decisions:
+  - "Owner 11-14: the three testkit issues go in one task, opened after v0.5.0 was published."
+  - "(a) Source: Hami-Coordinator report 11-14. atc_testkit/git.py verify_push_checkout (~115-130) turns each pushed oid into a commit and requires it to equal HEAD; HQT's app-v0.8.0 (annotated tag on ff7d2ed, already on origin/main) was refused, and the Owner pushed it with --no-verify. Direction: a push line whose remote ref is refs/tags/* and whose commit is already reachable from a remote-tracking ref brings no new commits, so it skips the checkout requirement and test selection; branch lines keep the HEAD rule. The design must not let a tag carry unpushed commits past the gate."
+  - "(b) GitHub Actions run 43479346886 attempt 1, python-adapter (windows-latest): tests/test_testkit_children.py::test_run_ends_the_tree_on_a_timeout asserted the child pid dead but alive(pid) was True; passed on rerun and on the main dispatch of the same commit. Find the race; keep the assertion's intent; audit sibling process-tree tests for the same race; do not only widen a timeout."
+  - "(c) close-out --check listed ATC-0041-091a25f-review.md as 'ledger line: role reviewer, verdict null' though the file says PASS. Find whether the reviewer's ledger write or the reader is at fault; fix the cause."
+  - "No version bump; the next release batches it."
