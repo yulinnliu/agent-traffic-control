@@ -1,0 +1,21 @@
+task_id: ATC-0037
+repository: yulinnliu/agent-traffic-control
+base_sha: 534a4ba16187c7fe0160152f7f1d7584a24fdf1d
+scope: 'close-out takes every scratch a task''s runs registered: atc test run --scratch
+  records the task, and close-out matches by task or by tree inside the task worktree'
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: 534a4ba16187c7fe0160152f7f1d7584a24fdf1d
+branch: worktree-claude+close-out-scratch-by-tree
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
+decisions:
+  - "Gap: close-out (`adapters/python/scripts/close_out.py` task_scratches) takes rows whose task column matches or whose tree lies inside the task worktree. A scratch made by `atc test run --scratch` whose --tree is outside the task worktree (e.g. a baseline run on the main checkout) registers no task, so close-out misses it and the Owner is asked item by item (ATC-0035's atc0035-base)."
+  - "Fix: `atc test run` gains `--task ID`, written to the registry's task column when it registers a new scratch. Without --task, when --tree is a task's managed worktree, the task is inferred from that worktree's record. Explicit --task wins. Reusing an existing scratch never rewrites its task."
+  - "close-out matching stays as it is (task column, or tree inside the worktree). No name-prefix guessing."
+  - "The atc-coordinator writer-brief template and atc-review's `atc test run` command lines pass `--task <ID>`. docs/ATC_HOME.md (and docs/TESTKIT.md if it documents the flags) describe the column and the flag in final-state wording."
+  - "Tests: registry row carries the task for both explicit and inferred cases; close-out --check lists a scratch with an outside tree and --task. No authorizations/**, no governance edit, no version bump unless CLI.md requires one, no push, tag or publish."
