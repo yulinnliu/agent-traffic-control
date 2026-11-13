@@ -1,0 +1,21 @@
+task_id: ATC-0038
+repository: yulinnliu/agent-traffic-control
+base_sha: 3bcc2abef9dd2830d1bee64b8521de9f90eefa99
+scope: 'Deny-hook design: one PreToolUse hook generated from hard-deny.yaml for Claude
+  Code and Codex, absorbing worktree_cd_guard.py and write_scope_guard.py; design
+  document first, implementation after the Owner''s ruling'
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: 3bcc2abef9dd2830d1bee64b8521de9f90eefa99
+branch: worktree-claude+deny-hook
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
+decisions:
+  - "Step 1 is the design step only (atc-review \"Writer: the design step\"): a design document committed in the repo at the place docs/LAYOUT.md gives, no code. Implementation follows as later steps of this task after the Owner rules on the design; those rulings are appended here."
+  - "The design covers: one PreToolUse hook generated from shared hard-deny.yaml (atc enforce) for Claude Code and Codex; absorbing worktree_cd_guard.py and write_scope_guard.py; fail-closed on hook error; a drift check (the generated hook vs hard-deny.yaml, like atc enforce --check); rules a prefix deny cannot express: `atc integrate` except `--check`, push to main, and `atc verify` / `atc test run` with run_in_background; matching for both the Bash and the PowerShell tool. Defense in depth, not a security boundary."
+  - "The design states the per-call cost (one hook process per tool call, compared with today's two guards), what each tool's hook protocol can and cannot see, and the options with a recommendation for each open question the Owner must rule on."
+  - "No authorizations/**. Any governance change is a proposal in the design, not an edit. No version bump, no push, tag or publish."
