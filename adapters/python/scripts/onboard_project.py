@@ -540,8 +540,8 @@ def resolve_target(root: Path, revision: str | None) -> tuple[str, str | None, b
     """``(revision, tag, named)`` sync renders: the latest release tag on main, or the Owner-named SHA on main."""
     if revision is not None:
         known = _git(root, "rev-parse", "--verify", "-q", f"{revision}^{{commit}}", check=False)
-        if known.returncode or _git(root, "merge-base", "--is-ancestor", revision, f"refs/heads/{MAIN}", check=False).returncode:
-            raise SyncStop("REVISION_NOT_ON_MAIN", f"{revision} is not a commit in the history of the ATC checkout's {MAIN}")
+        if known.stdout.strip() != revision or _git(root, "merge-base", "--is-ancestor", revision, f"refs/heads/{MAIN}", check=False).returncode:
+            raise SyncStop("REVISION_NOT_ON_MAIN", f"{revision} is not a commit SHA in the history of the ATC checkout's {MAIN}")
         return revision, release_tags(root, revision)[0], True
     tags = merged_release_tags(root, f"refs/heads/{MAIN}")
     if not tags:

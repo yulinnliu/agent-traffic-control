@@ -84,12 +84,13 @@ RELEASE = "v0.0.1"
 
 
 def release_workspace(root: Path, tag: str = RELEASE) -> str:
-    """Commit the ATC checkout on main and tag the commit as the release sync renders by default; its SHA."""
+    """Commit the ATC checkout on main and tag the commit, annotated as release tags are, as the release sync
+    renders by default; its SHA."""
     write(root / ".gitignore", "projects/\n")
     commit = ("-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q", "-m")
     run_git(root, "add", "-A")
     run_git(root, *commit, "release")
-    run_git(root, "tag", tag)
+    run_git(root, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "tag", "-a", "-m", f"atc {tag}", tag)
     return subprocess.check_output(["git", "-C", str(root), "rev-parse", "HEAD"], text=True).strip()
 
 

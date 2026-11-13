@@ -113,13 +113,13 @@ def test_a_project_ahead_of_the_latest_release_is_left_alone(tmp_path: Path, cap
             in capsys.readouterr().out
     assert git_out(project, "rev-parse", "HEAD") == head
     assert (project / ".atc/governance/CORE.md").read_text(encoding="utf-8") == "# CORE.md\n\nahead\n"
-    released = git_out(root, "rev-parse", RELEASE)
+    released = git_out(root, "rev-parse", f"{RELEASE}^{{commit}}")
     assert onboard_project.main(["--sync", "--project", "demo", "--revision", released], root=root) == 0
     assert (project / ".atc/governance/CORE.md").read_text(encoding="utf-8") == "# CORE.md\n"
     assert (project / ".atc/atc.lock").read_text(encoding="utf-8").endswith(f'revision = "{released}"\n')
 
 
-@pytest.mark.parametrize("case", ["no release", "off main", "unknown"])
+@pytest.mark.parametrize("case", ["no release", "off main", "unknown", "tag object"])
 def test_an_unresolvable_target_stops_before_any_project(tmp_path: Path, capsys: pytest.CaptureFixture[str], case: str) -> None:
     root, project = committed_workspace(tmp_path)
     named: list[str] = []
@@ -132,8 +132,11 @@ def test_an_unresolvable_target_stops_before_any_project(tmp_path: Path, capsys:
         named = ["--revision", commit_root(root, "topic")]
         run_git(root, "checkout", "-q", "main")
         expected = "REVISION_NOT_ON_MAIN"
-    else:
+    elif case == "unknown":
         named = ["--revision", "0" * 40]
+        expected = "REVISION_NOT_ON_MAIN"
+    else:
+        named = ["--revision", git_out(root, "rev-parse", RELEASE)]
         expected = "REVISION_NOT_ON_MAIN"
     assert onboard_project.main(["--sync", "--project", "demo", *named], root=root) == 1
     out = capsys.readouterr().out
@@ -157,7 +160,7 @@ def test_json_names_the_target(tmp_path: Path, capsys: pytest.CaptureFixture[str
     root, _ = committed_workspace(tmp_path)
     assert onboard_project.main(["--check", "--project", "demo", "--json"], root=root) == 1
     result = json.loads(capsys.readouterr().out)
-    assert result["target"] == {"revision": git_out(root, "rev-parse", RELEASE), "tag": RELEASE, "named": False}
+    assert result["target"] == {"revision": git_out(root, "rev-parse", f"{RELEASE}^{{commit}}"), "tag": RELEASE, "named": False}
     run_git(root, "tag", "-d", RELEASE)
     assert onboard_project.main(["--check", "--project", "demo", "--json"], root=root) == 1
     assert json.loads(capsys.readouterr().out)["target"]["stops"][0]["reason"] == "NO_RELEASE_TAG"
