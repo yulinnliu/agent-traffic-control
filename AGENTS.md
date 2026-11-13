@@ -6,7 +6,7 @@ layout lives in `docs/LAYOUT.md`.
 
 ## Governance bootloader
 
-Resolve governance in this order: exact source/revision from task authority; otherwise approved project/task pin; otherwise the `governance_source` recorded in `workspace.yaml`, at its canonical `main` tip resolved once and frozen; otherwise stop.
+Resolve governance in this order: exact source/revision from task authority (a task record here binds this repository's `main` at task start; a SHA the Owner names counts as one); otherwise approved project/task pin; otherwise the `governance_source` recorded in `workspace.yaml`, at its latest release tag on `main` resolved once and frozen as its SHA; otherwise stop.
 
 Then read `shared/governance/INDEX.md` and `CORE.md` from that exact same revision, followed only by routed modules. A project repository reads its own vendored copy under `.atc/governance/` instead; this checkout's location is never part of governance identity.
 

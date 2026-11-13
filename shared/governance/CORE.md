@@ -103,8 +103,16 @@ Resolution precedence is:
 1. an exact governance revision explicitly supplied by the task authority;
 2. an approved project-pinned governance revision, when the project defines
    one;
-3. otherwise, the authoritative governance repository's canonical branch tip
-   resolved once at task start and frozen as an exact SHA.
+3. otherwise, the latest release tag of the authoritative governance
+   repository: the highest `vMAJOR.MINOR.PATCH` tag reachable from its
+   canonical branch, resolved once at task start and frozen as an exact SHA.
+
+A SHA the Owner names explicitly replaces the release tag in 3; it must be on
+the canonical branch, and it is an exact revision supplied by the task
+authority in the sense of 1. A project's pin (2) moves only by sync, which
+takes the revision 3 resolves unless the Owner names one. A task in the
+governance source repository itself binds that repository's canonical branch
+tip at task start, since it changes the governance it reads.
 
 The working agent must not select an older governance revision merely to obtain
 more permissive rules.
