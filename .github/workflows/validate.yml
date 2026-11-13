@@ -27,10 +27,10 @@ jobs:
   schemas:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ inputs.tag || github.ref }}
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
       - name: policy examples match their schemas
         run: |
           for name in hard-deny approval-required permission-presets escalation; do
@@ -45,7 +45,7 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ inputs.tag || github.ref }}
       - name: link-skills installs, check-skills verifies, drift and orphans are caught
@@ -114,10 +114,10 @@ jobs:
       run:
         working-directory: adapters/python
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ inputs.tag || github.ref }}
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
         with:
           enable-cache: true
       - run: uv run --locked python -m atc_testkit.ci --stages
@@ -125,23 +125,28 @@ jobs:
       - run: uv run --locked python scripts/validate_workspace.py
       - run: uv run --locked python scripts/policies.py check ../../shared/policies/examples
 
-  draft-release:
+  # The release is split so the write token never meets build code: release-build checks out, runs uv and builds
+  # with a read-only token; release-draft runs no project code and hands the token only to its gh steps.
+  release-build:
     if: github.ref_type == 'tag' || inputs.tag
     needs: [schemas, shell-install, python-adapter]
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
     env:
       TAG: ${{ inputs.tag || github.ref_name }}
-      GH_TOKEN: ${{ github.token }}
-      GH_REPO: ${{ github.repository }}
+    outputs:
+      atc: ${{ steps.guards.outputs.atc }}
+      testkit: ${{ steps.guards.outputs.testkit }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ inputs.tag || github.ref }}
           fetch-depth: 0
-      - uses: astral-sh/setup-uv@v6
-      - name: the tag is a release tag of an integrated revision with no Release yet
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+      - name: the tag is a release tag of an integrated revision and names the atc version
+        id: guards
         shell: bash
         run: |
           set -eu
@@ -153,55 +158,66 @@ jobs:
           testkit=$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' adapters/python/atc-testkit/src/atc_testkit/__init__.py)
           test "$TAG" = "v$atc" || { echo "$TAG does not name atc $atc" >&2; exit 1; }
           test -n "$testkit"
-          existing=$(gh api --paginate "repos/$GH_REPO/releases" --jq ".[] | select(.tag_name == \"$TAG\") | .html_url")
-          if [ -n "$existing" ]; then echo "a Release already exists for $TAG: $existing" >&2; exit 1; fi
+          printf 'atc=%s\ntestkit=%s\n' "$atc" "$testkit" >> "$GITHUB_OUTPUT"
           printf 'ATC_VERSION=%s\nTESTKIT_VERSION=%s\n' "$atc" "$testkit" >> "$GITHUB_ENV"
       - name: build the conformance archive, the atc-testkit wheel and its record, and their sums
         shell: bash
         run: |
           set -eu
-          dist="$RUNNER_TEMP/dist"
-          mkdir "$dist"
+          dist="$RUNNER_TEMP/release/dist"
+          mkdir -p "$dist"
           conformance="atc-conformance-$ATC_VERSION.tar.gz"
           git archive --format=tar.gz --prefix="atc-conformance-$ATC_VERSION/" -o "$dist/$conformance" "refs/tags/$TAG" shared/conformance
           ( cd adapters/python && uv run --locked python scripts/build_testkit_release.py --output-dir "$dist" )
           wheel="atc_testkit-$TESTKIT_VERSION-py3-none-any.whl"
           test -f "$dist/$wheel" || { echo "the wheel is not $wheel" >&2; ls "$dist" >&2; exit 1; }
           ( cd "$dist" && sha256sum "$conformance" "$wheel" atc-testkit.json > SHA256SUMS && cat SHA256SUMS )
-          printf 'ASSETS=%s\n' "$dist/$conformance $dist/$wheel $dist/atc-testkit.json $dist/SHA256SUMS" >> "$GITHUB_ENV"
-      - name: write the Release notes from the release commit and the task records since the previous tag
-        working-directory: adapters/python
-        run: |
-          uv run --locked python - <<'PY'
-          import os, subprocess, yaml
-          def git(*args):
-              return subprocess.run(["git", *args], check=True, capture_output=True, encoding="utf-8").stdout
-          tag = f"refs/tags/{os.environ['TAG']}"
-          previous = subprocess.run(["git", "describe", "--tags", "--abbrev=0", "--match", "v[0-9]*", f"{tag}^"],
-                                    capture_output=True, encoding="utf-8")
-          # The first release tag has no previous one and takes the whole history.
-          span = f"{previous.stdout.strip()}..{tag}" if previous.returncode == 0 else tag
-          body = (git("log", "-1", "--format=%b", "--grep=^chore(release): atc ", span).strip()
-                  or git("tag", "-l", "--format=%(contents)", os.environ["TAG"]).strip())
-          records = sorted(set(git("log", "--diff-filter=A", "--name-only", "--format=", span, "--",
-                                   ":(top,glob).atc/tasks/ATC-*.yaml").split()))
-          tasks = []
-          for path in records:
-              record = yaml.safe_load(git("show", f"{tag}:{path}"))
-              tasks.append(f"- {record['task_id']}: {' '.join(str(record['scope']).split())}")
-          notes = "\n".join([f"atc {os.environ['ATC_VERSION']} (atc-testkit {os.environ['TESTKIT_VERSION']})", "", body, "",
-                             "## Tasks", "", *tasks, "", "## Assets", "",
-                             "Verify the downloads with `sha256sum -c SHA256SUMS`.", ""])
-          path = os.path.join(os.environ["RUNNER_TEMP"], "notes.md")
-          with open(path, "w", encoding="utf-8") as stream:
-              stream.write(notes)
-          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as stream:
-              stream.write(f"NOTES={path}\n")
-          print(notes)
-          PY
-      - name: create the draft Release
+      - name: take the release notes committed on main
         shell: bash
         run: |
           set -eu
-          # shellcheck disable=SC2086 # ASSETS is a space-separated list of paths without spaces
-          gh release create "$TAG" --draft --verify-tag --title "atc $ATC_VERSION (atc-testkit $TESTKIT_VERSION)" --notes-file "$NOTES" $ASSETS
+          notes="$RUNNER_TEMP/release/notes.md"
+          git show "origin/main:docs/releases/$TAG.md" > "$notes" || { echo "no docs/releases/$TAG.md on main" >&2; exit 1; }
+          test -s "$notes" || { echo "docs/releases/$TAG.md is empty" >&2; exit 1; }
+          cat "$notes"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release
+          path: ${{ runner.temp }}/release
+          if-no-files-found: error
+
+  release-draft:
+    needs: release-build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+      GH_REPO: ${{ github.repository }}
+      ATC_VERSION: ${{ needs.release-build.outputs.atc }}
+      TESTKIT_VERSION: ${{ needs.release-build.outputs.testkit }}
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release
+          path: ${{ runner.temp }}/release
+      - name: the downloaded assets match the sums release-build wrote
+        shell: bash
+        run: cd "$RUNNER_TEMP/release/dist" && sha256sum -c SHA256SUMS
+      - name: no Release exists for the tag yet
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          existing=$(gh api --paginate "repos/$GH_REPO/releases" --jq ".[] | select(.tag_name == \"$TAG\") | .html_url")
+          if [ -n "$existing" ]; then echo "a Release already exists for $TAG: $existing" >&2; exit 1; fi
+      - name: create the draft Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          dist="$RUNNER_TEMP/release/dist"
+          gh release create "$TAG" --draft --verify-tag --title "atc $ATC_VERSION (atc-testkit $TESTKIT_VERSION)" \
+            --notes-file "$RUNNER_TEMP/release/notes.md" "$dist"/atc-conformance-*.tar.gz "$dist"/*.whl "$dist/atc-testkit.json" "$dist/SHA256SUMS"
