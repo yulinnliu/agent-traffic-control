@@ -94,6 +94,8 @@ def test_sync_renders_the_latest_release_not_the_checkout(tmp_path: Path, capsys
     assert onboard_project.main(["--sync", "--project", "demo"], root=root) == 0
     assert (project / ".atc/governance/CORE.md").read_text(encoding="utf-8") == "# CORE.md\n\nv0.0.2\n"
     assert (project / ".atc/atc.lock").read_text(encoding="utf-8").endswith(f'revision = "{newer}"\n')
+    assert git_out(project, "log", "-1", "--format=%s") == f"chore(governance): sync from unknown v0.0.10 ({newer[:7]})"
+    assert records(project)[-1]["source_revision"] == newer
     capsys.readouterr()
     assert onboard_project.main(["--sync", "--project", "demo", "--revision", unreleased], root=root) == 0
     assert capsys.readouterr().out.startswith(f"target: {unreleased} (named)\n")
