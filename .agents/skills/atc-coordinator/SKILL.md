@@ -22,6 +22,19 @@ The coordinator never runs the integration or the push of `main` in the
 Owner's place. The Owner runs each command against an exact SHA (governance
 `GIT_WORKFLOW.md` § Owner-run commands).
 
+## Clearances and standard procedure
+
+The coordinator runs the standard procedure of this skill on its own and asks
+the Owner only for a clearance.
+
+- **Clearances, the Owner's:** the integration of each `main` SHA; every
+  push, tag and publication; a ruling on scope or design; a governance
+  change; a deletion outside the standard close-out.
+- **Standard procedure, no question:** the worktree and the task record; the
+  writer and reviewer sessions; relaying reports and verdicts; the fix
+  re-review; `atc integrate --check`; `atc preflight push`; close-out and
+  archive (step 6). Each is reported once done.
+
 ## Stops
 
 Each of these stops the task until it is resolved, and is reported to the
@@ -86,8 +99,9 @@ the map from task ID to session and nothing a record, Git or
   re-review continues the original reviewer on its own model (governance
   `VERIFICATION.md` § Independent review). The adapter names the models.
 - **Decision prompts.** A choice only the Owner can make reaches the Owner as
-  a prompt: its options, what each changes, the recommended option first and
-  marked. The ruling goes into the task record's `decisions`.
+  a prompt in the Owner's language, one decision per question: its options,
+  what each changes, the recommended option first and marked. The ruling
+  goes into the task record's `decisions`.
 - **Design phase.** A task that needs a design starts with the writer's design
   step (`atc-review` "Writer: the design step"); no status or role is added
   for it.

@@ -29,22 +29,23 @@ Read first: <the files to read before starting>
 Work rules:
   Fixed text, one line each, in this order:
   - Reply in the Owner's language, role terms in English.
-  - Run the targeted tests by an explicit file list, chosen with the
-    project's selection tool; never the full suite: the reviewer's
-    `atc verify` is the one full run.
+  - Run the targeted tests by an explicit file list through
+    `atc test run --scratch <name> --tree <worktree> -- <files>`
+    (atc-review "Writer: the step report"); never the full suite: the
+    reviewer's `atc verify` is the one full run.
   - Amend before review; after review, new commits, except after a FAIL
     verdict (governance GIT_WORKFLOW.md § After formal review).
   - No background shells, no polling (governance DELIVERY.md § Background
     work).
-  - No version bump.
+  - No version bump unless shared/conformance/CLI.md requires it.
+  - Commands for the Owner are plain `atc ...` lines, one per command, with
+    no environment prefix (governance GIT_WORKFLOW.md § Owner-run commands).
   - Finish as atc-review "Writer: the step report" step 5: one line, the
     report's path and the tip's full 40-character SHA.
 Hard rules:
   Fixed text, the Owner's: no change to authorization files,
   system or security settings; no `atc integrate` except `--check`; no push;
-  no deletion of a worktree, scratch or branch. Commands for the Owner
-  follow governance GIT_WORKFLOW.md § Owner-run commands, with no
-  environment prefix.
+  no deletion of a worktree, scratch or branch.
 ```
 
 ## Reviewer brief

@@ -7,6 +7,11 @@
   the same tier. Fable only after the Owner agreed for that session.
 - Decision prompts (§ Sessions and decisions): one decision goes in a
   wrap_up box, two to four in AskUserQuestion, the recommended option first.
+- On Windows every command that spawns tests (`atc verify`, `atc test run`,
+  `atc integrate --check`) runs through the PowerShell tool, never the Bash
+  tool: Bash-tool child processes leave nonpaged pool allocations behind on
+  this platform, root cause not found. A writer or reviewer brief to a
+  Claude session carries this line.
 - Sessions are addressed by the exact name ListAgents shows.
 - Subscribe to the writer's idle notice where the harness offers it,
   instead of polling.

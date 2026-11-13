@@ -302,6 +302,10 @@ seven days after its last change.
   repository's `AGENTS.md` prescribes: its own worktree for a registered
   project, and for the workspace root whatever the root's `AGENTS.md`
   § Changing this repo states.
+- On Windows every command that spawns tests (`atc verify`, `atc test run`,
+  `atc integrate --check`) runs through the PowerShell tool, never the Bash
+  tool: Bash-tool child processes leave nonpaged pool allocations behind on
+  this platform, root cause not found.
 - Model and effort per role: the `atc-coordinator` skill's Claude adapter,
   "Model by role".
 - On Claude desktop the wrap_up recap and the session's closing message are

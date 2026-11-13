@@ -270,7 +270,9 @@ Close-out is a standing rule of every task. After a task is integrated into
 topic branch where the repository has no managed worktrees, its scratches
 and its report files in `~/.atc/reports/` (`<task>-*.md`, the writer's and
 the reviewer's; Git history keeps the change and `integrations.jsonl` the
-integration's task, authority and reviewed SHA), then reports. The
+integration's task, authority and reviewed SHA), then reports. A design
+document or release notes are committed to the repository, never held only
+in a report file. The
 coordinator archives the task's sessions and removes what a session's own
 working directory kept from the close-out once that session ends. Keep
 exceptions are written in the task record. Items outside the task,
