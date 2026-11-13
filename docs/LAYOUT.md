@@ -49,8 +49,10 @@ Operational description of the tree; governance semantics live under
 - `docs/` — operational documentation; `docs/design/<task_id>.md` — a
   task's committed design; `docs/releases/v<version>.md` — the notes of the
   `atc` release `v<version>`, committed in its release commit and used
-  verbatim as its GitHub Release body. `.out-of-scope/` — recorded
-  rejections.
+  verbatim as its GitHub Release body. Before the Owner tags that commit, a
+  dispatch of `.github/workflows/validate.yml` on `main` runs at it, and the
+  tag goes on only after that run passes on Linux and Windows.
+  `.out-of-scope/` — recorded rejections.
 
 ## Inside a consuming repository
 

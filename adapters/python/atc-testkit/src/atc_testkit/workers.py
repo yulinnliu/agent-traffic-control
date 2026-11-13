@@ -192,6 +192,8 @@ def record_memory(directory: Path, key: str, per_worker: int) -> None:
 
 
 _LAST_PEAK: list[int] = []
+PEAK_IS_TREE = os.name == "nt"
+"""Whether ``take_peak`` measures a stage's whole process tree (the Windows Job) rather than its largest process."""
 
 
 def take_peak() -> int | None:
@@ -304,8 +306,20 @@ def _read_row(path: Path) -> Row | None:
         return None
 
 
+_OWN_ROWS: set[str] = set()
+
+
+def _row_key(path: Path) -> str:
+    return os.path.normcase(os.path.abspath(path))
+
+
 def _row_alive(path: Path, prune: bool = True) -> bool:
-    """Whether a process holds the row's lock; with ``prune`` a row nobody holds is removed."""
+    """Whether a process holds the row's lock; with ``prune`` a row nobody holds is removed.
+
+    A row of this process is alive without a probe: a POSIX record lock never conflicts with its own process, and
+    unlocking or closing a probe descriptor would drop the process's lock on the row."""
+    if _row_key(path) in _OWN_ROWS:
+        return True
     try:
         fd = os.open(path, os.O_RDWR | getattr(os, "O_BINARY", 0))
     except OSError:
@@ -332,6 +346,7 @@ class _OwnRow:
         self.fd = _open(self.path)
         if not _try_lock(self.fd, ROW_LOCK_OFFSET):
             raise OSError(f"{self.path} is locked by another process")
+        _OWN_ROWS.add(_row_key(self.path))
         self.data: dict = {"pid": os.getpid(), "label": label, "stage": "", "tokens": [], "want": 0, "floor": 0,
                            "granted_at": None, "waiting_since": None, "reserved": 0, "log": "", "limit": ""}
         atexit.register(self.remove)
@@ -347,6 +362,7 @@ class _OwnRow:
         os.write(self.fd, text + b" " * (ROW_BYTES - len(text)))
 
     def remove(self) -> None:
+        _OWN_ROWS.discard(_row_key(self.path))
         try:
             _unlock(self.fd, ROW_LOCK_OFFSET)
             os.close(self.fd)
@@ -572,7 +588,7 @@ class Budget:
         peak = take_peak()
         if self.memory_key is None or peak is None or count < RECORD_LEAST_WORKERS:
             return
-        record_memory(self.pool.directory, self.memory_key, peak // count if os.name == "nt" else peak)
+        record_memory(self.pool.directory, self.memory_key, peak // count if PEAK_IS_TREE else peak)
 
     def _record_wait(self, waited: float) -> None:
         self.waited += waited

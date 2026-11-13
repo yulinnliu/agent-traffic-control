@@ -475,16 +475,39 @@ def test_a_project_record_beats_the_default_and_a_declaration_beats_the_record(t
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(("tree", "recorded"), [(True, 150), (False, 600)])
 def test_a_pooled_stage_records_its_peak_per_worker_from_four_workers(monkeypatch: pytest.MonkeyPatch,
-                                                                     pool_dir: Path) -> None:
+                                                                     pool_dir: Path, tree: bool,
+                                                                     recorded: int) -> None:
     peaks = iter([3 * 400 * workers.MIB, 4 * 150 * workers.MIB])
     monkeypatch.setattr(workers, "take_peak", lambda: next(peaks))
-    monkeypatch.setattr(os, "name", "nt")
+    monkeypatch.setattr(workers, "PEAK_IS_TREE", tree)
     budget = workers.Budget(workers.Pool(pool_dir, 6), label="calibrate", memory_key="calibrated")
     for count in (3, 4):
         budget.release(budget.acquire("parallel", count, count))
     assert json.loads((pool_dir / workers.MEMORY / "calibrated.json").read_text(encoding="utf-8")) == \
-        {"per_worker": [150 * workers.MIB]}
+        {"per_worker": [recorded * workers.MIB]}
+
+
+@pytest.mark.unit
+def test_a_processs_own_row_stays_alive_when_its_lock_does_not_conflict_with_itself(
+        monkeypatch: pytest.MonkeyPatch, pool_dir: Path) -> None:
+    budget = workers.Budget(workers.Pool(pool_dir, 2), label="own")
+    grant = budget.acquire("parallel", 1, 1)
+    probed: list[int] = []
+
+    def posix_lock(fd: int, offset: int) -> bool:
+        probed.append(offset)
+        return True
+
+    monkeypatch.setattr(workers, "_try_lock", posix_lock)
+    monkeypatch.setattr(workers, "_unlock", lambda fd, offset: None)
+    try:
+        assert [row.label for row in budget.pool.rows()] == ["own"]
+        assert budget.row.path.exists() and workers.ROW_LOCK_OFFSET not in probed
+    finally:
+        monkeypatch.undo()
+        budget.release(grant)
 
 
 @pytest.mark.integration
