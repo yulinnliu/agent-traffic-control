@@ -168,7 +168,7 @@ def test_check_skills_reports_a_file_sync_does_not_write_under_atc(tmp_path: Pat
     write(repo / path, "mine\n")
     check = sh("check-skills.sh", repo.as_posix())
     assert check.returncode == 1 and f"stray      {path} (not a file sync writes)" in check.stdout
-    assert "stray      .atc/tasks/" not in check.stdout
+    assert f"stray      {onboard_project.validator.TASKS_DIR.as_posix()}/" not in check.stdout
 
 
 @pytest.mark.integration
