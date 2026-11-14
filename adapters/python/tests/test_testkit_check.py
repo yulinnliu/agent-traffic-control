@@ -125,9 +125,12 @@ def test_onboarding_reports_testkit_drift_without_rewriting_project_config(repos
     (workspace/'CLAUDE.md').write_text('workspace entrypoint')
     (repository/'CLAUDE.md').write_text('project-owned guidance')
     monkeypatch.setattr(sync_project,'canonical_skills',lambda root:{})
-    monkeypatch.setattr(sync_project,'atc_plan',lambda project,root:[])
-    monkeypatch.setattr(sync_project,'lock_plan',lambda project,root,changed,revision:sync_project.PlanItem('skip',project/'.atc/atc.lock','lock current'))
+    monkeypatch.setattr(sync_project,'atc_plan',lambda project,root,found=None:[])
+    monkeypatch.setattr(sync_project,'lock_plan',lambda project,root,changed,revision,repo=None:sync_project.PlanItem('skip',project/'.atc/atc.lock','lock current'))
     monkeypatch.setattr(sync_project,'pointer_plan',lambda project,line:sync_project.PlanItem('skip',project/'AGENTS.md','pointer current'))
+    import manifest
+    found=manifest.parse((sync_project.ROOT/manifest.FILE).read_text(encoding='utf-8'))
+    monkeypatch.setattr(sync_project,'checkout_target',lambda root:sync_project.Target(root,'0'*40,manifest=found,repo=root))
     before={str(p):p.read_bytes() for p in repository.rglob('*') if p.is_file()}
     plan=sync_project.build_plan(repository,workspace)
     assert any('testkit contract current' in item.detail for item in plan)

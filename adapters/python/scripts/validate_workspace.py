@@ -44,9 +44,14 @@ from pathlib import Path
 
 import yaml
 
+import manifest as mf
 import verification_section
 
 ROOT = Path(__file__).resolve().parents[3]
+# While `project_problems` runs: the sync target's tree, which delivered content is read from, and the content
+# repository locks are checked against (docs/LAYOUT.md § The manifest). ROOT for both otherwise.
+TREE: Path | None = None
+CONTENT_REPO: Path | None = None
 FAILURES: list[str] = []
 MANAGED_BY = "agent-traffic-control"
 ROOT_TOPICS_NAME = "root"
@@ -60,7 +65,6 @@ HARDCODED_GOVERNANCE_SOURCE = re.compile(r"[A-Za-z0-9_.-]+/agent-traffic-control
 POINTER_MARKER = "<!-- atc:governance -->"
 GOVERNANCE_INDEX_RELATIVE = Path("shared") / "governance" / "INDEX.md"
 POLICY_RELATIVE = GOVERNANCE_INDEX_RELATIVE
-GOVERNANCE_MODULES = ("CORE.md", "GIT_WORKFLOW.md", "VERIFICATION.md", "DELIVERY.md", "FAILURE_ESCALATION.md", "GOVERNANCE_CHANGES.md", "PROJECT_RUNTIME.md")
 ATC_DIR = Path(".atc")
 VENDORED_GOVERNANCE = ATC_DIR / "governance"
 ATC_LOCK = ATC_DIR / "atc.lock"
@@ -124,12 +128,49 @@ def load_skill_harnesses(path: Path) -> dict[str, tuple[str, ...]]:
     return {name: tool_dirs_for(tools) for name, tools in value.items()}
 
 
+def content_tree() -> Path:
+    return TREE or ROOT
+
+
+def content_repo() -> Path:
+    return CONTENT_REPO or ROOT
+
+
+def delivery(tree: Path | None = None) -> mf.Manifest:
+    """The manifest of ``tree`` (the content tree by default); ManifestError, a ValueError, without a usable one."""
+    return mf.load(tree or content_tree())
+
+
+def _delivered(tree: Path | None, mode: str, target: str | None, default: str) -> Path:
+    """The source in ``tree`` of the ``mode`` item delivered to ``target`` (the first for None); ``default`` when
+    the tree has no usable manifest, which `check_manifest` and sync's target report."""
+    tree = tree or content_tree()
+    try:
+        pairs = delivery(tree).files(mode)
+    except (mf.ManifestError, OSError):
+        return tree / default
+    for source, destination in pairs:
+        if target is None or destination == target:
+            return tree / source
+    return tree / default
+
+
 def pointer_template_path(root: Path | None = None) -> Path:
-    return (root or ROOT) / "shared" / "templates" / "PROJECT_AGENTS.md"
+    return _delivered(root, mf.POINTER, None, "shared/templates/PROJECT_AGENTS.md")
 
 
 def atc_readme_template_path(root: Path | None = None) -> Path:
-    return (root or ROOT) / "shared" / "templates" / "ATC_README.md"
+    return _delivered(root, mf.OWNED, ATC_README.as_posix(), "shared/templates/ATC_README.md")
+
+
+def skills_dir(root: Path | None = None) -> Path:
+    """The canonical skills directory the manifest's skill-render item names in ``root``."""
+    root = root or content_tree()
+    try:
+        source = delivery(root).skills_source()
+    except (mf.ManifestError, OSError):
+        source = None
+    return root / (source or "shared/skills")
 
 
 def pointer_line(root: Path | None = None) -> str:
@@ -166,16 +207,16 @@ def read_lock(project_path: Path) -> dict | None:
     return parse_lock(path.read_text(encoding="utf-8"))
 
 
-def atc_strays(repo: Path, sync_owned: bool = True) -> list[Path]:
+def atc_strays(repo: Path, sync_owned: bool = True, tree: Path | None = None) -> list[Path]:
     """Files under ``repo``'s `.atc/` that neither sync nor the project owns, relative to ``repo``.
 
-    Sync owns `README.md`, `atc.lock` and the vendored modules under
+    Sync owns `atc.lock` and the `owned` files the manifest of ``tree`` delivers: `README.md` and the vendored modules under
     `governance/`; `tasks/` is the project's. With ``sync_owned`` false (the
     workspace root, which is the governance source) only `tasks/` belongs."""
     atc = repo / ATC_DIR
     if not atc.is_dir():
         return []
-    allowed = {ATC_README, ATC_LOCK, *(VENDORED_GOVERNANCE / module for module in vendored_governance_modules())} if sync_owned else set()
+    allowed = {ATC_LOCK, *owned_targets(tree)} if sync_owned else set()
     strays = []
     for path in sorted(atc.rglob("*")):
         if path.is_dir() and not path.is_symlink():
@@ -271,6 +312,9 @@ def load_and_check_workspace_yaml(path: Path) -> tuple[str | None, dict[str, dic
     elif not looks_absolute(root_val):
         fail(f"{path}: 'workspace_root' must be an absolute path, got {root_val!r}")
         root_val = None
+    checkout = doc.get("governance_checkout")
+    if checkout is not None and (not isinstance(checkout, str) or not checkout.strip() or looks_absolute(checkout)):
+        fail(f"{path}: 'governance_checkout' must be a path relative to the workspace directory, got {checkout!r}")
 
     if "projects" not in doc:
         fail(f"{path}: missing top-level key 'projects'")
@@ -341,13 +385,13 @@ def overlay_files(canonical_dir: Path) -> list[Path]:
 
 
 def load_canonical_skills() -> dict[str, dict]:
-    """Return {name: frontmatter} for every shared/skills/<name>/SKILL.md."""
-    skills_dir = ROOT / "shared" / "skills"
+    """Return {name: frontmatter} for every <skills>/<name>/SKILL.md of the content tree."""
+    skills = skills_dir()
     canonical: dict[str, dict] = {}
-    if not skills_dir.is_dir():
-        fail(f"{skills_dir}: missing")
+    if not skills.is_dir():
+        fail(f"{skills}: missing")
         return canonical
-    for canonical_dir in sorted(p for p in skills_dir.iterdir() if p.is_dir()):
+    for canonical_dir in sorted(p for p in skills.iterdir() if p.is_dir()):
         name = canonical_dir.name
         canonical_file = canonical_dir / "SKILL.md"
         if not canonical_file.exists():
@@ -419,7 +463,7 @@ def render_adapter(root: Path, name: str, tool_dir: str) -> str:
     ownership fields. Body: the canonical body, followed by the tool overlay
     ``shared/skills/<name>/adapters/<tool>.md`` when one exists.
     """
-    canonical_dir = root / "shared" / "skills" / name
+    canonical_dir = skills_dir(root) / name
     text = canonical_dir.joinpath("SKILL.md").read_text(encoding="utf-8")
     parts = split_frontmatter(text)
     if not parts:
@@ -449,7 +493,7 @@ def supporting_files(root: Path, name: str) -> dict[str, str]:
     overlays are rendered into SKILL.md instead. A supporting file is UTF-8 text
     under a plain path (the shell installers split on whitespace); anything else
     raises ValueError before a plan writes anything."""
-    canonical_dir = root / "shared" / "skills" / name
+    canonical_dir = skills_dir(root) / name
     files: dict[str, str] = {}
     for path in sorted(canonical_dir.rglob("*")):
         relative = path.relative_to(canonical_dir)
@@ -700,8 +744,31 @@ def check_unique_prefixes(prefixes: Mapping[str, str | None]) -> None:
             fail(f"task prefix {prefix} is declared by {', '.join(labels)}; a prefix names one repository")
 
 
-def vendored_governance_modules() -> tuple[str, ...]:
-    return ("INDEX.md", *GOVERNANCE_MODULES)
+def vendored_governance_modules(tree: Path | None = None) -> tuple[str, ...]:
+    """The governance modules the manifest of ``tree`` vendors into `.atc/governance/`."""
+    return delivery(tree).governance_modules()
+
+
+def owned_targets(tree: Path | None = None) -> set[Path]:
+    """Every file the manifest of ``tree`` delivers in `owned` mode, relative to the project."""
+    return {Path(target) for _, target in delivery(tree).files(mf.OWNED)}
+
+
+def main_state(repo: Path, revision: str) -> str:
+    """`current` when ``revision`` is in the history of ``repo``'s `refs/heads/main`, else `stale`;
+    `unverifiable` when ``repo`` has no `main`. Reads Git objects only: ``repo`` may be bare, and a working
+    tree it has may be on any branch."""
+    env = {k: v for k, v in os.environ.items() if not k.upper().startswith("GIT_")}
+
+    def git(*args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, env=env)
+
+    try:
+        if git("rev-parse", "--verify", "-q", "refs/heads/main").returncode != 0:
+            return "unverifiable"
+        return "current" if git("merge-base", "--is-ancestor", revision, "refs/heads/main").returncode == 0 else "stale"
+    except FileNotFoundError:
+        return "unverifiable"
 
 
 def lock_state(root: Path, revision: str) -> str:
@@ -742,13 +809,13 @@ def locked_sources(project_path: Path, label: str, trees: dict[str, Path], scrat
         lock = read_lock(project_path)
     except ValueError:
         return None
-    if lock is None or lock_state(ROOT, lock["revision"]) != "current":
+    if lock is None or main_state(content_repo(), lock["revision"]) != "current":
         return None
     revision = lock["revision"]
     if revision not in trees:
         tree = scratch / revision
         try:
-            export_revision(ROOT, revision, tree)
+            export_revision(content_repo(), revision, tree)
         except ValueError as exc:
             fail(f"{label}: {ATC_LOCK.as_posix()} revision {revision}: cannot read its files ({exc})")
             return None
@@ -759,7 +826,7 @@ def locked_sources(project_path: Path, label: str, trees: dict[str, Path], scrat
 def canonical_frontmatter(source: Path) -> dict[str, dict]:
     """``{name: frontmatter}`` of the canonical skills in ``source``, read without checking them."""
     canonical: dict[str, dict] = {}
-    for skill_file in sorted((source / "shared" / "skills").glob("*/SKILL.md")):
+    for skill_file in sorted(skills_dir(source).glob("*/SKILL.md")):
         parts = split_frontmatter(skill_file.read_text(encoding="utf-8"))
         fm = yaml.safe_load(parts[0]) if parts else None
         if isinstance(fm, dict):
@@ -818,9 +885,10 @@ def report_hook(workspace_yaml: Path) -> None:
 
 
 def check_atc_dir(project_path: Path, label: str, source: Path | None = None) -> None:
-    """The project's `.atc/`: a valid lock, the bootloader and vendored governance of ``source`` (the locked
-    revision's tree; this checkout by default), nothing else but `tasks/`."""
-    for stray in atc_strays(project_path):
+    """The project's `.atc/`: a valid lock, the owned files of ``source`` (the locked revision's tree; the content
+    tree by default), nothing else but `tasks/`."""
+    source = source or content_tree()
+    for stray in atc_strays(project_path, tree=source):
         fail(f"{label}: {stray.as_posix()} is not a file sync writes; .atc/ holds README.md, atc.lock, governance/ and the project's tasks/")
     try:
         lock = read_lock(project_path)
@@ -830,28 +898,28 @@ def check_atc_dir(project_path: Path, label: str, source: Path | None = None) ->
     else:
         if lock is None:
             fail(f"{label}: {ATC_LOCK.as_posix()} missing — run sync")
-    if lock is not None and lock_state(ROOT, lock["revision"]) == "stale":
+    if lock is not None and main_state(content_repo(), lock["revision"]) == "stale":
         fail(f"{label}: {ATC_LOCK.as_posix()} revision {lock['revision']} is not in the history of main — run sync")
-    readme = project_path / ATC_README
-    if not readme.is_file():
-        fail(f"{label}: {ATC_README.as_posix()} missing — run sync")
-    elif normalise(readme.read_text(encoding="utf-8")) != normalise(atc_readme_template_path(source).read_text(encoding="utf-8")):
-        fail(f"{label}: {ATC_README.as_posix()} differs from shared/templates/ATC_README.md — run sync")
-    for module in vendored_governance_modules():
-        canonical = (source or ROOT) / "shared" / "governance" / module
-        target = project_path / VENDORED_GOVERNANCE / module
+    for relative, target_name in delivery(source).files(mf.OWNED):
+        canonical = source / relative
+        target = project_path / target_name
         if not target.is_file():
-            fail(f"{label}: {(VENDORED_GOVERNANCE / module).as_posix()} missing — run sync")
+            fail(f"{label}: {target_name} missing — run sync")
         elif canonical.is_file() and normalise(target.read_text(encoding="utf-8")) != normalise(canonical.read_text(encoding="utf-8")):
-            fail(f"{label}: {(VENDORED_GOVERNANCE / module).as_posix()} differs from shared/governance/{module} — run sync")
+            fail(f"{label}: {target_name} differs from {relative} — run sync")
 
 
 def sync_written_paths(project_path: Path, canonical: dict[str, dict], source: Path | None = None) -> list[str]:
     """The repository-relative paths sync writes that exist in ``project_path``."""
-    paths = ["AGENTS.md", ATC_README.as_posix(), ATC_LOCK.as_posix(), VENDORED_GOVERNANCE.as_posix()]
-    claude = project_path / "CLAUDE.md"
-    if claude.is_file() and normalise(claude.read_text(encoding="utf-8")) == normalise(((source or ROOT) / "CLAUDE.md").read_text(encoding="utf-8")):
-        paths.append("CLAUDE.md")
+    source = source or content_tree()
+    paths = ["AGENTS.md", ATC_LOCK.as_posix(), VENDORED_GOVERNANCE.as_posix(),
+             *(target for _, target in delivery(source).files(mf.OWNED))]
+    for relative, target in delivery(source).files(mf.CREATE_ONLY):
+        written, delivered = project_path / target, source / relative
+        if written.is_file() and delivered.is_file() and \
+                normalise(written.read_text(encoding="utf-8")) == normalise(delivered.read_text(encoding="utf-8")):
+            paths.append(target)
+    paths = list(dict.fromkeys(paths))
     paths += [f"{tool_dir}/skills/{name}" for name in canonical for tool_dir in TOOL_DIRS]
     return [path for path in paths if (project_path / path).exists()]
 
@@ -899,20 +967,44 @@ def check_rules_referenced_in_agents_md() -> None:
         fail(f"{index}: missing canonical governance router")
         return
     text = index.read_text(encoding="utf-8")
-    for name in GOVERNANCE_MODULES:
+    try:
+        modules = [name for name in vendored_governance_modules(ROOT) if name != "INDEX.md"]
+    except mf.ManifestError:
+        return  # check_manifest reports it
+    for name in modules:
         if not (governance_dir / name).is_file():
             fail(f"{governance_dir / name}: missing canonical governance module")
         if name not in text:
             fail(f"{index}: does not route to {name}")
     for path in sorted(governance_dir.glob("*.md")):
-        if path.name != "INDEX.md" and path.name not in GOVERNANCE_MODULES:
-            fail(f"{path}: not listed in GOVERNANCE_MODULES, so sync never vendors it")
+        if path.name != "INDEX.md" and path.name not in modules:
+            fail(f"{path}: not listed in the governance files of {mf.FILE}, so sync never vendors it")
+
+
+def check_manifest() -> None:
+    """The checkout's own `atc-manifest.yaml`: its format, every source present, and `min_atc` not above the
+    version in `adapters/python/pyproject.toml`."""
+    try:
+        found = mf.load(ROOT)
+    except mf.ManifestError as exc:
+        fail(f"{ROOT / mf.FILE}: {exc}")
+        return
+    pyproject = ROOT / "adapters" / "python" / "pyproject.toml"
+    if not pyproject.is_file():
+        return
+    version = re.search(r'^version = "(\d+)\.(\d+)\.(\d+)"', pyproject.read_text(encoding="utf-8"), re.MULTILINE)
+    if version and found.min_atc > tuple(int(part) for part in version.groups()):
+        fail(f"{ROOT / mf.FILE}: min_atc {'.'.join(map(str, found.min_atc))} is above this tool's version "
+             f"{'.'.join(version.groups())}")
 
 
 def check_shipped_files_are_self_contained() -> None:
     """Governance travels into other repositories; it cannot point back here."""
-    for module in vendored_governance_modules():
-        path = ROOT / "shared" / "governance" / module
+    try:
+        sources = [ROOT / source for source, _ in delivery(ROOT).files(mf.OWNED)]
+    except mf.ManifestError:
+        return  # check_manifest reports it
+    for path in sources:
         if path.is_file() and WORKSPACE_ENV_REFERENCE.search(path.read_text(encoding="utf-8")):
             fail(f"{path}: locates this checkout through an environment variable; it is vendored into repositories that have none")
 
@@ -1016,6 +1108,10 @@ def check_projects(canonical: dict[str, dict], project_checkouts: dict[str, Path
             label = f"projects.{name}"
             # Synced files are current when they equal what the locked revision renders (docs/LAYOUT.md).
             source = locked_sources(project_path, label, trees, Path(scratch))
+            if source is not None and not mf.present(source):
+                fail(f"{label}: {ATC_LOCK.as_posix()} revision predates {mf.FILE}; checked against the sync target "
+                     "— run sync")
+                source = None
             synced = canonical if source is None else canonical_frontmatter(source)
             import testkit_contract
             for problem in testkit_contract.problems(project_path):
@@ -1063,6 +1159,7 @@ def main(argv: list[str] | None = None) -> int:
     root_prefix = None
     if not args.adapters_only:
         root_prefix = check_task_records(ROOT, label="workspace root")
+        check_manifest()
         check_templates()
         check_root_atc()
         check_no_hardcoded_governance_source()
@@ -1089,20 +1186,24 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def project_problems(root: Path, names: list[str] | None = None) -> list[str]:
+def project_problems(root: Path, names: list[str] | None = None, tree: Path | None = None,
+                     repo: Path | None = None) -> list[str]:
     """`atc sync --check`: the problems of each registered project on disk and of user-level skill copies;
-    with ``names``, only the problems that name one of them or a user-level copy."""
-    global ROOT
-    original = ROOT
+    with ``names``, only the problems that name one of them or a user-level copy. Delivered content comes from
+    ``tree`` (the sync target) and locks are checked against ``repo`` (the content repository); both default
+    to the workspace directory ``root``."""
+    global ROOT, TREE, CONTENT_REPO
+    original = ROOT, TREE, CONTENT_REPO
     FAILURES.clear()
     try:
         ROOT = Path(root).resolve()
+        TREE, CONTENT_REPO = tree, repo
         canonical = load_canonical_skills()
         check_projects(canonical, root_prefix=check_task_records(ROOT, label="workspace root"))
         check_user_level_duplicates(canonical, user_home())
         found = [f for f in FAILURES if not names or "user-level" in f or any(name in f for name in names)]
     finally:
-        ROOT = original
+        ROOT, TREE, CONTENT_REPO = original
         FAILURES.clear()
     return found
 

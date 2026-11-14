@@ -102,6 +102,7 @@ DIRECTORY_READERS = {
     f"{TESTS}/test_testkit_evidence.py": (TESTKIT_README,),
     f"{TESTS}/test_select_tests.py": (SCRIPTS, CLI_SRC, TESTKIT_SRC, TESTS),
     f"{TESTS}/test_tooling.py": ("shared/skills", ".dsh/skills"),
+    f"{TESTS}/test_manifest_content.py": ("atc-manifest.yaml",),
     f"{TESTS}/test_integration_verify.py": ("AGENTS.md",),
     f"{TESTS}/test_shell_install.py": SCRIPT_READS,
 }

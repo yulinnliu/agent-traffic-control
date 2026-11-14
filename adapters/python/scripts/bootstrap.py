@@ -53,6 +53,19 @@ def origin_slug(root: Path) -> str | None:
     return match.group(1) if match else None
 
 
+def is_governance_checkout(root: Path) -> bool:
+    """Whether ``root`` is the top of a Git checkout carrying `atc-manifest.yaml`: the governance repository."""
+    import manifest
+    if not manifest.present(root):
+        return False
+    try:
+        top = subprocess.check_output(["git", "-C", str(root), "rev-parse", "--show-toplevel"], text=True,
+                                      stderr=subprocess.DEVNULL).strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return False
+    return Path(top).resolve() == root.resolve()
+
+
 def init(root: Path, governance_source: str | None, force: bool, environ: dict[str, str] | None = None) -> int:
     environ = os.environ if environ is None else environ
     target = root / "workspace.yaml"
@@ -65,7 +78,11 @@ def init(root: Path, governance_source: str | None, force: bool, environ: dict[s
     if not GOVERNANCE_SOURCE.fullmatch(source):
         return _error("GOVERNANCE_SOURCE_INVALID", f"{source!r} is not OWNER/REPO",
                       "pass a GitHub owner and repository name")
-    text =f"{MAP_HEADER}\nversion: 1\n\ngovernance_source: {source}\n\nworkspace_root: {root.as_posix()}\n\nprojects: {{}}\n"
+    # A workspace directory that is itself a checkout of the governance repository reads content from its own
+    # Git objects (docs/LAYOUT.md § The manifest).
+    checkout = "\ngovernance_checkout: .\n" if is_governance_checkout(root) else ""
+    text = (f"{MAP_HEADER}\nversion: 1\n\ngovernance_source: {source}\n{checkout}\n"
+            f"workspace_root: {root.as_posix()}\n\nprojects: {{}}\n")
     target.write_text(text, encoding="utf-8", newline="\n")
     for name in ("projects", "worktrees", "state"):
         (root / name).mkdir(exist_ok=True)
@@ -116,8 +133,9 @@ def register(root: Path, name: str) -> dict:
 
 def install_opt_in(root: Path, project: Path, skills: list[str],
                    tool_dirs: tuple[str, ...] = validate_workspace.TOOL_DIRS) -> None:
+    """Render the opt-in ``skills`` from the canonical skills of the tree ``root`` (the sync target's)."""
     for skill in skills:
-        if not (root / "shared" / "skills" / skill / "SKILL.md").is_file():
+        if not (validate_workspace.skills_dir(root) / skill / "SKILL.md").is_file():
             raise SystemExit(_error("SKILL_UNKNOWN", skill, "name a skill under shared/skills/"))
         for tool_dir in tool_dirs:
             target = project / tool_dir / "skills" / skill / "SKILL.md"
@@ -154,16 +172,25 @@ def add(root: Path, name: str, url: str | None, skills: list[str], verbose: bool
     entry = register(root, name)
     for key in ("worktrees", "state"):
         (root / entry[key]).mkdir(parents=True, exist_ok=True)
-    install_opt_in(root, project, skills,
+    try:
+        with sync_project.exported_target(root, None) as target:
+            return _add_files(root, name, project, skills, target, verbose)
+    except sync_project.SyncStop as stop:
+        return _stop(stop.code, stop.detail, sync_project.STOP_HINTS.get(stop.code))
+
+
+def _add_files(root: Path, name: str, project: Path, skills: list[str], target, verbose: bool) -> int:
+    """The opt-in skills, sync's apply step and the checks of `atc add`, all from the sync ``target``'s tree."""
+    install_opt_in(target.tree, project, skills,
                    validate_workspace.load_skill_harnesses(root / "workspace.yaml").get(name, validate_workspace.TOOL_DIRS))
     buffer = io.StringIO()
     with contextlib.redirect_stdout(buffer):
-        applied = sync_project.apply(name, root=root)
+        applied = sync_project.apply(name, root=root, target=target)
     if verbose or applied:
         sys.stdout.write(buffer.getvalue())
     if applied:
         return applied
-    problems = validate_workspace.project_problems(root, [name])
+    problems = validate_workspace.project_problems(root, [name], target.tree, target.repo)
     if problems:
         print(*(f"PROBLEM {p}" for p in problems), sep="\n")
         return _stop("PROJECT_PROBLEMS", f"{len(problems)} found in {name}",

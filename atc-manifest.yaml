@@ -1,0 +1,36 @@
+# What `atc sync` delivers from this revision and where it goes (docs/LAYOUT.md § The manifest).
+# The fields and the modes are the tool's format; this file names only sources, targets and modes.
+manifest: 1
+min_atc: 0.6.0
+project:
+  - id: bootloader
+    source: shared/templates/ATC_README.md
+    target: .atc/README.md
+    mode: owned
+  - id: governance
+    source: shared/governance/
+    files: [INDEX.md, CORE.md, GIT_WORKFLOW.md, VERIFICATION.md, DELIVERY.md, FAILURE_ESCALATION.md,
+            GOVERNANCE_CHANGES.md, PROJECT_RUNTIME.md]
+    target: .atc/governance/
+    mode: owned
+  - id: pointer
+    source: shared/templates/PROJECT_AGENTS.md
+    target: AGENTS.md
+    mode: pointer-line
+  - id: entrypoint
+    source: CLAUDE.md
+    target: CLAUDE.md
+    mode: create-only
+  - id: skills
+    source: shared/skills/
+    target: "{harness}/skills/"
+    mode: skill-render
+workspace:
+  - id: workspace-policy
+    source: policies/hard-deny.yaml
+    target: policies/hard-deny.yaml
+    mode: create-only
+  - id: workspace-skills
+    source: shared/skills/
+    target: "{harness}/skills/"
+    mode: skill-render

@@ -204,16 +204,14 @@ def test_an_unresolvable_target_stops_before_any_project(tmp_path: Path, capsys:
     assert not (project / ".atc").exists()
 
 
-def test_the_verification_gate_reads_the_target_governance(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_the_verification_gate_applies_to_every_target(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """Every revision sync renders carries a manifest and the verifier rule, so the gate is unconditional."""
     root, project = committed_workspace(tmp_path)
     write(project / "AGENTS.md", "# AGENTS.md\n\n## What this is\n\nDemo.\n")
     run_git(project, "commit", "-q", "-am", "no verification section")
-    write(root / "shared/governance/GIT_WORKFLOW.md", "# GIT_WORKFLOW.md\n\n## Integration verifier source\n")
-    gated = commit_root(root, "gate")
-    assert sync_project.main(["demo"], root=root) == 0
-    capsys.readouterr()
-    assert sync_project.main(["demo", "--revision", gated], root=root) == 1
+    assert sync_project.main(["demo"], root=root) == 1
     assert "STOP VERIFICATION_SECTION_MISSING:" in capsys.readouterr().out
+    assert not (project / ".atc").exists()
 
 
 def test_json_names_the_target(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -236,30 +234,19 @@ def test_revision_takes_a_full_sha_and_root_takes_neither_revision_nor_project(t
     assert exit_.value.code == 2
 
 
-def test_current_code_renders_the_v0_4_0_release_tree(tmp_path: Path) -> None:
-    """The installed code renders an older release's sources byte-for-byte (docs/design/ATC-0039.md § 3)."""
+def test_the_v0_4_0_release_tree_has_no_manifest_so_it_is_not_a_sync_target(tmp_path: Path) -> None:
+    """D5 (docs/design/ATC-0049.md § 4): a revision before the manifest is refused, never rendered."""
+    import manifest
+    import validate_workspace as validator
     source = sync_project.ROOT
     if subprocess.run(["git", "-C", str(source), "rev-parse", "-q", "--verify", "refs/tags/v0.4.0^{commit}"],
                       capture_output=True).returncode:
         pytest.skip("this checkout has no v0.4.0 tag")
-    revision = git_out(source, "rev-parse", "v0.4.0^{commit}")
     tree = tmp_path / "v0.4.0"
-    import validate_workspace as validator
-    validator.export_revision(source, revision, tree)
-    project = tmp_path / "project"
-    write(project / "AGENTS.md", "# AGENTS.md\n\n## What this is\n\nDemo.\n")
-    target = sync_project.Target(tree, revision, "v0.4.0")
-    sync_project.apply_plan(sync_project.build_plan(project, source, target=target), "sync")
-    for module in validator.vendored_governance_modules():
-        assert (project / ".atc/governance" / module).read_bytes() == (tree / "shared/governance" / module).read_bytes()
-    assert (project / ".atc/README.md").read_bytes() == (tree / "shared/templates/ATC_README.md").read_bytes()
-    for name, metadata in sync_project.canonical_skills(tree).items():
-        canonical = validator.normalise((tree / "shared/skills" / name / "SKILL.md").read_text(encoding="utf-8"))
-        body = canonical.split("\n---\n", 1)[1].strip()
-        for tool_dir in validator.TOOL_DIRS if metadata.get("adoption") == "baseline" else ():
-            adapter = (project / tool_dir / "skills" / name / "SKILL.md").read_text(encoding="utf-8")
-            assert adapter == validator.render_adapter(tree, name, tool_dir) and body in adapter
-    assert (project / ".atc/atc.lock").read_text(encoding="utf-8").endswith(f'revision = "{revision}"\n')
+    validator.export_revision(source, git_out(source, "rev-parse", "v0.4.0^{commit}"), tree)
+    with pytest.raises(manifest.ManifestError) as refused:
+        manifest.load(tree)
+    assert refused.value.token == "NO_MANIFEST"
 
 
 @pytest.mark.parametrize("case", ["dirty", "branch", "busy", "behind"])

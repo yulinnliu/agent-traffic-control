@@ -1,24 +1,22 @@
 #!/usr/bin/env python3
 """`atc sync`: check or write the files Agent Traffic Control owns inside a project.
 
-Owned files: `CLAUDE.md` (only when the project has none), `AGENTS.md` (created
-minimal when absent; after that only its pointer line), sync's files under
-`.atc/` (`README.md`, `atc.lock`, `governance/`), and one managed adapter per
-baseline skill in each harness directory `skill_harnesses` selects. Each adapter
-is rendered from the canonical skill, so a project needs nothing from this
-checkout at run time. `.atc/tasks/` is the project's; an adapter without an
-ownership marker is project-owned; neither is ever rewritten.
+What sync delivers is what the sync target's `atc-manifest.yaml` names (docs/LAYOUT.md § The manifest):
+`owned` files rewritten on drift (`.atc/README.md`, `.atc/governance/`), the `pointer-line` in `AGENTS.md`
+(created minimal when absent), `create-only` files (`CLAUDE.md`), and one managed adapter per baseline skill
+of the `skill-render` source in each harness directory `skill_harnesses` selects; sync also writes
+`.atc/atc.lock`. `.atc/tasks/` is the project's; an adapter without an ownership marker is project-owned;
+neither is ever rewritten. A revision without a manifest is not a sync target (`NO_MANIFEST`).
 
-`atc sync [NAME...]` renders the sync target: the latest release tag on
-`main`, or the SHA the Owner names with `--revision` (CORE.md § Effective
-authority and revocation, docs/LAYOUT.md). It prunes managed adapters with no
-canonical skill or in a harness directory the project no longer selects, commits
-what it writes on each project's `main` and records the commit in
-`integrations.jsonl`; `--check` writes nothing and also validates the projects.
-`atc-maintain sync --root` (`root_main`) renders the adapters of the checkout it
-runs in and commits nothing. The rules: GIT_WORKFLOW.md "Governance sync
-commits". `apply()` creates a new project's missing files from the same target,
-updates nothing and commits nothing (`atc add`).
+`atc sync [NAME...]` renders the sync target, read from the content repository (`content.py`): the
+installed release, else the latest release tag on its `main`, or the SHA the Owner names with `--revision`
+(CORE.md § Effective authority and revocation). It prunes managed adapters with no canonical skill or in a
+harness directory the project no longer selects, commits what it writes on each project's `main` and
+records the commit in `integrations.jsonl`; `--check` writes nothing and also validates the projects. The
+workspace directory's own copies are checked by `workspace_adapter_plan`. `atc-maintain sync --root`
+(`root_main`) renders the adapters of the checkout it runs in and commits nothing. The rules:
+GIT_WORKFLOW.md "Governance sync commits". `apply()` creates a new project's missing files from the same
+target, updates nothing and commits nothing (`atc add`).
 """
 
 from __future__ import annotations
@@ -39,6 +37,8 @@ from pathlib import Path
 
 import yaml
 
+import content
+import manifest as mf
 import validate_workspace as validator
 import verification_section
 import cli_conventions
@@ -51,7 +51,6 @@ EVENTS: list[dict] | None = None
 # The `--json` result's `target`: the revision projects were rendered from, None until resolved.
 TARGET_EVENT: dict | None = None
 POINTER_LINE = re.compile(rf"^{re.escape(validator.POINTER_MARKER)}.*$", re.MULTILINE)
-VERIFIER_SOURCE_HEADING = re.compile(r"^#+ Integration verifier source\s*$", re.MULTILINE)
 
 
 @dataclass(frozen=True)
@@ -64,11 +63,17 @@ class PlanItem:
 
 @dataclass(frozen=True)
 class Target:
-    """What sync renders and locks: ``tree`` holds the sources of ``revision``."""
+    """What sync renders and locks: ``tree`` holds the sources of ``revision``, read from the Git repository
+    ``repo`` (the tree itself when None); ``manifest`` is the tree's, loaded once."""
     tree: Path
     revision: str
     tag: str | None = None
     named: bool = False
+    manifest: mf.Manifest | None = None
+    repo: Path | None = None
+
+    def delivery(self) -> mf.Manifest:
+        return self.manifest or mf.load(self.tree)
 
 
 def load_projects(root: Path = ROOT) -> dict[str, dict]:
@@ -82,12 +87,12 @@ def load_projects(root: Path = ROOT) -> dict[str, dict]:
 
 def canonical_skills(root: Path = ROOT) -> dict[str, dict]:
     validator.FAILURES.clear()
-    original_root = validator.ROOT
+    original = validator.ROOT, validator.TREE
     try:
-        validator.ROOT = root
+        validator.ROOT, validator.TREE = root, None
         canonical = validator.load_canonical_skills()
     finally:
-        validator.ROOT = original_root
+        validator.ROOT, validator.TREE = original
     if validator.FAILURES:
         raise ValueError("; ".join(validator.FAILURES))
     return {name: canonical[name] for name in sorted(canonical)}
@@ -167,10 +172,12 @@ def governance_revision(root: Path) -> str:
         return "unknown"
 
 
-def atc_plan(project_path: Path, root: Path) -> list[PlanItem]:
-    """The bootloader and the vendored governance; collisions alone when `.atc/` holds what sync does not own."""
+def atc_plan(project_path: Path, root: Path, found: mf.Manifest | None = None) -> list[PlanItem]:
+    """The manifest's `owned` files (the bootloader and the vendored governance), rendered from the tree
+    ``root``; collisions alone when `.atc/` holds what sync does not own."""
+    found = found or mf.load(root)
     plan: list[PlanItem] = []
-    for stray in validator.atc_strays(project_path):
+    for stray in validator.atc_strays(project_path, tree=root):
         plan.append(PlanItem("collision", project_path / stray, "not a file sync writes; .atc/ holds README.md, atc.lock, governance/ and tasks/"))
     try:
         validator.read_lock(project_path)
@@ -178,32 +185,40 @@ def atc_plan(project_path: Path, root: Path) -> list[PlanItem]:
         plan.append(PlanItem("collision", project_path / validator.ATC_LOCK, f"{exc}; refusing to manage .atc/"))
     if plan:
         return plan
-    readme = project_path / validator.ATC_README
-    expected_readme = validator.atc_readme_template_path(root).read_text(encoding="utf-8")
-    if not readme.exists():
-        plan.append(PlanItem("create", readme, "governance bootloader", expected_readme))
-    elif validator.normalise(readme.read_text(encoding="utf-8")) != validator.normalise(expected_readme):
-        plan.append(PlanItem("update", readme, "governance bootloader drift", expected_readme))
-    else:
-        plan.append(PlanItem("skip", readme, "governance bootloader is current"))
-    for module in validator.vendored_governance_modules():
-        source = root / "shared" / "governance" / module
+    for relative, destination in found.files(mf.OWNED):
+        source = root / relative
         if not source.is_file():
-            raise ValueError(f"{source}: missing canonical governance module")
+            raise ValueError(f"{source}: missing source of an owned item in {mf.FILE}")
         expected = source.read_text(encoding="utf-8")
-        target = project_path / validator.VENDORED_GOVERNANCE / module
+        target = project_path / destination
         if not target.exists():
-            plan.append(PlanItem("create", target, "vendored governance module", expected))
+            plan.append(PlanItem("create", target, f"owned: {relative}", expected))
         elif validator.normalise(target.read_text(encoding="utf-8")) != validator.normalise(expected):
-            plan.append(PlanItem("update", target, "vendored governance drift", expected))
+            plan.append(PlanItem("update", target, f"owned drift: {relative}", expected))
         else:
-            plan.append(PlanItem("skip", target, "vendored governance is current"))
+            plan.append(PlanItem("skip", target, "owned file is current"))
     return plan
 
 
-def lock_plan(project_path: Path, root: Path, changed: bool, revision: str) -> PlanItem:
+def create_only_plan(project_path: Path, root: Path, found: mf.Manifest, scope: str = "project") -> list[PlanItem]:
+    """The manifest's `create-only` files: created when absent, never modified after."""
+    plan: list[PlanItem] = []
+    for relative, destination in found.files(mf.CREATE_ONLY, scope):
+        expected = (root / relative).read_text(encoding="utf-8")
+        target = project_path / destination
+        if not target.exists():
+            plan.append(PlanItem("create", target, f"create-only: {relative}", expected))
+        elif target.read_text(encoding="utf-8").strip() == expected.strip():
+            plan.append(PlanItem("skip", target, f"create-only {relative} is current"))
+        else:
+            plan.append(PlanItem("skip", target, f"differs from {relative}; create-only, not modified"))
+    return plan
+
+
+def lock_plan(project_path: Path, root: Path, changed: bool, revision: str, repo: Path | None = None) -> PlanItem:
     """`.atc/atc.lock` moves to the sync target ``revision`` when sync changes any file it writes
-    (GIT_WORKFLOW.md § Lock advancement)."""
+    (GIT_WORKFLOW.md § Lock advancement); a lock outside the history of ``repo``'s `main` (the content
+    repository; ``root`` by default) moves too."""
     path = project_path / validator.ATC_LOCK
     source = governance_source(root)
     content = validator.render_lock(source, revision)
@@ -212,17 +227,14 @@ def lock_plan(project_path: Path, root: Path, changed: bool, revision: str) -> P
         return PlanItem("create", path, "ATC lock", content)
     if changed or lock["source"] != source:
         return PlanItem("update", path, "ATC lock moves to the synced revision", content)
-    state = validator.lock_state(root, lock["revision"])
-    if state == "stale":
+    if validator.main_state(repo or root, lock["revision"]) == "stale":
         return PlanItem("update", path, "ATC lock revision is not in the history of main", content)
-    if state == "not-main":
-        return PlanItem("skip", path, "ATC lock not checked: the ATC checkout is not on main")
     return PlanItem("skip", path, "ATC lock is current")
 
 
 def checkout_target(root: Path) -> Target:
-    """The ATC checkout as it stands, locked at its HEAD."""
-    return Target(root, governance_revision(root))
+    """The ATC checkout as it stands, locked at its HEAD (source mode; docs/LAYOUT.md § The manifest)."""
+    return Target(root, governance_revision(root), manifest=mf.load(root), repo=root)
 
 
 def build_plan(project_path: Path, root: Path = ROOT, target: Target | None = None,
@@ -233,29 +245,11 @@ def build_plan(project_path: Path, root: Path = ROOT, target: Target | None = No
     history check come from ``root``."""
     target = target or checkout_target(root)
     tree = target.tree
-    template_path = validator.pointer_template_path(tree)
-    if not template_path.exists():
-        raise ValueError(f"{template_path}: missing canonical pointer line template")
-    if not validator.atc_readme_template_path(tree).exists():
-        raise ValueError(f"{validator.atc_readme_template_path(tree)}: missing canonical bootloader template")
-    plan: list[PlanItem] = atc_plan(project_path, tree)
+    found = target.delivery()
+    plan: list[PlanItem] = atc_plan(project_path, tree, found)
     atc_collision = any(item.action == "collision" for item in plan)
     plan.append(pointer_plan(project_path, validator.pointer_line(tree)))
-
-    claude_source = (tree / "CLAUDE.md").read_text(encoding="utf-8")
-    claude_target = project_path / "CLAUDE.md"
-    if not claude_target.exists():
-        plan.append(PlanItem("create", claude_target, "workspace entrypoint", claude_source))
-    elif claude_target.read_text(encoding="utf-8").strip() == claude_source.strip():
-        plan.append(PlanItem("skip", claude_target, "workspace entrypoint is current"))
-    else:
-        plan.append(
-            PlanItem(
-                "skip",
-                claude_target,
-                "differs from workspace entrypoint; no ownership marker, not modified",
-            )
-        )
+    plan.extend(create_only_plan(project_path, tree, found))
     import testkit_contract
     testkit_record = testkit_contract.record(project_path)
     if testkit_record is not None:
@@ -295,19 +289,14 @@ def build_plan(project_path: Path, root: Path = ROOT, target: Target | None = No
     plan.extend(orphan_plan(project_path, set(canonical), tool_dirs))
     if not atc_collision:
         changed = any(item.action in ("create", "update", "prune") for item in plan)
-        plan.append(lock_plan(project_path, root, changed, target.revision))
+        plan.append(lock_plan(project_path, root, changed, target.revision, target.repo))
     return plan
 
 
-def verification_gate(project_path: Path, tree: Path) -> str | None:
-    """Why the lock cannot advance to the sync target whose sources ``tree`` holds
-    (GIT_WORKFLOW.md § Lock advancement), or ``None``.
-
-    Applies once the target's governance carries § Integration verifier source;
-    the section is parsed as `atc integrate` parses it."""
-    workflow = tree / "shared" / "governance" / "GIT_WORKFLOW.md"
-    if not workflow.is_file() or not VERIFIER_SOURCE_HEADING.search(workflow.read_text(encoding="utf-8")):
-        return None
+def verification_gate(project_path: Path, tree: Path | None = None) -> str | None:
+    """Why the lock cannot advance to the sync target (GIT_WORKFLOW.md § Lock advancement), or ``None``: the
+    project's AGENTS.md lacks § Integration verifier source, parsed as `atc integrate` parses it. Every
+    revision sync renders carries a manifest, and all of them carry that rule, so it always applies."""
     agents_md = project_path / "AGENTS.md"
     declared = verification_section.declaration(agents_md.read_text(encoding="utf-8")) if agents_md.is_file() else None
     if declared is None:
@@ -388,19 +377,20 @@ def orphan_plan(project_path: Path, canonical: set[str], tool_dirs: tuple[str, .
     return plan
 
 
-def root_adapter_plan(root: Path = ROOT) -> list[PlanItem]:
-    """Render every checkout-root adapter from its canonical skill, and prune
-    the orphaned ones.
+def root_adapter_plan(root: Path = ROOT, tree: Path | None = None) -> list[PlanItem]:
+    """Render every adapter of the directory ``root`` from the canonical skills of ``tree`` (``root`` itself
+    by default), and prune the orphaned ones.
 
     The root is a consumer like any project with every tool selected, so its
     `.claude/`, `.agents/` and `.dsh/` copies are the rendered output and are
     regenerated here; the shell installers copy them as they are."""
+    tree = tree or root
     plan: list[PlanItem] = []
-    canonical = canonical_skills(root)
+    canonical = canonical_skills(tree)
     for skill in canonical:
         for tool_dir in validator.TOOL_DIRS:
             target = root / tool_dir / "skills" / skill / "SKILL.md"
-            expected = validator.render_adapter(root, skill, tool_dir)
+            expected = validator.render_adapter(tree, skill, tool_dir)
             if not target.exists() and holds_files(target.parent):
                 plan.append(PlanItem("collision", target, UNOWNED_DIRECTORY))
             elif not target.exists():
@@ -418,9 +408,49 @@ def root_adapter_plan(root: Path = ROOT) -> list[PlanItem]:
             else:
                 plan.append(PlanItem("skip", target, "managed adapter is current"))
             if plan[-1].action != "collision":
-                plan.extend(supporting_plan(root, skill, target.parent))
+                plan.extend(supporting_plan(tree, skill, target.parent))
     plan.extend(orphan_plan(root, set(canonical)))
     return plan
+
+
+@contextlib.contextmanager
+def main_tip_tree(checkout: Path) -> Iterator[Path]:
+    """The files of the tip of ``checkout``'s `main`, exported from its Git objects for the block."""
+    tip = _git(checkout, "rev-parse", "--verify", "-q", f"refs/heads/{MAIN}^{{commit}}", check=False).stdout.strip()
+    if not tip:
+        raise SyncStop("EXPORT_FAILED", f"{checkout} has no {MAIN} branch")
+    with tempfile.TemporaryDirectory(prefix="atc-root-", ignore_cleanup_errors=True) as temporary:
+        tree = Path(temporary) / "tree"
+        try:
+            validator.export_revision(checkout, tip, tree)
+        except ValueError as exc:
+            raise SyncStop("EXPORT_FAILED", str(exc)) from None
+        yield tree
+
+
+def workspace_scope_plan(root: Path, target: Target) -> list[PlanItem]:
+    """The manifest's `workspace` items for a workspace directory that is not the governance checkout: its
+    `create-only` files and the adapters of its `skill-render` source in every harness directory."""
+    found = target.delivery()
+    plan = create_only_plan(root, target.tree, found, "workspace")
+    if found.one(mf.SKILLS, "workspace") is not None:
+        plan.extend(root_adapter_plan(root, target.tree))
+    return plan
+
+
+def workspace_adapter_plan(root: Path, target: Target | None = None) -> tuple[list[PlanItem], bool]:
+    """The root-adapter check doctor and sync share (docs/LAYOUT.md § The manifest), and whether ``root`` is
+    the governance checkout. The actual copies are the workspace directory's. The expected ones are rendered
+    from the Git objects of the tip of `main` when the workspace directory is the governance checkout, never
+    from its working tree; otherwise from ``target``, the sync target (resolved when None), whose `workspace`
+    items sync delivers."""
+    if content.is_workspace_checkout(root):
+        with main_tip_tree(root) as tree:
+            return root_adapter_plan(root, tree), True
+    if target is not None:
+        return workspace_scope_plan(root, target), False
+    with exported_target(root, None) as resolved:
+        return workspace_scope_plan(root, resolved), False
 
 
 def apply_plan(plan: list[PlanItem], mode: str) -> None:
@@ -447,7 +477,7 @@ def apply_plan(plan: list[PlanItem], mode: str) -> None:
 STOP_HINTS = {
     "VERIFICATION_SECTION_MISSING": "add the '## Integration verification' section to the project's AGENTS.md first",
     "IGNORED_OUTPUT": "stop Git ignoring those paths in the project; sync commits every file it writes",
-    "ROOT_ADAPTER_DRIFT": "render them with `uv run --locked atc-maintain sync --root` in the topic that changed the skill",
+    "ROOT_ADAPTER_DRIFT": "render them with `uv run --locked atc-maintain sync --root` in a topic and integrate it",
     "ROOT_NOT_MAIN": "sync commits render from the ATC checkout on main; switch it back to main",
     "ROOT_DIRTY": "commit or discard the ATC checkout's tracked changes",
     "NOT_A_REPOSITORY": "fix the project's repo path in workspace.yaml",
@@ -459,7 +489,14 @@ STOP_HINTS = {
     "REVISION_NOT_ON_MAIN": "name a commit on the ATC checkout's main",
     "NO_RELEASE_TAG": "fetch the tags, or name a revision with --revision",
     "RELEASE_NOT_ON_MAIN": "install a release tagged on this checkout's main with atc install TAG",
-    "EXPORT_FAILED": "check the ATC checkout's Git state",
+    "EXPORT_FAILED": "check the content repository's Git state",
+    "NO_MANIFEST": "name a revision that carries atc-manifest.yaml (0.7.0 or later)",
+    "MANIFEST_INVALID": "fix atc-manifest.yaml in a topic of the governance repository",
+    "MANIFEST_SOURCE_MISSING": "fix atc-manifest.yaml in a topic of the governance repository",
+    "MANIFEST_TOO_NEW": "install a newer atc release first",
+    "GOVERNANCE_CHECKOUT_INVALID": "point governance_checkout in workspace.yaml at a Git checkout",
+    "CONTENT_SOURCE_UNKNOWN": "set governance_source (<owner>/<repo>) or governance_checkout in workspace.yaml",
+    "CONTENT_FETCH_FAILED": "check the network and that governance_source names a reachable repository",
     "GIT_FAILED": "check the project's Git state",
 }
 COLLISION_HINT = "the file is not ATC-managed; move it aside or ask the Owner, then sync again"
@@ -603,9 +640,26 @@ def installed_release():
     return release_pin.installed(Path(__file__).resolve().parents[3])
 
 
+def content_repository(root: Path) -> Path:
+    """The content repository of the workspace directory ``root`` (`content.repository`); SyncStop without one."""
+    try:
+        return content.repository(root)
+    except content.ContentError as exc:
+        raise SyncStop(exc.token, exc.detail) from None
+
+
+def running_version() -> str:
+    from importlib import metadata
+    try:
+        return metadata.version("agent-traffic-control")
+    except metadata.PackageNotFoundError:
+        return "unknown"
+
+
 def resolve_target(root: Path, revision: str | None) -> tuple[str, str | None, bool]:
-    """``(revision, tag, named)`` sync renders: the Owner-named SHA on main, else the installed release, so a
-    project never moves ahead of the tool, else the latest release tag on main."""
+    """``(revision, tag, named)`` sync renders, in the content repository ``root``: the Owner-named SHA on
+    main, else the installed release, so a project never moves ahead of the tool, else the latest release
+    tag on main."""
     if revision is not None:
         known = _git(root, "rev-parse", "--verify", "-q", f"{revision}^{{commit}}", check=False)
         if known.stdout.strip() != revision or _git(root, "merge-base", "--is-ancestor", revision, f"refs/heads/{MAIN}", check=False).returncode:
@@ -627,15 +681,24 @@ def resolve_target(root: Path, revision: str | None) -> tuple[str, str | None, b
 
 @contextlib.contextmanager
 def exported_target(root: Path, revision: str | None) -> Iterator[Target]:
-    """The sync target with its sources exported to a temporary tree for the duration of the block."""
-    commit, tag, named = resolve_target(root, revision)
+    """The sync target of the workspace directory ``root`` with its sources exported from the content
+    repository to a temporary tree for the duration of the block. A revision without a usable manifest, or
+    one that needs a newer atc, stops (D5: `NO_MANIFEST`, `MANIFEST_INVALID`, `MANIFEST_SOURCE_MISSING`,
+    `MANIFEST_TOO_NEW`)."""
+    repo = content_repository(root)
+    commit, tag, named = resolve_target(repo, revision)
     with tempfile.TemporaryDirectory(prefix="atc-sync-", ignore_cleanup_errors=True) as temporary:
         tree = Path(temporary) / "tree"
         try:
-            validator.export_revision(root, commit, tree)
+            validator.export_revision(repo, commit, tree)
         except ValueError as exc:
             raise SyncStop("EXPORT_FAILED", str(exc)) from None
-        yield Target(tree, commit, tag, named)
+        try:
+            found = mf.load(tree)
+            mf.check_version(found, running_version())
+        except mf.ManifestError as exc:
+            raise SyncStop(exc.token, f"{commit[:12]}: {exc.detail}") from None
+        yield Target(tree, commit, tag, named, found, repo)
 
 
 def behind_lock(project_path: Path, root: Path, target: Target) -> str | None:
@@ -648,7 +711,7 @@ def behind_lock(project_path: Path, root: Path, target: Target) -> str | None:
         return None
     if lock is None or lock["revision"] == target.revision:
         return None
-    if _git(root, "merge-base", "--is-ancestor", target.revision, lock["revision"], check=False).returncode:
+    if _git(target.repo or root, "merge-base", "--is-ancestor", target.revision, lock["revision"], check=False).returncode:
         return None
     return lock["revision"]
 
@@ -718,22 +781,31 @@ def run(mode: str, targets: list[tuple[str, Path]], root: Path = ROOT, commit: b
     Projects are rendered from ``target``, the checkout ``root`` as it stands by default, into the harness
     directories ``tools`` names for them (`skill_harnesses`; every one for a project it does not name). The
     checkout's own adapters are reported only when they would change; ``render_root`` writes them."""
-    target = target or checkout_target(root)
     tools = tools or {}
     has_collision = has_pending = has_updates = has_stop = False
-    root_plan = root_adapter_plan(root)
+    if target is None:  # source mode: the checkout's own copies from its own tree
+        target, checkout = checkout_target(root), True
+        root_plan = root_adapter_plan(root)
+    else:
+        root_plan, checkout = workspace_adapter_plan(root, target)
     root_changes = changes(root_plan)
     root_collision = any(item.action == "collision" for item in root_plan)
     if commit:
         try:
-            if root_changes:
+            if checkout and root_changes:
                 raise SyncStop("ROOT_ADAPTER_DRIFT", "the ATC checkout's own adapters are not current")
-            revision = root_commit_revision(root, target)
+            revision = root_commit_revision(root, target) if checkout else target.revision
         except SyncStop as stop:
             report_plan("root", root, root_plan, mode, verbose, stops=[(stop.code, stop.detail)])
             return cli_conventions.STOP
+        if not checkout:
+            if root_changes or verbose:
+                report_plan("workspace", root, root_plan, mode, verbose)
+            has_collision |= root_collision
+            if not root_collision:
+                apply_plan(root_plan, "sync")
         source = governance_source(root)
-        tags = release_tags(root, revision)
+        tags = release_tags(target.repo or root, revision)
     else:
         if root_changes or render_root or not targets:
             report_plan("root", root, root_plan, "sync" if render_root else mode, verbose)
@@ -872,18 +944,20 @@ def root_main(argv: list[str] | None = None, root: Path = ROOT) -> int:
 
 
 def full_revision(root: Path, revision: str | None) -> str | None:
-    """The full SHA ``revision`` names in the ATC checkout."""
+    """The full SHA ``revision`` names in the content repository of the workspace directory ``root``."""
     if revision is None:
         return None
-    found = _git(root, "rev-parse", "--verify", "-q", f"{revision}^{{commit}}", check=False).stdout.strip()
+    found = _git(content_repository(root), "rev-parse", "--verify", "-q", f"{revision}^{{commit}}", check=False).stdout.strip()
     if not found:
-        raise SyncStop("REVISION_NOT_ON_MAIN", f"{revision} names no commit in the ATC checkout")
+        raise SyncStop("REVISION_NOT_ON_MAIN", f"{revision} names no commit in the content repository")
     return found
 
 
 def run_at_target(mode: str, targets: list[tuple[str, Path]], root: Path, revision: str | None = None,
-                  commit: bool = False, verbose: bool = False, tools: dict[str, tuple[str, ...]] | None = None) -> int:
-    """``run`` against the sync target: the latest release tag on main, or ``revision`` (the Owner's SHA)."""
+                  commit: bool = False, verbose: bool = False, tools: dict[str, tuple[str, ...]] | None = None,
+                  after=None) -> int:
+    """``run`` against the sync target: the latest release tag on main, or ``revision`` (the Owner's SHA).
+    ``after(target, code)`` runs while the target's tree still exists and returns the exit code."""
     global TARGET_EVENT
     try:
         with exported_target(root, full_revision(root, revision)) as target:
@@ -892,7 +966,8 @@ def run_at_target(mode: str, targets: list[tuple[str, Path]], root: Path, revisi
                 print(f"target {label}{' (named)' if target.named else ''}")
             if EVENTS is not None:
                 TARGET_EVENT = {"revision": target.revision, "tag": target.tag, "named": target.named}
-            return run(mode, targets, root, commit=commit, verbose=verbose, target=target, tools=tools)
+            code = run(mode, targets, root, commit=commit, verbose=verbose, target=target, tools=tools)
+            return after(target, code) if after else code
     except SyncStop as stop:
         print(f"STOP {stop.code}: {stop.detail}", file=sys.stderr)
         if STOP_HINTS.get(stop.code):
@@ -914,32 +989,40 @@ def _run(args: argparse.Namespace, mode: str, root: Path) -> int:
             return cli_conventions.ERROR
         selected = [(name, projects[name]) for name in args.projects] if args.projects else projects.items()
         targets = [(name, (root / entry["repo"]).resolve()) for name, entry in selected]
-        code = run_at_target(mode, targets, root, args.revision, commit=mode == "sync", verbose=args.verbose,
-                             tools=validator.load_skill_harnesses(root / "workspace.yaml"))
-        if mode == "check":
-            found = validator.project_problems(root, [name for name, _ in targets])
+
+        def problems(target: Target, code: int) -> int:
+            if mode != "check":
+                return code
+            found = validator.project_problems(root, [name for name, _ in targets], target.tree, target.repo)
             for problem in found:
                 print(f"PROBLEM {problem}")
             if found:
                 print(f"STOP PROJECT_PROBLEMS: {len(found)} found", file=sys.stderr)
                 print("hint: each PROBLEM line names the file and the fix", file=sys.stderr)
                 code = max(code, cli_conventions.STOP)
-        return code
+            return code
+
+        return run_at_target(mode, targets, root, args.revision, commit=mode == "sync", verbose=args.verbose,
+                             tools=validator.load_skill_harnesses(root / "workspace.yaml"), after=problems)
     except ValueError as exc:
         print(f"ERROR SYNC {exc}", file=sys.stderr)
         print("hint: fix workspace.yaml or the canonical skills it names", file=sys.stderr)
         return cli_conventions.ERROR
 
 
-def apply(name: str, root: Path = ROOT) -> int:
-    """Create the missing owned files of the registered project ``name``; update nothing, commit nothing."""
+def apply(name: str, root: Path = ROOT, target: Target | None = None) -> int:
+    """Create the missing owned files of the registered project ``name`` from ``target`` (the sync target,
+    resolved when None); update nothing, commit nothing."""
     try:
         projects = load_projects(root)
         if name not in projects:
             print(f"ERROR PROJECT_UNKNOWN '{name}' is not registered in workspace.yaml", file=sys.stderr)
             return cli_conventions.ERROR
-        return run_at_target("apply", [(name, (root / projects[name]["repo"]).resolve())], root,
-                             tools=validator.load_skill_harnesses(root / "workspace.yaml"))
+        targets = [(name, (root / projects[name]["repo"]).resolve())]
+        tools = validator.load_skill_harnesses(root / "workspace.yaml")
+        if target is not None:
+            return run("apply", targets, root, target=target, tools=tools)
+        return run_at_target("apply", targets, root, tools=tools)
     except ValueError as exc:
         print(f"ERROR SYNC {exc}", file=sys.stderr)
         return cli_conventions.ERROR

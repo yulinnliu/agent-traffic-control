@@ -29,6 +29,12 @@ governance_source: <owner>/agent-traffic-control
 
 workspace_root: /absolute/path/to/this/workspace
 
+# Optional: a checkout of governance_source, relative to workspace_root. atc then
+# reads delivered content from that checkout's Git objects instead of fetching
+# governance_source into ~/.atc/content/ (docs/LAYOUT.md § The manifest). Only a
+# host that develops ATC sets it; `.` when this directory is that checkout.
+# governance_checkout: .
+
 # Directories outside workspace_root an agent may write to; %VAR%, $VAR and ~
 # expand when `atc-maintain guard --hook-out` composes the PreToolUse hook's table.
 # Optional; workspace_root is always one.

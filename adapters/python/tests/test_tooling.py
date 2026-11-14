@@ -23,6 +23,22 @@ VERIFICATION_SECTION = (
 
 POINTER = "<!-- atc:governance -->Read `.atc/README.md` first."
 BOOTLOADER = "Governance: `.atc/governance/INDEX.md` at the exact governance revision in `.atc/atc.lock`.\n"
+MODULES = ("CORE.md", "GIT_WORKFLOW.md", "VERIFICATION.md", "DELIVERY.md", "FAILURE_ESCALATION.md",
+           "GOVERNANCE_CHANGES.md", "PROJECT_RUNTIME.md")
+# The fixture's atc-manifest.yaml: the repository's own project items, no workspace items.
+MANIFEST = f"""manifest: 1
+min_atc: 0.0.1
+project:
+  - {{id: bootloader, source: shared/templates/ATC_README.md, target: .atc/README.md, mode: owned}}
+  - id: governance
+    source: shared/governance/
+    files: [INDEX.md, {", ".join(MODULES)}]
+    target: .atc/governance/
+    mode: owned
+  - {{id: pointer, source: shared/templates/PROJECT_AGENTS.md, target: AGENTS.md, mode: pointer-line}}
+  - {{id: entrypoint, source: CLAUDE.md, target: CLAUDE.md, mode: create-only}}
+  - {{id: skills, source: shared/skills/, target: "{{harness}}/skills/", mode: skill-render}}
+"""
 
 
 def write(path: Path, content: str) -> None:
@@ -68,13 +84,14 @@ def make_workspace(tmp_path: Path, *, create_project: bool = True) -> tuple[Path
         write(project / "AGENTS.md", "# AGENTS.md\n\nProject intro.\n\n## What this is\n\nDemo.\n\n" + VERIFICATION_SECTION)
         write(project / "scripts/integration-verify.json", '["python", "-c", "pass"]\n')
     write(root / "CLAUDE.md", "Read AGENTS.md.\n")
-    for name in ("CORE.md", "GIT_WORKFLOW.md", "VERIFICATION.md", "DELIVERY.md", "FAILURE_ESCALATION.md", "GOVERNANCE_CHANGES.md", "PROJECT_RUNTIME.md"):
+    for name in MODULES:
         write(root / "shared/governance" / name, f"# {name}\n")
-    write(root / "shared/governance/INDEX.md", "# INDEX.md\n" + "\n".join(("CORE.md", "GIT_WORKFLOW.md", "VERIFICATION.md", "DELIVERY.md", "FAILURE_ESCALATION.md", "GOVERNANCE_CHANGES.md", "PROJECT_RUNTIME.md")) + "\n")
+    write(root / "shared/governance/INDEX.md", "# INDEX.md\n" + "\n".join(MODULES) + "\n")
+    write(root / "atc-manifest.yaml", MANIFEST)
     write(root / "shared/conventions/ALERT_MESSAGES.md", "# Alerts\n")
     write(
         root / "workspace.yaml",
-        f"version: 1\nworkspace_root: {root.as_posix()}\nprojects:\n  demo:\n    repo: projects/demo\n    worktrees: worktrees/demo\n    state: state/demo-data\n",
+        f"version: 1\nworkspace_root: {root.as_posix()}\ngovernance_checkout: .\nprojects:\n  demo:\n    repo: projects/demo\n    worktrees: worktrees/demo\n    state: state/demo-data\n",
     )
     write(root / "shared/templates/PROJECT_AGENTS.md", POINTER + "\n")
     write(root / "shared/templates/ATC_README.md", BOOTLOADER)
@@ -125,7 +142,7 @@ def test_onboarding_is_idempotent(tmp_path: Path) -> None:
 def test_missing_canonical_template_fails_without_project_reference(tmp_path: Path) -> None:
     root, project = make_workspace(tmp_path)
     (root / "shared/templates/PROJECT_AGENTS.md").unlink()
-    with pytest.raises(ValueError, match="canonical pointer line template"):
+    with pytest.raises(ValueError, match="MANIFEST_SOURCE_MISSING .*project.pointer"):
         sync_project.build_plan(project, root)
 
 
@@ -208,7 +225,7 @@ def test_current_claude_entrypoint_is_reported_current(tmp_path: Path) -> None:
     root, project = make_workspace(tmp_path)
     (project / "CLAUDE.md").write_bytes(b"Read AGENTS.md.\r\n")
     item = claude_item(sync_project.build_plan(project, root), project)
-    assert (item.action, item.detail) == ("skip", "workspace entrypoint is current")
+    assert (item.action, item.detail) == ("skip", "create-only CLAUDE.md is current")
 
 
 @pytest.mark.parametrize("content", ["Read AGENTS.md first.\n", "# Project-owned\n\n@AGENTS.md\n"])
@@ -218,7 +235,7 @@ def test_differing_claude_entrypoint_is_reported_and_never_modified(tmp_path: Pa
     plan = sync_project.build_plan(project, root)
     item = claude_item(plan, project)
     assert item.action == "skip"
-    assert item.detail.startswith("differs from workspace entrypoint")
+    assert item.detail.startswith("differs from CLAUDE.md; create-only")
     assert sync_project.run("sync", [("demo", project)], root) == 0
     assert (project / "CLAUDE.md").read_text(encoding="utf-8") == content
 
@@ -468,11 +485,11 @@ def test_lock_outside_main_history_is_stale_and_resynced(tmp_path: Path, monkeyp
     assert check_registered_projects(root, monkeypatch) == [
         f"projects.demo: .atc/atc.lock revision {old} is not in the history of main — run sync"
     ]
+    # The lock is checked against main's Git objects, whatever branch the checkout's working tree is on.
     run_git(root, "checkout", "-q", "-b", "topic")
-    assert check_registered_projects(root, monkeypatch) == []
-    assert (lock_item().action, lock_item().detail) == ("skip", "ATC lock not checked: the ATC checkout is not on main")
-    assert sync_project.run("sync", [("demo", project)], root) == 0
-    assert validator.read_lock(project)["revision"] == old
+    assert check_registered_projects(root, monkeypatch) == [
+        f"projects.demo: .atc/atc.lock revision {old} is not in the history of main — run sync"
+    ]
     run_git(root, "checkout", "-q", "main")
     assert (lock_item().action, lock_item().detail) == ("update", "ATC lock revision is not in the history of main")
     assert sync_project.run("sync", [("demo", project)], root) == 0
@@ -619,7 +636,7 @@ def test_unlisted_governance_module_is_rejected(tmp_path: Path, monkeypatch: pyt
     monkeypatch.setattr(validator, "ROOT", root)
     validator.FAILURES.clear()
     validator.check_rules_referenced_in_agents_md()
-    assert any("UNLISTED.md: not listed in GOVERNANCE_MODULES" in failure for failure in validator.FAILURES)
+    assert any("UNLISTED.md: not listed in the governance files of atc-manifest.yaml" in failure for failure in validator.FAILURES)
     validator.FAILURES.clear()
 
 def test_explicit_candidate_checkout_must_exist(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

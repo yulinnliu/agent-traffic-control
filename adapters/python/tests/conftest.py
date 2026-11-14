@@ -35,6 +35,16 @@ def _no_host_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(stages, "host_config", lambda: SCRIPTS / "no-host-config.toml")
 
 
+@pytest.fixture(autouse=True)
+def _no_host_content_cache(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Code a test runs in process keeps the content cache of a workspace without ``governance_checkout`` in the
+    test's own directory and fetches no remote; a test that needs a remote supplies one."""
+    import content
+    monkeypatch.setattr(content, "cache_dir", lambda name, environ=None: tmp_path / "content-cache" / f"{name}.git")
+    monkeypatch.setattr(content, "remote_url", lambda name: str(tmp_path / "no-remote" / f"{name}.git"))
+    content._FETCHED.clear()
+
+
 @pytest.fixture(scope="session")
 def _test_worker_pool(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return tmp_path_factory.mktemp("worker-pool")
