@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import subprocess
 from pathlib import Path
 
@@ -172,6 +173,22 @@ def test_a_revision_without_a_manifest_is_refused(tmp_path: Path, capsys: pytest
         assert "STOP NO_MANIFEST:" in capsys.readouterr().err
     assert not (project / ".atc").exists()
     assert sync_project.main(["demo", "--revision", git_out(root, "rev-parse", RELEASE + "^{commit}")], root=root) == 0
+
+
+@pytest.mark.integration
+def test_a_revision_that_needs_a_newer_atc_is_refused(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """D5: a target whose `min_atc` is above the running atc stops sync before anything is written."""
+    root, project = make_workspace(tmp_path)
+    commit_workspace(root, project)
+    manifest = root / "atc-manifest.yaml"
+    text = manifest.read_text(encoding="utf-8")
+    manifest.write_text(re.sub(r"(?m)^min_atc: .*$", "min_atc: 99.0.0", text), encoding="utf-8", newline="\n")
+    run_git(root, "add", "atc-manifest.yaml")
+    run_git(root, *COMMIT, "needs a newer atc")
+    newer = git_out(root, "rev-parse", "HEAD")
+    assert sync_project.main(["demo", "--revision", newer], root=root) == 1
+    assert "STOP MANIFEST_TOO_NEW:" in capsys.readouterr().err
+    assert not (project / ".atc").exists()
 
 
 @pytest.mark.integration
