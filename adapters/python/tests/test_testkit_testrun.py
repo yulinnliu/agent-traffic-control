@@ -13,6 +13,7 @@ import atc_cli
 from atc_testkit import commands, python_toolchain, scratch, testrun
 from atc_testkit.locations import Refusal
 
+TASK = "ATC-0044"
 MODULE = ("from pathlib import Path\nimport os, tempfile\n"
           "def value():\n    return 1\n")
 REPORTING_TEST = """import os, tempfile
@@ -39,7 +40,7 @@ def run_command(*args: str, cwd: Path | None = None, **env: str) -> subprocess.C
 def run_tests(tree: Path | str, scratch_name: str, python: str, *args: str, cwd: Path | None = None,
               **env: str) -> subprocess.CompletedProcess[str]:
     """``atc test run`` with pytest's output streamed, so a test's prints reach stdout."""
-    return run_command("test", "run", "--scratch", scratch_name, "--tree", str(tree), "--python", python,
+    return run_command("test", "run", "--scratch", scratch_name, "--task", TASK, "--tree", str(tree), "--python", python,
                        "--progress", "--", *args, cwd=cwd, **env)
 
 
@@ -154,7 +155,7 @@ def test_a_pythonpath_directory_absent_after_entering_is_refused(tree: Path, atc
                                                                  monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(testrun, "pythonpath_directories", lambda _tree: [str(tmp_path / "gone")])
     with pytest.raises(Refusal) as refused:
-        testrun.execute(str(tree), "s", sys.executable, ["tests"], dict(os.environ))
+        testrun.execute(str(tree), "s", sys.executable, ["tests"], dict(os.environ), task=TASK)
     assert refused.value.token == "PYTHONPATH_MISSING" and refused.value.code == 8
 
 
@@ -255,7 +256,7 @@ class Export:
         listing = tmp_path / "mutants.json"
         listing.write_text(json.dumps(mutants), encoding="utf-8")
         return run_command("test", "mutants", self.place.name, self.sha, str(self.worktree), str(listing),
-                           "--python", sys.executable, *options, "--tests", "tests", **env)
+                           "--task", TASK, "--python", sys.executable, *options, "--tests", "tests", **env)
 
 
 @pytest.fixture()
@@ -399,7 +400,7 @@ def test_a_same_size_write_in_the_files_last_second_reaches_the_run(export: Expo
     with monkeypatch.context() as held_writes:
         held_writes.setattr(Path, "write_bytes", in_the_same_second)
         held_writes.chdir(tmp_path)
-        code = testrun.mutants([export.place.name, export.sha, str(export.worktree), str(listing), "--python",
+        code = testrun.mutants([export.place.name, export.sha, str(export.worktree), str(listing), "--task", TASK, "--python",
                                 sys.executable, "--tests", "tests"], bytecode_written)
     lines = [line for line in capsys.readouterr().out.splitlines() if line != testrun.EXCLUSION_NOTE]
     assert code == 0, lines
@@ -473,8 +474,8 @@ def test_an_exception_during_a_mutant_still_restores_and_reports(export: Export,
     monkeypatch.setattr(testrun, "execute", execute)
     listing = tmp_path / "mutants.json"
     listing.write_text(json.dumps([KILLED]), encoding="utf-8")
-    code = testrun.mutants([export.place.name, export.sha, str(export.worktree), str(listing), "--python", sys.executable,
-                            "--tests", "tests"])
+    code = testrun.mutants([export.place.name, export.sha, str(export.worktree), str(listing), "--task", TASK, "--python",
+                            sys.executable, "--tests", "tests"])
     captured = capsys.readouterr()
     assert code == 1 and captured.err.splitlines()[0] == "TimeoutError: CHILD_TREE_STILL_RUNNING"
     assert captured.out.splitlines()[-2:] == ["restored-ok src/fixture_pkg/__init__.py", "done: 0 of 1 mutants, 0 survived"]
@@ -517,7 +518,7 @@ def test_mutants_need_the_export(export: Export, tmp_path: Path, capsys: pytest.
     listing.write_text("[]", encoding="utf-8")
     other = export.place.parent / "other"
     code = commands.main(["test", "mutants", other.name, export.sha, str(export.worktree), str(listing),
-                          "--python", sys.executable, "--tests", "tests"])
+                          "--task", TASK, "--python", sys.executable, "--tests", "tests"])
     assert code == 9 and capsys.readouterr().err.startswith("TREE_NOT_FOUND ")
 
 
@@ -529,7 +530,7 @@ def test_mutants_refuse_a_sha_that_names_no_commit_before_the_baseline(
     listing.write_text(json.dumps([KILLED]), encoding="utf-8")
     other = export.place.parent / "other"
     code = commands.main(["test", "mutants", other.name, sha, str(export.worktree), str(listing),
-                          "--python", sys.executable, "--tests", "tests"])
+                          "--task", TASK, "--python", sys.executable, "--tests", "tests"])
     captured = capsys.readouterr()
     assert code == 9 and captured.err.startswith(f"SHA_NOT_FOUND {sha} names no commit in ")
     assert captured.out == "" and not other.exists()
@@ -590,18 +591,106 @@ def test_mutants_refuse_an_invalid_private_desktop_value_before_the_baseline(
     listing.write_text("[]", encoding="utf-8")
     monkeypatch.setenv("ATC_PRIVATE_DESKTOP", "yes")
     code = commands.main(["test", "mutants", export.place.name, export.sha, str(export.worktree), str(listing),
-                          "--python", sys.executable, "--tests", "tests"])
+                          "--task", TASK, "--python", sys.executable, "--tests", "tests"])
     captured = capsys.readouterr()
     assert code == 9 and captured.err.startswith("PRIVATE_DESKTOP_INVALID ") and "BASELINE" not in captured.out
 
 
 @pytest.mark.integration
-def test_a_run_in_a_managed_worktree_registers_its_task(tree: Path, atc_tmp: Path) -> None:
-    for args in (("init", "-q", "-b", "worktree-claude+demo"), ("config", "user.email", "t@example.com"),
-                 ("config", "user.name", "t")):
-        subprocess.run(["git", *args], cwd=tree, check=True, capture_output=True)
-    (tree / ".atc/tasks").mkdir(parents=True)
-    (tree / ".atc/tasks/DEMO-0007.yaml").write_text("task_id: DEMO-0007\nbranch: worktree-claude+demo\n",
+def test_mutants_register_the_scratch_to_its_task_and_refuse_another(export: Export, tmp_path: Path) -> None:
+    assert export.run(tmp_path, [KILLED]).returncode == 0
+    assert [row.task for row in scratch.registered(export.place.parent)] == [TASK]
+    listing = tmp_path / "m.json"
+    listing.write_text(json.dumps([KILLED]), encoding="utf-8")
+    run = run_command("test", "mutants", export.place.name, export.sha, str(export.worktree), str(listing),
+                      "--task", "ATC-0001", "--python", sys.executable, "--tests", "tests")
+    assert run.returncode == 9 and run.stderr.startswith("SCRATCH_TASK_MISMATCH ") and "BASELINE" not in run.stdout
+
+
+@pytest.mark.integration
+def test_mutants_without_a_task_are_a_usage_error(export: Export, tmp_path: Path) -> None:
+    listing = tmp_path / "m.json"
+    listing.write_text("[]", encoding="utf-8")
+    run = run_command("test", "mutants", export.place.name, export.sha, str(export.worktree), str(listing),
+                      "--python", sys.executable, "--tests", "tests")
+    assert run.returncode == 2 and "--task" in run.stderr and scratch.registered(export.place.parent) == []
+
+
+@pytest.mark.integration
+def test_mutants_default_to_the_copys_own_environment(export: Export, tmp_path: Path,
+                                                      capsys: pytest.CaptureFixture[str]) -> None:
+    listing = tmp_path / "m.json"
+    listing.write_text("[]", encoding="utf-8")
+    code = commands.main(["test", "mutants", export.place.name, export.sha, str(export.worktree), str(listing),
+                          "--task", TASK, "--tests", "tests"])
+    err = capsys.readouterr().err
+    assert code == 9 and err.startswith("VENV_MISSING ") and str(export.place / "tree") in err
+
+
+VENV_PYTHON = ".venv/Scripts/python.exe" if os.name == "nt" else ".venv/bin/python"
+
+
+@pytest.mark.unit
+def test_the_copys_interpreter_is_in_the_registered_lock_dir_else_the_tree(atc_tmp: Path, tmp_path: Path) -> None:
+    place = atc_tmp / "c"
+    for directory in (place / "tree", place / "tree/adapters/python", tmp_path / "outside"):
+        (directory / VENV_PYTHON).parent.mkdir(parents=True)
+        (directory / VENV_PYTHON).write_bytes(b"")
+    assert testrun.copy_interpreter(atc_tmp, place) == str(place / "tree" / VENV_PYTHON)
+    scratch.register(atc_tmp, place, place / "tree/adapters/python", task=TASK)
+    assert testrun.copy_interpreter(atc_tmp, place) == str(place / "tree/adapters/python" / VENV_PYTHON)
+    other = atc_tmp / "d"
+    (other / "tree").mkdir(parents=True)
+    scratch.register(atc_tmp, other, tmp_path / "outside", task=TASK)
+    with pytest.raises(Refusal) as refused:
+        testrun.copy_interpreter(atc_tmp, other)
+    assert refused.value.token == "VENV_MISSING"
+
+
+PROBE = "atc0044_probe"
+
+
+def guard(tree: Path, *pythonpath: Path) -> testrun.Result:
+    environ = {key: value for key, value in os.environ.items() if key != "PYTHONPATH"}
+    environ["PYTHONPATH"] = os.pathsep.join(map(str, pythonpath))
+    return testrun._capture([sys.executable, "-c", testrun.IMPORT_GUARD, str(tree), str(testrun.PROJECT_DEPTH)],
+                            tree, environ, False, None)
+
+
+def probe_project(at: Path) -> Path:
+    """A project at ``at`` whose ``src`` holds the probe package; its ``src``."""
+    (at / "src" / PROBE).mkdir(parents=True)
+    (at / "pyproject.toml").write_text('[project]\nname = "probe"\n', encoding="utf-8")
+    (at / "src" / PROBE / "__init__.py").write_text("raise RuntimeError('a located package never runs')\n",
                                                     encoding="utf-8")
-    assert run_tests(str(tree), "s", sys.executable, "tests").returncode == 0
-    assert [row.task for row in scratch.registered(atc_tmp)] == ["DEMO-0007"]
+    return at / "src"
+
+
+@pytest.mark.unit
+def test_the_guard_refuses_a_tree_project_package_the_environment_takes_from_elsewhere(tmp_path: Path) -> None:
+    tree = tmp_path / "tree"
+    inside = probe_project(tree / "adapters/python")
+    elsewhere = probe_project(tmp_path / "worktree/adapters/python")
+    refused = guard(tree, elsewhere)
+    assert refused.code == 1 and any(line.startswith(f"{PROBE}: ") and str(elsewhere) in line
+                                     for line in refused.lines), refused.lines
+    assert guard(tree, inside).code == 0
+    assert guard(tree).code == 0
+
+
+@pytest.mark.unit
+def test_the_guard_looks_for_projects_three_levels_below_the_tree(tmp_path: Path) -> None:
+    tree = tmp_path / "tree"
+    elsewhere = probe_project(tmp_path / "elsewhere")
+    probe_project(tree / "a/b/c")
+    assert guard(tree, elsewhere).code == 1
+    deeper = tmp_path / "deeper"
+    probe_project(deeper / "a/b/c/d")
+    assert guard(deeper, elsewhere).code == 0
+
+
+@pytest.mark.integration
+def test_a_refused_guard_names_the_copys_own_environment(tree: Path, atc_tmp: Path) -> None:
+    (tree / "src/fixture_pkg/__init__.py").write_text("raise ImportError('broken')\n", encoding="utf-8")
+    run = run_tests(str(tree), "s", sys.executable, "tests")
+    assert run.returncode == 8 and testrun.GUARD_NEXT in run.stderr

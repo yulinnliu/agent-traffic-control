@@ -387,7 +387,7 @@ def test_an_interrupt_while_queued_stops_the_run_with_130(tmp_path: Path, pool_d
         monkeypatch.setattr(workers.Budget, "_write_wait", interrupted)
         environ = {**os.environ, workers.POOL_DIRECTORY: str(pool_dir)}
         try:
-            code = testrun.run(["--scratch", "q", "--tree", str(small_tree(tmp_path)), "--python", sys.executable,
+            code = testrun.run(["--scratch", "q", "--task", "ATC-0044", "--tree", str(small_tree(tmp_path)), "--python", sys.executable,
                                 "--", "tests"], environ)
         except KeyboardInterrupt:
             pytest.fail("the interrupt left atc test run as a traceback")
@@ -411,7 +411,7 @@ def test_a_cli_run_past_its_wait_limit_exits_124_with_the_token(tmp_path: Path, 
         environment = {key: value for key, value in os.environ.items() if not key.startswith("PYTEST_")}
         environment.update({workers.POOL_DIRECTORY: str(pool_dir), workers.MAX_WAIT: "1", "HOME": str(home),
                             "USERPROFILE": str(home), "PYTHONIOENCODING": "utf-8"})
-        run = subprocess.run([sys.executable, "-m", "atc_testkit.commands", "test", "run", "--scratch", "w",
+        run = subprocess.run([sys.executable, "-m", "atc_testkit.commands", "test", "run", "--scratch", "w", "--task", "ATC-0044",
                               "--tree", str(small_tree(tmp_path)), "--python", sys.executable, "--", "tests"],
                              env=environment, capture_output=True, text=True, encoding="utf-8",
                              stdin=subprocess.DEVNULL, timeout=SETTLE * 3)

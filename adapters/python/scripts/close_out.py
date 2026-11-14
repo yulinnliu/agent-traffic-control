@@ -115,6 +115,33 @@ def task_scratches(tmp: Path, task: str, worktree: Path | None) -> list[str]:
             if row.task == task or (inside is not None and row.tree.strip() and _real(row.tree).is_relative_to(inside))]
 
 
+def unregistered_scratches(tmp: Path, task: str, taken: list[str]) -> list[Path]:
+    """The directories under ``tmp`` named for ``task`` (its ID, any case, then the end or a character other than a
+    digit) that are not among ``taken``, the scratches close-out removes."""
+    prefix = task.lower()
+    try:
+        children = sorted(tmp.iterdir())
+    except OSError:
+        return []
+    return [child for child in children
+            if child.is_dir() and child.name.lower().startswith(prefix)
+            and not child.name[len(prefix):len(prefix) + 1].isdigit()
+            and not any(locations.same_path(child, path) for path in taken)]
+
+
+CONSENT = "CONSENT"
+
+
+def consent_line(directory: Path) -> str:
+    return (f"{CONSENT} {directory} (named for the task, not registered to it; close-out leaves it, delete with "
+            f"`atc tmp clean {directory.name}` only on the Owner's consent)")
+
+
+def consent_count(counts: dict[str, int]) -> str:
+    """The summary's consent count, when any directory needs the Owner's consent."""
+    return f", {counts[CONSENT]} need the Owner's consent" if counts[CONSENT] else ""
+
+
 REPORT_NAME = re.compile(r"(?P<task>.+?)-(?P<sha>[0-9a-f]{7,40})(?P<review>-review)?\.md")
 NEGATIONS = frozenset({"NO", "NOT"})
 
@@ -269,7 +296,7 @@ def report_check(task: str, lines: list[str], counts: dict[str, int], as_json: b
     for line in lines:
         print(line)
     print(f"close-out {task} --check: {counts['DELETED']} to delete, {counts['SKIPPED']} skipped, "
-          f"{counts['REFUSED']} refused; nothing deleted")
+          f"{counts['REFUSED']} refused{consent_count(counts)}; nothing deleted")
     return code
 
 
@@ -315,8 +342,9 @@ def main(argv: list[str] | None = None, root: Path = task_records.ROOT, environ:
 
     branch = str(data.get("branch", ""))
     worktree = task_worktree(checkout, branch) or leftover_directory(root, name, branch, environ)
-    scratch_rows = task_scratches(locations.locate(environ).tmp, args.task,
-                                  worktree or managed_path(root, name, branch, environ))
+    tmp = locations.locate(environ).tmp
+    scratch_rows = task_scratches(tmp, args.task, worktree or managed_path(root, name, branch, environ))
+    unowned = unregistered_scratches(tmp, args.task, scratch_rows)
     if worktree is None:
         pass
     elif skipped("worktree"):
@@ -329,6 +357,9 @@ def main(argv: list[str] | None = None, root: Path = task_records.ROOT, environ:
         lines += [f"SKIPPED {item} ({skipped('scratches')})" for item in scratches]
     elif scratches:
         scratch.clean(scratches, say=lines.append, environ=environ, with_runs=True, check=args.check)
+    named = [item["path"] for item in json_items(lines)]
+    lines += [consent_line(directory) for directory in unowned
+              if not any(locations.same_path(directory, path) for path in named)]
 
     reports = sorted((locations.atc_home(environ) / REPORTS).glob(f"{args.task}-*.md"))
     for report in reports:
@@ -349,7 +380,8 @@ def main(argv: list[str] | None = None, root: Path = task_records.ROOT, environ:
         except OSError as error:
             lines.append(f"REFUSED {report} ({error})")
 
-    counts = {word: sum(line.startswith(f"{word} ") for line in lines) for word in ("DELETED", "SKIPPED", "REFUSED")}
+    counts = {word: sum(line.startswith(f"{word} ") for line in lines)
+              for word in ("DELETED", "SKIPPED", "REFUSED", CONSENT)}
     if args.check:
         return report_check(args.task, lines, counts, args.json)
     if not counts["REFUSED"]:
@@ -365,7 +397,7 @@ def main(argv: list[str] | None = None, root: Path = task_records.ROOT, environ:
     for line in lines:
         print(line)
     print(f"close-out {args.task}: {counts['DELETED']} deleted, {counts['SKIPPED']} skipped, "
-          f"{counts['REFUSED']} refused")
+          f"{counts['REFUSED']} refused{consent_count(counts)}")
     return code
 
 

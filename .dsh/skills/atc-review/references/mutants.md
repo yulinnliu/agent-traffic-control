@@ -1,7 +1,7 @@
 # `atc test mutants`
 
 ```
-atc test mutants <scratch> <sha> <worktree> <mutants.json> --python <py> [--kill-rule failure|assertion] --tests <path>...
+atc test mutants <scratch> <sha> <worktree> <mutants.json> --task <ID> [--python <py>] [--kill-rule failure|assertion] --tests <path>...
 ```
 
 Applies each mutant alone to the copy at `<tmp>/<scratch>/tree`, the export
@@ -32,6 +32,13 @@ arguments that judge that mutant in place of `--tests`.
 
 ## Result lines
 
+- `--task` registers the scratch under the task; a scratch registered to
+  another task stops with `SCRATCH_TASK_MISMATCH` (exit 9).
+- `--python` defaults to the copy's own `.venv`: in the directory the
+  scratch's registry line names, as `atc tmp checkout --lock-dir` records
+  it, else in `<scratch>/tree`; without one, `VENV_MISSING` (exit 9). An
+  interpreter whose environment installs the tree's packages from another
+  checkout stops with `COPY_IMPORT_MISMATCH` (exit 8), naming them.
 - `<sha>` must name a commit in `<worktree>`: otherwise `SHA_NOT_FOUND`
   (exit 9) before the scratch is touched, then `PYTHON_NOT_FOUND`, the
   scratch refusals of `atc test run`, `TIME_SLACK_INVALID` and

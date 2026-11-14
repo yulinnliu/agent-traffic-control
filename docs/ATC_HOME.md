@@ -177,15 +177,17 @@ registered, so `atc tmp clean <scratch>` removes it.
 - `scratch`, `tree`: absolute native paths. `created_utc`: `YYYY-MM-DDTHH:MM:SSZ`.
 - `task`: the task the scratch belongs to, which `atc close-out` reads
   (`TASKS.md` § Close-out). `atc tmp checkout` writes its `--task`;
-  `atc test run` writes its `--task`, else the task of the managed worktree
-  holding the tree, else nothing.
+  `atc test run` and `atc test mutants` write their required `--task`. Only
+  a line of an older version has none.
 - `source`, `commit`: the source worktree and the full commit of a scratch
   `atc tmp checkout` made; empty for other scratches.
   A line of the four-column format reads with the three empty, and a change
   to the file keeps it as it is.
-- `atc test run` adds the line at the start of a run whenever the scratch has
-  none, whether or not the directory already exists. A scratch that already
-  has a line keeps its task; an empty task is filled.
+- `atc test run` and `atc test mutants` add the line at the start of a run
+  whenever the scratch has none, whether or not the directory already
+  exists. An empty task of an existing line is filled; a line that names
+  another task refuses the run with `SCRATCH_TASK_MISMATCH` (exit 9), so no
+  scratch changes task.
 - Every change to the file is made under `<tmp>/scratch-dirs.lock` and
   replaces the file in one step.
 - `atc tmp list` prints one line per scratch and deletes nothing: its name,

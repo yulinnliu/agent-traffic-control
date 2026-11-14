@@ -18,12 +18,16 @@ SELECTOR = ("import json, sys\n"
 DROPPED_SETTINGS = ("ATC_PRIVATE_DESKTOP", "PYTHONDONTWRITEBYTECODE", "PYTHONPYCACHEPREFIX")
 
 
+TASK = "ATC-0044"
+
+
 def run_command(*args: str, **env: str) -> subprocess.CompletedProcess[str]:
-    """The command in the caller's environment less `DROPPED_SETTINGS`."""
+    """The command in the caller's environment less `DROPPED_SETTINGS`, with `--task TASK` unless it names one."""
     environment = {key: value for key, value in os.environ.items()
                    if not key.startswith(("PYTEST_", "GIT_")) and key not in DROPPED_SETTINGS}
     environment.update(env, PYTHONIOENCODING="utf-8")
-    return subprocess.run([sys.executable, "-m", "atc_testkit.commands", "test", "run", *args], env=environment,
+    task = () if "--task" in args else ("--task", TASK)
+    return subprocess.run([sys.executable, "-m", "atc_testkit.commands", "test", "run", *task, *args], env=environment,
                           capture_output=True, text=True, encoding="utf-8", stdin=subprocess.DEVNULL)
 
 
@@ -94,24 +98,22 @@ def test_the_tree_comes_from_the_registry_and_python_from_its_venv(tree: Path, a
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize(("branch", "given", "expected"), [
-    ("main", ["--task", "DEMO-0007"], "DEMO-0007"),
-    ("worktree-claude+widget", [], "DEMO-0001"),
-    ("worktree-claude+widget", ["--task", "DEMO-0007"], "DEMO-0007")])
-def test_a_new_scratch_records_the_given_task_else_its_worktree_task(tree: Path, atc_tmp: Path, branch: str,
-                                                                    given: list[str], expected: str) -> None:
-    (tree / ".atc/tasks").mkdir(parents=True)
-    (tree / ".atc/tasks/DEMO-0001.yaml").write_text("task_id: DEMO-0001\nbranch: worktree-claude+widget\n",
-                                                   encoding="utf-8")
-    git(tree, "init", "-q", "-b", branch)
-    git(tree, "add", ".")
-    git(tree, "commit", "-q", "-m", "x")
-    common = ("--scratch", "f9", "--tree", str(tree), "--python", sys.executable, "--select", "HEAD")
-    for task in (given, ["--task", "DEMO-0008"]):
-        run = run_command(*common, *task)
-        assert run.returncode == 0, run.stdout + run.stderr
+def test_a_scratch_records_its_task_and_refuses_another(tree: Path, atc_tmp: Path) -> None:
+    common = ("--scratch", "f9", "--tree", str(tree), "--python", sys.executable, "--", "tests/test_value.py")
+    assert run_command("--task", "DEMO-0007", *common).returncode == 0
+    run = run_command("--task", "DEMO-0008", *common)
+    assert run.returncode == 9 and run.stderr.startswith("SCRATCH_TASK_MISMATCH ") and "DEMO-0007" in run.stderr
     [row] = scratch.registered(atc_tmp)
-    assert row.task == expected
+    assert row.task == "DEMO-0007"
+
+
+@pytest.mark.integration
+def test_a_run_without_a_task_is_a_usage_error_and_creates_nothing(tree: Path, atc_tmp: Path) -> None:
+    run = subprocess.run([sys.executable, "-m", "atc_testkit.commands", "test", "run", "--scratch", "f11", "--tree",
+                          str(tree)], env={**os.environ, "ATC_TMP": str(atc_tmp)}, capture_output=True, text=True,
+                         encoding="utf-8", stdin=subprocess.DEVNULL)
+    assert run.returncode == 2 and "--task" in run.stderr
+    assert not (atc_tmp / "f11").exists() and scratch.registered(atc_tmp) == []
 
 
 @pytest.mark.integration
@@ -164,7 +166,8 @@ def test_select_in_an_export_reads_its_source_commit(tree: Path, atc_tmp: Path, 
     run = run_command("--scratch", "f7x", "--python", sys.executable, "--tree", str(export), "--select", "HEAD~1")
     assert run.returncode == 9 and run.stderr.startswith("SELECTION_SOURCE_UNKNOWN ")
     scratch.register(atc_tmp, atc_tmp / "f7", export, task="ATC-0008", source=str(tree), commit=head)
-    run = run_command("--scratch", "f7", "--python", sys.executable, "--select", "HEAD~1", "--wide")
+    run = run_command("--scratch", "f7", "--task", "ATC-0008", "--python", sys.executable, "--select", "HEAD~1",
+                      "--wide")
     assert run.returncode == 0, run.stdout + run.stderr
     assert run.stdout.splitlines()[0] == "SELECT HEAD~1: 1 changed paths, 1 test paths"
 

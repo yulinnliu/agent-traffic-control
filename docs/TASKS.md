@@ -192,10 +192,16 @@ several, the working directory's.
 3. The scratches whose registry line names the task, or whose `tree` lies
    inside the task's worktree (paths compared as real paths without case),
    with their dependent runs (`ATC_HOME.md` § Deleting), go through
-   `atc tmp clean`. `atc test run` fills the `task` of the line it registers
-   from its `--task`, else from the tree's branch when one record names that
-   branch, so a run whose tree lies outside the task's worktree passes
-   `--task`.
+   `atc tmp clean`. Every command that creates a scratch takes a required
+   `--task` and writes it into the scratch's line (`ATC_HOME.md` § Scratch
+   registry). A directory under `<tmp>` whose name starts with the task ID,
+   any case, followed by the end of the name or a character other than a
+   digit, and that is not among those scratches, prints
+   `CONSENT <path> (...)`: close-out never deletes it, the Owner decides,
+   and `atc tmp clean <name>` deletes it on the Owner's consent. Such lines
+   change no exit code, and the summary line adds
+   `, <n> need the Owner's consent` when there are any; under `--json` each
+   is an item with outcome `CONSENT` and `counts` has `consent`.
 4. Each report file `~/.atc/reports/<ID>-*.md` is deleted. A writer report
    `<ID>-<sha>.md` is deleted with no ledger line (`--check`:
    `writer report, no ledger line`); any other first appends one line to the

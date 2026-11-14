@@ -37,32 +37,58 @@ KILL_FAILURE, KILL_ASSERTION = "failure", "assertion"
 # The start of a junit failure message that kills a mutant under the assertion rule.
 ASSERTION_FAILURE = re.compile(r"(?:AssertionError|assert |Failed: DID NOT RAISE)")
 JUNIT = "junit"
+PROJECT_DEPTH = 3
+# Imports each package of the PYTHONPATH directories, which must load from the tree; then locates, without running
+# it, each package of every other project `src` up to PROJECT_DEPTH levels below the tree, which must resolve to the
+# tree or not at all: an environment built from another checkout installs that checkout's copy.
 IMPORT_GUARD = r"""
-import glob, importlib, os, sys
-tree = os.path.normcase(os.path.realpath(sys.argv[1])) + os.sep
+import glob, importlib, importlib.util, os, sys
+top, depth = sys.argv[1], int(sys.argv[2])
+real = lambda path: os.path.normcase(os.path.realpath(path))
+tree = real(top) + os.sep
 bad = []
-def visit(src, rel):
+def where(name, listed):
+    if listed:
+        return importlib.import_module(name).__file__
+    spec = importlib.util.find_spec(name)
+    return None if spec is None else spec.origin or next(iter(spec.submodule_search_locations or ()), None)
+def visit(src, rel, listed):
     here = os.path.join(src, *rel)
     if os.path.isfile(os.path.join(here, "__init__.py")):
         name = ".".join(rel)
         try:
-            where = importlib.import_module(name).__file__
+            found = where(name, listed)
         except Exception as exc:
-            bad.append(f"{name}: {exc!r}")
+            if listed:
+                bad.append(f"{name}: {exc!r}")
             return
-        if not os.path.normcase(os.path.realpath(where)).startswith(tree):
-            bad.append(f"{name}: {where} (tree {tree})")
+        if found is not None and not real(found).startswith(tree):
+            bad.append(f"{name}: {found} (tree {tree})")
         return
     for child in sorted(os.listdir(here)):
-        if os.path.isdir(os.path.join(here, child)) and not child.startswith((".", "_")):
-            visit(src, rel + [child])
-for src in glob.glob(os.path.join(sys.argv[1], "packages", "*", "src")) + glob.glob(os.path.join(sys.argv[1], "src")):
-    for child in sorted(os.listdir(src)):
-        if os.path.isdir(os.path.join(src, child)) and not child.startswith((".", "_")):
-            visit(src, [child])
+        if os.path.isdir(os.path.join(here, child)) and not child.startswith((".", "_")) and child.isidentifier():
+            visit(src, rel + [child], listed)
+listed = glob.glob(os.path.join(top, "packages", "*", "src")) + glob.glob(os.path.join(top, "src"))
+seen = {real(src) for src in listed}
+others = []
+for here, dirs, files in os.walk(top):
+    rel = os.path.relpath(here, top)
+    level = 0 if rel == os.curdir else rel.count(os.sep) + 1
+    dirs[:] = [] if level >= depth else sorted(
+        name for name in dirs if not name.startswith((".", "_")) and name not in ("src", "node_modules", "tests", "test"))
+    src = os.path.join(here, "src")
+    if "pyproject.toml" in files and os.path.isdir(src) and real(src) not in seen:
+        others.append(src)
+for srcs, flag in ((listed, True), (others, False)):
+    for src in srcs:
+        for child in sorted(os.listdir(src)):
+            if os.path.isdir(os.path.join(src, child)) and not child.startswith((".", "_")) and child.isidentifier():
+                visit(src, [child], flag)
 print("\n".join(bad))
 sys.exit(1 if bad else 0)
 """
+GUARD_NEXT = ("next: run with the copy's own environment, built by `atc tmp checkout` or the project's AGENTS.md "
+              "preparation in the copy, and its interpreter")
 
 
 @dataclass(frozen=True)
@@ -94,6 +120,22 @@ def resolve_tree(argument: str) -> Path:
     except (OSError, ValueError):
         pass
     raise Refusal("TREE_NOT_FOUND", argument)
+
+
+def check_task(task: str) -> None:
+    """Refuse a ``--task`` that is not of the task form with ``TASK_INVALID`` (exit 9)."""
+    if not scratch.TASK_ID.fullmatch(task):
+        raise Refusal("TASK_INVALID", f"{task!r} is not a task ID such as ATC-0008")
+
+
+def copy_interpreter(root: Path, place: Path) -> str:
+    """The interpreter of the copy's own environment: the ``.venv`` of the tree the scratch's registry line names
+    inside it, as ``atc tmp checkout --lock-dir`` records it, else of ``<scratch>/tree``; ``VENV_MISSING`` without."""
+    row = next((row for row in scratch.registered(root) if locations.same_path(row.scratch, place)), None)
+    tree = place / "tree"
+    if row is not None and row.tree and Path(os.path.realpath(row.tree)).is_relative_to(os.path.realpath(place)):
+        tree = Path(row.tree)
+    return toolchains.for_tree(tree).interpreter(tree)
 
 
 def prepare_scratch(argument: str, environ: MutableMapping[str, str]) -> tuple[Path, Path]:
@@ -150,9 +192,9 @@ def isolate(tree: Path, place: Path, python: str, environ: MutableMapping[str, s
         if not os.path.isdir(directory):
             raise Refusal("PYTHONPATH_MISSING", directory, GUARD_EXIT)
 
-    guard = _capture([python, "-c", IMPORT_GUARD, str(tree)], tree, environ, False, None)
+    guard = _capture([python, "-c", IMPORT_GUARD, str(tree), str(PROJECT_DEPTH)], tree, environ, False, None)
     if guard.code != 0:
-        raise Refusal("COPY_IMPORT_MISMATCH", "\n".join(guard.lines), GUARD_EXIT)
+        raise Refusal("COPY_IMPORT_MISMATCH", "\n".join([*guard.lines, GUARD_NEXT]), GUARD_EXIT)
     return private_desktop(environ)
 
 
@@ -183,12 +225,13 @@ def _pytest_command(python: str, tree: Path, place: Path, environ: Mapping[str, 
 
 
 def execute(tree_argument: str, scratch_argument: str, python_argument: str, pytest_arguments: Sequence[str],
-            environ: MutableMapping[str, str], *, timeout: float | None = None, junit: Path | None = None) -> Result:
+            environ: MutableMapping[str, str], *, task: str, timeout: float | None = None,
+            junit: Path | None = None) -> Result:
     """One captured pytest run of a mutant; a refusal raises ``Refusal`` with its token and exit code."""
     tree = resolve_tree(tree_argument)
     python = resolve_python(python_argument)
     root, place = prepare_scratch(scratch_argument, environ)
-    scratch.register(root, place, tree)
+    scratch.register(root, place, tree, task=task)
     private = isolate(tree, place, python, environ)
     command = _pytest_command(python, tree, place, environ, private, pytest_arguments, junit)
     return _capture(command, tree, environ, private, timeout)
@@ -315,8 +358,12 @@ def _mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None,
     parser.add_argument("mutants", metavar="FILE",
                         help="JSON list of mutants: {label, edits: [{path, old, new}], tests?: [...]}, paths "
                              "relative to the tree; a mutant's own tests replace --tests for it")
-    parser.add_argument("--python", required=True, metavar="PATH",
-                        help="interpreter that runs pytest: a path, or a name on PATH")
+    parser.add_argument("--task", required=True, metavar="ID",
+                        help="the task the scratch belongs to, for example ATC-0008; a scratch registered to another "
+                             "task is refused")
+    parser.add_argument("--python", metavar="PATH",
+                        help="interpreter that runs pytest: a path, or a name on PATH (default: the copy's own .venv, "
+                             "in the directory the scratch's registry line names, else in NAME/tree)")
     parser.add_argument("--tests", nargs="+", required=True, metavar="ARG",
                         help="pytest arguments naming the tests that judge a mutant")
     parser.add_argument("--kill-rule", choices=(KILL_FAILURE, KILL_ASSERTION), default=KILL_FAILURE,
@@ -324,12 +371,15 @@ def _mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None,
                              "is an assertion, with no test errored, kills")
     args = parser.parse_args(argv)
     environ = os.environ if environ is None else environ
+    check_task(args.task)
     worktree = os.path.abspath(args.worktree)
     verify_commit(worktree, args.sha)
-    python = resolve_python(args.python)
+    python = resolve_python(args.python) if args.python else None
     entries = json.loads(Path(args.mutants).read_text(encoding="utf-8-sig"))
-    _root, place = prepare_scratch(args.scratch, environ)
+    root, place = prepare_scratch(args.scratch, environ)
     tree = place / "tree"
+    python = python or copy_interpreter(root, place)
+    scratch.register(root, place, resolve_tree(str(tree)), task=args.task)
     timing.resolve(environ)
     if private_desktop(environ):
         print(EXCLUSION_NOTE, flush=True)
@@ -354,7 +404,7 @@ def _mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None,
             junit = reports / f"{attempts:03d}-{LABEL_CHARACTERS.sub('_', label)[:40]}.xml"
             junit.unlink(missing_ok=True)
         attempts += 1
-        result = execute(str(tree), str(place), python, ["-x", *tests], environ,
+        result = execute(str(tree), str(place), python, ["-x", *tests], environ, task=args.task,
                          timeout=MUTANT_SECONDS, junit=junit)
         return _verdict(result, junit)
 
@@ -625,7 +675,7 @@ def summary(result: Result | None, log: Path) -> tuple[str, int]:
 
 
 def run(argv: Sequence[str], environ: MutableMapping[str, str] | None = None) -> int:
-    """``atc test run --scratch <name> [--tree <tree>] [--python <py>] [--task <ID>] [<option>...] [-- <pytest args>]``."""
+    """``atc test run --scratch <name> --task <ID> [--tree <tree>] [--python <py>] [<option>...] [-- <pytest args>]``."""
     argv = list(argv)
     pytest_arguments: list[str] = []
     if "--" in argv:
@@ -643,9 +693,9 @@ def run(argv: Sequence[str], environ: MutableMapping[str, str] | None = None) ->
     parser.add_argument("--tree", metavar="DIR", help="the tree the tests run in (default: the tree the scratch's registry line "
                                        "names, as `atc tmp checkout` records it)")
     parser.add_argument("--python", metavar="PATH", help="interpreter that runs pytest (default: the tree's .venv)")
-    parser.add_argument("--task", metavar="ID",
-                        help="the task ID a newly registered scratch records (default: the task of the managed "
-                             "worktree holding the tree)")
+    parser.add_argument("--task", required=True, metavar="ID",
+                        help="the task the scratch belongs to, for example ATC-0008; a scratch registered to another "
+                             "task is refused")
     parser.add_argument("--select", metavar="SHA",
                         help="run only the tests the tree's declared selector picks for the paths changed since SHA")
     parser.add_argument("--label", default="run", metavar="NAME", help="name of the run, in its log's file name")
@@ -661,8 +711,7 @@ def run(argv: Sequence[str], environ: MutableMapping[str, str] | None = None) ->
         parser.error("--wide and --touched take --select")
     if args.wide and args.touched:
         parser.error("--wide and --touched exclude each other")
-    if args.task is not None and not scratch.TASK_ID.fullmatch(args.task):
-        raise Refusal("TASK_INVALID", f"{args.task!r} is not a task ID such as ATC-0008")
+    check_task(args.task)
     environ = os.environ if environ is None else environ
     root, place = prepare_scratch(args.scratch, environ)
     row = _registered_row(root, place)
@@ -673,7 +722,7 @@ def run(argv: Sequence[str], environ: MutableMapping[str, str] | None = None) ->
     else:
         raise Refusal("TREE_NOT_FOUND", f"the scratch {place.name} names no tree; pass --tree")
     python = resolve_python(args.python) if args.python else toolchains.for_tree(tree).interpreter(tree)
-    scratch.register(root, place, tree, task=args.task or scratch.task_of_tree(tree))
+    scratch.register(root, place, tree, task=args.task)
     paths = changed_paths(tree, args.select, row) if args.select else None
     environ["PYTHONUNBUFFERED"] = "1"
     private = isolate(tree, place, python, environ)

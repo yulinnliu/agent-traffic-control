@@ -55,7 +55,7 @@ live worktree:
 
 ```text
 atc tmp checkout <sha> --task <ID>
-atc test run --scratch <ID>-<first 7 of sha> --select main
+atc test run --scratch <ID>-<first 7 of sha> --task <ID> --select main
 ```
 
 `atc tmp checkout` exports the commit and builds its `.venv`; for the

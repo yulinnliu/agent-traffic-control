@@ -16,14 +16,11 @@ import time
 import tomllib
 from typing import NamedTuple
 
-import yaml
-
 from . import isolation, locations, owner, stages, toolchain
 from .git import git_env
 from .locations import CANDIDATES, Refusal, SYSTMP, is_link as _is_link
 
 SCRATCH_NAME = re.compile(r"[A-Za-z0-9._-]+")
-MANAGED_BRANCH = re.compile(r"worktree-[^+/]+\+[^/]+")
 TASK_ID = re.compile(r"[A-Z][A-Z0-9]*-[0-9]+")
 RESERVED_NAMES = frozenset({SYSTMP, CANDIDATES})
 SCRATCH_NAME_BOUND = 64
@@ -135,42 +132,21 @@ def registered(root: Path) -> list[Row]:
 def register(root: Path, scratch: Path, tree: Path, now: datetime | None = None, *, task: str = "",
              source: str = "", commit: str = "", project: str | None = None) -> None:
     """Add the scratch's line when it has none, or fill an empty task of its line; ``project`` defaults to the
-    tree's ``project_name``."""
+    tree's ``project_name``. A line that names another task refuses ``task`` with ``SCRATCH_TASK_MISMATCH``."""
     field = lambda value: re.sub(r"[\t\r\n]", " ", str(value))  # noqa: E731 - the format has no quoting
     created = (now or datetime.now(UTC)).strftime(TIME_FORMAT)
     with _locked(root):
         lines = _registry_lines(root)
         for index, row in enumerate(map(_parse, lines)):
             if row and locations.same_path(row.scratch, scratch):
+                if task and row.task and row.task != task:
+                    raise Refusal("SCRATCH_TASK_MISMATCH", f"{scratch} belongs to {row.task}, not {task}; name "
+                                                           "another scratch")
                 if task and not row.task:
                     lines[index] = "\t".join(map(field, row._replace(task=task)))
                     _write_registry(root, lines)
                 return
         _write_registry(root, [*lines, "\t".join(map(field, (project or project_name(tree), scratch, tree, created, task, source, commit)))])
-
-
-def task_of_tree(tree: Path) -> str:
-    """The task ID of the one record whose ``branch`` is the managed worktree branch holding ``tree``; empty
-    for no such branch, or for no or several records."""
-    def run(*args: str) -> subprocess.CompletedProcess:
-        return subprocess.run(["git", *args], cwd=tree, capture_output=True, text=True, encoding="utf-8",
-                              env=git_env(), stdin=subprocess.DEVNULL, creationflags=WINDOW_HIDDEN)
-    try:
-        top, branch = run("rev-parse", "--show-toplevel"), run("symbolic-ref", "--short", "-q", "HEAD")
-    except OSError:
-        return ""
-    name = branch.stdout.strip()
-    if top.returncode or branch.returncode or not MANAGED_BRANCH.fullmatch(name):
-        return ""
-    found = []
-    for record in sorted(Path(top.stdout.strip(), ".atc", "tasks").glob("*.yaml")):
-        try:
-            data = yaml.safe_load(record.read_text(encoding="utf-8"))
-        except (OSError, UnicodeError, yaml.YAMLError):
-            continue
-        if isinstance(data, dict) and data.get("branch") == name and isinstance(data.get("task_id"), str):
-            found.append(data["task_id"])
-    return found[0] if len(found) == 1 else ""
 
 
 def _unregister(root: Path, directory: str) -> None:

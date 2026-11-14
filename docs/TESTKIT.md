@@ -589,14 +589,15 @@ that imports a module the installed `atc` lacks stops with
 `ERROR MISSING_DEPENDENCY` (exit 2) naming the module and the reinstall
 command of the root's `AGENTS.md`.
 
-### `atc test run --scratch <name> [--tree <tree>] [--python <py>] [--task <ID>] [--select <base> [--wide | --touched]] [--label <label>] [--timeout <s>] [--progress] [-- <pytest args>]`
+### `atc test run --scratch <name> --task <ID> [--tree <tree>] [--python <py>] [--select <base> [--wide | --touched]] [--label <label>] [--timeout <s>] [--progress] [-- <pytest args>]`
 
 One isolated pytest run inside a tree, a worktree or an exported copy, in
 the scratch `<name>` (`ATC_HOME.md` § Test scratch), its output kept in a
 log. In order:
 
-1. Before the run, each refusal exits 9 and runs no test. `--task` has the
-   task form `ATC-0008`; another form stops with `TASK_INVALID`. Check and
+1. Before the run, each refusal exits 9 and runs no test. `--task` is
+   required (usage error, exit 2) and has the task form `ATC-0008`; another
+   form stops with `TASK_INVALID`. Check and
    create the scratch: `SCRATCH_OUTSIDE_TMP`, `SCRATCH_PATH_TOO_LONG`,
    `SCRATCH_NOT_RESOLVED`, `SCRATCH_NOT_CREATED`. Resolve `--tree` and a
    path-form `--python` against the caller's directory:
@@ -606,9 +607,9 @@ log. In order:
    tree's environment (§ Toolchain); without one, `VENV_MISSING`, which
    names `atc tmp checkout` and the project's `AGENTS.md` preparation, and
    never another Python. The scratch then gets its registry line
-   (`ATC_HOME.md` § Scratch registry), with the task `--task` names, else
-   the task of the one record whose `branch` is the managed worktree
-   branch holding the tree.
+   (`ATC_HOME.md` § Scratch registry) with the task `--task` names; a
+   scratch whose line names another task stops with
+   `SCRATCH_TASK_MISMATCH`.
 2. `--select <base>` runs the tree's `[tool.atc-testkit]` `selector`, a
    list of strings: the argv of a command that takes changed paths as
    arguments and prints the test paths to run as a JSON array on its last
@@ -649,9 +650,17 @@ log. In order:
    that is absent after entering the tree is refused with
    `PYTHONPATH_MISSING` (exit 8).
 5. Import every regular package under those directories, descending through
-   namespace directories, and require each to load from inside the tree:
-   `COPY_IMPORT_MISMATCH` (exit 8). This guard is what proves the copy, not
-   an installed checkout, is what runs.
+   namespace directories, and require each to load from inside the tree.
+   Then locate, without running it, every regular package of each other
+   project in the tree, a `src` directory beside a `pyproject.toml` up to
+   three directory levels below the tree (directories named `src`, `tests`,
+   `test` or `node_modules`, or starting with `.` or `_`, are not entered),
+   and require each the interpreter's environment resolves to lie inside the
+   tree; one it does not resolve is not used and passes. Either failure is
+   `COPY_IMPORT_MISMATCH` (exit 8), whose last line names the copy's own
+   environment as the next step. This guard is what proves the copy, not an
+   installed checkout, is what runs: an environment built from another
+   checkout installs that checkout's packages, and the guard names them.
 6. Run pytest with `PYTHONUNBUFFERED=1`, `-q`, `-p no:cacheprovider`,
    `--basetemp <scratch>/bt` and, when xdist is installed, the run's worker
    option, its output written as it arrives to
@@ -693,7 +702,7 @@ is `worker pool: <free> of <size> free`; with no run it is the only one,
 same as an object with `state`, `size`, `free`, `runs` and `waiters`. It
 exits 0.
 
-### `atc test mutants <scratch> <sha> <worktree> <mutants.json> --python <py> [--kill-rule failure|assertion] --tests <path>...`
+### `atc test mutants <scratch> <sha> <worktree> <mutants.json> --task <ID> [--python <py>] [--kill-rule failure|assertion] --tests <path>...`
 
 Applies each mutant alone to `<scratch>/tree`, the export of `<sha>`, through
 the isolation of `atc test run`. Each run is pytest with `-x` and a
@@ -705,11 +714,21 @@ budget). That one token covers every run of the command: an `-n K` among
 the `--tests` arguments runs K workers on it, outside the pool and its
 memory clamp.
 
-- `<sha>` must name a commit in `<worktree>` (`git rev-parse --verify`):
-  `SHA_NOT_FOUND` (exit 9) before the scratch is touched, then
-  `PYTHON_NOT_FOUND`, the scratch refusals of `atc test run`,
+- `--task` is required (usage error, exit 2) and checked as `atc test run`
+  checks it: `TASK_INVALID`. `<sha>` must name a commit in `<worktree>`
+  (`git rev-parse --verify`): `SHA_NOT_FOUND` (exit 9) before the scratch is
+  touched, then `PYTHON_NOT_FOUND`, the scratch refusals of `atc test run`,
+  `VENV_MISSING`, `TREE_NOT_FOUND`, `SCRATCH_TASK_MISMATCH`,
   `TIME_SLACK_INVALID` and `PRIVATE_DESKTOP_INVALID` (exit 9). The private
   desktop's exclusion line comes first when the runs are private.
+- The runs use the copy's own environment: `--python` defaults to the
+  `.venv` interpreter of the directory the scratch's registry line names
+  inside the scratch, as `atc tmp checkout --lock-dir` records it, else of
+  `<scratch>/tree`; without one, `VENV_MISSING`. The scratch gets its
+  registry line with `--task` before the baseline. The import guard of
+  `atc test run` runs before each run on `<scratch>/tree`, so an interpreter
+  whose environment installs the tree's packages from another checkout
+  stops the command with `COPY_IMPORT_MISMATCH` (exit 8).
 - A mutant is a label, a list of edits `{path, old, new}` and optional
   `tests`, the pytest arguments that judge it in place of `--tests`. An
   `old` that does not occur exactly once in its file aborts the run. Edits

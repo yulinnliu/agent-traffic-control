@@ -113,8 +113,10 @@ Where the project runs its tests through `atc-testkit`, run targeted tests
 against the worktree with
 `atc test run --scratch <scratch> --tree <worktree> --task <task> [--python <py>] -- <pytest args...>`;
 elsewhere the targeted test commands are the ones the project's `AGENTS.md`
-names. `--task` records the scratch under the task, so close-out removes it
-whatever tree a run used. `<scratch>` is a name; the run creates it as
+names. Every command that creates a scratch requires `--task`, which records
+the scratch under the task, so close-out removes it whatever tree a run
+used; a directory under `<tmp>` named for the task but not registered to it
+is listed for the Owner's consent and never deleted by close-out. `<scratch>` is a name; the run creates it as
 `<tmp>/<scratch>`, where `<tmp>` is `~/.atc/tmp`, or `ATC_TMP` when that is
 set. The run removes every
 `HAMI_*` variable so the host's project settings stay out of it, points each
@@ -198,8 +200,9 @@ tip.
    Done when every file in the copy is proven equal to its Git object again
    and every surviving mutant is listed as a test gap or argued equivalent.
    Where the project runs its tests through `atc-testkit`,
-   `atc test mutants <scratch> <sha> <worktree> <mutants.json> --python <py> --tests <path>...`
-   performs this step on the copy at `<tmp>/<scratch>/tree`; elsewhere the
+   `atc test mutants <scratch> <sha> <worktree> <mutants.json> --task <task> --tests <path>...`
+   performs this step on the copy at `<tmp>/<scratch>/tree` with the copy's
+   own environment, the one `atc tmp checkout` builds; elsewhere the
    project's `AGENTS.md` names how a mutant run is done. Its input file and
    result lines are in [`references/mutants.md`](references/mutants.md).
 5. **Search by behaviour.** Look for a guard by its refusal token or the

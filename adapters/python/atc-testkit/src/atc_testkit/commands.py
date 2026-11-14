@@ -17,10 +17,10 @@ HELP_OPTIONS = ("-h", "--help")
 WITH_RUNS_OPTION = "--with-runs"
 
 USAGES = {
-    ("test", "run"): "usage: atc test run --scratch NAME [--tree DIR] [--python PATH] [--task ID] [--select SHA] "
+    ("test", "run"): "usage: atc test run --scratch NAME --task ID [--tree DIR] [--python PATH] [--select SHA] "
                      "[--label NAME] [--timeout SECONDS] [--progress] [--wide | --touched] [-- PYTEST_ARG...]",
     ("test", "status"): "usage: atc test status [--json]",
-    ("test", "mutants"): "usage: atc test mutants NAME SHA DIR FILE --python PATH --tests ARG...",
+    ("test", "mutants"): "usage: atc test mutants NAME SHA DIR FILE --task ID [--python PATH] --tests ARG...",
     ("test", "private"): "usage: atc test private [--] COMMAND [ARG...]",
     ("tmp", "checkout"): "usage: atc tmp checkout SHA --task ID [--worktree DIR] [--scratch NAME] [--lock-dir DIR]",
     ("tmp", "list"): "usage: atc tmp list [--json]",

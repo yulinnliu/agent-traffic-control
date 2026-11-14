@@ -319,27 +319,30 @@ def test_the_verdict_is_a_whole_word_of_the_first_line(line: str, verdict: str |
     assert close_out.verdict_of(line) == verdict
 
 
-def _repo_on(tmp_path: Path, branch: str, records: dict[str, str]) -> Path:
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    run_git(repo, "init", "-q", "-b", branch)
-    commit(repo, {f".atc/tasks/{name}.yaml": text for name, text in records.items()} or {"a.txt": "a"})
-    (repo / "adapters").mkdir()
-    return repo
-
-
-@pytest.mark.parametrize(("branch", "records", "expected"), [
-    ("worktree-claude+widget", {TASK: record(TASK, "worktree-claude+widget")}, TASK),
-    ("worktree-claude+widget", {TASK: record(TASK, "worktree-claude+other")}, ""),
-    ("worktree-claude+widget", {TASK: record(TASK, "worktree-claude+widget"),
-                                "DEMO-0002": record("DEMO-0002", "worktree-claude+widget")}, ""),
-    ("topic", {TASK: record(TASK, "topic")}, "")])
-def test_a_test_run_scratch_records_the_task_of_its_managed_worktree(tmp_path: Path, atc_tmp: Path, branch: str,
-                                                                     records: dict[str, str], expected: str) -> None:
-    repo = _repo_on(tmp_path, branch, records)
-    assert scratch.task_of_tree(repo / "adapters") == expected
-    scratch.register(atc_tmp, atc_tmp / "s", repo / "adapters")
-    scratch.register(atc_tmp, atc_tmp / "s", repo / "adapters", task=scratch.task_of_tree(repo / "adapters"))
-    scratch.register(atc_tmp, atc_tmp / "s", repo / "adapters", task="DEMO-0009")
+def test_a_scratch_registered_to_one_task_refuses_another(atc_tmp: Path, tmp_path: Path) -> None:
+    scratch.register(atc_tmp, atc_tmp / "s", tmp_path)
+    scratch.register(atc_tmp, atc_tmp / "s", tmp_path, task=TASK)
+    scratch.register(atc_tmp, atc_tmp / "s", tmp_path, task=TASK)
+    with pytest.raises(Refusal) as refused:
+        scratch.register(atc_tmp, atc_tmp / "s", tmp_path, task="DEMO-0009")
+    assert refused.value.token == "SCRATCH_TASK_MISMATCH" and refused.value.code == 9
     [row] = scratch.registered(atc_tmp)
-    assert row.task == (expected or "DEMO-0009")
+    assert row.task == TASK
+
+
+def test_check_lists_unregistered_scratches_named_for_the_task_for_consent_and_keeps_them(
+        done, atc_tmp: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    ws, topic, environ = done
+    for name in (f"{TASK.lower()}-review", TASK, f"{TASK}0", "DEMO-0002-review"):
+        (atc_tmp / name / "bt").mkdir(parents=True)
+    (atc_tmp / f"{TASK}-file").write_text("x", encoding="utf-8")
+    code, lines, err = close(ws, environ, capsys, ws.root, "--check")
+    consent = sorted(line.split(" (")[0] for line in lines if line.startswith("CONSENT "))
+    assert code == 0, (lines, err)
+    assert consent == sorted(f"CONSENT {atc_tmp / name}" for name in (TASK, f"{TASK.lower()}-review"))
+    assert f"DELETED {atc_tmp / 'mine'} (registered scratch)" in lines
+    assert lines[-1].endswith("0 refused, 2 need the Owner's consent; nothing deleted")
+    code, lines, err = close(ws, environ, capsys, ws.root, "--skip", "worktree")
+    assert code == 0 and sum(line.startswith("CONSENT ") for line in lines) == 2, (lines, err)
+    assert (atc_tmp / f"{TASK.lower()}-review").is_dir() and (atc_tmp / TASK).is_dir()
+    assert not (atc_tmp / "mine").exists()
