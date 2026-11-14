@@ -12,6 +12,7 @@ import pytest
 
 import doctor
 import generate_enforcement as ge
+import guard
 import pretooluse_hook as hook
 
 pytestmark = pytest.mark.integration
@@ -134,7 +135,7 @@ def test_install_writes_the_table_and_replaces_the_retired_guards(workspace, hom
         {"matcher": "Edit|Write", "hooks": [{"type": "command", "command": "python \"C:/h/write_scope_guard.py\""},
                                             {"type": "command", "command": "bash keep.sh"}]},
     ], "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "python ctx.py"}]}]}}), encoding="utf-8")
-    assert ge.main(["--workspace", str(workspace), "--install-hooks"]) == 0
+    assert guard.main(["--install"], root=workspace.parent, home=home) == 0
     table = home / ".atc" / "enforcement" / "pretooluse.json"
     assert table.is_file()
     settings = json.loads(claude.read_text(encoding="utf-8"))
@@ -151,20 +152,20 @@ def test_install_writes_the_table_and_replaces_the_retired_guards(workspace, hom
     live = ["--workspace", str(workspace), "--check", "--live-hook-table", str(table),
             "--live-claude-hooks", str(claude), "--live-codex-hooks", str(home / ".codex" / "hooks.json")]
     assert ge.main(live) == 0
-    assert ge.main(["--workspace", str(workspace), "--install-hooks"]) == 0
+    assert guard.main(["--install"], root=workspace.parent, home=home) == 0
     assert json.loads(claude.read_text(encoding="utf-8")) == settings
+    assert guard.main([], root=workspace.parent, home=home) == 0
     assert doctor.hook_check(workspace, home).status == "READY"
 
 
 def test_a_table_outside_the_default_directory_is_named_in_the_command(workspace, home):
-    assert ge.main(["--workspace", str(workspace), "--install-hooks", "--hook-out", str(home / "elsewhere")]) == 0
-    command = json.loads((home / ".codex" / "hooks.json").read_text(encoding="utf-8"))["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+    command = ge.engine_command(workspace, "codex", home / "elsewhere")
     assert command.endswith(f' --table "{(home / "elsewhere" / "pretooluse.json").as_posix()}"')
 
 
 def test_drift_names_each_stale_part(workspace, home, capsys):
     claude = home / ".claude" / "settings.json"
-    assert ge.main(["--workspace", str(workspace), "--install-hooks"]) == 0
+    assert guard.main(["--install"], root=workspace.parent, home=home) == 0
     table = home / ".atc" / "enforcement" / "pretooluse.json"
     (workspace.parent / "policies" / "hard-deny.yaml").write_text(
         ROOT_POLICY.replace("[git, reset, --hard]", "[git, reset, --hard]\n    - id: gh-auth-token\n"
@@ -188,8 +189,8 @@ def test_doctor_reports_a_missing_table(workspace, home):
 
 
 @pytest.mark.parametrize("args, message", [
-    (["--install-hooks"], "require --workspace"),
-    (["--workspace", "w.yaml", "--install-hooks", "--check"], "with --check use --live-hook-table"),
+    (["--install-hooks"], "unrecognized arguments: --install-hooks"),
+    (["--workspace", "w.yaml", "--install-hooks", "--check"], "unrecognized arguments: --install-hooks"),
     (["--workspace", "w.yaml", "--live-hook-table", "t.json"], "require --check"),
     (["--policies", "p"], "go together"),
     ([], "are required unless"),
@@ -241,7 +242,7 @@ def test_the_engine_fails_closed(tmp_path, table_text, stdin):
     ran = run(["--table", str(path)], stdin)
     assert ran.returncode == 0
     reason = json.loads(ran.stdout)["hookSpecificOutput"]["permissionDecisionReason"]
-    assert "could not decide" in reason and "atc enforce --install-hooks" in reason
+    assert "could not decide" in reason and "atc guard --install" in reason
 
 
 @pytest.mark.parametrize("harness", ["claude", "codex"])
@@ -260,3 +261,22 @@ def test_a_helper_that_cannot_load_fails_closed(tmp_path, harness):
 def test_an_unknown_engine_argument_fails_closed():
     ran = run(["--bogus"], "{}")
     assert "could not decide" in json.loads(ran.stdout)["hookSpecificOutput"]["permissionDecisionReason"]
+
+
+def test_guard_refuses_a_missing_workspace_and_an_uninstalled_table(tmp_path, home, capsys):
+    assert guard.main([], root=tmp_path, home=home) == 1
+    assert capsys.readouterr().err.startswith("STOP WORKSPACE_MISSING: ")
+    (tmp_path / "workspace.yaml").write_text("version: 1\n", encoding="utf-8")
+    assert guard.main([], root=tmp_path, home=home) == 1
+    assert capsys.readouterr().err.startswith("STOP GUARD_NOT_INSTALLED: ")
+    assert guard.main(["--json"], root=tmp_path, home=home) == 1
+    assert json.loads(capsys.readouterr().out)["refusal"]["reason"] == "GUARD_NOT_INSTALLED"
+
+
+def test_guard_install_writes_the_table_and_then_reports_current(workspace, home, capsys):
+    assert guard.main(["--install", "--json"], root=workspace.parent, home=home) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["verdict"] == "INSTALLED" and result["hook_table"].endswith("pretooluse.json")
+    assert (home / ".atc" / "enforcement" / "pretooluse.json").is_file()
+    assert guard.main([], root=workspace.parent, home=home) == 0
+    assert capsys.readouterr().out == "CURRENT guard\n"

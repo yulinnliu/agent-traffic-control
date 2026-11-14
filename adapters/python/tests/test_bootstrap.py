@@ -21,7 +21,7 @@ def test_init_writes_map_and_directories(tmp_path: Path, capsys: pytest.CaptureF
     assert data == {"version": 1, "governance_source": "owner/repo", "workspace_root": root.as_posix(), "projects": {}}
     for name in ("projects", "worktrees", "state"):
         assert (root / name).is_dir()
-    assert "atc" in capsys.readouterr().out
+    assert capsys.readouterr().out.startswith("INITIALIZED workspace.yaml (governance_source owner/repo)")
 
 
 def test_init_refuses_to_overwrite_without_force(tmp_path: Path) -> None:
@@ -118,3 +118,51 @@ def test_opt_in_install_carries_supporting_files_and_leaves_an_unowned_directory
     assert (project / ".claude/skills/optional-skill/references/guide.md").read_text(encoding="utf-8") == "# Guide\n"
     assert (project / ".agents/skills/optional-skill/notes/mine.md").is_file()
     assert not (project / ".agents/skills/optional-skill/SKILL.md").exists()
+
+
+def _registered(tmp_path: Path, skill_harness: bool = False) -> tuple[Path, Path]:
+    root, project = make_workspace(tmp_path)
+    if skill_harness:
+        path = root / "workspace.yaml"
+        path.write_text(path.read_text(encoding="utf-8") + "skill_harnesses:\n  demo: [claude]\n", encoding="utf-8")
+    (root / "worktrees" / "demo").mkdir(parents=True)
+    return root, project
+
+
+@pytest.mark.unit
+def test_remove_drops_the_entry_and_keeps_the_project_files(tmp_path: Path) -> None:
+    root, project = _registered(tmp_path, skill_harness=True)
+    assert bootstrap.remove(root, "demo", check=False, answer=lambda prompt: "y") == 0
+    data = yaml.safe_load((root / "workspace.yaml").read_text(encoding="utf-8"))
+    assert "demo" not in data["projects"] and "demo" not in (data.get("skill_harnesses") or {})
+    assert not (root / "worktrees" / "demo").exists()
+    assert (project / "AGENTS.md").is_file()
+
+
+@pytest.mark.unit
+def test_remove_refuses_while_a_worktree_is_present(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root, _ = _registered(tmp_path)
+    (root / "worktrees" / "demo" / "claude+ATC-0001").mkdir()
+    before = (root / "workspace.yaml").read_text(encoding="utf-8")
+    assert bootstrap.remove(root, "demo", check=False, answer=lambda prompt: "y") == 1
+    err = capsys.readouterr().err
+    assert err.startswith("STOP WORKTREES_PRESENT: ") and "task close" in err
+    assert (root / "workspace.yaml").read_text(encoding="utf-8") == before
+
+
+@pytest.mark.unit
+def test_remove_check_and_a_declined_answer_change_nothing(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root, _ = _registered(tmp_path)
+    before = (root / "workspace.yaml").read_text(encoding="utf-8")
+    assert bootstrap.remove(root, "demo", check=True) == 0
+    assert capsys.readouterr().out.startswith("CHECK remove demo")
+    assert bootstrap.remove(root, "demo", check=False, answer=lambda prompt: "n") == 1
+    assert capsys.readouterr().err.startswith("STOP DECLINED: ")
+    assert (root / "workspace.yaml").read_text(encoding="utf-8") == before
+
+
+@pytest.mark.unit
+def test_remove_names_an_unregistered_project(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root, _ = _registered(tmp_path)
+    assert bootstrap.remove(root, "absent", check=True) == 2
+    assert capsys.readouterr().err.startswith("ERROR PROJECT_UNKNOWN ")

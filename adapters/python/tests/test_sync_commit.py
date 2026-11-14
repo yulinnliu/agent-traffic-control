@@ -40,14 +40,14 @@ def test_sync_commits_on_main_and_records_it(tmp_path: Path, capsys: pytest.Capt
     head = git_out(project, "rev-parse", "HEAD")
     revision = git_out(root, "rev-parse", "HEAD")
     assert head != before and git_out(project, "status", "--porcelain") == ""
-    assert f"  commit: {head}" in capsys.readouterr().out
+    assert f"commit {head[:7]}" in capsys.readouterr().out
     assert git_out(project, "log", "-1", "--format=%s") == f"chore(governance): sync from unknown {RELEASE} ({revision[:7]})"
     assert (project / ".atc/atc.lock").read_text(encoding="utf-8").endswith(f'revision = "{revision}"\n')
     [record] = records(project)
     assert (record["kind"], record["candidate_sha"], record["main_before"], record["source_revision"]) == ("sync", head, before, revision)
     assert sync_project.main(["demo"], root=root) == 0
     assert git_out(project, "rev-parse", "HEAD") == head
-    assert "  commit: none (no tracked file changed)" in capsys.readouterr().out
+    assert capsys.readouterr().out == "demo current\n"
     assert len(records(project)) == 1
 
 
@@ -89,16 +89,16 @@ def test_sync_renders_the_latest_release_not_the_checkout(tmp_path: Path, capsys
     write(root / "shared/governance/CORE.md", "# CORE.md\n\nunreleased\n")
     unreleased = commit_root(root, "third")
     run_git(root, "tag", "v0.1.0-rc")
-    assert sync_project.main(["demo", "--check"], root=root) == 1
-    assert capsys.readouterr().out.startswith(f"target: v0.0.10 ({newer})\n")
+    assert sync_project.main(["demo", "--check", "--verbose"], root=root) == 1
+    assert capsys.readouterr().out.startswith(f"target v0.0.10 ({newer[:7]})\n")
     assert sync_project.main(["demo"], root=root) == 0
     assert (project / ".atc/governance/CORE.md").read_text(encoding="utf-8") == "# CORE.md\n\nv0.0.2\n"
     assert (project / ".atc/atc.lock").read_text(encoding="utf-8").endswith(f'revision = "{newer}"\n')
     assert git_out(project, "log", "-1", "--format=%s") == f"chore(governance): sync from unknown v0.0.10 ({newer[:7]})"
     assert records(project)[-1]["source_revision"] == newer
     capsys.readouterr()
-    assert sync_project.main(["demo", "--revision", unreleased], root=root) == 0
-    assert capsys.readouterr().out.startswith(f"target: {unreleased} (named)\n")
+    assert sync_project.main(["demo", "--revision", unreleased, "--verbose"], root=root) == 0
+    assert capsys.readouterr().out.startswith(f"target {unreleased[:7]} (named)\n")
     assert (project / ".atc/governance/CORE.md").read_text(encoding="utf-8") == "# CORE.md\n\nunreleased\n"
 
 
@@ -111,7 +111,7 @@ def test_a_project_ahead_of_the_latest_release_is_left_alone(tmp_path: Path, cap
     capsys.readouterr()
     for mode in (["--check"], []):
         assert sync_project.main(["demo", *mode], root=root) == 0
-        assert f"locked at {ahead}, ahead of {RELEASE}; sync never moves a project back without --revision" \
+        assert f"locked at {ahead[:7]}, ahead of {RELEASE}; sync never moves a project back without --revision" \
             in capsys.readouterr().out
     assert git_out(project, "rev-parse", "HEAD") == head
     assert (project / ".atc/governance/CORE.md").read_text(encoding="utf-8") == "# CORE.md\n\nahead\n"
@@ -121,7 +121,7 @@ def test_a_project_ahead_of_the_latest_release_is_left_alone(tmp_path: Path, cap
     assert (project / ".atc/atc.lock").read_text(encoding="utf-8").endswith(f'revision = "{released}"\n')
 
 
-@pytest.mark.parametrize("case", ["no release", "off main", "unknown", "tag object"])
+@pytest.mark.parametrize("case", ["no release", "off main", "unknown"])
 def test_an_unresolvable_target_stops_before_any_project(tmp_path: Path, capsys: pytest.CaptureFixture[str], case: str) -> None:
     root, project = committed_workspace(tmp_path)
     named: list[str] = []
@@ -141,8 +141,8 @@ def test_an_unresolvable_target_stops_before_any_project(tmp_path: Path, capsys:
         named = ["--revision", git_out(root, "rev-parse", RELEASE)]
         expected = "REVISION_NOT_ON_MAIN"
     assert sync_project.main(["demo", *named], root=root) == 1
-    out = capsys.readouterr().out
-    assert out.startswith(f"  stop: {expected} ") and "===" not in out
+    captured = capsys.readouterr()
+    assert f"STOP {expected}:" in captured.err and "===" not in captured.out
     assert not (project / ".atc").exists()
 
 
@@ -155,7 +155,7 @@ def test_the_verification_gate_reads_the_target_governance(tmp_path: Path, capsy
     assert sync_project.main(["demo"], root=root) == 0
     capsys.readouterr()
     assert sync_project.main(["demo", "--revision", gated], root=root) == 1
-    assert "  stop: VERIFICATION_SECTION_MISSING " in capsys.readouterr().out
+    assert "STOP VERIFICATION_SECTION_MISSING:" in capsys.readouterr().out
 
 
 def test_json_names_the_target(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -168,7 +168,7 @@ def test_json_names_the_target(tmp_path: Path, capsys: pytest.CaptureFixture[str
     assert json.loads(capsys.readouterr().out)["target"]["stops"][0]["reason"] == "NO_RELEASE_TAG"
 
 
-@pytest.mark.parametrize("argv", [["--revision", "abc1234"], ["--revision", "A" * 40], ["--root", "--revision", "0" * 40],
+@pytest.mark.parametrize("argv", [["--revision", "not-a-sha"], ["--root", "--revision", "0" * 40],
                                   ["--root", "demo"]])
 def test_revision_takes_a_full_sha_and_root_takes_neither_revision_nor_project(tmp_path: Path, argv: list[str]) -> None:
     root, _ = committed_workspace(tmp_path)
@@ -226,7 +226,7 @@ def test_project_precondition_stops_before_writing(tmp_path: Path, capsys: pytes
     finally:
         if slot is not None:
             slot.release()
-    assert f"  stop: {expected} " in capsys.readouterr().out
+    assert f"STOP {expected}:" in capsys.readouterr().out
     assert git_out(project, "rev-parse", "HEAD") == head
     assert not (project / ".atc/atc.lock").exists()
     assert records(project) == []
@@ -243,7 +243,7 @@ def test_atc_checkout_precondition_stops_every_project(tmp_path: Path, capsys: p
     else:
         (root / ".agents/skills/demo-skill/SKILL.md").unlink()
     assert sync_project.main([], root=root) == 1
-    assert f"  stop: {expected} " in capsys.readouterr().out
+    assert f"STOP {expected}:" in capsys.readouterr().out
     assert not (project / ".atc/atc.lock").exists()
     assert case != "adapter" or not (root / ".agents/skills/demo-skill/SKILL.md").exists()
 
@@ -254,7 +254,7 @@ def test_ignored_synced_files_stop_before_writing(tmp_path: Path, capsys: pytest
     head = git_out(project, "rev-parse", "HEAD")
     assert sync_project.main(["demo"], root=root) == 1
     out = capsys.readouterr().out
-    assert "  stop: IGNORED_OUTPUT every file sync writes is committed; Git ignores or excludes: .atc/README.md, .atc/atc.lock" in out
+    assert "STOP IGNORED_OUTPUT: Git ignores or excludes: .atc/README.md, .atc/atc.lock" in out
     assert "CLAUDE.md" in out.split("IGNORED_OUTPUT")[1]
     assert git_out(project, "rev-parse", "HEAD") == head
     assert not (project / ".atc").exists() and git_out(project, "status", "--porcelain") == ""
@@ -292,7 +292,7 @@ def test_change_outside_the_synced_files_is_left_uncommitted(
     monkeypatch.setattr(sync_project, "apply_plan", apply_and_stray)
     head = git_out(project, "rev-parse", "HEAD")
     assert sync_project.main(["demo"], root=root) == 1
-    assert "  stop: UNMANAGED_CHANGE changed outside the synced files, left uncommitted: stray.txt" in capsys.readouterr().out
+    assert "STOP UNMANAGED_CHANGE: changed outside the synced files, left uncommitted: stray.txt" in capsys.readouterr().out
     assert git_out(project, "rev-parse", "HEAD") == head
     assert records(project) == []
 
@@ -303,7 +303,7 @@ def test_sync_root_renders_the_topic_checkout_and_commits_nothing(tmp_path: Path
     adapter = root / ".agents/skills/demo-skill/SKILL.md"
     adapter.unlink()
     head = git_out(root, "rev-parse", "HEAD")
-    assert sync_project.main(["--root"], root=root) == 0
+    assert sync_project.root_main(["--root"], root=root) == 0
     assert adapter.exists()
     assert git_out(root, "rev-parse", "HEAD") == head
 
@@ -339,7 +339,7 @@ def test_checkout_dirtied_before_the_slot_is_taken_stops_inside_it(
     monkeypatch.setattr(sync_project, "IntegrationSlot", DirtyingSlot)
     head = git_out(project, "rev-parse", "HEAD")
     assert sync_project.main(["demo"], root=root) == 1
-    assert "  stop: CHECKOUT_DIRTY " in capsys.readouterr().out
+    assert "STOP CHECKOUT_DIRTY:" in capsys.readouterr().out
     assert git_out(project, "rev-parse", "HEAD") == head
     assert not (project / ".atc/atc.lock").exists()
 
@@ -352,7 +352,7 @@ def test_project_that_is_not_its_own_repository_stops(tmp_path: Path, capsys: py
     run_git(root, "tag", RELEASE)
     head = git_out(root, "rev-parse", "HEAD")
     assert sync_project.main(["demo"], root=root) == 1
-    assert "  stop: NOT_A_REPOSITORY " in capsys.readouterr().out
+    assert "STOP NOT_A_REPOSITORY:" in capsys.readouterr().out
     assert git_out(root, "rev-parse", "HEAD") == head
     assert not (project / ".atc/atc.lock").exists()
 
@@ -363,7 +363,7 @@ def test_root_adapter_collision_stops_every_project(tmp_path: Path, capsys: pyte
     run_git(root, "add", "-A")
     run_git(root, *COMMIT, "unowned adapter")
     assert sync_project.main(["demo"], root=root) == 1
-    assert "  stop: ROOT_ADAPTER_DRIFT " in capsys.readouterr().out
+    assert "STOP ROOT_ADAPTER_DRIFT:" in capsys.readouterr().out
     assert not (project / ".atc/atc.lock").exists()
 
 

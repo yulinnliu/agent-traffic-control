@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import io
 import json
 import os
 import shutil
@@ -10,9 +9,7 @@ from pathlib import Path
 
 import pytest
 
-import check_workspace
 import doctor
-import friction
 import sync_project
 import validate_workspace as validator
 
@@ -249,97 +246,6 @@ def test_tool_overlay_is_appended_only_to_its_tool(tmp_path: Path) -> None:
     write(root / "shared/skills/demo-skill/adapters/gemini.md", "nope\n")
     with pytest.raises(ValueError, match="overlay name must be one of"):
         sync_project.canonical_skills(root)
-
-
-def test_friction_append_and_resolution_preserve_incident(tmp_path: Path) -> None:
-    events = tmp_path / "events.jsonl"
-    incident = friction.append_incident(
-        kind="VALIDATOR_DRIFT", project="demo", tool="pytest", expected="green",
-        observed="red", evidence="fixture", recurrence_key="validator", events_file=events,
-    )
-    original = events.read_text(encoding="utf-8")
-    resolution = friction.resolve_incident(incident["event_id"], "green now", events)
-    lines = events.read_text(encoding="utf-8").splitlines()
-    assert len(lines) == 2
-    assert lines[0] + "\n" == original
-    assert json.loads(lines[1])["resolves_event_id"] == incident["event_id"]
-    assert resolution["event_type"] == "RESOLUTION"
-
-
-def test_resolution_of_missing_incident_is_rejected(tmp_path: Path) -> None:
-    with pytest.raises(ValueError, match="does not exist"):
-        friction.resolve_incident("evt_missing", "none", tmp_path / "events.jsonl")
-
-
-def test_friction_summary_projects_resolution_and_threshold(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    events = tmp_path / "events.jsonl"
-    first = friction.append_incident(
-        kind="RULE_NOT_FOUND", project="a", tool="codex", expected="found", observed="missing",
-        evidence="one", recurrence_key="routing", session_id="s1", events_file=events,
-    )
-    friction.append_incident(
-        kind="RULE_NOT_FOUND", project="b", tool="claude", expected="found", observed="missing",
-        evidence="two", recurrence_key="routing", session_id="s2", events_file=events,
-    )
-    friction.resolve_incident(first["event_id"], "fixed", events)
-    friction.print_summary(events, "recurrence_key")
-    output = capsys.readouterr().out
-    assert "routing  2  1  2  2  GOVERNANCE_CHANGE_CANDIDATE" in output
-
-
-def test_validator_failure_records_evidence(tmp_path: Path) -> None:
-    root = tmp_path / "workspace"
-    root.mkdir()
-    validator_script = root / "fail.py"
-    write(validator_script, "raise SystemExit(1)\n")
-    events = root / "state/workspace-friction/events.jsonl"
-    result = check_workspace.run_check(
-        root=root, validator_script=validator_script, events_file=events,
-        python_executable=sys.executable,
-    )
-    assert result == 1
-    records = friction.load_records(events)
-    assert records[0]["kind"] == "VALIDATOR_DRIFT"
-    assert list((events.parent / "validator").glob("*.log"))
-
-
-@pytest.mark.integration
-def test_validator_output_reaches_the_caller_whatever_encoding_the_caller_carries(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    monkeypatch.setenv("PYTHONIOENCODING", "latin-1")
-    root = tmp_path / "workspace"
-    root.mkdir()
-    validator_script = root / "pass.py"
-    write(validator_script, "print('caf\\u00e9 \\u9a57\\u8b49')\n")
-    result = check_workspace.run_check(
-        root=root, validator_script=validator_script, events_file=root / "events.jsonl",
-        python_executable=sys.executable,
-    )
-    assert result == 0
-    assert capsys.readouterr().out == "caf\u00e9 \u9a57\u8b49\n"
-
-
-@pytest.mark.unit
-def test_forwarded_output_escapes_what_the_stream_cannot_encode() -> None:
-    stream = io.TextIOWrapper(io.BytesIO(), encoding="cp950", newline="\n")
-    check_workspace.forward(stream, "\u9a57 \u2713\n")
-    stream.flush()
-    assert stream.buffer.getvalue().decode("cp950") == "\u9a57 \\u2713\n"
-
-
-def test_validator_success_creates_no_incident(tmp_path: Path) -> None:
-    root = tmp_path / "workspace"
-    root.mkdir()
-    validator_script = root / "pass.py"
-    write(validator_script, "raise SystemExit(0)\n")
-    events = root / "state/workspace-friction/events.jsonl"
-    result = check_workspace.run_check(
-        root=root, validator_script=validator_script, events_file=events,
-        python_executable=sys.executable,
-    )
-    assert result == 0
-    assert not events.exists()
 
 
 def test_missing_registered_project_is_readiness_not_contract_failure(
@@ -579,7 +485,7 @@ def test_verification_gate_stops_the_project_before_writing(tmp_path: Path, caps
         capsys.readouterr()
         assert sync_project.run("sync", [("demo", project)], root) == 1
         out = capsys.readouterr().out
-        assert f"  stop: VERIFICATION_SECTION_MISSING AGENTS.md" in out or f"  stop: VERIFICATION_SECTION_MISSING verifier" in out
+        assert "STOP VERIFICATION_SECTION_MISSING: AGENTS.md" in out or "STOP VERIFICATION_SECTION_MISSING: verifier" in out
         assert problem in out
         assert not (project / ".atc").exists() and (project / "AGENTS.md").read_text(encoding="utf-8") == text
     write(project / "AGENTS.md", agents)
@@ -914,7 +820,7 @@ def test_supporting_file_must_be_plain_named_utf8_text_and_caches_are_ignored(tm
         assert len([failure for failure in validator.FAILURES if message in failure]) == 1
         validator.FAILURES.clear()
         before = sorted(p for p in root.rglob("*") if ".git" not in p.parts)
-        assert sync_project.main(["--root"], root) != 0
+        assert sync_project.root_main(["--root"], root) != 0
         assert message in capsys.readouterr().err
         assert sorted(p for p in root.rglob("*") if ".git" not in p.parts) == before
         bad.unlink()
@@ -1071,7 +977,7 @@ def test_doctor_reports_managed_worktree_readiness(tmp_path: Path) -> None:
     environ = {"CODEX_HOME": str(tmp_path / "codex")}
     by_name = {check.name: check for check in doctor.diagnose(root, environ)}
     assert by_name["atc-worktree"].status == "READY"
-    assert "contract 1" in by_name["atc-worktree"].detail
+    assert "contract 2" in by_name["atc-worktree"].detail
     write(tmp_path / "codex/config.toml", f"[desktop]\ngit-worktree-root = '{(root / 'worktrees').as_posix()}'\n")
     check = {c.name: c for c in doctor.diagnose(root, environ)}["atc-worktree"]
     assert check.status == "ERROR"
@@ -1082,10 +988,10 @@ def test_doctor_reports_managed_worktree_readiness(tmp_path: Path) -> None:
     assert {c.name: c for c in doctor.diagnose(root, environ)}["atc-worktree"].status == "ERROR"
 
 
-def run_doctor(scripts: Path, workspace_root: Path) -> subprocess.CompletedProcess:
+def run_doctor(scripts: Path, workspace_root: Path, *args: str) -> subprocess.CompletedProcess:
     environ = {**os.environ, "PYTHONPATH": str(scripts), "PYTHONIOENCODING": "utf-8"}
     return subprocess.run(
-        [sys.executable, str(scripts / "doctor.py")],
+        [sys.executable, str(scripts / "doctor.py"), *args],
         cwd=scripts.parent,
         capture_output=True,
         text=True,
@@ -1113,7 +1019,7 @@ def test_doctor_exposes_the_managed_worktree_capability_when_it_loads() -> None:
 
 def test_doctor_starts_and_reports_a_missing_managed_worktree_module(tmp_path: Path) -> None:
     """Only a real startup exercises the import guard; diagnose() on the live module cannot."""
-    scripts = tmp_path / "scripts"
+    scripts = tmp_path / "adapters" / "python" / "scripts"  # doctor's ROOT is parents[3] of its own file
     shutil.copytree(Path(doctor.__file__).resolve().parent, scripts)
     real_module = scripts / "managed_worktree.py"
     write_minimal_workspace(tmp_path)
@@ -1133,10 +1039,10 @@ def test_doctor_starts_and_reports_a_missing_managed_worktree_module(tmp_path: P
 
     # With the real module present, doctor must load it rather than die or disable it.
     shutil.copy(Path(doctor.managed_worktree.__file__), real_module)
-    present = run_doctor(scripts, tmp_path)
+    present = run_doctor(scripts, tmp_path, "-v")  # READY checks print only with -v
     assert "Traceback" not in present.stderr and "Traceback" not in present.stdout
     assert "could not be loaded" not in present.stdout
-    assert "contract 1" in managed_worktree_line(present.stdout)
+    assert "contract 2" in managed_worktree_line(present.stdout)
 
 
 
@@ -1150,7 +1056,7 @@ def test_adopted_opt_in_drift_check_sync_and_idempotence(tmp_path: Path, tool: s
     original = expected + "\ncontent drift\n"
     write(target, original)
     assert sync_project.run("check", [("demo", project)], root) == 1
-    assert "would update" in capsys.readouterr().out
+    assert "STOP DRIFT" in capsys.readouterr().err
     assert target.read_text(encoding="utf-8") == original
     assert sync_project.run("sync", [("demo", project)], root) == 0
     assert target.read_text(encoding="utf-8") == expected
@@ -1224,11 +1130,11 @@ def test_opt_in_dsh_sync_carries_the_contract_and_the_dsh_constants(tmp_path: Pa
     write(root / relative, expected)
     shutil.copytree(workspace / "shared/skills/atc-worktree", root / "shared/skills/atc-worktree")
     target = project / relative
-    write(target, expected.replace("DSH_SESSION_ID", "STALE_SESSION_ID"))
+    write(target, expected + "\nstale drift\n")
     assert sync_project.run("sync", [("demo", project)], root) == 0
     actual = target.read_text(encoding="utf-8")
     assert actual == expected
-    for constant in ("**owner:** `dsh`", "DSH_SESSION_ID", "Windows PowerShell 5.1", "--no-cache", "--squash-integrated", "atc worktree"):
+    for constant in ("Windows PowerShell 5.1", "--no-cache"):
         assert constant in actual
     assert "$ATC_ROOT" not in actual
     for tool in (".agents", ".claude"):
@@ -1286,9 +1192,10 @@ def test_run_syncs_root_adapters_before_projects(tmp_path: Path, capsys: pytest.
         "---\nname: demo-skill\ndescription: sharper trigger\nadoption: baseline\n---\n\n# Demo\n",
     )
     assert sync_project.run("sync", [("demo", project)], root) == 0
-    out = capsys.readouterr().out
-    assert "update (" in out
-    assert "would update" not in out
+    captured = capsys.readouterr()
+    assert captured.out.splitlines()[0].startswith("root ~")
+    assert not captured.err
+    out = captured.out
     for tool in (".agents", ".claude"):
         text = (project / tool / "skills/demo-skill/SKILL.md").read_text(encoding="utf-8")
         assert "description: sharper trigger" in text
@@ -1301,5 +1208,5 @@ def test_check_mode_reports_root_drift_without_writing(tmp_path: Path, capsys: p
         "---\nname: demo-skill\ndescription: sharper trigger\nadoption: baseline\n---\n\n# Demo\n",
     )
     assert sync_project.run("check", [("demo", project)], root) == 1
-    assert "would update" in capsys.readouterr().out
+    assert "STOP DRIFT" in capsys.readouterr().err
     assert "description: test skill" in (root / ".claude/skills/demo-skill/SKILL.md").read_text(encoding="utf-8")

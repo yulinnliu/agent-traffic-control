@@ -849,7 +849,12 @@ def root_main(argv: list[str] | None = None, root: Path = ROOT) -> int:
     """`atc-maintain sync --root`: render the checkout's own adapters, or check them."""
     args = build_root_parser().parse_args(argv)
     mode = "check" if args.check else "sync"
-    return _with_events(args.json, mode, lambda: run(mode, [], root, verbose=args.verbose, render_root=not args.check))
+    try:
+        return _with_events(args.json, mode, lambda: run(mode, [], root, verbose=args.verbose, render_root=not args.check))
+    except ValueError as exc:
+        print(f"ERROR SYNC {exc}", file=sys.stderr)
+        print("hint: fix the canonical skills named by shared/skills", file=sys.stderr)
+        return cli_conventions.ERROR
 
 
 def full_revision(root: Path, revision: str | None) -> str | None:

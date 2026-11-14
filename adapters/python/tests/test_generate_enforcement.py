@@ -110,18 +110,6 @@ def test_without_state_roots_live_claude_is_unchanged(tmp_path, capsys, projects
     assert "machine-local" not in capsys.readouterr().out
 
 
-def test_atc_enforce_passes_the_root_workspace_map(tmp_path, monkeypatch):
-    import atc_cli
-    seen = {}
-    monkeypatch.setattr(generate_enforcement, "main", lambda rest: seen.setdefault("rest", rest) and 0)
-    (tmp_path / "workspace.yaml").write_text("version: 1\n", encoding="utf-8")
-    atc_cli.main(["--root", str(tmp_path), "enforce", "--policies", "p", "--out", "o"])
-    assert seen["rest"][-2:] == ["--workspace", str(tmp_path / "workspace.yaml")]
-    seen.clear()
-    atc_cli.main(["--root", str(tmp_path), "enforce", "--workspace=other.yaml"])
-    assert seen["rest"] == ["--workspace=other.yaml"]
-
-
 def test_validate_reports_missing_and_drifted_machine_local(tmp_path, capsys):
     import validate_workspace
     workspace = _workspace(tmp_path, WORKSPACE)
