@@ -535,7 +535,7 @@ def test_a_list_or_clean_reports_its_lines_and_a_refusal_raises(atc_tmp: Path, c
 
 def test_mutants_need_the_export(export: Export, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     listing = tmp_path / "m.json"
-    listing.write_text("[]", encoding="utf-8")
+    listing.write_text(json.dumps([KILLED]), encoding="utf-8")
     other = export.place.parent / "other"
     code = mutants([other.name, export.sha, str(export.worktree), str(listing),
                     "--task", TASK, "--python", sys.executable, "--tests", "tests"])
@@ -560,7 +560,7 @@ def test_mutants_refuse_a_sha_that_names_no_commit_before_the_baseline(
 def test_mutants_refuse_an_invalid_private_desktop_value_before_the_baseline(
         export: Export, tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
     listing = tmp_path / "m.json"
-    listing.write_text("[]", encoding="utf-8")
+    listing.write_text(json.dumps([KILLED]), encoding="utf-8")
     monkeypatch.setenv("ATC_PRIVATE_DESKTOP", "yes")
     code = mutants([export.place.name, export.sha, str(export.worktree), str(listing),
                     "--task", TASK, "--python", sys.executable, "--tests", "tests"])
@@ -582,7 +582,7 @@ def test_mutants_register_the_scratch_to_its_task_and_refuse_another(export: Exp
 @pytest.mark.integration
 def test_mutants_without_a_task_are_a_usage_error(export: Export, tmp_path: Path) -> None:
     listing = tmp_path / "m.json"
-    listing.write_text("[]", encoding="utf-8")
+    listing.write_text(json.dumps([KILLED]), encoding="utf-8")
     run = run_command("mutants", export.place.name, export.sha, str(export.worktree), str(listing),
                       "--python",sys.executable, "--tests", "tests")
     assert run.returncode == 2 and "--task" in run.stderr and scratch.registered(export.place.parent) == []
@@ -592,7 +592,7 @@ def test_mutants_without_a_task_are_a_usage_error(export: Export, tmp_path: Path
 def test_mutants_default_to_the_copys_own_environment(export: Export, tmp_path: Path,
                                                       capsys: pytest.CaptureFixture[str]) -> None:
     listing = tmp_path / "m.json"
-    listing.write_text("[]", encoding="utf-8")
+    listing.write_text(json.dumps([KILLED]), encoding="utf-8")
     code = mutants([export.place.name, export.sha, str(export.worktree), str(listing),
                     "--task", TASK, "--tests", "tests"])
     err = capsys.readouterr().err
@@ -681,7 +681,7 @@ def test_a_mutants_refusal_before_the_registry_line_creates_no_directory(export:
                                                                          capsys: pytest.CaptureFixture[str],
                                                                          monkeypatch: pytest.MonkeyPatch) -> None:
     listing = tmp_path / "m.json"
-    listing.write_text("[]", encoding="utf-8")
+    listing.write_text(json.dumps([KILLED]), encoding="utf-8")
     root = export.place.parent
     common = [str(export.worktree), str(listing), "--task", TASK, "--python", sys.executable, "--tests", "tests"]
     assert mutants(["fresh", export.sha, *common]) == 9
