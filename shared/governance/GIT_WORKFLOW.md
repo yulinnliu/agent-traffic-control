@@ -85,12 +85,6 @@ do not rewrite the task's base merely to fit the adapter; select another
 compatible execution context. No managed-worktree runtime change is required
 for this rule.
 
-To continue a topic already published on `origin`, the adapter's
-`create --base-sha` starts the worktree at the exact tip of that topic's own
-branch on `origin` and refuses any other commit. That tip is the worktree's
-creation base; the task's bound `base_sha` remains the topic's original
-integration baseline.
-
 ## Topic branch
 
 A topic branch remains the unit of implementation ownership.
@@ -99,11 +93,12 @@ Canonical governance does not require a branch to share the worktree path's
 identity and does not require this naming form:
 
 ```text
-worktree-<owner>+<topic>
+<harness>+<task-id>
 ```
 
-Existing Hami Managed Worktree branches remain valid. The current machine
-contract version remains `1`; the version number is an implementation
+Hami Managed Worktree machine contract `2` names a task's worktree and branch
+this way. Branches of earlier contracts remain valid; `atc task close` finds
+them from the record's `branch`. The version number is an implementation
 compatibility detail, not the human-facing name.
 
 Future tasks may gradually adopt task-oriented names such as:

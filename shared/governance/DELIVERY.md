@@ -251,9 +251,9 @@ Those remain independently controlled.
 This distinction is necessary for unattended or remote execution to function
 without weakening integration authority.
 
-A push of `main` is the Owner's own action: the Owner runs the push command
-the coordinator gives after `atc preflight push` (`GIT_WORKFLOW.md`
-§ Owner-run commands), and no agent pushes `main`.
+A push of `main` is the Owner's own action: the Owner runs
+`atc push <project>` after the coordinator's `atc push <project> --check`
+(`GIT_WORKFLOW.md` § Owner-run commands), and no agent pushes `main`.
 
 ### Unpublished commits are status, not an open item
 
@@ -304,8 +304,8 @@ publishing on that branch. The receiving writer explicitly accepts, verifies
 remote HEAD against the recorded SHA **immediately before its first
 mutation**, and independently confirms its own effective authority. Transfer
 grants no `push_topic`, force-push, `integrate_main`, `push_main` or
-deployment permission. Hami Managed Worktree contract 1 keeps its local
-tool-owner/session/lock identity; a local worktree lock is not a shared
+deployment permission. Hami Managed Worktree contract 2 keeps its local
+`<harness>:<task-id>` lock identity; a local worktree lock is not a shared
 cross-environment branch lock.
 
 If no checkable record exists, the recipient is unnamed, previous writer
