@@ -10,7 +10,7 @@ import pytest
 
 import sync_project
 import validate_workspace as validator
-from test_tooling import commit_workspace, make_workspace, managed_adapter, run_git, write
+from test_tooling import commit_workspace, make_workspace, managed_adapter, run_git, user_home, write  # noqa: F401  (user_home: autouse)
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 
@@ -36,9 +36,10 @@ def _plan_actions(root: Path, project: Path, tool_dirs: tuple[str, ...] = valida
     return out
 
 
-def _validate(root: Path) -> subprocess.CompletedProcess:
-    """`sync --check` of every project: the contract check that replaced `validate --projects`."""
-    code = (f"import sys; sys.path.insert(0, {str(SCRIPTS)!r}); import sync_project; from pathlib import Path; "
+def _validate(root: Path, home: Path) -> subprocess.CompletedProcess:
+    """`sync --check` of every project, reading user-level skill copies from ``home``."""
+    code = (f"import sys; sys.path.insert(0, {str(SCRIPTS)!r}); import sync_project, validate_workspace; "
+            f"from pathlib import Path; validate_workspace.user_home = lambda: Path({str(home)!r}); "
             f"sys.exit(sync_project.main(['--check'], root=Path({str(root)!r})))")
     return subprocess.run(
         [sys.executable, "-c", code],
@@ -82,7 +83,8 @@ def test_check_lists_the_prunes_and_writes_nothing(tmp_path: Path, capsys: pytes
 
 
 @pytest.mark.integration
-def test_sync_prunes_by_default_in_its_commit_and_validator_passes(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_sync_prunes_by_default_in_its_commit_and_validator_passes(tmp_path: Path, capsys: pytest.CaptureFixture[str],
+                                                                  user_home: Path) -> None:
     root, project = _orphaned_project(tmp_path)
     assert sync_project.main(["demo"], root=root) == 0
     assert " -2 commit" in capsys.readouterr().out
@@ -92,12 +94,12 @@ def test_sync_prunes_by_default_in_its_commit_and_validator_passes(tmp_path: Pat
     deleted = subprocess.check_output(["git", "-C", str(project), "show", "--name-only", "--diff-filter=D", "--format=",
                                        "HEAD"], text=True).split()
     assert sorted(deleted) == [".agents/skills/old-skill/SKILL.md", ".claude/skills/old-skill/SKILL.md"]
-    run = _validate(root)
+    run = _validate(root, user_home)
     assert run.returncode == 0, run.stdout + run.stderr
 
 
 @pytest.mark.integration
-def test_skill_harnesses_selects_the_tool_dirs_and_validate_agrees(tmp_path: Path) -> None:
+def test_skill_harnesses_selects_the_tool_dirs_and_validate_agrees(tmp_path: Path, user_home: Path) -> None:
     root, project = _orphaned_project(tmp_path)
     assert sync_project.main(["demo"], root=root) == 0
     assert (project / ".dsh/skills/demo-skill/SKILL.md").is_file()
@@ -106,10 +108,10 @@ def test_skill_harnesses_selects_the_tool_dirs_and_validate_agrees(tmp_path: Pat
     assert not (project / ".dsh/skills/demo-skill").exists()
     for tool_dir in (".claude", ".agents"):
         assert (project / tool_dir / "skills/demo-skill/SKILL.md").is_file()
-    run = _validate(root)
+    run = _validate(root, user_home)
     assert run.returncode == 0, run.stdout + run.stderr
     write(project / ".dsh/skills/demo-skill/SKILL.md", validator.render_adapter(root, "demo-skill", ".dsh"))
-    run = _validate(root)
+    run = _validate(root, user_home)
     assert run.returncode == 1 and ".dsh/skills/demo-skill/ is a managed adapter in a tool directory skill_harnesses does " \
         "not select" in run.stdout
 

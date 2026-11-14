@@ -953,6 +953,11 @@ def baseline_skills(canonical: dict[str, dict]) -> set[str]:
     return {name for name, fm in canonical.items() if fm.get("adoption") == "baseline"}
 
 
+def user_home() -> Path:
+    """The home directory whose `.claude/`, `.agents/` and `.dsh/` skills hold user-level copies."""
+    return Path.home()
+
+
 def check_user_level_duplicates(canonical: dict[str, dict], home: Path) -> None:
     """Local-only: a user-level copy of a canonical skill shadows every adapter."""
     for name in sorted(canonical):
@@ -1032,7 +1037,7 @@ def main(argv: list[str] | None = None) -> int:
     import cli_conventions
     parser = argparse.ArgumentParser(prog="atc-maintain validate", allow_abbrev=False, **cli_conventions.form(
         "Check this checkout's contract: workspace.yaml.example, canonical skills against their managed adapters,\n"
-        "and task records. With --projects, also every registered project on disk.",
+        "and task records. With --project-checkout, also those checkouts as registered projects.",
         exit="0 every check passed; 1 problems found, all of them printed; 2 usage error",
         see="adapters/python/README.md § validate"))
     parser.add_argument("--adapters-only", action="store_true", help="check only canonical skills and their adapters")
@@ -1067,7 +1072,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if project_checkouts:
         check_projects(canonical, project_checkouts, root_prefix=root_prefix)
-        check_user_level_duplicates(canonical, Path.home())
+        check_user_level_duplicates(canonical, user_home())
 
     if args.json:
         print(json.dumps({"verdict": "PROBLEMS" if FAILURES else "OK", "problems": FAILURES}, indent=2))
@@ -1094,7 +1099,7 @@ def project_problems(root: Path, names: list[str] | None = None) -> list[str]:
         ROOT = Path(root).resolve()
         canonical = load_canonical_skills()
         check_projects(canonical, root_prefix=check_task_records(ROOT, label="workspace root"))
-        check_user_level_duplicates(canonical, Path.home())
+        check_user_level_duplicates(canonical, user_home())
         found = [f for f in FAILURES if not names or "user-level" in f or any(name in f for name in names)]
     finally:
         ROOT = original

@@ -10,7 +10,7 @@ import pytest
 import git_preflight
 import sync_project
 from integration_slot import IntegrationSlot
-from test_tooling import RELEASE, commit_workspace, make_workspace, run_git, write
+from test_tooling import RELEASE, commit_workspace, make_workspace, run_git, user_home, write  # noqa: F401  (user_home: autouse)
 
 pytestmark = pytest.mark.integration
 

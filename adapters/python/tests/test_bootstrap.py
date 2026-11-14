@@ -10,7 +10,7 @@ import shutil
 import bootstrap
 import sync_project
 import validate_workspace as validator
-from test_tooling import VERIFICATION_SECTION, make_workspace, release_workspace, run_git, write
+from test_tooling import VERIFICATION_SECTION, make_workspace, release_workspace, run_git, user_home, write  # noqa: F401  (user_home: autouse)
 
 
 def test_init_writes_map_and_directories(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

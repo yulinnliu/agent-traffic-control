@@ -47,6 +47,15 @@ canonical: {name}
 """
 
 
+@pytest.fixture(autouse=True)
+def user_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """The home `atc sync --check` reads user-level skill copies from: an empty directory of the test's own.
+    A module that imports it uses it for every test."""
+    home = tmp_path / "user-home"
+    monkeypatch.setattr(validator, "user_home", lambda: home)
+    return home
+
+
 def make_workspace(tmp_path: Path, *, create_project: bool = True) -> tuple[Path, Path]:
     root = tmp_path / "workspace"
     project = root / "projects" / "demo"
@@ -1210,3 +1219,12 @@ def test_check_mode_reports_root_drift_without_writing(tmp_path: Path, capsys: p
     assert sync_project.run("check", [("demo", project)], root) == 1
     assert "STOP DRIFT" in capsys.readouterr().err
     assert "description: test skill" in (root / ".claude/skills/demo-skill/SKILL.md").read_text(encoding="utf-8")
+
+
+@pytest.mark.integration
+def test_sync_check_reads_user_level_copies_from_the_user_home(tmp_path: Path, user_home: Path) -> None:
+    root, _ = make_workspace(tmp_path)
+    assert not any("user-level" in p for p in validator.project_problems(root))
+    write(user_home / ".claude/skills/demo-skill/SKILL.md", "# a user-level copy\n")
+    found = [p for p in validator.project_problems(root) if "user-level duplicate" in p]
+    assert len(found) == 1 and str(user_home) in found[0]
