@@ -166,3 +166,18 @@ def test_remove_names_an_unregistered_project(tmp_path: Path, capsys: pytest.Cap
     root, _ = _registered(tmp_path)
     assert bootstrap.remove(root, "absent", check=True) == 2
     assert capsys.readouterr().err.startswith("ERROR PROJECT_UNKNOWN ")
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("name", ["repo", "state", "worktrees"])
+def test_without_entry_drops_only_a_direct_child_of_the_section(name: str) -> None:
+    """A project named like a key every entry holds removes that project, never another project's key."""
+    text = ("projects:\n"
+            "  demo:\n    repo: projects/demo\n    worktrees: worktrees/demo\n    state: state/demo-data\n"
+            f"  {name}:\n    repo: projects/{name}\n    worktrees: worktrees/{name}\n    state: state/{name}-data\n"
+            "skill_harnesses:\n  demo: [claude]\n")
+    assert bootstrap.without_entry(text, "projects", name) == (
+        "projects:\n"
+        "  demo:\n    repo: projects/demo\n    worktrees: worktrees/demo\n    state: state/demo-data\n"
+        "skill_harnesses:\n  demo: [claude]\n")
+    assert bootstrap.without_entry(text, "skill_harnesses", name) == text

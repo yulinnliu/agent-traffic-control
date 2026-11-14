@@ -184,7 +184,12 @@ def without_entry(text: str, section: str, name: str) -> str:
     if top is None:
         return text
     end = _block_end(lines, top)
-    entry = next((i for i in range(top + 1, end) if re.match(rf"^\s+{re.escape(name)}:(\s|$)", lines[i])), None)
+    children = [line for line in lines[top + 1:end] if line.strip() and not line.lstrip().startswith("#")]
+    if not children:
+        return text
+    indent = children[0][:len(children[0]) - len(children[0].lstrip())]
+    # Only a direct child of the section: a nested key such as a project's own `repo:` is never the entry.
+    entry = next((i for i in range(top + 1, end) if re.match(rf"^{indent}{re.escape(name)}:(\s|$)", lines[i])), None)
     if entry is None:
         return text
     del lines[entry:_block_end(lines, entry)]
