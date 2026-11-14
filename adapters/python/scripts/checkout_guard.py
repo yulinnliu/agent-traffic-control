@@ -1,12 +1,13 @@
 """The canonical checkout guard of the root `AGENTS.md` § Changing this repo.
 
-The installed `atc` is an editable install, so the canonical checkout's content
-is the code every session runs: it stays on `main` with no tracked
-modification. A checkout is canonical when it holds `workspace.yaml` and its
-git dir is the common dir; a linked worktree, a CI checkout and an
-integration candidate are not. A checkout holding `workspace.yaml` and `.git`
-whose Git state cannot be read is treated as canonical and unreadable, so the
-guard fails closed.
+The installed `atc` runs a release copy (`release_install.py`), but the
+canonical checkout's working tree is still what `atc` and every session read
+as the workspace: its task records, policies, governance and skills. It stays
+on `main` with no tracked modification. A checkout is canonical when it holds
+`workspace.yaml` and its git dir is the common dir; a linked worktree, a
+release copy, a CI checkout and an integration candidate are not. A checkout
+holding `workspace.yaml` and `.git` whose Git state cannot be read is treated
+as canonical and unreadable, so the guard fails closed.
 """
 
 from __future__ import annotations
@@ -70,3 +71,23 @@ def state(checkout: Path) -> CheckoutState:
 
 def describe(checkout: Path, current: CheckoutState) -> str:
     return f"{checkout} is on {current.branch or 'a detached HEAD'}"
+
+
+def main_worktree(path: Path) -> Path | None:
+    """The main worktree of the repository holding ``path``: the parent of its common `.git` directory, or None."""
+    found = _git(path, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    if found.returncode != 0 or not found.stdout.strip():
+        return None
+    common = Path(found.stdout.strip())
+    return common.parent if common.name == ".git" else None
+
+
+def releases_dir(environ: dict[str, str] | None = None) -> Path:
+    """Where the release copies of the installed `atc` live: `~/.atc/releases/<tag>` (docs/ATC_HOME.md § Layout)."""
+    from atc_testkit.locations import atc_home
+    return atc_home(environ) / "releases"
+
+
+def release_copy(path: Path, environ: dict[str, str] | None = None) -> bool:
+    """Whether ``path`` is a release copy: a directory directly under `releases_dir()`."""
+    return os.path.normcase(os.path.abspath(path.parent)) == os.path.normcase(os.path.abspath(releases_dir(environ)))

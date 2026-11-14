@@ -221,6 +221,6 @@ fi
 
 if ! command -v atc >/dev/null 2>&1; then
   echo "note: skills that run a tool call the atc command; put it on PATH with:"
-  echo "  uv tool install -e \"$ROOT/adapters/python\""
+  echo "  uv run --directory \"$ROOT/adapters/python\" atc install <tag>"
 fi
 exit $status

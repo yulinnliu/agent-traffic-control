@@ -20,6 +20,7 @@ pytestmark = pytest.mark.integration
 SUBCOMMANDS = [
     ("task",), ("task", "create"), ("task", "update"), ("task", "list"), ("task", "resume"), ("task", "close"),
     ("test",), ("integrate",), ("push",), ("init",), ("add",), ("remove",), ("sync",), ("doctor",), ("guard",),
+    ("install",),
 ]
 
 # A directory without workspace.yaml is not a canonical checkout, so the guard lets the command through.
@@ -110,8 +111,21 @@ def test_a_missing_dependency_names_the_reinstall_command(monkeypatch: pytest.Mo
     assert expected in err and "Traceback" not in err
 
 
-def test_without_a_named_root_outside_any_workspace_the_root_is_this_checkout(tmp_path: Path) -> None:
-    assert atc_cli.resolve_root(None, {}, tmp_path) == atc_cli.CHECKOUT
+def test_without_a_named_root_outside_any_workspace_the_root_is_the_main_worktree_of_the_code(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A release copy is a linked worktree of the workspace root repository, so it resolves to the canonical
+    checkout; code outside any repository resolves to itself."""
+    main = tmp_path / "main"
+    main.mkdir()
+    git(main, "init", "-q", "-b", "main")
+    git(main, "-c", "user.email=t@example.invalid", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "r")
+    release = tmp_path / "home" / ".atc" / "releases" / "v0.6.0"
+    git(main, "worktree", "add", "-q", "--detach", str(release))
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    for code, expected in ((release, main), (main, main), (outside, outside)):
+        monkeypatch.setattr(atc_cli, "CHECKOUT", code)
+        assert atc_cli.resolve_root(None, {}, outside).resolve() == expected.resolve()
 
 
 def nested_checkouts(tmp_path: Path) -> tuple[Path, Path]:
@@ -207,7 +221,29 @@ def test_a_canonical_checkout_off_main_refuses_every_command_but_doctor_and_help
 def test_a_dirty_canonical_checkout_warns_and_runs(canonical: Path, capsys: pytest.CaptureFixture[str]) -> None:
     (canonical / "AGENTS.md").write_text("# edited\n", encoding="utf-8")
     assert atc_cli._guard("sync", [], canonical) is None
-    assert capsys.readouterr().err.startswith(f"WARNING CHECKOUT_DIRTY {canonical} ")
+    assert capsys.readouterr().err == (f"WARNING CHECKOUT_DIRTY {canonical} has tracked modifications; "
+                                       "atc and sessions read them\n")
+
+
+def test_the_guard_reads_the_resolved_root_not_the_code_checkout(
+    canonical: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The installed atc runs a release copy; the checkout the guard protects is the root it acts on."""
+    import sync_project
+    monkeypatch.setattr(atc_cli, "GUARDED_CHECKOUT", None)
+    monkeypatch.setattr(atc_cli, "CHECKOUT", NOT_CANONICAL)
+    monkeypatch.setattr(sync_project, "main", lambda rest, root: 0)
+    monkeypatch.delenv("ATC_ROOT", raising=False)
+    assert atc_cli.main(["--root", str(canonical), "sync"]) == 0
+    git(canonical, "switch", "-q", "-c", "topic")
+    assert atc_cli.main(["--root", str(canonical), "sync"]) == 2
+    assert capsys.readouterr().err.startswith(f"ERROR CHECKOUT_NOT_MAIN {canonical.resolve()} is on topic\n")
+    monkeypatch.setenv("ATC_ROOT", str(canonical))
+    assert atc_cli.main(["sync"]) == 2
+    monkeypatch.delenv("ATC_ROOT")
+    (canonical / "shared" / "governance").mkdir(parents=True)
+    monkeypatch.chdir(canonical)
+    assert atc_cli.main(["sync"]) == 2
 
 
 def test_a_linked_worktree_and_a_checkout_without_the_map_are_not_canonical(canonical: Path) -> None:
@@ -280,6 +316,24 @@ def test_maintainer_commands_refuse_the_canonical_checkout(canonical: Path, monk
     monkeypatch.chdir(canonical)
     assert maintain.main(["validate"]) == 2
     assert capsys.readouterr().err.startswith(f"ERROR CHECKOUT_CANONICAL {canonical.resolve()} ")
+
+
+def test_maintainer_commands_refuse_a_release_copy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                   capsys: pytest.CaptureFixture[str]) -> None:
+    import checkout_guard
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    copy = tmp_path / "home" / ".atc" / "releases" / "v0.6.0"
+    scripts = copy / "adapters" / "python" / "scripts"
+    scripts.mkdir(parents=True)
+    (scripts / "validate_workspace.py").write_text("", encoding="utf-8")
+    monkeypatch.setattr(maintain, "CHECKOUT", copy)
+    monkeypatch.chdir(tmp_path)
+    assert maintain.main(["validate"]) == 2
+    assert capsys.readouterr().err.startswith(f"ERROR CHECKOUT_CANONICAL {copy} is a release copy of the installed atc")
+    assert checkout_guard.release_copy(copy)
+    assert not checkout_guard.release_copy(scripts)
+    assert not checkout_guard.release_copy(tmp_path / "home" / ".atc" / "other" / "v0.6.0")
 
 
 def test_maintainer_commands_dispatch_to_their_modules(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

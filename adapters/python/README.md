@@ -6,32 +6,30 @@ by this code. Python 3.12 (`requires-python = ">=3.12,<3.13"`), provisioned
 by `uv` from the `pyproject.toml` and `uv.lock` here. Run everything from this
 directory.
 
-One command fronts the scripts: `uv run atc <command>` here, or
-`uv tool install -e .` once per machine to have `atc` on PATH, which is how
-the skills call it. The distribution is `agent-traffic-control`; its console
-script is `atc`.
+One command fronts the scripts: `uv run atc <command>` here, or the
+installed `atc` on PATH, which is how the skills call it. The distribution is
+`agent-traffic-control`; its console script is `atc`.
 `atc` resolves the checkout from `--root`, `ATC_ROOT`,
-the nearest `workspace.yaml` above the working directory, or its own install
-location, in that order.
+the nearest `workspace.yaml` above the working directory, or the main
+worktree of the repository its own code lives in, in that order; for a
+release copy that is the workspace root's canonical checkout.
 
-The installed `atc` is an editable install: it reads the checkout's code and
-holds the dependencies of the moment it was installed. An integrated range
-that changes the dependencies in `pyproject.toml` or
-`atc-testkit/pyproject.toml` is followed, on each host with an installed
-`atc`, by `uv tool install -e "<checkout>/adapters/python" --force`, after
-the uninstall below on a host whose `uv tool list` shows
-`atc-python-adapter`. Until
-then a command that imports a new dependency stops with
-`ModuleNotFoundError`, and `uv run --locked atc` from here works.
-
-A host whose `atc` is installed under the earlier distribution name
-`atc-python-adapter` (`uv tool list` shows it) uninstalls that tool before
-installing this one, since both provide the `atc` executable:
+The installed `atc` runs a release. `atc install vX.Y.Z`, run by the Owner,
+creates the release copy `~/.atc/releases/vX.Y.Z`, a detached and locked
+worktree of the workspace root repository at the tag, and makes `atc` an
+editable install of its `adapters/python` with that release's dependencies.
+Integrating into `main` changes nothing a host runs until the Owner installs
+the next tag (`docs/WORKFLOW.md` § Installing a release). A host with no
+`atc` yet installs the first release from a clone or the workspace root:
 
 ```sh
-uv tool uninstall atc-python-adapter
-uv tool install -e "<checkout>/adapters/python"
+uv run --directory adapters/python atc install vX.Y.Z
 ```
+
+A host whose `atc` is installed under the earlier distribution name
+`atc-python-adapter` (`uv tool list` shows it) runs
+`uv tool uninstall atc-python-adapter` first, since both provide the `atc`
+executable.
 
 ## Commands
 
@@ -50,7 +48,8 @@ Exit codes, `--json`, output and naming: `shared/conformance/CLI.md`.
 | `remove` | `bootstrap.py` | `NAME [--check]`: Owner-run; drops the project's `workspace.yaml` entry and its `skill_harnesses` entry, never its checkout | `docs/LAYOUT.md` |
 | `sync` | `sync_project.py` | `[NAME...] [--check] [--revision SHA] [-v]`: write and commit, or with `--check` only list and validate, the managed files of the named projects or of every registered project, rendered from the latest `vMAJOR.MINOR.PATCH` tag on `main` or the SHA the Owner names with `--revision`; a project locked ahead of that release is skipped; managed adapters with no canonical skill or in a harness directory the project's `skill_harnesses` does not select are deleted in the same commit; a project with no `AGENTS.md` gets a minimal one; never touches project-owned files. The sync commit's subject names the target with its release tag: `sync from <source> v0.4.0 (c91d318)` at a tagged revision, `<sha> (after v0.4.0)` past one, the bare SHA before any; the ledger's sync line adds `source_tag` and `source_after`, and `--json` a top-level `target`. The tags are the ATC checkout's local ones, so an unfetched newer tag is not seen | `docs/LAYOUT.md` |
 | `doctor` | `doctor.py` | `[-v]`: local readiness verdict `READY`, `NOT_INITIALIZED` or `ERROR` plus the non-READY checks; `-v` lists every check and the host test worker pool's free tokens, holders and waiters; `--json` | `docs/ATC_HOME.md` |
-| `guard` | `guard.py` | `[--install]`: checks, or for the Owner installs, the PreToolUse hook table `~/.atc/enforcement` and its entries in `~/.claude/settings.json` and `~/.codex/hooks.json` | `docs/ENFORCEMENT.md` |
+| `guard` | `guard.py` | `[--install]`: checks, or for the Owner installs, the PreToolUse hook table `~/.atc/enforcement` and its entries in `~/.claude/settings.json` and `~/.codex/hooks.json`; the entries run the engine of the `atc` that installs them | `docs/ENFORCEMENT.md` |
+| `install` | `release_install.py` | `TAG [--check]`: Owner-run; creates the release copy `~/.atc/releases/TAG` (a detached, locked worktree of the root repository at a `vMAJOR.MINOR.PATCH` tag on `main`) unless it exists clean at the tag, runs `uv tool install -e <copy>/adapters/python --force` and prints the old and new version; `--check` changes nothing | `docs/WORKFLOW.md` § Installing a release |
 | | `integration_verify.py` | the verifier `atc integrate` runs in a candidate of this checkout (root `AGENTS.md` § Integration verification) | |
 | | `build_testkit_release.py` | builds the `atc-testkit` wheel and digest record for consuming projects | |
 | | `select_tests.py` | the test files a change can affect: a count and one reason per path, each file's cause with `--explain`, a JSON array with `--json` (§ Selected tests) | |
@@ -59,7 +58,7 @@ Exit codes, `--json`, output and naming: `shared/conformance/CLI.md`.
 
 `uv run --locked atc-maintain <command>` from an ATC worktree's
 `adapters/python/` maintains this repository; it refuses in the canonical
-checkout and is not part of the installed `atc`.
+checkout and in a release copy, and is not part of the installed `atc`.
 
 | `atc-maintain` command | Script | Does | Reference |
 | --- | --- | --- | --- |

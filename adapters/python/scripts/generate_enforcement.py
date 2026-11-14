@@ -48,6 +48,8 @@ HOOK_TABLE = "pretooluse.json"
 HOOK_TABLE_VERSION = 1
 ENGINE = "pretooluse_hook.py"
 ENGINE_FILES = (ENGINE, "shell_words.py", "write_targets.py", "globs.py")
+# The engine the hook runs is the one beside this module: a release copy's for the installed `atc`.
+ENGINE_DIR = Path(__file__).resolve().parent
 # The hook scripts the engine replaces (the worktree cd guard and the write scope guard); install drops their
 # entries. A pattern, so the test selector reads no edge to the cd guard's module.
 RETIRED_GUARDS = re.compile(r"\b(?:worktree_cd|write_scope)_guard\.py\b")
@@ -213,8 +215,11 @@ def _hook_sources(base: Path, doc: dict) -> list[tuple[str, Path, list[tuple[Pat
     return sources
 
 
-def hook_table(workspace: Path, table_dir: Path, schemas: Path = policies.SCHEMAS) -> str:
-    """The PreToolUse hook's table (docs/ENFORCEMENT.md § PreToolUse hook); raises PolicyError or ValueError."""
+def hook_table(workspace: Path, table_dir: Path, schemas: Path = policies.SCHEMAS, engine_dir: Path | None = None) -> str:
+    """The PreToolUse hook's table (docs/ENFORCEMENT.md § PreToolUse hook); raises PolicyError or ValueError.
+
+    It protects the table, the engine's files and every release copy of the installed `atc`."""
+    import checkout_guard
     base, doc = _workspace_doc(workspace)
     commands: list[dict] = []
     filesystem: list[dict] = []
@@ -269,8 +274,9 @@ def hook_table(workspace: Path, table_dir: Path, schemas: Path = policies.SCHEMA
         path = _norm(_expand_root(root), base)
         if path not in write_roots:
             write_roots.append(path)
-    scripts = base / "adapters" / "python" / "scripts"
-    protected = [_norm(table_dir, base)] + [_norm(scripts / name, base) for name in ENGINE_FILES]
+    scripts = engine_dir or ENGINE_DIR
+    protected = ([_norm(table_dir, base)] + [_norm(scripts / name, base) for name in ENGINE_FILES]
+                 + [_norm(checkout_guard.releases_dir(), base)])
     table = {"version": HOOK_TABLE_VERSION, "commands": commands, "filesystem": filesystem,
              "worktrees": worktrees, "write_roots": write_roots, "protected": protected}
     return json.dumps(table, indent=2, ensure_ascii=False) + "\n"
@@ -280,10 +286,10 @@ def default_table_dir() -> Path:
     return Path.home() / ".atc" / "enforcement"
 
 
-def engine_command(workspace: Path, harness: str, table_dir: Path) -> str:
-    """The hook command: the canonical checkout's engine, run by `python`, named by forward-slash path."""
+def engine_command(workspace: Path, harness: str, table_dir: Path, engine_dir: Path | None = None) -> str:
+    """The hook command: the engine of the `atc` that composes it, run by `python`, named by forward-slash path."""
     base, _ = _workspace_doc(workspace)
-    command = f'python "{(base / "adapters" / "python" / "scripts" / ENGINE).as_posix()}" --harness {harness}'
+    command = f'python "{((engine_dir or ENGINE_DIR) / ENGINE).as_posix()}" --harness {harness}'
     if _norm(table_dir, base) != _norm(default_table_dir(), base):
         command += f' --table "{(table_dir / HOOK_TABLE).as_posix()}"'
     return command

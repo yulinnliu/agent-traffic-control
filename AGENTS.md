@@ -21,11 +21,11 @@ Then read `shared/governance/INDEX.md` and `CORE.md` from that exact same revisi
 ## Changing this repo
 
 - Read by default; editing this repo requires explicit task authority.
-- The installed `atc` runs this canonical checkout's code, so the checkout stays on `main` with no tracked modification: off `main` every `atc` command but `doctor` refuses, and `atc-maintain` refuses to run here.
+- The installed `atc` runs a release copy under `~/.atc/releases/`, which the Owner installs with `atc install <tag>`, never this checkout's `main`. This checkout is still what `atc` and every session read as the workspace (records, policies, governance, skills), so it stays on `main` with no tracked modification: off `main` every `atc` command but `doctor` refuses, and `atc-maintain` refuses to run here or in a release copy.
 - Authorized changes use a managed worktree under `worktrees/root/` from `atc task create --project root`; the Owner's `atc integrate <ID>` fast-forwards `main` here (`docs/WORKFLOW.md`).
 - Integration, publication and deployment are separately governed actions.
 - Never aim destructive project/worktree tooling at this checkout itself. Do not run `git clean -fdx` here or recursively delete `projects/`, `worktrees/`, or `state/` from above.
-- Read back changes, then validate from the topic worktree's `adapters/python/`, entered in a subshell `( cd <worktree>/adapters/python && ... )`, with the maintainer commands `uv run --locked atc-maintain`, which run only in a worktree (bare `atc` runs this checkout's code): `sync --root` followed by `validate` after touching a shared skill or overlay, `policies check ../../shared/policies/examples` after touching a schema or example, and `uv run --locked pytest` (reads `shared/conformance/`) after touching a tool or fixture.
+- Read back changes, then validate from the topic worktree's `adapters/python/`, entered in a subshell `( cd <worktree>/adapters/python && ... )`, with the maintainer commands `uv run --locked atc-maintain`, which run only in a worktree (bare `atc` runs the installed release): `sync --root` followed by `validate` after touching a shared skill or overlay, `policies check ../../shared/policies/examples` after touching a schema or example, and `uv run --locked pytest` (reads `shared/conformance/`) after touching a tool or fixture.
 
 ## Task records
 
@@ -45,6 +45,6 @@ Tasks here are identified by record (governance `CORE.md` § Task identity).
 
 What the verifier checks, which ranges it treats as documentation-only and
 where the full suite runs: `docs/TESTKIT.md` § The workspace root's verifier.
-After an integrated range changes the dependencies of `adapters/python` or of
-its `atc-testkit`, reinstall `atc` on each host as `adapters/python/README.md`
-says.
+Integrating changes nothing a host runs: the Owner tags a release and installs
+it on each host with `atc install <tag>` (`docs/WORKFLOW.md` § Installing a
+release).

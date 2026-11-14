@@ -309,8 +309,9 @@ def path_denial(table: dict, target: str, path: str) -> str | None:
     """Why writing `path` (case-folded, long, absolute) is refused, or None."""
     for protected in table["protected"]:
         if g.within(path, protected):
-            return (f"Refused: {target} is part of the PreToolUse hook (its table or engine); the Owner "
-                    f"changes it with `atc guard --install` from their own terminal.")
+            return (f"Refused: {target} is part of the PreToolUse hook (its table or engine) or a release copy of "
+                    f"the installed atc; the Owner changes it with `atc guard --install` or `atc install` from "
+                    f"their own terminal.")
     slash = path.replace("\\", "/")
     for rule in table["filesystem"]:
         if not WRITE_MODES & set(rule.get("modes", [])):

@@ -16,6 +16,7 @@ Workspace:
   sync        write and commit the files ATC owns in projects, or --check them
   doctor      diagnose runtime readiness; changes nothing
   guard       check, or --install, the PreToolUse hook and its permission rules
+  install     install a release tag as this host's atc, or --check it
 
 --root DIR    the ATC checkout to act on, before or after the command
               (shared/conformance/CLI.md § Root resolution)
@@ -46,10 +47,19 @@ COMMANDS = {
     "sync": "sync_project",
     "doctor": "doctor",
     "guard": "guard",
+    "install": "release_install",
 }
 GUARD_EXEMPT = ("doctor",)
 GROUPED = ("task",)
-GUARDED_CHECKOUT = CHECKOUT
+# The checkout the guard reads; None guards the resolved root. Tests name one.
+GUARDED_CHECKOUT: Path | None = None
+
+
+def canonical_checkout() -> Path:
+    """The main worktree of the repository this code lives in: the canonical checkout, also for a release copy."""
+    scripts_on_path()
+    import checkout_guard
+    return checkout_guard.main_worktree(CHECKOUT) or CHECKOUT
 
 
 def resolve_root(explicit: str | None, environ: dict[str, str], cwd: Path) -> Path:
@@ -60,7 +70,7 @@ def resolve_root(explicit: str | None, environ: dict[str, str], cwd: Path) -> Pa
     for candidate in (cwd.resolve(), *cwd.resolve().parents):
         if (candidate / "workspace.yaml").is_file() and (candidate / "shared" / "governance").is_dir():
             return candidate
-    return CHECKOUT
+    return canonical_checkout()
 
 
 def usage() -> str:
@@ -89,7 +99,7 @@ def scripts_on_path() -> None:
 
 
 def _guard(command: str, rest: list[str], checkout: Path) -> int | None:
-    """Exit 2 when the canonical checkout serving this `atc` is off `main`; warn when it is dirty."""
+    """Exit 2 when the canonical checkout `atc` acts on is off `main`; warn when it is dirty."""
     if command in GUARD_EXEMPT or any(arg in ("-h", "--help") for arg in rest):
         return None
     scripts_on_path()
@@ -106,7 +116,7 @@ def _guard(command: str, rest: list[str], checkout: Path) -> int | None:
               file=sys.stderr)
         return 2
     if current.dirty:
-        print(f"WARNING CHECKOUT_DIRTY {checkout} has tracked modifications; atc runs them", file=sys.stderr)
+        print(f"WARNING CHECKOUT_DIRTY {checkout} has tracked modifications; atc and sessions read them", file=sys.stderr)
     return None
 
 
@@ -154,7 +164,7 @@ def wants_json(rest: list[str]) -> bool:
 
 
 def main(argv: list[str] | None = None, checkout: Path | None = None) -> int:
-    """``checkout`` is the checkout serving this `atc` for the guard; tests name one."""
+    """``checkout`` is the checkout the guard reads, by default the resolved root; tests name one."""
     escape_unencodable_output()
     if argv is None:
         _child_encoding()
@@ -173,7 +183,8 @@ def main(argv: list[str] | None = None, checkout: Path | None = None) -> int:
     if command not in COMMANDS:
         print(f"usage: atc [--root DIR] <command> [<args>]\natc: error: unknown command: {command}", file=sys.stderr)
         return 2
-    refused = _guard(command, rest, GUARDED_CHECKOUT if checkout is None else checkout)
+    guarded = checkout or GUARDED_CHECKOUT or resolve_root(explicit_root, dict(os.environ), Path.cwd())
+    refused = _guard(command, rest, guarded)
     if refused is not None:
         return refused
     program = sys.argv[0]

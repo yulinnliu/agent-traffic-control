@@ -112,8 +112,21 @@ def test_the_table_composes_the_workspace_policy_first_then_each_project(workspa
     assert [(r["id"], r["modes"]) for r in states] == [("state.p", ["edit", "write"]), ("state.q", ["edit", "write"])]
     assert table["worktrees"] == [norm(root / "worktrees")]
     assert table["write_roots"] == [norm(root), norm(home / ".atc"), norm(home.parent / "scratch")]
-    assert table["protected"][0] == norm(home / ".atc" / "enforcement")
-    assert norm(root / "adapters" / "python" / "scripts" / "pretooluse_hook.py") in table["protected"]
+    assert table["protected"] == [norm(home / ".atc" / "enforcement"),
+                                  *(norm(ge.ENGINE_DIR / name) for name in ge.ENGINE_FILES),
+                                  norm(home / ".atc" / "releases")]
+
+
+def test_the_table_and_the_command_name_the_engine_of_the_composing_atc(workspace, home):
+    """A release copy's `atc guard --install` points the hook at that copy, never at the workspace checkout."""
+    release = home / ".atc" / "releases" / "v0.6.0" / "adapters" / "python" / "scripts"
+    table = json.loads(ge.hook_table(workspace, home / ".atc" / "enforcement", engine_dir=release))
+    assert norm(release / "pretooluse_hook.py") in table["protected"]
+    assert norm(ge.ENGINE_DIR / "pretooluse_hook.py") not in table["protected"]
+    assert ge.engine_command(workspace, "claude", home / ".atc" / "enforcement", release) == (
+        f'python "{(release / "pretooluse_hook.py").as_posix()}" --harness claude')
+    assert ge.engine_command(workspace, "claude", home / ".atc" / "enforcement") == (
+        f'python "{(ge.ENGINE_DIR / "pretooluse_hook.py").as_posix()}" --harness claude')
 
 
 def test_the_table_is_deterministic_and_refuses_a_bad_policy(workspace, home, monkeypatch):
@@ -139,7 +152,7 @@ def test_install_writes_the_table_and_replaces_the_retired_guards(workspace, hom
     table = home / ".atc" / "enforcement" / "pretooluse.json"
     assert table.is_file()
     settings = json.loads(claude.read_text(encoding="utf-8"))
-    engine = (workspace.parent / "adapters" / "python" / "scripts" / "pretooluse_hook.py").as_posix()
+    engine = (ge.ENGINE_DIR / "pretooluse_hook.py").as_posix()
     assert settings["model"] == "x" and settings["hooks"]["UserPromptSubmit"]
     assert settings["hooks"]["PreToolUse"] == [
         {"matcher": "Edit|Write", "hooks": [{"type": "command", "command": "bash keep.sh"}]},

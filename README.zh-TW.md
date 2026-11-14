@@ -123,13 +123,14 @@ atc/scripts/link-skills.sh path/to/your-repo atc-worktree hami-writing-for-agent
 adapter。Windows 上請用 Git Bash 執行。
 
 `atc-worktree`、`atc-review`、`atc-coordinator`、`atc-shared-skill` 這幾個
-skill 會呼叫 `atc` 指令，所以每台機器要先裝一次，讓它在 PATH 上：
+skill 會呼叫 `atc` 指令，所以每台機器要先安裝一次 release，讓它在 PATH 上：
 
 ```sh
-uv tool install -e atc/adapters/python
+uv run --directory atc/adapters/python atc install vX.Y.Z
 ```
 
-這會安裝 distribution `agent-traffic-control`，指令名稱是 `atc`。機器上如果
+這會建立 release copy `~/.atc/releases/vX.Y.Z`，並從它安裝 distribution
+`agent-traffic-control`，指令名稱是 `atc`（見 `docs/WORKFLOW.md` § Installing a release）。機器上如果
 已經用舊名稱 `atc-python-adapter` 裝過 `atc`，要先跑
 `uv tool uninstall atc-python-adapter`（見 `adapters/python/README.md`）。
 
@@ -137,7 +138,7 @@ uv tool install -e atc/adapters/python
 
 ```sh
 git clone https://github.com/yulinnliu/agent-traffic-control.git atc
-uv tool install -e atc/adapters/python
+uv run --directory atc/adapters/python atc install vX.Y.Z
 cd atc
 atc init                                    # 建立 workspace.yaml 和 projects/ worktrees/ state/
 atc add my-project --url <url>              # clone、登記、建立 ATC 檔案、驗證

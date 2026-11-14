@@ -684,7 +684,9 @@ def test_atc_root_must_hold_the_canonical_policy(tmp_path: Path) -> None:
 def test_doctor_requires_the_atc_command(tmp_path: Path) -> None:
     root = make_env_workspace(tmp_path)
     by_name = {check.name: check for check in doctor.diagnose(root, {"PATH": str(tmp_path / "empty")})}
-    assert by_name["atc command"].status == "ERROR" and "uv tool install" in by_name["atc command"].detail
+    detail = by_name["atc command"].detail
+    assert by_name["atc command"].status == "ERROR" and detail.endswith(" atc install TAG")
+    assert f'uv run --directory "{root / "adapters" / "python"}"' in detail
 
 
 def test_validator_fails_on_mismatched_atc_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

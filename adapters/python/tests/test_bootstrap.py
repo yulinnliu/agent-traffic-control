@@ -24,6 +24,28 @@ def test_init_writes_map_and_directories(tmp_path: Path, capsys: pytest.CaptureF
     assert capsys.readouterr().out.startswith("INITIALIZED workspace.yaml (governance_source owner/repo)")
 
 
+@pytest.mark.integration
+def test_init_without_atc_on_path_names_the_first_install(tmp_path: Path, capsys: pytest.CaptureFixture[str],
+                                                         monkeypatch: pytest.MonkeyPatch) -> None:
+    """The first install is `atc install` of the latest release tag on main, run from the checkout's adapter
+    (docs/WORKFLOW.md § Installing a release); TAG when main has no release yet."""
+    monkeypatch.setattr(bootstrap.shutil, "which", lambda name: None)
+    root = tmp_path / "root"
+    root.mkdir()
+    adapter = root / "adapters" / "python"
+    assert bootstrap.init(root, "owner/repo", force=False, environ={}) == 0
+    assert capsys.readouterr().out.splitlines()[-1] == f'  put atc on PATH: uv run --directory "{adapter}" atc install TAG'
+    run_git(root, "init", "-q", "-b", "main")
+    write(root / "README.md", "x\n")
+    run_git(root, "add", "-A")
+    run_git(root, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q", "-m", "x")
+    run_git(root, "tag", "v0.9.0")
+    run_git(root, "tag", "v0.10.0")
+    assert bootstrap.init(root, "owner/repo", force=True, environ={}) == 0
+    assert capsys.readouterr().out.splitlines()[-1] == (f'  put atc on PATH: uv run --directory "{adapter}" '
+                                                       "atc install v0.10.0")
+
+
 def test_init_refuses_to_overwrite_without_force(tmp_path: Path) -> None:
     root = tmp_path / "root"
     root.mkdir()

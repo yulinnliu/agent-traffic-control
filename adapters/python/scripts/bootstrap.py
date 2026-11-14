@@ -71,8 +71,15 @@ def init(root: Path, governance_source: str | None, force: bool, environ: dict[s
         (root / name).mkdir(exist_ok=True)
     print(f"INITIALIZED workspace.yaml (governance_source {source})")
     if not shutil.which("atc"):
-        print(f'  put atc on PATH: uv tool install -e "{root / "adapters" / "python"}"')
+        print(f'  put atc on PATH: uv run --directory "{root / "adapters" / "python"}" atc install {latest_tag(root)}')
     return 0
+
+
+def latest_tag(root: Path) -> str:
+    """The latest release tag on the checkout's main, the release a first install takes; TAG when there is none."""
+    import sync_project
+    tags = sync_project.merged_release_tags(root, "refs/heads/main")
+    return tags[0][0] if tags else "TAG"
 
 
 def _stop(token: str, detail: str, hint: str | None = None) -> int:

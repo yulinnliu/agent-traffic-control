@@ -50,8 +50,28 @@ def checkout_check(checkout: Path) -> Check:
     if current.off_main:
         return Check("canonical checkout", "ERROR", f"{checkout_guard.describe(checkout, current)}; every other atc command refuses")
     if current.dirty:
-        return Check("canonical checkout", "ERROR", f"{checkout} has tracked modifications; atc runs them")
+        return Check("canonical checkout", "ERROR", f"{checkout} has tracked modifications; atc and sessions read them")
     return Check("canonical checkout", "READY", f"{checkout} is on main and clean")
+
+
+def install_check(code: Path, version: str) -> Check:
+    """The installed version and the copy it runs from (docs/WORKFLOW.md § Installing a release)."""
+    if checkout_guard.release_copy(code):
+        return Check("atc install", "READY", f"atc {version} from the release copy {code}")
+    if checkout_guard.state(code).canonical:
+        return Check("atc install", "WARN", f"atc {version} runs the canonical checkout {code}, which every "
+                                            "integration changes; the Owner installs a release: atc install TAG")
+    return Check("atc install", "READY", f"atc {version} from {code}, a development copy")
+
+
+def running_atc() -> tuple[Path, str]:
+    from importlib import metadata
+
+    import atc_cli
+    try:
+        return atc_cli.CHECKOUT, metadata.version("agent-traffic-control")
+    except metadata.PackageNotFoundError:
+        return atc_cli.CHECKOUT, "unknown"
 
 
 def worker_pool(environ: dict[str, str]) -> dict:
@@ -149,9 +169,11 @@ def hook_check(workspace_file: Path, home: Path | None = None) -> Check:
     return Check("pretooluse hook", "READY", "table and entries current")
 
 
-def diagnose(root: Path = ROOT, environ: dict[str, str] | None = None, checkout: Path = ROOT) -> list[Check]:
+def diagnose(root: Path = ROOT, environ: dict[str, str] | None = None, checkout: Path | None = None) -> list[Check]:
+    """``checkout`` is the canonical checkout the guard reads, by default ``root``."""
     environ = environ if environ is not None else dict(os.environ)
-    checks = [Check("workspace root", "READY", str(root.resolve())), checkout_check(checkout)]
+    checks = [Check("workspace root", "READY", str(root.resolve())), checkout_check(checkout or root),
+              install_check(*running_atc())]
 
     env_problems = validator.workspace_env_problems(root, environ)
     if "ATC_ROOT" not in env_problems:
@@ -165,7 +187,8 @@ def diagnose(root: Path = ROOT, environ: dict[str, str] | None = None, checkout:
         Check(
             "atc command",
             "READY" if atc_path else "ERROR",
-            atc_path or f"not on PATH; skills call it: uv tool install -e \"{root / 'adapters' / 'python'}\"",
+            atc_path or "not on PATH; skills call it; the Owner installs a release: uv run --directory "
+                        f"\"{root / 'adapters' / 'python'}\" atc install TAG",
         )
     )
     checks += worker_pool_checks(environ)

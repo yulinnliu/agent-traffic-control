@@ -124,8 +124,9 @@ Git skips it on Linux and macOS.
 ## PreToolUse hook
 
 One hook binds every Claude Code and Codex session on the machine: the engine
-`adapters/python/scripts/pretooluse_hook.py` in the canonical checkout,
-standard library only, reading one composed table. The hook sees the text of
+`adapters/python/scripts/pretooluse_hook.py` of the installed release copy
+(`WORKFLOW.md` § Installing a release), standard library only, reading one
+composed table. The hook sees the text of
 a tool call, not what a program does once it runs; it turns a mistaken
 command into a refusal with a reason and is not a security boundary.
 
@@ -145,7 +146,8 @@ command into a refusal with a reason and is not a security boundary.
 Command rules apply to every session, whatever their source; `~`-rooted globs
 apply everywhere. A rule already composed from an earlier source is not
 repeated. Paths are stored absolute, long-form and case-folded. The engine
-files and the table directory are write-protected in every call.
+files, the table directory and `~/.atc/releases` are write-protected in every
+call.
 
 **Command entries.** The schema adds four hook-only fields to a
 `commands.deny` entry; all the conditions of one entry hold for it to deny:
@@ -328,10 +330,13 @@ running the engine or one of the retired guards (`worktree_cd_guard.py`, `write_
 
 | Harness | Matcher | Command |
 | --- | --- | --- |
-| Claude Code | `Bash\|PowerShell\|Edit\|Write\|NotebookEdit` | `python "<root>/adapters/python/scripts/pretooluse_hook.py" --harness claude` |
+| Claude Code | `Bash\|PowerShell\|Edit\|Write\|NotebookEdit` | `python "<copy>/adapters/python/scripts/pretooluse_hook.py" --harness claude` |
 | Codex | `Bash\|apply_patch` | the same with `--harness codex` |
 
-A table outside the default directory adds `--table "<file>"`. Codex then
+`<copy>` is the checkout of the `atc` that runs `guard --install`: the
+installed release copy, so after `atc install` the hook keeps the previous
+copy until the Owner runs `atc guard --install` again. A table outside the
+default directory adds `--table "<file>"`. Codex then
 asks the Owner to trust the entry once in `/hooks`. The workspace policy
 denies agents `atc guard --install`, so it runs from the Owner's terminal,
 which no hook sees. `atc guard` without `--install` checks the table and the

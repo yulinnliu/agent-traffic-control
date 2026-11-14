@@ -38,14 +38,16 @@ def checkout_of(cwd: Path) -> Path:
 
 
 def refused(checkout: Path) -> str | None:
-    """Why this program may not run here: the scripts are absent (a published package), or ``checkout`` is a
-    canonical one, whose installed `atc` serves every session."""
+    """Why this program may not run here: the scripts are absent (a published package), ``checkout`` is a canonical
+    one, which every session reads as the workspace, or a release copy, whose code the installed `atc` runs."""
     if not SCRIPTS.is_dir():
         return "this installation carries no maintainer scripts"
     scripts_on_path()
     import checkout_guard
     if checkout_guard.state(checkout).canonical or checkout_guard.state(CHECKOUT).canonical:
         return f"{checkout} is the canonical checkout"
+    if checkout_guard.release_copy(checkout):
+        return f"{checkout} is a release copy of the installed atc"
     return None
 
 

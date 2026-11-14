@@ -31,10 +31,10 @@ with `HARNESS_UNKNOWN`. Never set those variables yourself.
 ## Running the CLI
 
 The CLI is the `atc` command on PATH. It finds the workspace map itself (the
-nearest `workspace.yaml` above the working directory, or the checkout it was
-installed from). If `workspace.yaml` exists but `atc` is not on PATH, ask the
-user to install it from their Agent Traffic Control checkout with
-`uv tool install -e <checkout>/adapters/python`. If no `workspace.yaml`
+nearest `workspace.yaml` above the working directory, or the checkout its
+release was installed from). If `workspace.yaml` exists but `atc` is not on
+PATH, ask the user to install a release from their Agent Traffic Control
+checkout with `uv run --directory <checkout>/adapters/python atc install <tag>`. If no `workspace.yaml`
 exists in the current directory or any parent and `atc` is not on PATH, this
 is an independent clone: the managed-worktree lifecycle does not apply. Use
 the `GIT_WORKFLOW.md` topic-branch procedure in this clone, and report the
@@ -111,9 +111,9 @@ missing lock, `PATH_UNSAFE` and `CANDIDATE_LEFTOVER` are findings.
   follows `DELIVERY.md`.
 - Only a top-level session that can run commands drives the CLI. A subagent
   without a shell edits files but takes no part in worktree identity.
-- The workspace root repo's canonical checkout stays on `main`, since the
-  installed `atc` runs its code; each root task gets its worktree from
-  `atc task create --project root`.
+- The workspace root repo's canonical checkout stays on `main`, since `atc`
+  and every session read it as the workspace; each root task gets its
+  worktree from `atc task create --project root`.
 
 ## Never
 

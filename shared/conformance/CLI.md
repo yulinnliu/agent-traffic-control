@@ -7,7 +7,8 @@ reference implementation checks them in `adapters/python/tests/test_cli_conventi
 
 The ATC checkout a command acts on is, in order: `--root DIR`, `$ATC_ROOT`,
 the nearest parent of the working directory that holds `workspace.yaml` and
-`shared/governance/`, else the checkout the installed `atc` comes from.
+`shared/governance/`, else the main worktree of the repository the running
+`atc` comes from, which for a release copy is the canonical checkout.
 `--root` is one global flag and may stand before or after the command
 (`atc --root DIR doctor` and `atc doctor --root DIR` are the same call);
 everything after a `--` belongs to the command, and `atc test` and `atc sync`
@@ -20,13 +21,14 @@ that root's `workspace.yaml`; `root` names the workspace root.
 
 ## Canonical checkout guard
 
-When `atc` runs from the canonical checkout (it holds `workspace.yaml` and is
-no linked worktree), every command but `doctor`, `--help` and `--version`
-stops with `ERROR CHECKOUT_NOT_MAIN` while that checkout is off `main`, stops
-with `ERROR CHECKOUT_UNREADABLE` when its Git state cannot be read, and warns
-with `WARNING CHECKOUT_DIRTY` while it has tracked modifications.
+When the root a command acts on is a canonical checkout (it holds
+`workspace.yaml` and is no linked worktree), every command but `doctor`,
+`--help` and `--version` stops with `ERROR CHECKOUT_NOT_MAIN` while that
+checkout is off `main`, stops with `ERROR CHECKOUT_UNREADABLE` when its Git
+state cannot be read, and warns with `WARNING CHECKOUT_DIRTY` while it has
+tracked modifications: `atc` and every session read it as the workspace.
 `atc-maintain` stops with `ERROR CHECKOUT_CANONICAL` when the checkout
-it would act on is the canonical one. A module the installed `atc` lacks stops
+it would act on is the canonical one or a release copy. A module the installed `atc` lacks stops
 the command with `ERROR MISSING_DEPENDENCY` and the reinstall command.
 
 ## Command groups
@@ -34,7 +36,7 @@ the command with `ERROR MISSING_DEPENDENCY` and the reinstall command.
 | Group | Commands |
 | --- | --- |
 | Task lifecycle | `task` (`create`, `update`, `list`, `resume`, `close`), `test`, `integrate`, `push` |
-| Workspace | `init`, `add`, `remove`, `sync`, `doctor`, `guard` |
+| Workspace | `init`, `add`, `remove`, `sync`, `doctor`, `guard`, `install` |
 
 `atc --help` lists them by group, one line each; `atc --version` prints the
 `atc` and `atc-testkit` versions. The maintainer commands (`atc-maintain sync

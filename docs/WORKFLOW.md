@@ -167,12 +167,41 @@ checked `main` tip and reads `origin/main` back. `atc push --all` asks y/N
 per repository. The coordinator then archives the task's sessions
 (`DELIVERY.md` § Close-out and § 10).
 
-## When the integration changes `atc` itself
+## Installing a release
 
-The installed `atc` is an editable install of the workspace root's canonical
-checkout, so integrating a root task that changes the CLI changes the
-commands of every later step at once: from step 6 on, the coordinator runs
-the commands of the integrated revision. A command removed by that revision
-fails as a usage error; `atc --help` lists the current ones. After a range
-that changes the dependencies of `adapters/python` or its `atc-testkit`,
-reinstall `atc` as `adapters/python/README.md` says before step 6.
+The installed `atc` runs a release copy, never `main`: integrating a root
+task, even one that changes the CLI, changes nothing a host runs, and every
+step of the flow runs the commands of the installed release. A release
+reaches a host when the Owner, after tagging it on `main`, runs from their
+own terminal:
+
+```text
+atc install <tag> --check
+atc install <tag>
+atc guard --install
+```
+
+`atc install` creates `~/.atc/releases/<tag>` (`ATC_HOME.md` § Layout), a
+detached worktree of the workspace root repository at the tag, locked so no
+worktree cleanup removes it, unless it already exists clean at that tag. It
+then runs `uv tool install -e <copy>/adapters/python --force` and prints the
+installed version and copy and the ones before them. `--check` reports the
+same and changes nothing; agents run only `--check` (hard-deny rule
+`atc-install`). `atc guard --install` points the PreToolUse hook at the new
+copy's engine; until then the hook runs the previous copy and `atc guard`
+reports the drift. `atc doctor` names the installed version and the copy it
+runs from.
+
+An unknown tag (fetch the tags first), a tag not on `main` and an existing
+copy that is not a clean detached worktree at the tag stop the command. On
+Windows, `atc install` renames the running `atc.exe` aside so uv can write
+the new one; when uv still fails, the hint names the uv command to run from a
+terminal where no `atc` runs. Earlier copies stay: a rollback is
+`atc install <earlier tag>`, and the Owner removes a copy no longer installed
+with `git worktree remove --force --force <copy>`.
+
+The canonical checkout stays the workspace that `atc` and every session
+read: task records, policies, governance and skills. Off `main` every `atc`
+command but `doctor` refuses with `CHECKOUT_NOT_MAIN`. A topic worktree runs
+its own code with `uv run atc` and `uv run --locked atc-maintain` from its
+`adapters/python`.
