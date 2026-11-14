@@ -12,7 +12,7 @@ import pytest
 
 import git_integrate as gi
 from test_git_integrate import (  # noqa: F401  (repo is a fixture)
-    OWNER, commit, declare_verifier, evidence_dir, integrate, main_tip, publish, records, repo, run_git, topic,
+    commit, declare_verifier, evidence_dir, integrate, main_tip, publish, records, repo, run_git, task_at, topic,
 )
 
 pytestmark = pytest.mark.integration
@@ -44,10 +44,11 @@ def run_count(runs: Path) -> int:
 
 def verify(repo: Path, reviewed: str, *extra: str, capsys: pytest.CaptureFixture[str] | None = None) -> int:
     """`atc verify`; with ``capsys``, its output is read and dropped so the next command's output stands alone."""
-    code = gi.verify_main(["--project", "repo", "--reviewed", reviewed, *extra], root=repo.parent,
-                          cwd=str(repo.parent))
+    code = gi.run_candidate(task_at(repo, reviewed), reviewed, root=repo.parent, cwd=str(repo.parent),
+                            as_json="--json" in extra)
     if capsys is not None:
-        capsys.readouterr()
+        captured = capsys.readouterr()
+        assert code == 0, captured.err
     return code
 
 
@@ -89,17 +90,6 @@ def test_integrate_reuses_a_passing_verify_of_the_same_candidate(
     assert evidence.get("reused") == note and evidence["report"] == record["report"]
     line = json.loads((repo / ".git" / "atc" / "integrations.jsonl").read_text(encoding="utf-8").splitlines()[-1])
     assert line["verification_evidence"] == note
-
-
-def test_the_human_output_names_the_reuse(repo: Path, counted: tuple[Path, Path],
-                                         capsys: pytest.CaptureFixture[str]) -> None:
-    tip = topic(repo, {"a.txt": "a2\n"})
-    assert verify(repo, tip) == 0
-    path = gi.candidate_record_path(repo, "FF", main_tip(repo), tip)
-    capsys.readouterr()
-    assert integrate(repo, "topic", tip) == 0
-    line = next(line for line in capsys.readouterr().err.splitlines() if line.startswith("verify: "))
-    assert line.startswith("verify: REUSED ") and line.endswith(str(Path(gi.CANDIDATE_RECORDS) / path.name))
 
 
 def test_a_merge_candidate_is_reused_when_its_tree_matches(
@@ -168,9 +158,6 @@ def test_another_timeout_or_slack_or_vendored_selector_runs_the_verifier(
     runs, _failing = counted
     tip = topic(repo, {"a.txt": "a2\n"})
     assert verify(repo, tip, capsys=capsys) == 0
-    assert integrate(repo, "topic", tip, "--json", "--verify-timeout", "200") == 0
-    assert json.loads(capsys.readouterr().out)["verification_reuse"] == "TIMEOUT_MISMATCH"
-
     second = topic(repo, {"b.txt": "b2\n"}, branch="second")
     assert verify(repo, second, capsys=capsys) == 0
     monkeypatch.setenv("ATC_TEST_TIME_SLACK", "5")
@@ -183,7 +170,7 @@ def test_another_timeout_or_slack_or_vendored_selector_runs_the_verifier(
     assert verify(repo, third, capsys=capsys) == 0
     assert integrate(repo, "third", third, "--json") == 0
     assert json.loads(capsys.readouterr().out)["verification_reuse"] == "SELECTOR_MISMATCH"
-    assert run_count(runs) == 6
+    assert run_count(runs) == 5
 
 
 def test_only_the_latest_result_counts(repo: Path, counted: tuple[Path, Path],
@@ -211,20 +198,6 @@ def test_a_moved_main_finds_no_record(repo: Path, counted: tuple[Path, Path],
     capsys.readouterr()
     assert integrate(repo, "topic", tip, "--json") == 0
     assert run_count(runs) == 2 and json.loads(capsys.readouterr().out)["verification_reuse"] == "NO_RECORD"
-
-
-def test_verify_takes_the_task_and_timeout_of_the_integrate_command(
-        repo: Path, counted: tuple[Path, Path], capsys: pytest.CaptureFixture[str]) -> None:
-    runs, _failing = counted
-    base = main_tip(repo)
-    tip = topic(repo, {"a.txt": "a2\n"})
-    assert verify(repo, tip, "--task", "some task", "--verify-timeout", "200") == 0
-    record = candidate_record(repo, "FF", base, tip)
-    assert (record["task"], record["tasks"], record["timeout"]) == ("some task", ["some task"], 200)
-    capsys.readouterr()
-    assert gi.main(["--project", "repo", "--reviewed", tip, "--task", "other task", "--owner-words", OWNER,
-                    "--verify-timeout", "200", "--json"], root=repo.parent, cwd=str(repo.parent)) == 0
-    assert run_count(runs) == 1 and json.loads(capsys.readouterr().out)["verification_reuse"] == "REUSED"
 
 
 def test_verify_without_a_report_or_for_records_only_writes_no_record(repo: Path, tmp_path: Path) -> None:

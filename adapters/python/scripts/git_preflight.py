@@ -516,7 +516,7 @@ def push_preflight(repo: Path, main: str = "main", own: set[str] | str | None = 
 def render(report: Report) -> str:
     lines = [f"{report.verdict} {report.reason}: {report.detail}"]
     if report.next:
-        lines.append(f"next: {report.next}")
+        lines.append(f"hint: {report.next}")
     for key, value in report.evidence.items():
         if isinstance(value, list):
             value = ", ".join(value) if value else "-"

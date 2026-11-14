@@ -102,6 +102,7 @@ NEXT = {
     ),
     "TASK_ID_TAKEN": "take the next free number for the record on the topic, re-review, then run again",
     "AUTHORITY_REFERENCE_REFUSED": "integrate a range that touches .atc/tasks/ under the ID of a record it changes",
+    "NO_PASS_REVIEW": "pass --sha with the full SHA the formal review named",
 }
 
 
@@ -163,7 +164,7 @@ def resolve_commit(repo: Path, value: str, flag: str) -> str:
     if len(named) > 1:
         raise stop("AMBIGUOUS_SHA", f"{flag} {value} matches {len(named)} objects: "
                                     f"{', '.join(distinguishing(named, len(value)))}", evidence={"matches": named})
-    if flag == "--reviewed":
+    if flag == "--sha":
         raise stop("REVIEWED_SHA_UNKNOWN", f"{gp.REASONS['REVIEWED_SHA_UNKNOWN']}: {value}")
     raise stop("REVIEWED_SHA_UNKNOWN", f"the branch tip names no commit in this repository: {value}")
 
@@ -1495,7 +1496,7 @@ def resolve_authority_of(
 
 
 def resolve(args: argparse.Namespace, root: Path, cwd: str) -> Target:
-    reviewed = sha_form(args.reviewed, "--reviewed")
+    reviewed = sha_form(args.reviewed, "--sha")
     rebased = sha_form(args.rebased, "--rebased") if args.rebased is not None else None
     project, repo = resolve_repo(args, root, cwd)
     check_checkout(repo)
@@ -1508,7 +1509,7 @@ def resolve(args: argparse.Namespace, root: Path, cwd: str) -> Target:
     main_tip = rev(repo, main)
     if main_tip is None:
         raise Refused("GIT", f"cannot resolve {main} in {repo}")
-    reviewed = resolve_commit(repo, reviewed, "--reviewed")
+    reviewed = resolve_commit(repo, reviewed, "--sha")
     warnings: list[str] = []
     carried_from = None
     if rebased is not None:
@@ -1641,21 +1642,30 @@ def target_args(task: str, sha: str | None, root: Path, *, check: bool, verify_o
     if sha is None:
         found = close_out.latest_pass_review(task, environ)
         if found is None:
-            raise stop("NO_REVIEWED_SHA", f"no PASS review report for {task} under ~/.atc/reports")
+            raise stop("NO_PASS_REVIEW", f"no PASS review report for {task} under ~/.atc/reports")
         sha = found[0]
         if len(sha) < MIN_PREFIX:
             raise stop("REVIEWED_SHA_INVALID", f"the review report {found[1].name} names {sha}, shorter than "
                                                f"{MIN_PREFIX} characters")
-    reviewed = resolve_commit(repo, sha_form(sha, "--sha"), "--reviewed")
+    reviewed = resolve_commit(repo, sha_form(sha, "--sha"), "--sha")
     args = argparse.Namespace(project=declaring[0].name, task=task, reviewed=reviewed, rebased=None,
                               owner_words=OWNER_RUN_QUOTE, check=check, verify_only=verify_only)
-    try:
-        branch, _ = task_records.task_record(repo, task)
-    except cli_conventions.Refusal as refusal:
-        raise Refused("TASK_NOT_FOUND", refusal.detail) from None
+    # The branch is the one the record in the reviewed tree names, as `resolve` takes it; another copy of the
+    # record on some other branch must not decide the rebase.
+    in_reviewed = ta.parse(ta.show(repo, reviewed, ta.record_path(task)))
+    if in_reviewed is None:
+        # The reviewed commit holds no record of the task: nothing to rebase, and `resolve` judges the range.
+        try:
+            task_records.task_record(repo, task)
+        except cli_conventions.Refusal as refusal:
+            raise Refused("TASK_NOT_FOUND", refusal.detail) from None
+        return args
+    named = in_reviewed.get("branch")
+    branch = named if isinstance(named, str) and named else None
     tip = rev(repo, f"refs/heads/{branch}") if branch else None
     main_tip = rev(repo, "main")
-    if tip is None or tip == reviewed or (main_tip and is_ancestor(repo, reviewed, main_tip)):
+    if tip is None or tip == reviewed or (main_tip and is_ancestor(repo, reviewed, main_tip)) or (
+            main_tip and is_ancestor(repo, tip, main_tip)):
         return args
     if is_ancestor(repo, reviewed, tip):
         raise stop("UNREVIEWED_COMMITS", f"{branch} at {tip} has commits after the reviewed SHA {reviewed}")

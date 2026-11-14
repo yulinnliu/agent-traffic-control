@@ -186,4 +186,4 @@ def test_every_stop_names_its_next_step(repo: Path) -> None:
     (repo / "b.txt").write_text("dirty\n", encoding="utf-8")
     lines = gp.render(gp.merge_preflight(repo, "topic", tip)).splitlines()
     assert lines[0] == "STOP CHECKOUT_DIRTY: the integration checkout has uncommitted changes to tracked files: b.txt"
-    assert lines[1] == "next: have the owner of the listed paths commit or remove them, then run again"
+    assert lines[1] == "hint: have the owner of the listed paths commit or remove them, then run again"

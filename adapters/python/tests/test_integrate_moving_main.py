@@ -16,7 +16,7 @@ import git_integrate as gi
 import git_preflight as gp
 from test_git_integrate import (  # noqa: F401  (repo is a fixture)
     OWNER, REPORT, add_origin, commit, declare_verifier, evidence_dir, integrate, main_tip, publish, refusal, repo,
-    report_command, run_git, topic,
+    report_command, run_git, task_at, task_id, task_record, topic,
 )
 
 pytestmark = pytest.mark.integration
@@ -54,8 +54,8 @@ def short(sha: str) -> str:
 
 
 def run(repo: Path, reviewed: str, *extra: str) -> int:
-    return gi.main(["--project", "repo", "--reviewed", reviewed, "--task", "owner-approval", "--owner-words", OWNER,
-                    *extra], root=repo.parent)
+    """`atc integrate ID --sha reviewed`; a branch tip past a rebase is the rebased SHA the run carries over to."""
+    return gi.main([task_at(repo, reviewed), "--sha", reviewed, *extra], root=repo.parent)
 
 
 def rebase(repo: Path, branch: str, onto: str = "main") -> str:
@@ -82,8 +82,7 @@ def test_main_behind_origin_stops_before_the_verifier(repo: Path, tmp_path: Path
     err = capsys.readouterr().err
     first, after = refusal(err)
     assert first == f"STOP MAIN_BEHIND_ORIGIN: local main {before} is 1 commits behind origin/main {remote}"
-    assert after.startswith("next: fast-forward local main to origin/main")
-    assert "fetched=origin" in err
+    assert after.startswith("hint: fast-forward local main to origin/main")
     assert not marker.exists()
     assert main_tip(repo) == before
 
@@ -99,7 +98,7 @@ def test_main_diverged_from_origin_stops_with_both_counts(repo: Path, capsys: py
         f"STOP MAIN_DIVERGED_FROM_ORIGIN: local main {short(local)} has 1 commits origin/main lacks, "
         f"and origin/main {short(remote)} has 1 commits local main lacks"
     )
-    assert after.startswith("next: the owner decides how the local-only main commits reach origin")
+    assert after.startswith("hint: the owner decides how the local-only main commits reach origin")
     assert main_tip(repo) == local
 
 
@@ -110,7 +109,7 @@ def test_a_failed_fetch_stops(repo: Path, tmp_path: Path, capsys: pytest.Capture
     assert run(repo, tip) == 1
     first, after = refusal(capsys.readouterr().err)
     assert first.startswith("STOP FETCH_FAILED: git fetch origin failed")
-    assert after == "next: restore access to origin (network, credentials), then run again"
+    assert after == "hint: restore access to origin (network, credentials), then run again"
     assert main_tip(repo) == before
 
 
@@ -135,14 +134,14 @@ def test_an_unpublished_compatible_topic_requires_a_rebase(repo: Path, tmp_path:
     first, after = refusal(capsys.readouterr().err)
     assert first.startswith("STOP REBASE_REQUIRED: main advanced by 1 commits since the topic's base ")
     assert f"rebase the topic onto main {short(base)}" in first
-    assert after.startswith("next: rebase the unpublished topic onto main, then run again with --rebased")
+    assert after.startswith("hint: rebase the unpublished topic onto main, then run again;")
     assert not marker.exists()
     assert main_tip(repo) == base
 
 
 @pytest.mark.parametrize(("setup", "reason", "next_start"), [
-    ("overlap", "OVERLAP", "next: rebase the unpublished topic onto main, then run again with --rebased"),
-    ("conflict", "CONFLICT", "next: rebase the unpublished topic onto main and resolve the conflicts"),
+    ("overlap", "OVERLAP", "hint: rebase the unpublished topic onto main, then run again;"),
+    ("conflict", "CONFLICT", "hint: rebase the unpublished topic onto main and resolve the conflicts"),
 ])
 def test_unpublished_overlap_and_conflict_name_the_rebase(
     repo: Path, capsys: pytest.CaptureFixture[str], setup: str, reason: str, next_start: str,
@@ -171,15 +170,15 @@ def test_a_clean_rebase_carries_the_approval_over(repo: Path, capsys: pytest.Cap
     declare_verifier(repo, report_command(json.dumps(REPORT)))
     reviewed, between = stale_two_commit_topic(repo)
     rebased = rebase(repo, "topic")
-    assert run(repo, reviewed, "--rebased", rebased, "--check") == 0
+    assert run(repo, reviewed, "--check") == 0
     assert capsys.readouterr().out.rstrip().endswith(f"carried_from={short(reviewed)} reuse=NO_RECORD")
-    assert run(repo, reviewed[:12], "--rebased", rebased[:12], "--check") == 0
+    assert run(repo, reviewed[:12], "--check") == 0
     assert capsys.readouterr().out.rstrip().endswith(f"carried_from={short(reviewed)} reuse=NO_RECORD")
-    assert run(repo, reviewed, "--rebased", rebased, "--check", "--json") == 0
+    assert run(repo, reviewed, "--check", "--json") == 0
     carried = json.loads(capsys.readouterr().out)["carried_over"]
     assert (carried["carried_over_from"], carried["rebased"], carried["commits"]) == (reviewed, rebased, 2)
     assert len(carried["main_between"]) == 1 and carried["main_between"][0].startswith(between)
-    assert run(repo, reviewed, "--rebased", rebased) == 0
+    assert run(repo, reviewed) == 0
     captured = capsys.readouterr()
     lines = captured.out.splitlines()
     assert len(lines) == 1
@@ -187,7 +186,7 @@ def test_a_clean_rebase_carries_the_approval_over(repo: Path, capsys: pytest.Cap
     assert f" carried_from={short(reviewed)} log " in lines[0]
     assert main_tip(repo) == rebased
     assert (records(repo)[-1]["reviewed"], records(repo)[-1]["carried_over_from"]) == (rebased, reviewed)
-    assert (records(repo)[-1]["task"], records(repo)[-1]["authority"]) == ("owner-approval", {"kind": "owner_words", "quote": OWNER})
+    assert (records(repo)[-1]["task"], records(repo)[-1]["authority"]) == ("ATC-0001", {"kind": "owner_words", "quote": OWNER})
     evidence = json.loads((evidence_dir(repo) / f"{rebased}.json").read_text(encoding="utf-8"))
     assert (evidence["reviewed"], evidence["carried_over_from"], evidence["verdict"]) == (rebased, reviewed, "FF")
 
@@ -196,15 +195,26 @@ def test_a_carried_over_rebase_still_runs_the_verifier(repo: Path, capsys: pytes
     declare_verifier(repo, json.dumps([sys.executable, "-c", "import sys; sys.exit(5)"]))
     reviewed, between = stale_two_commit_topic(repo)
     rebased = rebase(repo, "topic")
-    assert run(repo, reviewed, "--rebased", rebased) == 3
+    assert run(repo, reviewed) == 3
     assert refusal(capsys.readouterr().err)[0].startswith(f"STOP VERIFICATION_FAILED: candidate verification failed for {short(rebased)}")
     assert main_tip(repo) == between
+
+
+def commit_with_record(repo: Path, path: str, content: str, branch: str) -> str:
+    """Commit ``path`` with the record of ``branch``, so the commit still binds its task."""
+    (repo / ".atc" / "tasks").mkdir(parents=True, exist_ok=True)
+    record = f".atc/tasks/{task_id(branch)}.yaml"
+    (repo / record).write_text(task_record(branch), encoding="utf-8")
+    (repo / path).write_text(content, encoding="utf-8")
+    run_git(repo, "add", "--", record, path)
+    run_git(repo, "commit", "-q", "-m", f"edit {path}")
+    return run_git(repo, "rev-parse", "HEAD")
 
 
 def amended(repo: Path) -> tuple[str, str]:
     reviewed, _ = stale_two_commit_topic(repo)
     run_git(repo, "switch", "-q", "-C", "topic", "main")
-    commit(repo, "a.txt", "a2\n")
+    commit_with_record(repo, "a.txt", "a2\n", "topic")
     commit(repo, "d.txt", "d changed\n")
     run_git(repo, "switch", "-q", "main")
     return reviewed, run_git(repo, "rev-parse", "topic")
@@ -258,12 +268,12 @@ def test_a_rebase_that_is_not_equivalent_is_refused(
     declare_verifier(repo, marker_verifier(marker))
     reviewed, rebased = setup(repo)
     before = main_tip(repo)
-    assert run(repo, reviewed, "--rebased", rebased) == 1
+    assert run(repo, reviewed) == 1
     first, after = refusal(capsys.readouterr().err)
     assert first.startswith("STOP CARRY_OVER_REFUSED: ")
     assert detail in first
     assert first.endswith(f"the approval for {short(reviewed)} does not carry over to {short(rebased)}")
-    assert after == "next: the rebased tip needs a fresh review; integrate the SHA that review names"
+    assert after == "hint: the rebased tip needs a fresh review; integrate the SHA that review names"
     assert not marker.exists()
     assert main_tip(repo) == before
 
@@ -274,10 +284,10 @@ def test_a_conflicting_replay_is_refused_even_when_the_patch_ids_match(
     reviewed = topic(repo, {"a.txt": "topic\n"})
     commit(repo, "a.txt", "main\n")
     run_git(repo, "switch", "-q", "-C", "topic", "main")
-    rebased = commit(repo, "a.txt", "topic\n")
+    rebased = commit_with_record(repo, "a.txt", "topic\n", "topic")
     run_git(repo, "switch", "-q", "main")
     monkeypatch.setattr(gi, "_patch_ids", lambda _repo, commits: ["same"] * len(commits))
-    assert run(repo, reviewed, "--rebased", rebased) == 1
+    assert run(repo, reviewed) == 1
     first, _ = refusal(capsys.readouterr().err)
     assert first.startswith(f"STOP CARRY_OVER_REFUSED: replaying {short(reviewed)} onto main conflicts in a.txt")
 
@@ -304,70 +314,4 @@ def test_a_published_overlap_keeps_the_reconcile_step(repo: Path, capsys: pytest
     publish(repo, "topic")
     commit(repo, "a.txt", "1\n2\n3\n4\n5\n6\n7\n8\nnine\n")
     assert run(repo, tip) == 1
-    assert refusal(capsys.readouterr().err)[1] == f"next: {gp.NEXT['OVERLAP']}"
-
-
-# The push listing
-
-
-def test_the_integration_lists_and_flags_what_a_push_carries(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    publish(repo, "main")
-    origin = main_tip(repo)
-    other = topic(repo, {"a.txt": "a2\n"}, branch="other")
-    assert run(repo, other) == 0
-    manual = commit(repo, "m.txt", "m\n")
-    capsys.readouterr()
-    mine = topic(repo, {"b.txt": "b2\n"}, branch="mine")
-    assert run(repo, mine) == 0
-    captured = capsys.readouterr()
-    assert len(captured.out.splitlines()) == 1
-    assert "WARNING 2 commits in origin/main..main come from other integrations or none" in captured.err
-    # The listing itself is the `--json` result's `push`, as `atc preflight push` renders it.
-    lines = ["", *gp.render_push(gp.push_listing(repo, "main", {mine}))]
-    assert lines[1:8] == [
-        f"push: 3 commits origin/main {short(origin)} -> main {short(mine)}",
-        f'  integration {short(other)} task="owner-approval" authority=owner_words [NO PUSH APPROVAL]',
-        f"    {short(other)} edit a.txt",
-        "  no integration record [NO PUSH APPROVAL]",
-        f"    {short(manual)} edit m.txt",
-        f'  integration {short(mine)} task="owner-approval" authority=owner_words [this integration]',
-        f"    {short(mine)} edit b.txt",
-    ]
-    assert "WARNING 2 commits in origin/main..main come from other integrations or none" in captured.err
-
-
-def test_preflight_push_fetches_and_groups_by_integration(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    publish(repo, "main")
-    first = topic(repo, {"a.txt": "a2\n"}, branch="first")
-    assert run(repo, first) == 0
-    second = topic(repo, {"b.txt": "b2\n"}, branch="second")
-    assert run(repo, second) == 0
-    capsys.readouterr()
-    assert gp.main(["push", "--project", "repo", "--integration", second], root=repo.parent) == 0
-    lines = capsys.readouterr().out.splitlines()
-    assert lines[0] == "PUSH PUSH_LISTED: 2 commits in origin/main..main; 1 lack this integration's push approval"
-    assert lines[-4:] == [
-        f'  integration {short(first)} task="owner-approval" authority=owner_words [NO PUSH APPROVAL]',
-        f"    {short(first)} edit a.txt",
-        f'  integration {short(second)} task="owner-approval" authority=owner_words [this integration]',
-        f"    {short(second)} edit b.txt",
-    ]
-    assert not re.search(r"\b[0-9a-f]{40}\b", "\n".join(lines))
-    assert gp.main(["push", "--project", "repo", "--json"], root=repo.parent) == 0
-    data = json.loads(capsys.readouterr().out)
-    assert [(c["sha"], c["integration"], c["push_approval"], c["task"], c["authority"])
-            for c in data["push"]["commits"]] == [
-        (first, first, None, "owner-approval", {"kind": "owner_words", "quote": OWNER}),
-        (second, second, None, "owner-approval", {"kind": "owner_words", "quote": OWNER}),
-    ]
-    push_from_other(repo, "c.txt", "c\n")
-    assert gp.main(["push", "--project", "repo"], root=repo.parent) == 1
-    assert capsys.readouterr().out.startswith("STOP MAIN_DIVERGED_FROM_ORIGIN: ")
-
-
-def test_push_and_integrate_take_no_main_flag(capsys: pytest.CaptureFixture[str]) -> None:
-    with pytest.raises(SystemExit) as exc:
-        gp.main(["push", "--project", "repo", "--main", "main"])
-    assert exc.value.code == 2
-    assert gi.main(["--project", "repo", "--reviewed", "0" * 40, "--task", "x", "--main", "main"]) == 2
-    assert "--main" in capsys.readouterr().err
+    assert refusal(capsys.readouterr().err)[1] == f"hint: {gp.NEXT['OVERLAP']}"

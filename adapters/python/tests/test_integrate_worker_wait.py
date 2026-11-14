@@ -40,7 +40,7 @@ def test_a_verifier_that_waited_past_its_limit_is_not_a_failed_candidate(tmp_pat
     argv = verifier(tmp_path, "assert os.environ['ATC_WORKER_MAX_WAIT'] == '60'\n"
                               "assert os.environ['ATC_WORKER_WAIT_FILE']\n"
                               "sys.stderr.write('WORKER_WAIT_TIMEOUT\\nwaited 61s for 2 host workers (parallel)\\n"
-                              "behind: atc test run x pid 1 4 tokens for 3m\\nnext: atc doctor\\n')\nsys.exit(1)\n")
+                              "behind: atc test run x pid 1 4 tokens for 3m\\nhint: atc doctor\\n')\nsys.exit(1)\n")
     with pytest.raises(gi.Refused) as refused:
         gi._verify_candidate(argv, candidate, "a" * 40, "b" * 40, "c" * 40, 60, tmp_path, tmp_path / "report.json")
     assert refused.value.token == workers.WAIT_TIMEOUT

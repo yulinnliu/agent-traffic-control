@@ -154,7 +154,7 @@ def test_documentation_only_range_skips_the_tests_only(candidate: Candidate, cap
     candidate.advance("docs/NOTE.md", "# note\n")
     assert iv.main(candidate.env(), candidate.root, candidate.run) == 0
     assert capsys.readouterr().out.splitlines()[0] == "classification: documentation-only"
-    assert candidate.started()[1:] == ["scripts/validate_workspace.py", "../../shared/policies/examples"]
+    assert candidate.started()[1:] == ["validate", "../../shared/policies/examples"]
 
 
 @pytest.mark.parametrize(("paths", "expected"), [
@@ -222,7 +222,7 @@ def test_this_checkout_imports_its_own_product_modules() -> None:
 
 
 @pytest.mark.parametrize(("failing", "token", "later"), [
-    ("scripts/validate_workspace.py", "WORKSPACE_VALIDATION_FAILED", ["../../shared/policies/examples", "parallel"]),
+    ("validate", "WORKSPACE_VALIDATION_FAILED", ["../../shared/policies/examples", "parallel"]),
     ("../../shared/policies/examples", "POLICY_CHECK_FAILED", ["parallel"]),
     ("parallel", "TESTS_FAILED", ["serial", "interactive"]),
 ])
