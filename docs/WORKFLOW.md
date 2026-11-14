@@ -143,7 +143,10 @@ nothing. `close` removes the worktree, the branch, the task's registered
 scratches and its reports; items that need the Owner's consent are listed,
 never deleted, and the record's `keep` keeps its items. It finds the
 worktree from the record's `branch`, so a task whose branch predates the
-`<harness>+<ID>` naming closes the same way. `atc task close <ID> --abandon`
+`<harness>+<ID>` naming closes the same way, and a topic integrated by a
+recorded, Owner-authorized squash closes plainly too, its tip kept as the tag
+`archive/<ID>` (governance `GIT_WORKFLOW.md` § Explicitly authorized squash).
+`atc task close <ID> --abandon`
 closes a task that will not be integrated and keeps its tip as the tag
 `archive/<ID>`.
 

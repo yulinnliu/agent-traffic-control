@@ -55,7 +55,7 @@ the task ID, whose prefix names the repository. `--json` prints one object:
 | `atc task update ID [--title T] [--decision TEXT]... [--scope S] [--tests L] [--file F]` | record an Owner decision or a changed scope or test level | one commit on the task's branch |
 | `atc task resume ID` | continue a task in a new session | nothing; prints the worktree and how many commits `main` has moved since its tip |
 | `atc task list [ID] [--project P \| --all] [-v]` | list tasks with their status (`open`, `integrated`, `closed`, `abandoned`) | nothing; `-v` adds each worktree's lock, clean and path findings |
-| `atc task close ID [--check]` | the task is integrated and its worktree is no longer needed | re-checks identity, merged and clean, then removes the worktree, its branch, the task's registered scratches and its reports; lists the items that need the Owner's consent and deletes none of them |
+| `atc task close ID [--check]` | the task is integrated and its worktree is no longer needed | re-checks identity, merged and clean, then removes the worktree, its branch (a topic integrated by a recorded, Owner-authorized squash keeps its tip as `archive/<ID>`), the task's registered scratches and its reports; lists the items that need the Owner's consent and deletes none of them |
 | `atc task close ID --abandon` | the task authority explicitly abandons the task | tags the tip `archive/<ID>`, then removes the worktree and compare-and-deletes the branch, keeping the tag |
 
 `--check` lists what `close` would delete and deletes nothing. The record's

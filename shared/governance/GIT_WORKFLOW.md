@@ -389,14 +389,18 @@ also match. Record both SHAs and tree equivalence with that evidence. Any other
 shape (`main` advanced before the squash, or overlapping files) is reviewed as
 a new integration.
 
-The source branch stays as review evidence; deleting it is a separate
-decision. Matching trees or patches never establish authorization or
-completeness by themselves. `atc task close` checks ancestry and refuses a
-squashed topic as `NOT_MERGED`. With valid cleanup authority, a squashed Hami
-Managed Worktree is closed with `atc task close <task> --abandon`, which keeps
-the branch tip as the tag `archive/<task>`; the caller first checks the squash
-commit message and the integration record. The worktree is never removed by
-hand.
+The coordinator, who hears the Owner, records the squash as one
+`integrations.jsonl` line: `kind: squash`, the `task`, `records_only: false`,
+the squash commit as `candidate_sha`, the recorded target tip as
+`main_before`, the source tip as `reviewed`, and the Owner's words as
+`authority` `{"kind": "owner_words", "quote": ...}`. Matching trees or patches
+never establish authorization or completeness by themselves. `atc task close`
+counts the task as integrated, with no flag, only when that line is the task's
+latest integration on `main`, its squash commit's only parent is `main_before`,
+its tree equals the tree of `reviewed`, and the task's branch still ends at
+`reviewed`. The close then keeps the source tip as the tag `archive/<task>`,
+the review evidence, and removes the worktree and branch. Any other squashed
+topic stays `NOT_MERGED`. The worktree is never removed by hand.
 
 ## Git environment in hooks and tests
 
@@ -454,7 +458,8 @@ command themself.
 Each `integrations.jsonl` line carries `task`, `records_only` and
 `authority`: `{"kind": "owner_words", "quote": ...}` or `{"kind": "sync"}`
 for a governance sync commit; `{"kind": "record", "task_id": ...}` and
-`{"kind": "unclassified"}` remain values readers accept in existing logs. A records-only integration that binds several tasks
+`{"kind": "unclassified"}` remain values readers accept in existing logs. A squash
+line also carries `kind: squash` (§ Explicitly authorized squash). A records-only integration that binds several tasks
 writes one line per task with the same candidate, and every records-only line
 carries `main_before`.
 

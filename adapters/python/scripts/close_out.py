@@ -33,8 +33,8 @@ def git(repo: Path, *args: str) -> subprocess.CompletedProcess:
                           env=task_records._env(), stdin=subprocess.DEVNULL)
 
 
-def integrated(repo: Path, task: str) -> str:
-    """The candidate SHA of the task's latest integration that local ``main`` contains."""
+def integrated(repo: Path, task: str) -> dict:
+    """The line of the task's latest integration whose candidate local ``main`` contains."""
     common = git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip()
     try:
         lines = Path(common).joinpath(*INTEGRATIONS).read_text(encoding="utf-8").splitlines()
@@ -46,13 +46,36 @@ def integrated(repo: Path, task: str) -> str:
             entry = json.loads(line)
         except ValueError:
             continue
-        if entry.get("task") == task and not entry.get("records_only") and isinstance(entry.get("candidate_sha"), str):
-            candidates.append(entry["candidate_sha"])
-    for sha in reversed(candidates):
-        if git(repo, "merge-base", "--is-ancestor", sha, "main").returncode == 0:
-            return sha
+        if (isinstance(entry, dict) and entry.get("task") == task and not entry.get("records_only")
+                and isinstance(entry.get("candidate_sha"), str)):
+            candidates.append(entry)
+    for entry in reversed(candidates):
+        if git(repo, "merge-base", "--is-ancestor", entry["candidate_sha"], "main").returncode == 0:
+            return entry
     raise Refusal("NOT_INTEGRATED", f"no integration of {task} is on main",
                   f"integrate it first (atc integrate {task}), or close it with --abandon")
+
+
+def _rev(repo: Path, spec: str) -> str | None:
+    run = git(repo, "rev-parse", "--verify", "--quiet", spec)
+    return run.stdout.strip() if run.returncode == 0 and run.stdout.strip() else None
+
+
+def squash_integrated(repo: Path, entry: dict, branch: str | None) -> bool:
+    """Whether ``entry`` records an Owner-authorized squash of the branch's tip (GIT_WORKFLOW.md § Explicitly
+    authorized squash): its squash commit, on ``main``, has the recorded target tip as its only parent and the
+    recorded source tip's tree, and the branch still ends at that source tip."""
+    authority = entry.get("authority")
+    source, target, squash = entry.get("reviewed"), entry.get("main_before"), entry["candidate_sha"]
+    if (entry.get("kind") != "squash" or branch is None or not isinstance(authority, dict)
+            or authority.get("kind") != "owner_words" or not isinstance(authority.get("quote"), str)
+            or not authority["quote"].strip() or not isinstance(source, str) or not isinstance(target, str)):
+        return False
+    parents = git(repo, "rev-list", "--parents", "-n", "1", squash).stdout.split()[1:]
+    tree = _rev(repo, f"{squash}^{{tree}}")
+    return (parents == [_rev(repo, f"{target}^{{commit}}")] and tree is not None
+            and tree == _rev(repo, f"{source}^{{tree}}")
+            and _rev(repo, f"refs/heads/{branch}") == _rev(repo, f"{source}^{{commit}}"))
 
 
 def keep_of(record: dict, task: str) -> set[str]:
@@ -187,8 +210,12 @@ def rehearse_report(repo: Path, task: str, report: Path) -> str:
     return f"DELETE {report} (ledger line: role {summary['role']}, verdict {summary['verdict'] or 'null'})"
 
 
-def worktree_item(ctx: hw.Context, branch: str, task: str, cwd: str, check: bool, abandon: bool) -> str | None:
-    """One item line for the task's worktree and branch; None when the task has none."""
+def worktree_item(ctx: hw.Context, branch: str, task: str, cwd: str, check: bool, abandon: bool,
+                  squash: str | None = None) -> str | None:
+    """One item line for the task's worktree and branch; None when the task has none. A topic ``squash``
+    integrated is removed as an abandoned one is, its tip kept as `archive/<ID>`."""
+    archive = abandon or squash is not None
+    kept_as = f", squash-integrated as {squash}" if squash else ""
     try:
         target, _ = hw.located(ctx, branch)
     except hw.Stop as stop:
@@ -199,14 +226,14 @@ def worktree_item(ctx: hw.Context, branch: str, task: str, cwd: str, check: bool
         return f"REFUSED {target} (the working directory is inside it; run it from elsewhere)"
     if check:
         try:
-            refusal, _, _ = hw.assess(ctx, branch, abandon, task)
+            refusal, _, _ = hw.assess(ctx, branch, archive, task)
         except hw.Stop as stop:
             refusal = stop.result
         if refusal is not None:
             return f"REFUSED {target} ({refusal.code}: {refusal.detail})"
-        return f"DELETE {target} (branch {branch}{', archived as archive/' + task if abandon else ''})"
+        return f"DELETE {target} (branch {branch}{kept_as}{', archived as archive/' + task if archive else ''})"
     try:
-        result = hw.remove(ctx, branch, abandon, task)
+        result = hw.remove(ctx, branch, archive, task)
     except hw.Stop as stop:
         result = stop.result
     if result.code != "OK":
@@ -221,8 +248,10 @@ def close(root: Path, environ: dict[str, str], cwd: str, task: str, *, check: bo
     project = task_records.project_of_task(ws, task)
     repo = Path(project.repo)
     branch, record = task_records.task_record(repo, task)
+    squash = None
     if not abandon:
-        integrated(repo, task)
+        entry = integrated(repo, task)
+        squash = entry["candidate_sha"] if squash_integrated(repo, entry, branch) else None
     keep = keep_of(record, task)
     ctx = hw.context(root, environ, project.name)
     lines: list[str] = []
@@ -232,7 +261,7 @@ def close(root: Path, environ: dict[str, str], cwd: str, task: str, *, check: bo
         worktree = Path(found["worktree"]) if found else None
         if "worktree" in keep:
             lines += [f"KEPT {worktree} (record keep)"] if worktree else []
-        elif (line := worktree_item(ctx, branch, task, cwd, check, abandon)) is not None:
+        elif (line := worktree_item(ctx, branch, task, cwd, check, abandon, squash)) is not None:
             lines.append(line)
     tmp = locations.locate(environ).tmp
     scratches = task_scratches(tmp, task, worktree)

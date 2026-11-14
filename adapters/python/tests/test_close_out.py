@@ -198,6 +198,80 @@ def test_a_closed_task_on_an_old_style_branch_is_found_from_its_record(ws: Works
     assert run_git(ws.repo, "branch", "--list", "worktree-claude+cli-redesign") == ""
 
 
+SQUASH_BRANCH = "claude+squashed"
+OWNER_SQUASH = {"kind": "owner_words", "quote": "squash ATC topic onto main"}
+
+
+def squashed(ws: Workspace, tmp_path: Path, atc_tmp: Path, *, on_main: bool = True, tree_of: str = "tip",
+             parent: str = "main", **line: object) -> tuple[Path, str, dict[str, str]]:
+    """A topic of two commits squashed onto ``main`` by `git commit-tree` and recorded as a squash: the squash
+    commit's tree comes from ``tree_of`` (`tip` or `first`); with ``parent`` `moved` its parent is a commit
+    `main` gained after the recorded target tip."""
+    topic = ws.worktree(ws.repo, SQUASH_BRANCH, SQUASH_BRANCH)
+    first = commit(topic, {f".atc/tasks/{TASK}.yaml": record(TASK, SQUASH_BRANCH), "a.txt": "a\n"})
+    tip = commit(topic, {"b.txt": "b\n"})
+    before = run_git(ws.repo, "rev-parse", "main")
+    on = before if parent == "main" else commit(ws.repo, {"moved.txt": "m\n"})
+    tree = run_git(ws.repo, "rev-parse", f"{tip if tree_of == 'tip' else first}^{{tree}}")
+    squash = run_git(ws.repo, "commit-tree", tree, "-p", on, "-m", f"squash {tip}")
+    if on_main:
+        run_git(ws.repo, "merge", "-q", "--ff-only", squash)
+    entry = {"kind": "squash", "task": TASK, "records_only": False, "candidate_sha": squash, "main_before": before,
+             "reviewed": tip, "authority": OWNER_SQUASH, **line}
+    ws.integrate(ws.repo, **{key: value for key, value in entry.items() if value is not None})
+    home = tmp_path / "home"
+    return topic, tip, {"CLAUDECODE": "1", "ATC_TMP": str(atc_tmp), "USERPROFILE": str(home), "HOME": str(home)}
+
+
+def test_a_recorded_owner_authorized_squash_closes_and_keeps_the_tip_as_archive(
+        ws: Workspace, atc_tmp: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    topic, tip, environ = squashed(ws, tmp_path, atc_tmp)
+    code, payload, err = close(ws, environ, capsys, ws.root, "--check")
+    assert code == 0, (payload, err)
+    assert outcomes(payload)[str(topic)][0] == "DELETE" and "squash-integrated as" in outcomes(payload)[str(topic)][1]
+    code, payload, err = close(ws, environ, capsys, ws.root)
+    assert code == 0, (payload, err)
+    assert outcomes(payload)[str(topic)][0] == "DELETED" and not topic.exists()
+    assert run_git(ws.repo, "branch", "--list", SQUASH_BRANCH) == ""
+    assert run_git(ws.repo, "rev-parse", f"refs/tags/archive/{TASK}") == tip
+
+
+@pytest.mark.parametrize("shape", [
+    {"tree_of": "first"},
+    {"parent": "moved"},
+    {"authority": {"kind": "record", "task_id": TASK, "quote": "squash it"}},
+    {"authority": {"kind": "owner_words", "quote": " "}},
+    {"authority": None},
+    {"kind": None},
+    {"main_before": None},
+    {"reviewed": None},
+], ids=["wrong-tree", "wrong-first-parent", "not-owner-words", "empty-quote", "no-authority", "not-a-squash",
+        "no-target-tip", "no-source-tip"])
+def test_a_squash_that_fails_a_check_stays_unmerged(ws: Workspace, atc_tmp: Path, tmp_path: Path, shape: dict,
+                                                    capsys: pytest.CaptureFixture[str]) -> None:
+    topic, _tip, environ = squashed(ws, tmp_path, atc_tmp, **shape)
+    code, payload, err = close(ws, environ, capsys, ws.root)
+    outcome, why = outcomes(payload)[str(topic)]
+    assert (outcome, why.split(":")[0]) == ("REFUSED", "UNMERGED"), (payload, err)
+    assert topic.is_dir() and run_git(ws.repo, "tag", "--list", f"archive/{TASK}") == ""
+
+
+def test_a_squash_whose_branch_moved_past_the_source_tip_stays_unmerged(
+        ws: Workspace, atc_tmp: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    topic, _tip, environ = squashed(ws, tmp_path, atc_tmp)
+    commit(topic, {"c.txt": "c\n"})
+    code, payload, err = close(ws, environ, capsys, ws.root)
+    assert outcomes(payload)[str(topic)][1].startswith("UNMERGED"), (payload, err)
+    assert topic.is_dir()
+
+
+def test_a_squash_commit_off_main_is_not_integrated(ws: Workspace, atc_tmp: Path, tmp_path: Path,
+                                                    capsys: pytest.CaptureFixture[str]) -> None:
+    topic, _tip, environ = squashed(ws, tmp_path, atc_tmp, on_main=False)
+    code, _payload, err = close(ws, environ, capsys, ws.root)
+    assert (code, err.split(" ", 2)[1].rstrip(":")) == (1, "NOT_INTEGRATED") and topic.is_dir()
+
+
 def _link(link: Path, target: Path) -> None:
     """A directory junction on Windows, a symbolic link elsewhere."""
     if os.name == "nt":

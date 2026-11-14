@@ -165,7 +165,12 @@ working directory's.
    tag `archive/<ID>`.
 2. The worktree whose branch is the record's `branch`, and the branch, are
    removed after the checks that the worktree is clean and merged into
-   `main`; an empty directory left at that branch's managed path after Git
+   `main`. When the task's latest integration on `main` is a `kind: squash`
+   line that passes governance `GIT_WORKFLOW.md` § Explicitly authorized
+   squash (Owner's words, the squash commit's only parent `main_before`, its
+   tree that of `reviewed`, the branch still at `reviewed`), the branch counts
+   as merged and its tip is kept as the tag `archive/<ID>`; any other squashed
+   branch is refused `UNMERGED`; an empty directory left at that branch's managed path after Git
    unregistered the worktree goes too. A worktree that holds the working
    directory ends `SKIPPED (working directory)`, for the coordinator to
    remove.
