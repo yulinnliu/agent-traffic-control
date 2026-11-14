@@ -61,8 +61,10 @@ class Workspace:
         self.repo = root / "projects" / PROJECT
 
     def worktree(self, repo: Path, name: str, branch: str) -> Path:
+        """A worktree `<a>+<b>` locked as `<a>:<b>`, as `atc task create` leaves it."""
         path = self.root / "worktrees" / (PROJECT if repo == self.repo else "root") / name
         run_git(repo, "worktree", "add", "-q", "-b", branch, str(path), "main")
+        run_git(repo, "worktree", "lock", "--reason", name.replace("+", ":", 1), str(path))
         return path
 
     def integrate(self, repo: Path, **line: object) -> None:
@@ -199,9 +201,22 @@ def test_create_counts_a_number_only_a_remote_tracking_branch_holds(ws: Workspac
     other = ws.worktree(ws.repo, "claude+other", "other")
     commit(other, {".atc/tasks/DEMO-0007.yaml": record("DEMO-0007", "other")})
     run_git(ws.repo, "update-ref", "refs/remotes/origin/other", "other")
-    run_git(ws.repo, "worktree", "remove", "--force", str(other))
+    run_git(ws.repo, "worktree", "remove", "--force", "--force", str(other))
     run_git(ws.repo, "branch", "-D", "other")
     assert ws.cli(capsys, "create", "widget", "--scope", "s", cwd=ws.repo)[1].startswith("CREATED DEMO-0008 ")
+
+
+def test_numbers_come_from_worktree_names_never_their_parent_paths(tmp_path: Path) -> None:
+    """A checkout under a directory named after a task (`atc test ID` runs tests under `~/.atc/tmp/<ID>-...`)
+    takes no number; a linked worktree's own name and branch do, even detached."""
+    repo = tmp_path / "DEMO-0042-sha" / "ATC-0001" / "repo"
+    repo.mkdir(parents=True)
+    run_git(repo, "init", "-q", "-b", "main")
+    commit(repo, {"AGENTS.md": agents("DEMO")})
+    assert task_records.taken_numbers(repo, "DEMO") == set()
+    run_git(repo, "worktree", "add", "-q", "--detach", str(tmp_path / "DEMO-0050" / "claude+DEMO-0003"), "main")
+    run_git(repo, "worktree", "add", "-q", "-b", "claude+DEMO-0006", str(tmp_path / "plain"), "main")
+    assert task_records.taken_numbers(repo, "DEMO") == {3, 6}
 
 
 def test_create_takes_the_workspace_root_as_a_project(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
@@ -251,7 +266,7 @@ def test_list_derives_each_status(ws: Workspace, capsys: pytest.CaptureFixture[s
     abandoned = ws.worktree(ws.repo, "claude+abandoned", "t-abandoned")
     commit(abandoned, {".atc/tasks/DEMO-0006.yaml": record("DEMO-0006", "t-abandoned")})
     run_git(ws.repo, "tag", "archive/DEMO-0006", "t-abandoned")
-    run_git(ws.repo, "worktree", "remove", "--force", str(abandoned))
+    run_git(ws.repo, "worktree", "remove", "--force", "--force", str(abandoned))
     run_git(ws.repo, "branch", "-D", "t-abandoned")
 
     rows = ws.listing(capsys)
@@ -324,7 +339,7 @@ def test_list_reads_unknown_for_an_integration_whose_candidate_is_off_main(ws: W
     commit(ws.repo, {".atc/tasks/DEMO-0001.yaml": record("DEMO-0001", "t-lost")})
     lost = ws.worktree(ws.repo, "claude+lost", "t-lost")
     candidate = commit(lost, {"work.txt": "never on main\n"})
-    run_git(ws.repo, "worktree", "remove", "--force", str(lost))
+    run_git(ws.repo, "worktree", "remove", "--force", "--force", str(lost))
     run_git(ws.repo, "branch", "-D", "t-lost")
     ws.integrate(ws.repo, candidate_sha=candidate, task="DEMO-0001")
     assert ws.listing(capsys)["DEMO-0001"]["status"] == "unknown"

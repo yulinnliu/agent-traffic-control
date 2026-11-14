@@ -253,10 +253,23 @@ def taken_numbers(repo: Path, prefix: str) -> set[int]:
         if ref.startswith(("refs/heads/", "refs/remotes/", "refs/tags/archive/")):
             listing = git(repo, "ls-tree", "--name-only", ref, f"{TASKS_DIR}/", check=False).stdout
             stems += [Path(line).name.removesuffix(".yaml") for line in listing.splitlines() if line.endswith(".yaml")]
-    stems += [line for line in git(repo, "worktree", "list", "--porcelain").stdout.splitlines()]
+    stems += worktree_names(repo)
     import git_preflight
     stems += [r["task"] for r in git_preflight.read_integrations(repo) if isinstance(r.get("task"), str)]
     return {int(m.group(1)) for stem in stems for m in pattern.finditer(stem)}
+
+
+def worktree_names(repo: Path) -> list[str]:
+    """The branch of every worktree and the directory name of every linked one; a path's parent directories,
+    such as a test's temporary root named after a task, are never read."""
+    names: list[str] = []
+    for entry in git(repo, "worktree", "list", "--porcelain").stdout.split("\n\n")[1:]:
+        for line in entry.splitlines():
+            if line.startswith("worktree "):
+                names.append(Path(line.removeprefix("worktree ")).name)
+            elif line.startswith("branch "):
+                names.append(line.removeprefix("branch "))
+    return names
 
 
 def repository_identity(repo: Path) -> dict[str, str]:
