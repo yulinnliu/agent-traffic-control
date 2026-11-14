@@ -37,6 +37,7 @@ HINTS = {
     "ALREADY_EXISTS": "atc task resume {task}",
     "NOT_FOUND": "atc task list -v shows the task's worktree, if any",
     "IDENTITY_MISMATCH": "the worktree or branch belongs to something else; ask the Owner",
+    "IDENTITY_AMBIGUOUS": "the worktree's lock is missing, so its holder is unknown; ask the Owner",
     "PATH_UNSAFE": "stop and hand to the Owner",
     "DIRTY": "commit or discard the worktree's changes, then run it again",
     "UNMERGED": "integrate the task first, or close it with --abandon",
@@ -409,6 +410,8 @@ def create(ctx: Context, harness: str, task_id: str) -> Result:
     if added.returncode == 0:
         return Result("OK", target, evidence={"branch": name, "base": base})
     evidence = {"git": first_line(added.stderr)}
+    if branch_present(repo, name):
+        return Result("IDENTITY_MISMATCH", target, f"branch {name} was created by another process", evidence)
     if PERMISSION_TEXT.search(added.stderr) or not metadata_writable(repo):
         return Result("PERMISSION_DENIED", target, "Git metadata or the worktrees root is not writable from this session",
                       evidence)
@@ -436,10 +439,8 @@ def resume(ctx: Context, branch: str) -> Result:
     return Result("OK", target, evidence={"branch": branch, "behind_main": int(behind)})
 
 
-def restoration_evidence(repo: str, target: str, old_reason: str | None) -> dict:
-    """Restore the lock ``old_reason`` after a failed removal and report what reads back; nothing without one."""
-    if old_reason is None:
-        return {}
+def restoration_evidence(repo: str, target: str, old_reason: str) -> dict:
+    """Restore the lock ``old_reason`` after a failed removal and report what reads back."""
     try:
         git(repo, "worktree", "lock", "--reason", old_reason, target)
         entry = next((e for e in list_worktrees(repo)[1:] if key(e["worktree"]) == key(target)), None)
@@ -476,11 +477,25 @@ def cleanup_branch_config(repo: str, branch: str) -> dict:
     return {"branch_config": "removed"}
 
 
+def lock_problem(target: str, entry: dict) -> Result | None:
+    """The worktree `<a>+<b>` must be locked by `<a>:<b>` (contract 2 `<harness>:<ID>`; an earlier contract's
+    `<owner>:<topic>[:<session>]`): a missing lock or one naming another holder refuses its removal."""
+    reason = entry.get("locked")
+    if reason is None:
+        return Result("IDENTITY_AMBIGUOUS", target, "lock missing")
+    expected = os.path.basename(target).split("+", 1)
+    if reason.split(":")[:2] != expected:
+        return Result("IDENTITY_MISMATCH", target, f"lock reason {reason!r} does not name {':'.join(expected)}")
+    return None
+
+
 def assess(ctx: Context, branch: str, abandon: bool = False, task_id: str = "") -> tuple[Result | None, str, dict]:
     """Whether the worktree of ``branch`` may be removed: (refusal or None, target, entry). Changes nothing."""
     target, entry = located(ctx, branch)
     if not os.path.isdir(target):
         return Result("NOT_FOUND", target, "registered but the directory is missing"), target, entry
+    if (problem := lock_problem(target, entry)) is not None:
+        return problem, target, entry
     try:
         report = gp.cleanup_preflight(Path(ctx.project.repo), Path(target))
     except gp.GitError as exc:
@@ -516,11 +531,10 @@ def remove(ctx: Context, branch: str, abandon: bool = False, task_id: str = "") 
         tagged = git(repo, "tag", tag, tip)
         if tagged.returncode != 0:
             return Result("ARCHIVE_MISMATCH", target, f"cannot tag {tag}: {first_line(tagged.stderr)}")
-    reason = entry.get("locked")
-    if reason is not None:
-        unlocked = git(repo, "worktree", "unlock", target)
-        if unlocked.returncode != 0:
-            return mutation_failure(repo, target, "unlock failed", unlocked)
+    reason = entry["locked"]
+    unlocked = git(repo, "worktree", "unlock", target)
+    if unlocked.returncode != 0:
+        return mutation_failure(repo, target, "unlock failed", unlocked)
     removed = git(repo, "worktree", "remove", target)
     if removed.returncode != 0:
         restoration = restoration_evidence(repo, target, reason)
@@ -582,6 +596,11 @@ def audit(ctx: Context, environ: dict[str, str] | None = None) -> list[Result]:
         evidence = state_evidence(project.repo, entry, main_tip)
         try:
             check_target_path(ws, project, entry["worktree"], [])
+            problem = lock_problem(entry["worktree"], entry)
+            if problem is not None:
+                problem.evidence = evidence
+                results.append(problem)
+                continue
             results.append(Result("OK", entry["worktree"], removability(evidence), evidence))
         except Stop as stop:
             stop.result.evidence = {**evidence, **stop.result.evidence}

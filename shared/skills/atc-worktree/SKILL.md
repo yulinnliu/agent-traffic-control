@@ -76,6 +76,7 @@ line with the concrete next step. Exit status is `0` OK, `1` STOP, `2` ERROR,
 | `NOT_FOUND` | `atc task list -v` shows the task's worktree, if any |
 | `HARNESS_UNKNOWN` | run from a harness session; never set its variables by hand |
 | `IDENTITY_MISMATCH` | stop and hand to the user — the directory, branch or lock disagree about who owns it |
+| `IDENTITY_AMBIGUOUS` | stop and hand to the user — the worktree has no lock, so nothing names its holder |
 | `PATH_UNSAFE` | stop and hand to the user; `detail` is one of `outside-root`, `protected`, `reparse`, `unregistered`, `resolved-mismatch`, `external-root-overlap` |
 | `DIRTY` | commit or discard the worktree's changes, then run it again |
 | `UNMERGED` | integrate the task first; an explicitly authorized abandonment uses `--abandon` |
