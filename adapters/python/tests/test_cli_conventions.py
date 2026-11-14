@@ -9,7 +9,8 @@ from pathlib import Path
 import atc_cli
 import cli_conventions
 import pytest
-from test_atc_cli import NOT_CANONICAL, SUBCOMMANDS, ascii_stdout, call, parsers  # noqa: F401  (fixture)
+from test_atc_cli import (  # noqa: F401  (fixtures)
+    NOT_CANONICAL, SUBCOMMANDS, _a_workspace_above_nothing, ascii_stdout, call, parsers)
 
 pytestmark = pytest.mark.integration
 
@@ -157,8 +158,10 @@ def test_doctor_takes_json_and_refuses_unknown_arguments(monkeypatch: pytest.Mon
     (["sync", "demo"], None, ["demo"]),
 ], ids=["global root before", "global root equals", "no root"])
 def test_the_global_root_is_resolved_before_the_subcommand_sees_its_arguments(
-        argv: list[str], root: str | None, rest: list[str], monkeypatch: pytest.MonkeyPatch) -> None:
+        argv: list[str], root: str | None, rest: list[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     seen: list = []
-    monkeypatch.setattr(atc_cli, "_dispatch", lambda command, rest, explicit: seen.append((command, rest, explicit)) or 0)
+    (tmp_path / "workspace.yaml").write_text("version: 1\n", encoding="utf-8")
+    monkeypatch.setenv("ATC_ROOT", str(tmp_path))
+    monkeypatch.setattr(atc_cli, "_dispatch", lambda command, rest, resolved: seen.append((command, rest, resolved)) or 0)
     assert atc_cli.main(argv, checkout=NOT_CANONICAL) == 0
-    assert seen == [("sync", rest, root)]
+    assert seen == [("sync", rest, Path(root).resolve() if root else tmp_path.resolve())]

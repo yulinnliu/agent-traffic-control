@@ -141,8 +141,13 @@ def load_workspace(root: Path, environ: dict[str, str]) -> Workspace:
 
 
 def root_project(ws: Workspace) -> Project:
-    """The workspace root as a worktree target: never an entry of ``ws.projects``, and without state."""
-    return Project(validator.ROOT_TOPICS_NAME, ws.root, os.path.join(ws.root, *validator.ROOT_WORKTREES.split("/")), None)
+    """The governance repository as a worktree target, named `root`: never an entry of ``ws.projects``, and without
+    state. Its repository is the `governance_checkout` of `workspace.yaml`, else the workspace directory; its
+    worktrees stay under the workspace directory's `worktrees/root/`."""
+    import content
+    checkout = content.governance_checkout(Path(ws.root))
+    repo = ws.root if checkout is None or content.is_workspace_checkout(Path(ws.root)) else os.path.normpath(str(checkout))
+    return Project(validator.ROOT_TOPICS_NAME, repo, os.path.join(ws.root, *validator.ROOT_WORKTREES.split("/")), None)
 
 
 def infer_project(ws: Workspace, cwd: str) -> Project | None:

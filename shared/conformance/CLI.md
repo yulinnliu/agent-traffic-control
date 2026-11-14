@@ -5,10 +5,12 @@ reference implementation checks them in `adapters/python/tests/test_cli_conventi
 
 ## Root resolution
 
-The ATC checkout a command acts on is, in order: `--root DIR`, `$ATC_ROOT`,
-the nearest parent of the working directory that holds `workspace.yaml` and
-`shared/governance/`, else the main worktree of the repository the running
-`atc` comes from, which for a release copy is the canonical checkout.
+The workspace directory a command acts on is, in order: `--root DIR`,
+`$ATC_ROOT`, else the nearest parent of the working directory (itself
+included) that holds `workspace.yaml`. Nothing else is required of it, and
+there is no fallback: with none of the three, a command stops with
+`STOP WORKSPACE_NOT_FOUND`, except `init`, which creates the workspace in the
+working directory, `doctor`, which reports on it, and `--help`.
 `--root` is one global flag and may stand before or after the command
 (`atc --root DIR doctor` and `atc doctor --root DIR` are the same call);
 everything after a `--` belongs to the command, and `atc test` and `atc sync`
@@ -17,12 +19,14 @@ take the global `--root DIR` only before the command.
 `atc-maintain` acts on the ATC checkout that holds the working directory, which
 in a linked worktree has no `workspace.yaml`; `atc-maintain sync --root`
 renders it. A command that names a repository takes `--project`, resolved in
-that root's `workspace.yaml`; `root` names the workspace root.
+that root's `workspace.yaml`; `root` names the governance repository: its
+`governance_checkout`, else the workspace directory.
 
 ## Canonical checkout guard
 
-When the root a command acts on is a canonical checkout (it holds
-`workspace.yaml` and is no linked worktree), every command but `doctor`,
+When the workspace directory a command acts on is itself the governance
+checkout (`workspace.yaml` names `governance_checkout: .`) and a canonical
+checkout (no linked worktree), every command but `doctor`,
 `--help` and `--version` stops with `ERROR CHECKOUT_NOT_MAIN` while that
 checkout is off `main`, stops with `ERROR CHECKOUT_UNREADABLE` when its Git
 state cannot be read, and warns with `WARNING CHECKOUT_DIRTY` while it has

@@ -35,14 +35,17 @@ access.
 | enforcement generation | `generate-enforcement/` | `GENERATED enforcement configs`, `CURRENT enforcement configs`, `DRIFT` (files and `live-claude`/`live-codex`/`live-hook`), `unresolved-token`, plus golden files per harness |
 | PreToolUse hook | `pretooluse-hook/` | a deny decision (`"permissionDecision": "deny"`) naming the rule, the refused path, the write target `the hook cannot resolve`, or `the PreToolUse hook could not decide`; the payload is `input/payload.json`, passed as `--payload` |
 | task record check | `task-records/` | `OK <dir>`, `invalid-yaml`, `schema-violation`, `id-mismatch`, `no-declaration`, `no-prefix-line`, `invalid-prefix`, `tests-none-undecided` |
+| root resolution | `root-resolution/` | `STOP WORKSPACE_NOT_FOUND` outside any workspace; a directory holding only `workspace.yaml` is one (`CLI.md` § Root resolution) |
 
 Merge preflight (`FF`, `NO_FF`, `STOP`), push check (`PUSH`, `STOP`) and
 worktree identity (`CREATED`, `RESUMED`, `IDENTITY_MISMATCH`,
 `IDENTITY_AMBIGUOUS`, `ALREADY_EXISTS`, `REMOVABLE`) and task records
 (`atc task create` and `list`) need live git
 repositories, and so does `atc sync` (prune by default, `skill_harnesses`, the
-minimal `AGENTS.md`, the sync commit), whose cases are `tests/test_sync_prune.py`
-and `tests/test_sync_commit.py`. Their cases are the Python suites `tests/test_git_preflight.py`,
+minimal `AGENTS.md`, the sync commit, the content repository, the `NO_MANIFEST`
+refusal of a revision without `atc-manifest.yaml`, and the root-adapter check
+that renders from the Git objects of `main`), whose cases are `tests/test_sync_prune.py`,
+`tests/test_sync_commit.py` and `tests/test_manifest_content.py`. Their cases are the Python suites `tests/test_git_preflight.py`,
 `tests/test_integrate_moving_main.py`, `tests/test_managed_worktree.py` and
 `tests/test_task_records.py`, which build
 each repository in code; a second implementation ports those suites until

@@ -83,7 +83,7 @@ def test_a_removed_command_is_an_unknown_command_usage_error(capsys: pytest.Capt
 def test_help_restores_the_program_name(monkeypatch: pytest.MonkeyPatch) -> None:
     ascii_stdout(monkeypatch)
     before = sys.argv[0]
-    assert call(["sync", "--help"]) == 0
+    assert call(["task", "--help"]) == 0
     assert sys.argv[0] == before
 
 
@@ -111,29 +111,44 @@ def test_a_missing_dependency_names_the_reinstall_command(monkeypatch: pytest.Mo
     assert expected in err and "Traceback" not in err
 
 
-def test_without_a_named_root_outside_any_workspace_the_root_is_the_main_worktree_of_the_code(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A release copy is a linked worktree of the workspace root repository, so it resolves to the canonical
-    checkout; code outside any repository resolves to itself."""
-    main = tmp_path / "main"
-    main.mkdir()
-    git(main, "init", "-q", "-b", "main")
-    git(main, "-c", "user.email=t@example.invalid", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "r")
-    release = tmp_path / "home" / ".atc" / "releases" / "v0.6.0"
-    git(main, "worktree", "add", "-q", "--detach", str(release))
+@pytest.fixture(autouse=True)
+def _a_workspace_above_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Commands resolve a workspace directory of the test's own unless a test names or removes one: the suite's
+    working directory need not lie in a workspace."""
+    workspace = tmp_path / "default-workspace"
+    workspace.mkdir()
+    (workspace / "workspace.yaml").write_text("version: 1\n", encoding="utf-8")
+    monkeypatch.setenv("ATC_ROOT", str(workspace))
+
+
+def test_outside_any_workspace_a_command_stops_and_init_doctor_and_help_act_on_the_working_directory(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    """There is no fallback to the checkout the code comes from: a workspace is a directory holding workspace.yaml."""
+    import doctor
+    import sync_project
     outside = tmp_path / "outside"
     outside.mkdir()
-    for code, expected in ((release, main), (main, main), (outside, outside)):
-        monkeypatch.setattr(atc_cli, "CHECKOUT", code)
-        assert atc_cli.resolve_root(None, {}, outside).resolve() == expected.resolve()
+    monkeypatch.delenv("ATC_ROOT")
+    monkeypatch.chdir(outside)
+    with pytest.raises(atc_cli.WorkspaceNotFound):
+        atc_cli.resolve_root(None, {}, outside)
+    monkeypatch.setattr(sync_project, "main", lambda rest, root: pytest.fail("sync ran without a workspace"))
+    assert call(["sync"]) == 1
+    err = capsys.readouterr().err
+    assert err.startswith(f"STOP WORKSPACE_NOT_FOUND: no workspace.yaml in {outside.resolve()} or any parent\n")
+    assert "hint: " in err
+    seen: list[Path] = []
+    monkeypatch.setattr(doctor, "main", lambda rest, root: seen.append(root) or 0)
+    assert call(["doctor"]) == 0 and seen == [outside.resolve()]
+    assert call(["task", "--help"]) == 0
 
 
 def nested_checkouts(tmp_path: Path) -> tuple[Path, Path]:
-    """A workspace checkout holding workspace.yaml and a linked worktree inside it without one."""
+    """A workspace directory holding workspace.yaml, and a linked worktree inside it without one; neither holds
+    shared/governance, which root resolution never asks for."""
     workspace = tmp_path / "workspace"
     worktree = workspace / ".claude" / "worktrees" / "topic"
     for checkout in (workspace, worktree):
-        (checkout / "shared" / "governance").mkdir(parents=True)
         (checkout / "adapters" / "python" / "scripts").mkdir(parents=True)
         (checkout / "adapters" / "python" / "scripts" / "validate_workspace.py").write_text("", encoding="utf-8")
     (workspace / "workspace.yaml").write_text("version: 1\n", encoding="utf-8")
@@ -185,7 +200,8 @@ def git(repo: Path, *args: str) -> None:
 
 @pytest.fixture()
 def canonical(tmp_path: Path) -> Path:
-    """A canonical checkout: holds workspace.yaml, its git dir is the common dir, on main with one tracked file."""
+    """A canonical checkout: holds workspace.yaml naming itself the governance checkout, its git dir is the common dir,
+    on main with one tracked file."""
     checkout = tmp_path / "workspace"
     checkout.mkdir()
     git(checkout, "init", "-q", "-b", "main")
@@ -194,13 +210,26 @@ def canonical(tmp_path: Path) -> Path:
     (checkout / "AGENTS.md").write_text("# root\n", encoding="utf-8")
     git(checkout, "add", "AGENTS.md")
     git(checkout, "commit", "-q", "-m", "root")
-    (checkout / "workspace.yaml").write_text("version: 1\n", encoding="utf-8")
+    (checkout / "workspace.yaml").write_text("version: 1\ngovernance_checkout: .\n", encoding="utf-8")
     return checkout
 
 
 def test_the_canonical_checkout_on_main_and_clean_passes_silently(canonical: Path, capsys: pytest.CaptureFixture[str]) -> None:
     assert atc_cli._guard("sync", [], canonical) is None
     assert capsys.readouterr().err == ""
+
+
+def test_the_guard_applies_only_when_the_workspace_directory_is_the_governance_checkout(
+        canonical: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    import doctor
+    git(canonical, "switch", "-q", "-c", "topic")
+    for content in ("version: 1\n", f"version: 1\ngovernance_checkout: {(tmp_path / 'elsewhere').as_posix()}\n"):
+        (canonical / "workspace.yaml").write_text(content, encoding="utf-8")
+        assert atc_cli._guard("sync", [], canonical) is None
+        assert doctor.checkout_check(canonical).status == "READY"
+    assert capsys.readouterr().err == ""
+    (canonical / "workspace.yaml").write_text("version: 1\ngovernance_checkout: .\n", encoding="utf-8")
+    assert atc_cli._guard("sync", [], canonical) == 2
 
 
 def test_a_canonical_checkout_off_main_refuses_every_command_but_doctor_and_help(

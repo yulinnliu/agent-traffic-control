@@ -62,6 +62,8 @@ installed `atc` stops working until it does. Persistent state lives elsewhere
     workers.lock                the pool's tokens, one locked byte each
     workers/                    one row per process using the pool, locked for its life
     memory/                     per-project worker memory of recent runs, `<project>.json`
+  content/                      regenerable
+    <owner>/<repo>.git          bare cache of governance_source, the content repository of a workspace without governance_checkout (`LAYOUT.md` § The manifest)
   cache/                        regenerable
     uv/                         UV_CACHE_DIR
     python/                     UV_PYTHON_INSTALL_DIR

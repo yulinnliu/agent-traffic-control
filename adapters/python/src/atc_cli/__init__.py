@@ -10,7 +10,7 @@ Task lifecycle:
   push        push integrated main to origin after checking every commit
 
 Workspace:
-  init        set up this checkout as a workspace root
+  init        set up this directory as a workspace
   add         register a project and create its ATC files
   remove      unregister a project
   sync        write and commit the files ATC owns in projects, or --check them
@@ -18,7 +18,7 @@ Workspace:
   guard       check, or --install, the PreToolUse hook and its permission rules
   install     install a release tag as this host's atc, or --check it
 
---root DIR    the ATC checkout to act on, before or after the command
+--root DIR    the workspace directory to act on, before or after the command
               (shared/conformance/CLI.md § Root resolution)
 Workflow: docs/WORKFLOW.md. Exit codes, output and --json: shared/conformance/CLI.md.
 Run `atc <command> --help` for one command.
@@ -50,27 +50,29 @@ COMMANDS = {
     "install": "release_install",
 }
 GUARD_EXEMPT = ("doctor",)
+# Commands that act on the working directory when no workspace is found: `init` creates one there, `doctor`
+# reports that it is missing.
+ROOTLESS = ("init", "doctor")
 GROUPED = ("task",)
 # The checkout the guard reads; None guards the resolved root. Tests name one.
 GUARDED_CHECKOUT: Path | None = None
 
 
-def canonical_checkout() -> Path:
-    """The main worktree of the repository this code lives in: the canonical checkout, also for a release copy."""
-    scripts_on_path()
-    import checkout_guard
-    return checkout_guard.main_worktree(CHECKOUT) or CHECKOUT
+class WorkspaceNotFound(LookupError):
+    """No `--root`, no `ATC_ROOT` and no parent of the working directory holding `workspace.yaml`."""
 
 
 def resolve_root(explicit: str | None, environ: dict[str, str], cwd: Path) -> Path:
+    """The workspace directory a command acts on: `--root`, else `ATC_ROOT`, else the nearest parent of ``cwd``
+    holding `workspace.yaml` (shared/conformance/CLI.md § Root resolution); WorkspaceNotFound otherwise."""
     if explicit:
         return Path(explicit).resolve()
     if environ.get("ATC_ROOT"):
         return Path(environ["ATC_ROOT"]).resolve()
     for candidate in (cwd.resolve(), *cwd.resolve().parents):
-        if (candidate / "workspace.yaml").is_file() and (candidate / "shared" / "governance").is_dir():
+        if (candidate / "workspace.yaml").is_file():
             return candidate
-    return canonical_checkout()
+    raise WorkspaceNotFound(str(cwd.resolve()))
 
 
 def usage() -> str:
@@ -99,11 +101,15 @@ def scripts_on_path() -> None:
 
 
 def _guard(command: str, rest: list[str], checkout: Path) -> int | None:
-    """Exit 2 when the canonical checkout `atc` acts on is off `main`; warn when it is dirty."""
+    """Exit 2 when the canonical checkout `atc` acts on is off `main`; warn when it is dirty. Applies only when that
+    workspace directory is itself the governance checkout (`governance_checkout: .`)."""
     if command in GUARD_EXEMPT or any(arg in ("-h", "--help") for arg in rest):
         return None
     scripts_on_path()
     import checkout_guard
+    import content
+    if not content.is_workspace_checkout(checkout):
+        return None
     current = checkout_guard.state(checkout)
     if current.unreadable:
         print(f"ERROR CHECKOUT_UNREADABLE {checkout} holds workspace.yaml but its Git state cannot be read "
@@ -120,14 +126,13 @@ def _guard(command: str, rest: list[str], checkout: Path) -> int | None:
     return None
 
 
-def _release_pin(command: str, rest: list[str], explicit_root: str | None) -> int | None:
+def _release_pin(command: str, rest: list[str], root: Path) -> int | None:
     """STOP when a release copy acts on a project pinned to another release (`release_pin`)."""
     scripts_on_path()
     import cli_conventions
     import release_pin
     environ = dict(os.environ)
-    refusal = release_pin.check(command, rest, resolve_root(explicit_root, environ, Path.cwd()), CHECKOUT,
-                                os.getcwd(), environ)
+    refusal = release_pin.check(command, rest, root, CHECKOUT, os.getcwd(), environ)
     return None if refusal is None else cli_conventions.refuse(refusal, wants_json(rest))
 
 
@@ -194,11 +199,21 @@ def main(argv: list[str] | None = None, checkout: Path | None = None) -> int:
     if command not in COMMANDS:
         print(f"usage: atc [--root DIR] <command> [<args>]\natc: error: unknown command: {command}", file=sys.stderr)
         return 2
-    guarded = checkout or GUARDED_CHECKOUT or resolve_root(explicit_root, dict(os.environ), Path.cwd())
-    refused = _guard(command, rest, guarded)
+    try:
+        root = resolve_root(explicit_root, dict(os.environ), Path.cwd())
+    except WorkspaceNotFound as missing:
+        if command not in ROOTLESS and not any(arg in ("-h", "--help") for arg in rest):
+            scripts_on_path()
+            import cli_conventions
+            return cli_conventions.refuse(cli_conventions.Refusal(
+                "WORKSPACE_NOT_FOUND", f"no workspace.yaml in {missing} or any parent",
+                "run atc inside a workspace directory, pass --root DIR or set ATC_ROOT; atc init creates one"),
+                wants_json(rest))
+        root = Path.cwd().resolve()
+    refused = _guard(command, rest, checkout or GUARDED_CHECKOUT or root)
     if refused is not None:
         return refused
-    refused = _release_pin(command, rest, explicit_root)
+    refused = _release_pin(command, rest, root)
     if refused is not None:
         return refused
     program = sys.argv[0]
@@ -206,8 +221,8 @@ def main(argv: list[str] | None = None, checkout: Path | None = None) -> int:
     try:
         if wants_json(rest):
             return enveloped(command_name("atc", command, rest, GROUPED),
-                             lambda: _dispatch(command, rest, explicit_root))
-        return _dispatch(command, rest, explicit_root)
+                             lambda: _dispatch(command, rest, root))
+        return _dispatch(command, rest, root)
     except ModuleNotFoundError as error:
         print(f"ERROR MISSING_DEPENDENCY atc {command} needs the module {error.name!r}, which this installation lacks",
               file=sys.stderr)
@@ -239,10 +254,10 @@ def enveloped(name: str, run) -> int:
     return code
 
 
-def _dispatch(command: str, rest: list[str], explicit_root: str | None) -> int:
-    """Run one command; ``sys.argv[0]`` is ``atc <command>``, the program name argparse shows."""
+def _dispatch(command: str, rest: list[str], root: Path) -> int:
+    """Run one command on the workspace directory ``root``; ``sys.argv[0]`` is ``atc <command>``, the program name
+    argparse shows."""
     scripts_on_path()
-    root = resolve_root(explicit_root, dict(os.environ), Path.cwd())
     module = __import__(COMMANDS[command])
     if command in ("init", "add", "remove"):
         return module.main([command, *rest], root=root)

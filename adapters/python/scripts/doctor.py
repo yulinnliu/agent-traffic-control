@@ -41,8 +41,43 @@ class Check:
     detail: str
 
 
+def root_adapter_check(root: Path) -> Check:
+    """The workspace directory's own adapters, by the check `atc sync` stops on (`workspace_adapter_plan`): rendered
+    from the Git objects of `main` when the directory is the governance checkout, else from the sync target."""
+    try:
+        plan, checkout = sync_project.workspace_adapter_plan(root)
+    except sync_project.SyncStop as stop:
+        return Check("workspace-managed adapters", "ERROR", f"{stop.code}: {stop.detail}")
+    except ValueError as exc:
+        return Check("workspace-managed adapters", "ERROR", str(exc))
+    source = f"the tip of {sync_project.MAIN}" if checkout else "the sync target"
+    pending = [item for item in plan if item.action != "skip"]
+    if pending:
+        fix = ("atc-maintain sync --root in a topic, integrated" if checkout else "atc sync")
+        shown = ", ".join(cli_conventions.relative(item.path, root) for item in pending[:3])
+        return Check("workspace-managed adapters", "ERROR",
+                     f"{len(pending)} differ from {source} ({shown}{', ...' if len(pending) > 3 else ''}); fix: {fix}")
+    adapters = sum(item.path.name == "SKILL.md" for item in plan)
+    return Check("workspace-managed adapters", "READY", f"{adapters} adapters current with {source}")
+
+
+def governance_checkout_hint(root: Path) -> Check | None:
+    """WARN when the workspace directory is a checkout of the governance repository but `workspace.yaml` does not
+    say so: atc then fetches content from origin and no checkout guard applies (docs/LAYOUT.md § The manifest)."""
+    import content
+    import manifest
+    if content.governance_checkout(root) is not None or not manifest.present(root) or not (root / ".git").exists():
+        return None
+    return Check("governance_checkout", "WARN", f"{root} is a checkout of the governance repository but workspace.yaml "
+                                               "has no governance_checkout; add governance_checkout: .")
+
+
 def checkout_check(checkout: Path) -> Check:
-    """The canonical checkout guard's conditions (`checkout_guard`), as a problem doctor lists."""
+    """The canonical checkout guard's conditions (`checkout_guard`), as a problem doctor lists; the guard applies only
+    when the workspace directory is the governance checkout (`governance_checkout: .`)."""
+    import content
+    if not content.is_workspace_checkout(checkout):
+        return Check("canonical checkout", "READY", f"{checkout} is not the governance checkout; no guard applies")
     current = checkout_guard.state(checkout)
     if not current.canonical:
         return Check("canonical checkout", "READY", f"{checkout} is not the canonical checkout")
@@ -236,7 +271,7 @@ def diagnose(root: Path = ROOT, environ: dict[str, str] | None = None, checkout:
         checks.append(Check("workspace.yaml", "ERROR", "; ".join(validator.FAILURES)))
         projects = {}
     elif configured_root and Path(configured_root).expanduser().resolve() != root.resolve():
-        checks.append(Check("workspace.yaml", "ERROR", "workspace_root does not match checkout"))
+        checks.append(Check("workspace.yaml", "ERROR", "workspace_root does not match the workspace directory"))
     else:
         checks.append(Check("workspace.yaml", "READY", f"{len(projects)} registered projects"))
 
@@ -252,19 +287,10 @@ def diagnose(root: Path = ROOT, environ: dict[str, str] | None = None, checkout:
     )
     checks.append(Check("PyYAML", "READY", f"{yaml.__version__}"))
 
-    validator.FAILURES.clear()
-    original_root = validator.ROOT
-    try:
-        validator.ROOT = root
-        canonical = validator.load_canonical_skills()
-        validator.check_adapter_tree(root, canonical, label="workspace root", required=set(canonical))
-    finally:
-        validator.ROOT = original_root
-    if validator.FAILURES:
-        checks.append(Check("workspace-managed adapters", "ERROR", f"{len(validator.FAILURES)} problem(s)"))
-    else:
-        adapters = len(canonical) * len(validator.TOOL_DIRS)
-        checks.append(Check("workspace-managed adapters", "READY", f"{adapters} adapters current"))
+    checks.append(root_adapter_check(root))
+    unset = governance_checkout_hint(root)
+    if unset:
+        checks.append(unset)
 
     if managed_worktree is None:
         checks.append(Check("atc-worktree", "ERROR", f"the shared capability could not be loaded: {WORKTREE_IMPORT_ERROR}"))

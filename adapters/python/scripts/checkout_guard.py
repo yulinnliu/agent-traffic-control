@@ -1,5 +1,10 @@
 """The canonical checkout guard of the root `AGENTS.md` § Changing this repo.
 
+`atc` applies it only when the workspace directory is itself the governance checkout
+(`governance_checkout: .`, docs/LAYOUT.md § The manifest): the workspace policy and the root
+adapters sessions read are then that checkout's working tree. `atc-maintain` applies `state`
+unconditionally, so it never runs in the canonical checkout or a release copy.
+
 The installed `atc` runs a release copy (`release_install.py`), but the
 canonical checkout's working tree is still what `atc` and every session read
 as the workspace: its task records, policies, governance and skills. It stays

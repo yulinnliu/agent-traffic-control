@@ -1010,11 +1010,11 @@ def check_shipped_files_are_self_contained() -> None:
 
 
 def workspace_env_problems(root: Path, environ: Mapping[str, str]) -> dict[str, str | None]:
-    """Check the optional ``ATC_ROOT`` override against the checkout at ``root``.
+    """Check the optional ``ATC_ROOT`` override against the workspace directory ``root``.
 
-    Nothing requires the variable: tools find their root from their own
-    location or from the nearest ``workspace.yaml``. When it is set it must
-    agree. Returns {variable: problem or None}; an unset variable is omitted.
+    Nothing requires the variable: tools find their root from the nearest
+    ``workspace.yaml``. When it is set it must agree. Returns {variable:
+    problem or None}; an unset variable is omitted.
     """
     results: dict[str, str | None] = {}
     root = root.resolve()
@@ -1024,11 +1024,11 @@ def workspace_env_problems(root: Path, environ: Mapping[str, str]) -> dict[str, 
         if not path.exists():
             results["ATC_ROOT"] = f"{value} does not exist"
         elif not path.is_dir():
-            results["ATC_ROOT"] = f"{value} is a file; ATC_ROOT must be the checkout directory"
+            results["ATC_ROOT"] = f"{value} is a file; ATC_ROOT must be the workspace directory"
         elif path.resolve() != root:
             results["ATC_ROOT"] = f"resolves to {path.resolve()}, expected {root}"
-        elif not (path / POLICY_RELATIVE).is_file():
-            results["ATC_ROOT"] = f"canonical governance index missing: {path / POLICY_RELATIVE}"
+        elif not (path / "workspace.yaml").is_file():
+            results["ATC_ROOT"] = f"workspace.yaml missing: {path / 'workspace.yaml'}"
         else:
             results["ATC_ROOT"] = None
     return results

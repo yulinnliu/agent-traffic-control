@@ -36,6 +36,8 @@ Operational description of the tree; governance semantics live under
   the `atc` command, with its own `pyproject.toml` and lock file, plus
   `atc-testkit/`, the pytest adapter of the verification contract. Other
   languages add a sibling directory and run the same fixtures.
+- `atc-manifest.yaml` — what `atc sync` delivers from this revision and where
+  (§ The manifest).
 - `workspace.yaml.example` — the shape of the machine-local map.
 - `policies/hard-deny.yaml` — the workspace policy: what no agent on the
   machine may do, composed first into the PreToolUse hook's table
@@ -53,6 +55,45 @@ Operational description of the tree; governance semantics live under
   dispatch of `.github/workflows/validate.yml` on `main` runs at it, and the
   tag goes on only after that run passes on Linux and Windows.
   `.out-of-scope/` — recorded rejections.
+
+## The manifest
+
+`atc-manifest.yaml` at the root of a revision lists, per scope, each item
+`atc sync` delivers: an `id`, its `source` in that revision, its `target` and
+its `mode`. The fields and the modes are the tool's format; the manifest names
+only paths, all relative and without `..`.
+
+| Mode | Delivery |
+| --- | --- |
+| `owned` | written, and rewritten on drift; a directory item lists its `files` |
+| `pointer-line` | the one marked line in the target `AGENTS.md` |
+| `create-only` | written when the target is absent, never modified after |
+| `skill-render` | a rendered copy of each canonical skill under the source, in `{harness}/skills/` |
+
+- `manifest` is the format (`1`); `min_atc` is the oldest `atc` that renders
+  the revision, and an older one stops with `MANIFEST_TOO_NEW`.
+- `project` items go into every registered project. `workspace` items go into
+  the workspace directory when it is not the governance checkout: the
+  workspace policy (`create-only`) and the workspace's own skill copies.
+- A revision without a manifest is not a sync target: sync stops with
+  `NO_MANIFEST`, also for a SHA the Owner names. A manifest that breaks the
+  format stops with `MANIFEST_INVALID`, one naming a source the revision lacks
+  with `MANIFEST_SOURCE_MISSING`.
+
+Sync reads the revision's files from the **content repository**, never from a
+working tree: the Git objects of the checkout `workspace.yaml` names as
+`governance_checkout`, or else the bare cache
+`~/.atc/content/<owner>/<repo>.git` of `governance_source`, cloned on first
+use and fetched (`main` and tags) once per run. A SHA names the same tree in
+either, so the SHA is the integrity check. A host without `governance_checkout`
+syncs only to commits and tags pushed to the governance repository.
+
+The workspace directory's own skill copies are checked by one check that
+`atc doctor` and `atc sync` share: the copies on disk against copies rendered
+from the Git objects of the tip of `main` when the workspace directory is the
+governance checkout, else from the sync target. A drift is an `ERROR` in
+doctor; in the governance checkout `atc sync` stops with `ROOT_ADAPTER_DRIFT`,
+elsewhere it renders the `workspace` items.
 
 ## Inside a consuming repository
 
@@ -90,9 +131,8 @@ Operational description of the tree; governance semantics live under
   `atc` runs from a release copy, the installed release's commit, which
   must be in the history of ATC `main` (`STOP RELEASE_NOT_ON_MAIN`), so a
   project never moves ahead of the tool; else the highest
-  `vMAJOR.MINOR.PATCH` tag in the history of ATC `main`. It reads the tags of the
-  ATC checkout and never fetches, so that checkout holds the release tags:
-  the Owner creates each one there, and another host fetches tags first. Sync
+  `vMAJOR.MINOR.PATCH` tag in the history of ATC `main`. `main`, its history
+  and the tags are those of the content repository (§ The manifest). Sync
   writes the lock with the target as `revision` when the lock is missing,
   when its `source` differs from the governance repository, when sync changes
   any file it writes into the repository, or when the recorded revision is
@@ -101,9 +141,10 @@ Operational description of the tree; governance semantics live under
   release or a named `--revision`. `scripts/link-skills.sh` installs the
   checkout it runs from, at its `HEAD`; it reads the lock without parsing
   it, so it also rewrites a lock with an empty `revision`, and checks the
-  recorded revision against that `HEAD`. On `main`, `atc sync
-  --check` checks that this revision is in `main`'s history and compares
-  the synced files with that revision's tree. The files sync writes carry no
+  recorded revision against that `HEAD`. `atc sync --check` checks that this
+  revision is in the history of the content repository's `main` and compares
+  the synced files with that revision's tree; a lock at a revision without a
+  manifest is a problem until the next sync. The files sync writes carry no
   format version of their own: they are current when they equal what the
   locked revision renders, and sync replaces them otherwise.
 - `.atc/tasks/<task_id>.yaml` — the repository's own task records, declared by
@@ -141,7 +182,13 @@ argv file exist (`GIT_WORKFLOW.md` § Lock advancement).
   not name, and this checkout, get `all`: every harness the running `atc`
   supports, so a harness supported in a later release joins `all` there. The
   map stays top-level; a `projects.<name>` entry holds exactly `repo`,
-  `worktrees` and `state`.
+  `worktrees` and `state`. Its optional `governance_checkout` is a path,
+  relative to the workspace directory, of a checkout of `governance_source`:
+  the content repository (§ The manifest) and the repository the reserved
+  project `root` names. Only a host that develops ATC sets it; `.` makes the
+  workspace directory that checkout, and only then does the canonical checkout
+  guard apply (`shared/conformance/CLI.md` § Canonical checkout guard). A
+  workspace directory is any directory holding `workspace.yaml`.
 - `projects/<name>/` — independent repositories brought in by the owner. This
   repository never tracks their content.
 - `worktrees/<name>/<harness>+<ID>/` — disposable per-topic worktrees whose

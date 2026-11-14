@@ -28,6 +28,7 @@ TOOLS = {
     "generate-enforcement": [str(SCRIPTS / "generate_enforcement.py")],
     "pretooluse-hook": [str(SCRIPTS / "pretooluse_hook.py")],
     "task-records": ["-m", "atc_cli.maintain", "task"],
+    "root-resolution": ["-m", "atc_cli"],
 }
 
 

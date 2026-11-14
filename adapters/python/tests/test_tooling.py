@@ -683,19 +683,23 @@ def test_atc_root_override_is_optional_and_checked_when_set(tmp_path: Path) -> N
     assert by_name["ATC_ROOT"].status == "READY" and "same checkout" in by_name["ATC_ROOT"].detail
 
 
-def test_atc_root_must_be_the_checkout_directory(tmp_path: Path) -> None:
+@pytest.mark.unit
+def test_atc_root_must_be_the_workspace_directory(tmp_path: Path) -> None:
     root = make_env_workspace(tmp_path)
     problems = validator.workspace_env_problems(root, {"ATC_ROOT": str(root / "workspace.yaml")})
-    assert "must be the checkout directory" in problems["ATC_ROOT"]
+    assert "must be the workspace directory" in problems["ATC_ROOT"]
     other = make_env_workspace(tmp_path / "other")
     assert validator.workspace_env_problems(root, {"ATC_ROOT": str(other)})["ATC_ROOT"].startswith("resolves to")
 
 
-def test_atc_root_must_hold_the_canonical_policy(tmp_path: Path) -> None:
+@pytest.mark.unit
+def test_atc_root_must_hold_workspace_yaml_not_governance(tmp_path: Path) -> None:
     root, _ = make_workspace(tmp_path, create_project=False)
     (root / validator.GOVERNANCE_INDEX_RELATIVE).unlink()
+    assert validator.workspace_env_problems(root, {"ATC_ROOT": str(root)}) == {"ATC_ROOT": None}
+    (root / "workspace.yaml").unlink()
     problems = validator.workspace_env_problems(root, {"ATC_ROOT": str(root)})
-    assert "canonical governance index missing" in problems["ATC_ROOT"]
+    assert "workspace.yaml missing" in problems["ATC_ROOT"]
 
 
 def test_doctor_requires_the_atc_command(tmp_path: Path) -> None:

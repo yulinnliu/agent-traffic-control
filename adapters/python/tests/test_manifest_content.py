@@ -175,6 +175,40 @@ def test_a_revision_without_a_manifest_is_refused(tmp_path: Path, capsys: pytest
 
 
 @pytest.mark.integration
+def test_the_root_adapter_check_renders_from_mains_git_objects_not_the_working_tree(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """Doctor and sync share one check: actual copies from the working tree, expected ones from `main`'s tip."""
+    import doctor
+    root, project = make_workspace(tmp_path)
+    commit_workspace(root, project)
+    plan, checkout = sync_project.workspace_adapter_plan(root)
+    assert checkout and not sync_project.changes(plan)
+    assert doctor.root_adapter_check(root).status == "READY"
+    skill = root / "shared/skills/demo-skill/SKILL.md"
+    skill.write_text(skill.read_text(encoding="utf-8").replace("test skill", "edited skill"), encoding="utf-8")
+    assert doctor.root_adapter_check(root).status == "READY", "an uncommitted canonical edit is not the expectation"
+    sync_project.apply_plan(sync_project.root_adapter_plan(root), "sync")
+    check = doctor.root_adapter_check(root)
+    assert check.status == "ERROR" and "differ from the tip of main" in check.detail
+    assert sync_project.main(["demo"], root=root) == 1
+    assert "STOP ROOT_ADAPTER_DRIFT:" in capsys.readouterr().out
+    run_git(root, "add", "-A")
+    run_git(root, *COMMIT, "skill and its copies")
+    assert doctor.root_adapter_check(root).status == "READY"
+
+
+@pytest.mark.integration
+def test_doctor_warns_when_a_governance_checkout_does_not_say_so(tmp_path: Path) -> None:
+    import doctor
+    root, _ = make_workspace(tmp_path)
+    assert doctor.governance_checkout_hint(root) is None
+    path = root / "workspace.yaml"
+    path.write_text(path.read_text(encoding="utf-8").replace("governance_checkout: .\n", ""), encoding="utf-8")
+    hint = doctor.governance_checkout_hint(root)
+    assert hint is not None and hint.status == "WARN" and "governance_checkout: ." in hint.detail
+
+
+@pytest.mark.integration
 def test_a_lock_before_the_manifest_is_a_problem_until_sync(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root, project = make_workspace(tmp_path)
     (root / "atc-manifest.yaml").rename(tmp_path / "held.yaml")

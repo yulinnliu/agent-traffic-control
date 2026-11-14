@@ -1,5 +1,5 @@
 # Machine-local root map: absolute paths, one copy per machine.
-workspace.yaml
+/workspace.yaml
 
 # Machine-local memory router naming this machine's real repos.
 /shared/memory/INDEX.md
