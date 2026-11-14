@@ -64,5 +64,5 @@ mutant.
 - The last line reads `done: M mutants, S survived <labels>`, or
   `done: N of M mutants, S survived <labels>` after a stop, also one on the
   last mutant, where `N` counts the mutants that printed `KILLED`,
-  `SURVIVED` or `INCONCLUSIVE`. Survivors alone leave the exit code 0; the
+  `SURVIVED` or `INCONCLUSIVE`. A survivor exits 1; the
   reviewer reads them from this line.

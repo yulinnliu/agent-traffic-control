@@ -307,7 +307,7 @@ SURVIVING = {"label": "S two", "edits": [{"path": "src/fixture_pkg/__init__.py",
 def test_mutants_are_killed_or_survive_and_files_are_restored(export: Export, tmp_path: Path) -> None:
     run = export.run(tmp_path, [KILLED, SURVIVING])
     lines = [line for line in run.stdout.splitlines() if line != testrun.EXCLUSION_NOTE]
-    assert run.returncode == 0, run.stdout + run.stderr
+    assert run.returncode == 1, run.stdout + run.stderr  # a survivor exits 1
     assert lines[0].startswith("BASELINE-OK")
     assert lines[1].startswith("KILLED") and "K one" in lines[1] and "FAILED" in lines[1]
     assert lines[2].startswith("SURVIVED") and "S two" in lines[2]
@@ -346,7 +346,7 @@ def test_the_failure_rule_kills_on_any_failed_test(export: Export, tmp_path: Pat
 def test_a_mutants_own_tests_judge_it_and_join_the_baseline(export: Export, tmp_path: Path) -> None:
     (export.place / "tree/tests/test_other.py").write_text("def test_other():\n    pass\n", encoding="utf-8")
     run = export.run(tmp_path, [{**KILLED, "tests": ["tests/test_other.py"]}])
-    assert run.returncode == 0 and mutant_lines(run)[1].startswith("SURVIVED K one"), run.stdout + run.stderr
+    assert run.returncode == 1 and mutant_lines(run)[1].startswith("SURVIVED K one"), run.stdout + run.stderr
     (export.place / "tree/tests/test_other.py").write_text("def test_other():\n    assert 0\n", encoding="utf-8")
     run = export.run(tmp_path, [{**KILLED, "tests": ["tests/test_other.py"]}])
     assert run.returncode == 1 and mutant_lines(run)[0].startswith("BASELINE-RED")
@@ -422,7 +422,7 @@ def test_a_same_size_write_in_the_files_last_second_reaches_the_run(export: Expo
         code = testrun.mutants([export.place.name, export.sha, str(export.worktree), str(listing), "--task", TASK, "--python",
                                 sys.executable, "--tests", "tests"], bytecode_written)
     lines = [line for line in capsys.readouterr().out.splitlines() if line != testrun.EXCLUSION_NOTE]
-    assert code == 0, lines
+    assert code == 1, lines  # the survivor
     assert lines[1].startswith("KILLED") and "K one" in lines[1]
     assert lines[2].startswith("SURVIVED") and "other file" in lines[2]
 

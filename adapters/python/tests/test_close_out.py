@@ -88,7 +88,7 @@ def test_check_lists_a_test_run_scratch_of_the_task_whose_tree_is_outside_its_wo
     # The run registers its scratch before the selection, whose unknown base then stops it.
     with pytest.raises(Refusal, match="SELECTION_BASE_UNKNOWN"):
         testrun.run(["--scratch", "base", "--tree", str(ws.repo), "--python", sys.executable, "--task", TASK,
-                     "--select", "0" * 40], environ=dict(environ))
+                     "--related", "0" * 40], environ=dict(environ))
     assert not Path(os.path.realpath(ws.repo)).is_relative_to(os.path.realpath(topic))
     code, payload, err = close(ws, environ, capsys, ws.root, "--check")
     assert code == 0 and outcomes(payload)[str(atc_tmp / "base")][0] == "DELETE", (payload, err)

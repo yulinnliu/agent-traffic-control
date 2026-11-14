@@ -141,16 +141,19 @@ def run_tests(task: Task, args: argparse.Namespace, pytest_args: list[str], envi
     argv = ["--scratch", name, "--task", task.id, "--tree", str(directory), "--label", "all" if args.all else "related",
             *timeout_of(directory), *(["--progress"] if args.verbose else [])]
     if not args.all and task.base:
-        argv += ["--select", task.base, "--touched"]
+        argv += ["--related", task.base]
     return testrun.run([*argv, *(["--", *pytest_args] if pytest_args else [])], environ)
 
 
-def related_tests(directory: Path, task: Task, environ: dict[str, str]) -> list[str]:
-    """The test files the task's changes since its base touch, relative to ``directory``."""
+def related_tests(directory: Path, task: Task, name: str, environ: dict[str, str]) -> list[str]:
+    """The test files the task's changes since its base touch, relative to ``directory``, the test directory of
+    the export in the scratch ``name``, whose registry line names the source commit to diff."""
     if not task.base:
         return []
+    root = locations.locate(environ).tmp
+    row = next((r for r in scratch.registered(root) if Path(r.scratch).name == name), None)
     python = toolchains.for_tree(directory).interpreter(directory)
-    paths = testrun.changed_paths(directory, task.base, None)
+    paths = testrun.changed_paths(directory, task.base, row)
     return testrun.touched(directory, python, paths, environ)
 
 
@@ -160,7 +163,7 @@ def run_mutants(task: Task, args: argparse.Namespace, tests: list[str], environ:
     while tree.name != checkout.TREE:
         tree = tree.parent
     prefix = directory.relative_to(tree).as_posix()
-    tests = tests or [t if prefix == "." else f"{prefix}/{t}" for t in related_tests(directory, task, environ)]
+    tests = tests or [t if prefix == "." else f"{prefix}/{t}" for t in related_tests(directory, task, name, environ)]
     if not tests:
         raise Refusal("NO_TESTS", "no test is related to the task's changes", "name the judging tests after --")
     return testrun.mutants([name, commit, str(task.source()), str(Path(args.mutants).resolve()), "--task", task.id,

@@ -106,8 +106,11 @@ def calls(monkeypatch: pytest.MonkeyPatch) -> dict[str, list]:
 
     def sync(directory, environ, run=None) -> Path:
         seen["sync"].append(Path(directory))
-        (Path(directory) / ".venv").mkdir()
-        return Path(directory) / ".venv"
+        venv = Path(directory) / ".venv"
+        python = venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+        python.parent.mkdir(parents=True)
+        python.write_bytes(b"")  # the interpreter's place; no selector is declared, so nothing runs it
+        return venv
     monkeypatch.setattr(testrun, "run", run)
     monkeypatch.setattr(testrun, "mutants", mutants)
     monkeypatch.setattr(git_integrate, "run_candidate", candidate)
@@ -125,7 +128,7 @@ def test_a_run_tests_the_related_tests_of_the_worktree_as_the_task_scratch(works
     [argv] = calls["run"]
     assert (option(argv, "--scratch"), option(argv, "--task"), option(argv, "--label")) == (TASK, TASK, "related")
     assert Path(option(argv, "--tree")).resolve() == workspace.worktree.resolve()
-    assert argv[argv.index("--select"):argv.index("--select") + 3] == ["--select", workspace.base, "--touched"]
+    assert option(argv, "--related") == workspace.base
     assert option(argv, "--timeout") == "60" and "--" not in argv
 
 
@@ -133,7 +136,7 @@ def test_all_runs_the_full_suite_and_passes_pytests_arguments_after_dashes(works
                                                                           calls: dict[str, list]) -> None:
     assert workspace.run(TASK, "--all", "--", "-q") == 0
     [argv] = calls["run"]
-    assert option(argv, "--label") == "all" and "--select" not in argv and argv[-2:] == ["--", "-q"]
+    assert option(argv, "--label") == "all" and "--related" not in argv and argv[-2:] == ["--", "-q"]
 
 
 def test_a_sha_is_exported_into_the_task_and_commit_scratch_and_reused(workspace: Workspace, calls: dict[str, list],
@@ -153,8 +156,10 @@ def test_a_sha_is_exported_into_the_task_and_commit_scratch_and_reused(workspace
 
 
 def test_mutants_judge_the_branch_tip_by_default_with_each_mutants_kill_rule(
-        workspace: Workspace, calls: dict[str, list], tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(task_tests, "related_tests", lambda directory, task, environ: ["tests/test_value.py"])
+        workspace: Workspace, calls: dict[str, list], tmp_path: Path) -> None:
+    """Without tests after --, the judging tests are those the branch changed since its base, read from the
+    export's source commit (the export is no Git working tree)."""
+    put(workspace.worktree, {"tests/test_value.py": "def test_value():\n    assert 2 == 2\n"}, "test the widget")
     listing = tmp_path / "mutants.json"
     edit = [{"path": "src/demo.py", "old": "X = 2", "new": "X = 3"}]
     listing.write_text(json.dumps([{"label": "a", "edits": edit, "kill_rule": "assertion"},

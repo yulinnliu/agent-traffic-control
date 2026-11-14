@@ -355,10 +355,10 @@ def _mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None,
         prog="atc test --mutants", allow_abbrev=False,
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description="Apply each mutant alone to <scratch>/tree and run the tests on it.",
-        epilog="Exit: 0 when every mutant ran and every file is restored, survivors named on the last line; 1 for a\n"
-               "red baseline, an aborted run or a restore mismatch; 9 for a refusal before the baseline, 8 for an\n"
-               "import-guard refusal; 124 when the wait for a host worker passes 900 seconds, 130 when that wait\n"
-               "is interrupted.\n"
+        epilog="Exit: 0 when every mutant ran and was killed and every file is restored; 1 for a survivor (named\n"
+               "on the last line), a red baseline, an aborted run or a restore mismatch; 9 for a refusal before the\n"
+               "baseline, 8 for an import-guard refusal; 124 when the wait for a host worker passes 900 seconds,\n"
+               "130 when that wait is interrupted.\n"
                "See: docs/TESTKIT.md § Commands")
     parser.add_argument("scratch", metavar="NAME", help="scratch name; NAME/tree holds the export of SHA")
     parser.add_argument("sha", metavar="SHA",
@@ -466,7 +466,7 @@ def _mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None,
         print("restored-ok" if same else "RESTORE-MISMATCH", path, flush=True)
     counted = f"{finished} of {len(entries)}" if aborted else finished
     print(f"done: {counted} mutants, {len(survivors)} survived", *survivors, flush=True)
-    return aborted or (1 if mismatched else 0)
+    return aborted or (1 if mismatched or survivors else 0)
 
 
 # One run (docs/TESTKIT.md § Commands)
@@ -481,9 +481,6 @@ LABEL_CHARACTERS = re.compile(r"[^A-Za-z0-9._-]+")
 COUNTS = re.compile(r"\b\d+ (?:passed|failed|errors?|skipped|deselected|xfailed|xpassed|warnings?)\b")
 SELECTOR_KEY = "selector"
 DIRECT_OPTION = "--direct"
-SELECT_FRACTION_KEY = "select_full_fraction"
-SELECT_FRACTION = 0.5
-SKIPPED_WIDE = "SKIPPED_WIDE"
 
 
 def _registered_row(root: Path, place: Path) -> scratch.Row | None:
@@ -511,24 +508,6 @@ def changed_paths(tree: Path, base: str, row: scratch.Row | None) -> list[str]:
     if paths is None:
         raise Refusal("SELECTION_BASE_UNKNOWN", f"{base} or {row.commit} names no commit in {row.source}")
     return paths
-
-
-def select(tree: Path, python: str, paths: Sequence[str], environ: Mapping[str, str]) -> list[str]:
-    """The test paths the tree's declared ``selector`` prints as JSON for ``paths``."""
-    selector = config.tool_table(tree).get(SELECTOR_KEY)
-    if not (isinstance(selector, list) and selector and all(isinstance(item, str) for item in selector)):
-        raise Refusal("SELECTION_UNDECLARED", f"{tree}/pyproject.toml declares no [tool.atc-testkit] {SELECTOR_KEY}, "
-                                              "a list of strings; run without --select")
-    if not paths:
-        return []
-    done = _capture([python, *selector, *paths], tree, environ, False, None)
-    try:
-        chosen = json.loads(done.lines[-1]) if done.code == 0 and done.lines else None
-    except ValueError:
-        chosen = None
-    if not (isinstance(chosen, list) and all(isinstance(item, str) for item in chosen)):
-        raise Refusal("SELECTOR_FAILED", "\n".join([f"exit {done.code}", *done.lines[-TAIL_LINES:]]))
-    return chosen
 
 
 def _logged(command: Sequence[str], cwd: Path, env: Mapping[str, str], private: bool, timeout: float | None,
@@ -633,17 +612,6 @@ def _granted_arguments(arguments: list[str], grant: host_workers.Grant, want: in
     return arguments, workers.granted(grant).line()
 
 
-def select_fraction(tree: Path) -> float:
-    """``[tool.atc-testkit] select_full_fraction``, a number from 0 to 1; ``SELECT_FRACTION`` when absent."""
-    value = config.tool_table(tree).get(SELECT_FRACTION_KEY)
-    if value is None:
-        return SELECT_FRACTION
-    if isinstance(value, (int, float)) and not isinstance(value, bool) and 0 <= value <= 1:
-        return float(value)
-    raise Refusal(stages.CONFIG_INVALID, f"{tree / 'pyproject.toml'}: [tool.atc-testkit] {SELECT_FRACTION_KEY} = "
-                                         f"{value!r} is not a number from 0 to 1", stages.CONFIG_EXIT)
-
-
 def _count(python: str, tree: Path, place: Path, environ: Mapping[str, str], private: bool,
            arguments: Sequence[str]) -> int | None:
     """The tests pytest collects for ``arguments`` (worker options dropped); ``None`` when it cannot tell."""
@@ -712,21 +680,13 @@ def run(argv: Sequence[str], environ: MutableMapping[str, str] | None = None) ->
     parser.add_argument("--task", required=True, metavar="ID",
                         help="the task the scratch belongs to, for example ATC-0008; a scratch registered to another "
                              "task is refused")
-    parser.add_argument("--select", metavar="SHA",
-                        help="run only the tests the tree's declared selector picks for the paths changed since SHA")
+    parser.add_argument("--related", metavar="SHA",
+                        help="run only the changed test files and the test files that import a changed module "
+                             "directly, for the paths changed since SHA")
     parser.add_argument("--label", default="run", metavar="NAME", help="name of the run, in its log's file name")
     parser.add_argument("--timeout", type=float, metavar="SECONDS", help="seconds before the run is ended and reported as TIMEOUT")
     parser.add_argument("--progress", action="store_true", help="also stream pytest's output to the console")
-    parser.add_argument("--wide", action="store_true",
-                        help=f"with --select: run a selection that {SKIPPED_WIDE} would skip as too wide")
-    parser.add_argument("--touched", action="store_true",
-                        help="with --select: run only the changed test files and the test files that import a "
-                             "changed module directly")
     args = parser.parse_args(argv)
-    if (args.wide or args.touched) and not args.select:
-        parser.error("--wide and --touched take --select")
-    if args.wide and args.touched:
-        parser.error("--wide and --touched exclude each other")
     check_task(args.task)
     environ = os.environ if environ is None else environ
     root, place = locate_scratch(args.scratch, environ)
@@ -739,26 +699,16 @@ def run(argv: Sequence[str], environ: MutableMapping[str, str] | None = None) ->
         raise Refusal("TREE_NOT_FOUND", f"the scratch {place.name} names no tree; pass --tree")
     python = resolve_python(args.python) if args.python else toolchains.for_tree(tree).interpreter(tree)
     claim_scratch(root, place, tree, args.task)
-    paths = changed_paths(tree, args.select, row) if args.select else None
+    paths = changed_paths(tree, args.related, row) if args.related else None
     environ["PYTHONUNBUFFERED"] = "1"
     private = isolate(tree, place, python, environ)
     items = None
     if paths is not None:
-        chosen = touched(tree, python, paths, environ) if args.touched else select(tree, python, paths, environ)
-        head = f"SELECT {args.select}{' --touched' if args.touched else ''}: {len(paths)} changed paths, " \
-               f"{len(chosen)} test paths"
+        chosen = touched(tree, python, paths, environ)
+        head = f"RELATED {args.related}: {len(paths)} changed paths, {len(chosen)} test paths"
         if not chosen:
             print(head, "NO_TESTS no test selected", sep="\n", flush=True)
             return 0
-        fraction = 1.0 if args.wide or args.touched else select_fraction(tree)
-        if fraction < 1:
-            items = _count(python, tree, place, environ, private, [*chosen, *pytest_arguments])
-            total = _count(python, tree, place, environ, private, pytest_arguments)
-            if items and total and items >= fraction * total:
-                print(f"{head}, {items} of {total} tests ({items * 100 // total}%) >= {SELECT_FRACTION_KEY} "
-                      f"{fraction:g}", f"{SKIPPED_WIDE} the reviewer's atc test ID --sha --all runs these; run them here with "
-                      "--wide, or the touched files with --touched", sep="\n", flush=True)
-                return 0
         print(head, flush=True)
         pytest_arguments = [*chosen, *pytest_arguments]
     (place / RUNS).mkdir(exist_ok=True)

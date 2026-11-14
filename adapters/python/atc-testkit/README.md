@@ -177,7 +177,6 @@ The rows down to `product_module_prefixes` are required; the others are optional
 | `ci_init` | the `module:function` the CI runner calls first |
 | `ignore` | the test paths each stage ignores, under `nt` and `posix` |
 | `selector` | the command `atc test ID` runs to pick the related test paths |
-| `select_full_fraction` | the share of the tests at which `--select` skips with `SKIPPED_WIDE` |
 | `toolchain` | the toolchain's name, `python` when absent |
 
 The selection policy and the static checks stay in the project's gate script.

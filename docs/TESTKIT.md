@@ -625,7 +625,7 @@ scratch entries. In order:
    working tree, relative to its top; for an export, the diff from
    `<base_sha>` to the exported commit. A selector that fails with `--direct`
    gives the changed test files of the tree. The line
-   `SELECT <base> --touched: <n> changed paths, <k> test paths` follows; with
+   `RELATED <base>: <n> changed paths, <k> test paths` follows; with
    none selected, `NO_TESTS no test selected` ends the command with exit 0.
    The selected paths come before the pytest arguments.
 
@@ -739,7 +739,7 @@ memory clamp.
   survivors: `done: M mutants, S survived <labels>`, or
   `done: N of M mutants, S survived <labels>` after any abort, also one on the
   last mutant, where `N` counts the mutants that printed a `KILLED`,
-  `SURVIVED` or `INCONCLUSIVE` line. Survivors alone leave the exit code 0.
+  `SURVIVED` or `INCONCLUSIVE` line. A survivor exits 1.
 
 ### `atc test ID --candidate [--sha SHA]`
 
@@ -795,7 +795,6 @@ In `[tool.atc-testkit]`; the first seven keys are required:
 | `ci_init` | the CI runner's initialization function, as `module:function` |
 | `ignore` | `--ignore` paths appended to a stage, under `nt` and `posix` |
 | `selector` | the argv of the command the related-test selection of `atc test ID` runs; with `--direct` after the changed paths it prints only the changed test files and the test files one import from a changed module, which `atc test ID` runs (§ Commands) |
-| `select_full_fraction` | the share of the tree's tests, a number from 0 to 1, at which a `--select` run of the testkit's runner skips the selection with `SKIPPED_WIDE`; 0.5 when absent, 1 turns the skip off; any other value stops the run with `ATC_CONFIG_INVALID` (exit 9) |
 | `toolchain` | the toolchain's name, `python` when absent (§ Toolchain) |
 | `worker_memory_mib` | the memory one test worker is counted to need, an integer from 1 to 65536; when absent, the project's recorded cost on a host, else 256 (§ Stages); any other value stops a run with `ATC_CONFIG_INVALID` (exit 9) |
 
