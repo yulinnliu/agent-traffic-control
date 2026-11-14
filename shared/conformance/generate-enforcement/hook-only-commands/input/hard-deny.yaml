@@ -11,11 +11,14 @@ commands:
     - id: git-push-main
       argv_prefix: [git, push]
       push_targets: [main]
-    - id: atc-verify-background
-      argv_prefix: [atc, verify]
+    - id: atc-test-background
+      argv_prefix: [atc, test]
       background: true
-    - id: atc-enforce-hook-install
-      argv_prefix: [atc, enforce]
-      with_args: [--hook-out, --install-hooks]
+    - id: atc-guard-install
+      argv_prefix: [atc, guard]
+      with_args: [--install]
+    - id: atc-maintain-guard-hook-out
+      argv_prefix: [atc-maintain, guard]
+      with_args: [--hook-out]
     - id: git-reset-hard
       argv_prefix: [git, reset, --hard]
