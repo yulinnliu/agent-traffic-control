@@ -375,6 +375,10 @@ def pwsh_parse(text: str) -> list[tuple[list[str], bool, int | None, int]]:
             in_word = True
             i += 1
             continue
+        if c == "`" and text[i + 1:i + 2] in ("\n", "\r"):  # a line continuation separates words
+            end_word()
+            i += 3 if text[i + 1:i + 3] == "\r\n" else 2
+            continue
         if c == "`" and i + 1 < n:
             word.append(text[i + 1])
             in_word = True

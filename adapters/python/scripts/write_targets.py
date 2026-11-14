@@ -40,7 +40,16 @@ BASH_WRAPPERS = {
     "nohup": set(), "time": set(), "command": set(), "exec": set(), "builtin": set(), "setsid": set(),
     "chrt": set(), "taskset": set(), "flock": {"-w", "-E"},
 }
-CMD_ALL = {"rmdir", "rd", "del", "erase", "mkdir", "md"}
+# Short options taking a value, per verb, so bundles such as `cp -rt dir` and `curl -o/path` split correctly.
+BASH_SHORT_VALUED = {
+    **{verb: {"-t", "-S", "-m", "-o", "-g"} for verb in ("cp", "mv", "ln", "install")},
+    "curl": {"-o", "-D", "-c", "-d", "-H", "-u", "-X", "-A", "-e", "-T", "-F", "-x", "-m", "-w", "-K", "-b", "-r",
+             "-E", "-C", "-U", "-Q", "-Y", "-y", "-z"},
+    "wget": {"-O", "-P", "-o", "-a", "-e", "-t", "-T", "-w", "-U", "-i", "-B", "-l", "-A", "-R", "-D", "-I", "-X"},
+    "tar": {"-C", "-f", "-T", "-X", "-b", "-g", "-H", "-K", "-L", "-N", "-V"},
+    "unzip": {"-d"},
+}
+CMD_ALL ={"rmdir", "rd", "del", "erase", "mkdir", "md"}
 CMD_LAST = {"copy", "move"}
 XCOPY_FLAG = re.compile(r"^//?(?:[A-Za-z?]|-Y|[A-Za-z]+:\S*)$", re.IGNORECASE)
 PWSH_ALL = {"new-item", "ni", "md", "mkdir", "remove-item", "ri", "rm", "del", "erase", "rd", "rmdir",
@@ -177,6 +186,8 @@ class Shell:
             return os.environ.get(name[4:]) if key.startswith("env:") and name[4:] else None
         if name == "HOME":
             return os.environ.get("HOME") or self.home
+        if name in ("TMPDIR", "TMP", "TEMP"):  # Git Bash maps /tmp and $TMPDIR to the Windows temporary directory
+            return os.environ.get(name) or os.environ.get("TEMP") or os.environ.get("TMP") or tempfile.gettempdir()
         return os.environ.get(name)
 
     def set(self, scope: tuple[int, ...], name: str, value: str | None) -> None:
@@ -371,8 +382,8 @@ def cmd_segment_writes(words: list[str]) -> list[str]:
         targets += args[1:] if len(args) > 1 else ["."]
     else:
         targets += copy_tool_writes(words)
-    if verb == "mklink":
-        targets += args[:1]
+    if verb == "mklink":  # the link and what it points to
+        targets += args[:2]
     return targets
 
 
@@ -411,20 +422,64 @@ def unwrap_bash(words: list[str]) -> list[str]:
     return words
 
 
+def expand_short(words: list[str], valued: set[str]) -> list[str]:
+    """Split bundled short options (`-rt dir`, `-t/dir`, `-o/file`) so a valued one stands before its value."""
+    expanded = [words[0]] if words else []
+    for word in words[1:]:
+        if not re.fullmatch(r"-[A-Za-z][^\s]*", word) or word.startswith("--"):
+            expanded.append(word)
+            continue
+        for k, letter in enumerate(word[1:], 1):
+            if not letter.isalpha():
+                expanded.append(word)  # not an option bundle after all, such as `-1` or `-x=y`
+                break
+            expanded.append("-" + letter)
+            if "-" + letter in valued:
+                if word[k + 1:]:
+                    expanded.append(word[k + 1:])
+                break
+    return expanded
+
+
+# Git subcommands that only read; any other one writes in the repository it runs in.
+GIT_READS = {"status", "log", "diff", "show", "rev-parse", "ls-files", "ls-tree", "cat-file", "describe", "blame",
+             "grep", "shortlog", "rev-list", "for-each-ref", "show-ref", "merge-base", "name-rev", "version", "help",
+             "whatchanged", "reflog", "var", "check-ignore", "check-attr", "count-objects", "verify-commit"}
+
+
 def git_writes(words: list[str]) -> list[str]:
-    directory, i = "", 1
+    directory, i, trees = "", 1, []
     while i < len(words) and words[i].startswith("-"):
-        if words[i] == "-C" and i + 1 < len(words):
-            directory = words[i + 1] if absolute(words[i + 1]) or not directory else f"{directory}/{words[i + 1]}"
-        i += 2 if words[i] in ("-C", "-c", "--git-dir", "--work-tree", "--namespace") else 1
-    args = [w for w in words[i:] if not w.startswith("-")]
+        word = words[i]
+        if word.partition("=")[0] in ("--work-tree", "--git-dir"):
+            trees.append(word.partition("=")[2] if "=" in word else words[i + 1] if i + 1 < len(words) else "")
+        value = word[2:] if word.startswith("-C") and len(word) > 2 else None
+        if word == "-C" and i + 1 < len(words):
+            value = words[i + 1]
+        if value is not None:
+            directory = value if absolute(value) or not directory else f"{directory}/{value}"
+        i += 2 if word in ("-C", "-c", "--git-dir", "--work-tree", "--namespace") else 1
+    rest = words[i:]
+    command = rest[0] if rest else ""
     targets: list[str] = []
-    if args[:1] == ["clone"]:
-        targets = args[-1:] if len(args) > 2 else []
-    elif args[:1] == ["init"]:
-        targets = args[1:2]
-    elif args[:2] == ["worktree", "add"]:
-        targets = args[2:3]
+    if command == "clone":
+        args = [w for w in rest[1:] if not w.startswith("-")]
+        targets = args[-1:] if len(args) > 1 else []
+    elif command == "init":
+        args = [w for w in rest[1:] if not w.startswith("-")]
+        targets = args[:1] or ["."]
+    elif rest[:2] == ["worktree", "add"]:
+        args, k = [], 2
+        while k < len(rest):
+            if rest[k] in ("-b", "-B", "--reason", "--orphan") and k + 1 < len(rest):
+                k += 2
+                continue
+            if not rest[k].startswith("-"):
+                args.append(rest[k])
+            k += 1
+        targets = args[:1]
+    elif (directory or trees) and command and command not in GIT_READS:
+        targets = ["."] + [t for t in trees if t]  # a writing subcommand changes the repository it is pointed at
     return [t if not directory or absolute(t) else f"{directory}/{t}" for t in targets]
 
 
@@ -464,7 +519,11 @@ def bash_command_writes(words: list[str]) -> list[str]:
         return targets + ([unresolved("cmd reading its commands from stdin")] if script is None else cmd_writes(script))
     if verb in ("robocopy", "xcopy"):
         return targets + copy_tool_writes(words)
+    if verb in BASH_SHORT_VALUED:
+        words = expand_short(words, BASH_SHORT_VALUED[verb])
     args = [w for w in words[1:] if not w.startswith("-")]
+    if verb == "ln":  # a link pointing outside the roots opens them for every later write
+        targets += args
     if verb in BASH_ALL:
         targets += args
     elif verb == "install" and "-d" in words:
@@ -681,6 +740,8 @@ def pwsh_command_writes(words: list[str]) -> list[str]:
         return targets + ([unresolved("cmd reading its commands from stdin")] if script is None else cmd_writes(script))
     if verb in ("robocopy", "xcopy"):
         return targets + copy_tool_writes([unquote(w) for w in words])
+    if verb == "git":
+        return targets + git_writes([unquote(w) for w in words])
     arguments = pwsh_arguments(words)
     paths, dests, names, newnames, positional = [], [], [], [], []
     for kind, parameter, items in arguments:
@@ -696,6 +757,12 @@ def pwsh_command_writes(words: list[str]) -> list[str]:
             newnames += items
         elif kind == "positional":
             positional.append(items)
+    if verb in ("new-item", "ni"):  # a link pointing outside the roots opens them for every later write
+        item_type = [unquote(i).lower() for k, p, items in arguments if k == "value" and len(p) >= 3
+                     and ("-itemtype".startswith(p) or "-type".startswith(p)) for i in items]
+        if any(t in ("symboliclink", "junction", "hardlink") for t in item_type):
+            targets += [i for k, p, items in arguments if k == "value" and len(p) >= 3
+                        and ("-target".startswith(p) or "-value".startswith(p)) for i in items]
     if verb not in PWSH_ALL and verb not in PWSH_FIRST and verb not in PWSH_DEST:
         return targets
     if any(re.match(r"@\w", unquote(w)) for w in words[1:]):  # splatted parameters: any of them may name a path

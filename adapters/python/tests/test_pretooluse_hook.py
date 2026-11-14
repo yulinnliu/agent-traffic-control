@@ -303,7 +303,7 @@ def test_a_powershell_write_outside_the_roots_is_refused(monkeypatch, command):
     "Write-Output 'a > C:\\out'",
     "Get-Item x 2>$null",
     "Remove-Item C:\\hami\\x -Recurse",
-    "New-Item -ItemType Junction -Path C:\\hami\\v -Target C:\\out",
+    "New-Item -ItemType Junction -Path C:\\hami\\v -Target C:\\hami\\w",
     "New-Item -ItemType Directory -Force $env:TEMP\\q",
     "Remove-Item -Path C:\\hami\\x -ErrorAction SilentlyContinue",
     "$o=\"$env:TEMP\\rev-diff.txt\"; git -C C:\\hami diff a b > $o",
@@ -923,3 +923,50 @@ def test_what_the_shell_model_cannot_follow_is_refused(monkeypatch, tool, comman
 
 def test_cmd_switches_before_c_still_read_its_line():
     assert decide("PowerShell", command='cmd /d /c "echo a > C:\\hami\\o.txt"', cwd="C:\\hami\\repo") is None
+
+
+@pytest.mark.parametrize("tool, command", [
+    ("PowerShell", "Set-Content `\n-Path C:\\out\\o.txt 1"),
+    ("PowerShell", "Set-Content -Path `\r\nC:\\out\\o.txt 1"),
+    ("Bash", "cp -t/c/out /c/hami/a"),
+    ("Bash", "cp -rt /c/out /c/hami/a"),
+    ("Bash", "cp -at/c/out /c/hami/a"),
+    ("Bash", "mv -t/c/out /c/hami/a"),
+    ("Bash", "curl -o/c/out/o https://example.invalid"),
+    ("Bash", "curl -sSLo/c/out/o https://example.invalid"),
+    ("Bash", "wget -O/c/out/o https://example.invalid"),
+    ("Bash", "tar xf a.tar -C/c/out"),
+    ("Bash", "unzip -d/c/out a.zip"),
+    ("Bash", "git -C /c/out init"),
+    ("Bash", "git -C/c/out commit -m x"),
+    ("Bash", "git -C /c/out checkout main"),
+    ("Bash", "git worktree add -b t /c/out/w"),
+    ("Bash", "git --work-tree=/c/out checkout HEAD -- ."),
+    ("PowerShell", "git worktree add -B t C:\\out\\w main"),
+    ("PowerShell", "New-Item -ItemType Junction -Path C:\\hami\\j -Value C:\\out"),
+    ("PowerShell", "New-Item -ItemType SymbolicLink -Path C:\\hami\\l -Target C:\\out"),
+    ("PowerShell", "ni -Type HardLink -Path C:\\hami\\h -Target C:\\out\\f"),
+    ("PowerShell", "cmd /c mklink /J C:\\hami\\j C:\\out"),
+    ("Bash", "ln -s /c/out /c/hami/l"),
+])
+def test_ordinary_spellings_of_an_outside_write_are_refused(tool, command):
+    assert decide(tool, command=command, cwd="C:\\hami\\repo") is not None
+
+
+@pytest.mark.parametrize("tool, command", [
+    ("PowerShell", "Set-Content `\n-Path C:\\hami\\ok.txt `\n-Value 1"),
+    ("PowerShell", "git -C C:\\hami\\repo log `\n --oneline"),
+    ("Bash", "cp -rt /c/hami/b /c/out/a"),
+    ("Bash", "curl -sSLo/c/hami/o https://example.invalid"),
+    ("Bash", "git -C /c/out status"),
+    ("Bash", "git -C /c/out log --oneline"),
+    ("Bash", "git -C /c/hami/repo commit -m x"),
+    ("Bash", 'git diff > "$TMPDIR/x"'),
+    ("Bash", 'mkdir -p "$TMP/q"'),
+    ("PowerShell", "New-Item -ItemType SymbolicLink -Path C:\\hami\\l -Target C:\\hami\\x"),
+    ("Bash", "ln -s /c/hami/x /c/hami/l"),
+])
+def test_ordinary_spellings_inside_the_roots_stay_allowed(monkeypatch, tool, command):
+    monkeypatch.delenv("TMPDIR", raising=False)
+    monkeypatch.delenv("TMP", raising=False)
+    assert decide(tool, command=command, cwd="C:\\hami\\repo") is None
