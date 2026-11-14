@@ -690,3 +690,14 @@ def test_a_mutants_refusal_before_the_registry_line_creates_no_directory(export:
     assert mutants([export.place.name, export.sha, *common]) == 9
     assert capsys.readouterr().err.startswith("PRIVATE_DESKTOP_INVALID ") and scratch.registered(root) == []
     assert unregistered(root) == [export.place.name] and not (export.place / "qdr").exists()
+
+
+@pytest.mark.integration
+def test_mutants_refuse_a_bad_file_before_the_baseline(export: Export, tmp_path: Path,
+                                                       capsys: pytest.CaptureFixture[str]) -> None:
+    listing = tmp_path / "m.json"
+    listing.write_text("[]", encoding="utf-8")
+    code = mutants([export.place.name, export.sha, str(export.worktree), str(listing),
+                    "--task", TASK, "--python", sys.executable, "--tests", "tests"])
+    captured = capsys.readouterr()
+    assert code == 9 and captured.err.startswith("MUTANTS_INVALID ") and "BASELINE" not in captured.out
