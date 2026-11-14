@@ -26,11 +26,12 @@ PWSH_VALUE_PARAMS = {
 BASH_DECLARE = {"export", "declare", "typeset", "local", "readonly"}
 
 # Lexer marks: EXPAND stands for a `$` that expands, QUOTED opens a PowerShell quoted string, GROUP
-# brackets the number of a substitution or group, REDIR is an unquoted Bash `>`.
+# brackets the number of a substitution or group, REDIR is an unquoted `>`, COMMA an unquoted PowerShell `,`.
 EXPAND = "\0"
 QUOTED = "\1"
 GROUP = "\2"
 REDIR = "\3"
+COMMA = "\4"
 PLACEHOLDER = re.compile(GROUP + r"(\d+)" + GROUP)
 
 
@@ -41,7 +42,7 @@ def placeholder(number: int) -> str:
 def plain(word: str) -> str:
     """A marked word as the user wrote it, a group shown as `(...)`."""
     word = PLACEHOLDER.sub("(...)", word.replace(QUOTED, ""))
-    return word.replace(EXPAND, "$").replace(REDIR, ">")
+    return word.replace(EXPAND, "$").replace(REDIR, ">").replace(COMMA, ",")
 
 
 def cd_reason(tool: str, target: str) -> str:
@@ -68,21 +69,31 @@ PWSH_ASSIGNMENT = re.compile(r"(?:\[[^\]\s]+\])*\0([A-Za-z_]\w*) ?([^\s\w]?)= ?"
 
 def bash_commands(text: str) -> list[tuple[int, list[str]]]:
     """Split Bash source into simple commands, each with its subshell depth."""
-    return [(depth, words) for depth, words, _ in bash_simple_commands(text)]
+    return [(len(scope), words) for scope, words, _ in bash_parse(text)]
 
 
 def bash_simple_commands(text: str) -> list[tuple[int, list[str], bool]]:
     """Split Bash source into simple commands: subshell depth, words, and whether a single `&` backgrounds it."""
-    commands: list[tuple[int, list[str], bool]] = []
+    return [(len(scope), words, background) for scope, words, background in bash_parse(text)]
+
+
+def bash_parse(text: str) -> list[tuple[tuple[int, ...], list[str], bool]]:
+    """Bash simple commands: the numbers of the subshells and substitutions holding each, words, backgrounded.
+
+    A command's scope tuple names each enclosing `(...)`, `$(...)` or backtick pair, outermost first, so two
+    sibling subshells have different scopes.
+    """
+    commands: list[tuple[tuple[int, ...], list[str], bool]] = []
     words: list[str] = []
     word: list[str] = []
     in_word = False
-    depth = 0
     backtick = False
     heredocs: list[str] = []
     # One entry per open `(`: None for a subshell, else the substituting command's words, word and in_word.
     stack: list[tuple[list[str], list[str], bool] | None] = []
+    scope: list[int] = []
     groups = 0
+    scopes = 0
     i, n = 0, len(text)
 
     def end_word() -> None:
@@ -95,21 +106,27 @@ def bash_simple_commands(text: str) -> list[tuple[int, list[str], bool]]:
     def end_command(background: bool = False) -> None:
         end_word()
         if words:
-            commands.append((depth, words.copy(), background))
+            commands.append((tuple(scope), words.copy(), background))
             words.clear()
 
+    def open_scope() -> None:
+        nonlocal scopes
+        scopes += 1
+        scope.append(scopes)
+
     def open_substitution() -> None:
-        nonlocal in_word, depth
+        nonlocal in_word
         stack.append((words.copy(), word.copy(), in_word))
         words.clear()
         word.clear()
         in_word = False
-        depth += 1
+        open_scope()
 
     def close_group() -> None:
-        nonlocal in_word, depth, groups
+        nonlocal in_word, groups
         end_command()
-        depth = max(depth - 1, 0)
+        if scope:
+            scope.pop()
         saved = stack.pop() if stack else None
         if saved is not None:
             words[:], word[:] = saved[0], saved[1]
@@ -186,7 +203,7 @@ def bash_simple_commands(text: str) -> list[tuple[int, list[str], bool]]:
         if c == "(":
             end_command()
             stack.append(None)
-            depth += 1
+            open_scope()
             i += 1
             continue
         if c == ")":
@@ -194,9 +211,10 @@ def bash_simple_commands(text: str) -> list[tuple[int, list[str], bool]]:
             i += 1
             continue
         if c == ">":
-            word.append(REDIR)
+            # `>|` and `>&` belong to the redirection; the `>>` of an append is two marks.
+            word.append(REDIR + (text[i + 1] if text[i + 1:i + 2] in ("|", "&") else ""))
             in_word = True
-            i += 1
+            i += 2 if text[i + 1:i + 2] in ("|", "&") else 1
             continue
         if c in ";&|":
             # A lone `&` backgrounds the command before it; `&&`, `>&`, `&>` and `|&` do not.
@@ -274,20 +292,23 @@ def pwsh_commands(text: str) -> list[list[str]]:
 
 def pwsh_simple_commands(text: str) -> list[tuple[list[str], bool]]:
     """Split PowerShell source into commands, each with whether a trailing `&` runs it as a background job."""
-    return [(words, background) for words, background, _ in pwsh_parse(text)]
+    return [(words, background) for words, background, _, _ in pwsh_parse(text)]
 
 
-def pwsh_parse(text: str) -> list[tuple[list[str], bool, int | None]]:
-    """PowerShell commands, inner ones first: words, backgrounded, and the number of the `(...)` group holding it.
+def pwsh_parse(text: str) -> list[tuple[list[str], bool, int | None, int]]:
+    """PowerShell commands, inner ones first: words, backgrounded, the number of the `(...)` group holding it,
+    and how many `{...}` blocks hold it.
 
-    A `(...)`, `$(...)` or `@(...)` group stands in its command's word as `placeholder(<number>)`.
+    A `(...)`, `$(...)` or `@(...)` group stands in its command's word as `placeholder(<number>)`; an
+    unquoted `>` is REDIR.
     """
-    commands: list[tuple[list[str], bool, int | None]] = []
+    commands: list[tuple[list[str], bool, int | None, int]] = []
     words: list[str] = []
     word: list[str] = []
     in_word = False
     stack: list[tuple[list[str], list[str], bool, int]] = []
     groups = 0
+    blocks = 0
     i, n = 0, len(text)
 
     def end_word() -> None:
@@ -300,7 +321,7 @@ def pwsh_parse(text: str) -> list[tuple[list[str], bool, int | None]]:
     def end_command(background: bool = False) -> None:
         end_word()
         if words:
-            commands.append((words.copy(), background, stack[-1][3] if stack else None))
+            commands.append((words.copy(), background, stack[-1][3] if stack else None, blocks))
             words.clear()
 
     def close_group() -> None:
@@ -378,17 +399,23 @@ def pwsh_parse(text: str) -> list[tuple[list[str], bool, int | None]]:
             close_group()
             i += 1
             continue
+        if c == ">":
+            word.append(REDIR)
+            in_word = True
+            i += 1
+            continue
         if c in ";|&(){}\n":
             # `&` after a command's words starts it as a job; before them it is the call operator.
             end_word()
             end_command(background=c == "&" and bool(words) and text[i + 1:i + 2] != "&")
+            blocks = blocks + 1 if c == "{" else max(blocks - 1, 0) if c == "}" else blocks
             i += 1
             continue
         if c in " \t\r":
             end_word()
             i += 1
             continue
-        word.append(EXPAND if c == "$" else c)
+        word.append(EXPAND if c == "$" else COMMA if c == "," else c)
         in_word = True
         i += 1
     while stack:  # an unclosed group still ends its command's words
@@ -451,26 +478,64 @@ def program(word: str) -> str:
     return base[:-4] if base.endswith(".exe") else base
 
 
-def shell_script(words: list[str]) -> tuple[str, str | None] | None:
-    """("bash" or "pwsh", script) of a `bash -c`, `pwsh -Command` or `-EncodedCommand` argv of plain words.
+BASH_OPTION_VALUES = {"-o", "+o", "-O", "+O", "--rcfile", "--init-file"}
+PWSH_OPTION_VALUES = ("-executionpolicy", "-ep", "-ex", "-workingdirectory", "-wd", "-outputformat", "-of",
+                      "-inputformat", "-if", "-settingsfile", "-configurationname", "-config", "-custompipename",
+                      "-version", "-v", "-psconsolefile", "-windowstyle", "-w")
 
-    The script is None when an encoded command does not decode.
+
+def shell_script(words: list[str]) -> tuple[str, str | None] | None:
+    """("bash" or "pwsh", script) of a shell argv of plain words that runs code given in the call itself.
+
+    `bash -c`, `pwsh -Command`, `-EncodedCommand` and Windows PowerShell's positional command give their
+    script; a shell reading its script from stdin (`| bash`, `bash <<< ...`, `bash -s`, `pwsh -Command -`)
+    or an encoded command that does not decode gives None as the script. A shell running a script file
+    gives None as a whole: that is a program's own writing.
     """
     head = program(words[0]) if words else ""
+    if len(words) == 2 and words[1].lower() in ("--version", "--help", "-version", "-v", "-help", "-?", "/?"):
+        return None
     if head in SHELLS_BASH:
-        for j, word in enumerate(words[1:], 1):
-            if re.fullmatch(r"-[a-z]*c[a-z]*", word) and j + 1 < len(words):
-                return "bash", words[j + 1]
+        operands, rest = [], iter(words[1:])
+        for word in rest:
+            if re.fullmatch(r"-[a-zA-Z]*c[a-zA-Z]*", word):
+                return "bash", next(rest, None)
+            if word in BASH_OPTION_VALUES:
+                next(rest, None)
+            elif word == "-s":
+                return "bash", None
+            elif not word.startswith(("-", "+", "<")) and REDIR not in word and ">" not in word:
+                operands.append(word)
+        return None if operands else ("bash", None)
     if head in SHELLS_PWSH:
-        for j, word in enumerate(words[1:], 1):
-            lower = word.lower()
-            if lower == "-c" or (len(lower) >= 4 and "-command".startswith(lower)):
-                return "pwsh", " ".join(words[j + 1:])
-            if lower in ("-e", "-ec") or (len(lower) >= 4 and "-encodedcommand".startswith(lower)):
+        rest = iter(words[1:])
+        for word in rest:
+            lower = "-" + word[1:].lower() if word.startswith("/") else word.lower()
+            name = lower.partition(":")[0]
+            if name == "-c" or (len(name) >= 3 and ("-command".startswith(name) or "-commandwithargs".startswith(name))) \
+                    or name == "-cwa":
+                text = " ".join(rest)
+                return "pwsh", None if text in ("", "-") else text
+            if name in ("-e", "-ec") or (len(name) >= 3 and "-encodedcommand".startswith(name)):
                 try:
-                    return "pwsh", base64.b64decode(words[j + 1], validate=True).decode("utf-16-le")
-                except (IndexError, binascii.Error, UnicodeDecodeError, ValueError):
+                    return "pwsh", base64.b64decode(next(rest), validate=True).decode("utf-16-le")
+                except (StopIteration, binascii.Error, UnicodeDecodeError, ValueError):
                     return "pwsh", None
+            if name in ("-f", "-file") or (len(name) >= 3 and "-file".startswith(name)):
+                value = next(rest, "-")
+                return ("pwsh", None) if value == "-" else None
+            if lower.startswith("-"):
+                if any(name == full or (len(name) >= 3 and full.startswith(name)) for full in PWSH_OPTION_VALUES):
+                    next(rest, None)
+                continue
+            if word.startswith("<") or REDIR in word:
+                continue
+            # A positional is the command in Windows PowerShell and the script file in pwsh.
+            if head == "powershell":
+                text = " ".join([word, *rest])
+                return "pwsh", None if text == "-" else text
+            return ("pwsh", None) if word == "-" else None
+        return "pwsh", None
     return None
 
 

@@ -115,7 +115,7 @@ def start_process(words: list[str]) -> list[str]:
 
 def normalise(words: list[str], cwd: str, nested: bool = False) -> list[tuple[list[str], str]]:
     """The argvs a simple command runs, each with its directory; argv[0] by `command_name`."""
-    words = [word.replace(g.QUOTED, "").replace(g.EXPAND, "$").replace(g.REDIR, ">") for word in words]
+    words = [word.replace(g.QUOTED, "").replace(g.EXPAND, "$").replace(g.REDIR, ">").replace(g.COMMA, ",") for word in words]
     i = 0
     while i < len(words):
         word = words[i]

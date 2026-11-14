@@ -193,14 +193,19 @@ of a shell call is refused when it lies in a protected path, matches a
 filesystem rule denying `edit` or `write`, or lies outside every write root.
 The write targets of a shell call (`write_targets.py`) are:
 
-- redirections: Bash `>`, `>>`, `2>`, `&>` outside quotes; PowerShell `>`,
-  `>>`, `2>`, `3>` and `*>` outside quotes; `cmd /c` redirections;
+- redirections outside quotes: Bash `>`, `>>`, `>|`, `2>`, `&>`, `>& file`;
+  PowerShell `>`, `>>`, `2>`, `3>` and `*>`, also glued to a quoted word
+  (`"a">file`); `cmd /c` redirections. `>&2` and `2>&1` duplicate a stream;
 - Bash `mkdir`, `rm`, `rmdir`, `touch`, `tee`, `truncate`, `unlink`,
   `shred`, every operand of `mv` and `install -d`, the destination of `cp`,
   `ln`, `install`, `rsync` and `scp` (`-t`/`--target-directory` included),
   the files of `sed -i` and `perl -i`, `curl -o`/`--output`/`--output-dir`,
   `wget -O`/`-P`, `tar -C`, `unzip -d`, `dd of=`, `git clone`, `git init`
-  and `git worktree add`;
+  and `git worktree add` (under `git -C`), `find -delete`, `-fprint` and the
+  writes of its `-exec` commands. The wrappers `env`, `sudo`, `doas`, `nice`,
+  `ionice`, `timeout`, `stdbuf`, `nohup`, `time`, `command`, `exec`,
+  `builtin`, `setsid`, `chrt`, `taskset` and `flock` are looked through; `xargs`
+  running a writing command is refused, since its operands come from input;
 - PowerShell `New-Item` (joined with `-Name`), `Remove-Item`, `Clear-Content`
   and their aliases on every path; `Set-Content`, `Add-Content`, `Out-File`,
   `Tee-Object`, `Export-Csv`, `Export-Clixml`, `Rename-Item` and
@@ -209,26 +214,64 @@ The write targets of a shell call (`write_targets.py`) are:
   directory when none is named) and, for a move, the source; `-OutFile`,
   `-RedirectStandardOutput` and `-RedirectStandardError` on any command.
   A parameter matches by any prefix of three characters or more, the dash
-  included;
+  included; a comma list (`-Path "a", "b"`, `a,b`) counts every item. A
+  module-qualified name (`Microsoft.PowerShell.Management\Set-Content`) and
+  the dot-source and call operators count as the cmdlet; an alias the call
+  defines from literals with `Set-Alias`/`New-Alias` counts as its command,
+  and any other alias definition, or a command name held in a group or a
+  variable (`& ('Set-' + 'Content')`), is refused;
 - .NET writes: `[IO.File]` and `[IO.Directory]` methods by the arguments
   they write (`Copy` its destination, `Move` both, `WriteAll*`, `AppendAll*`,
   `Create*`, `Open*`, `Delete` the first), `[IO.StreamWriter]::new`,
   `[IO.FileStream]::new` and `New-Object` of either, `.Save()`, `.CopyTo()`
-  and `.MoveTo()` on their argument, and `.Delete()` on its object;
-- `cmd /c` verbs (`rmdir`, `del`, `mkdir`, `copy`, `move`, `xcopy`,
-  `robocopy`, `mklink`), pytest `--basetemp`, and the script of a nested
-  `bash -c`, `pwsh -Command` or `pwsh -EncodedCommand`, read again.
+  and `.MoveTo()` on their argument, and `.Delete()` on its object. A type
+  held in a variable, `.Invoke`, a method named by a variable and
+  `[IO.FileInfo]` objects are not matched;
+- native `robocopy` and `xcopy` on their destination, in any shell; `cmd`
+  verbs (`rmdir`, `del`, `mkdir`, `copy`, `move`, `mklink`) after `/c`, `/k`
+  or `/r`, with any switches before it; pytest `--basetemp`;
+- code the call evaluates from a literal string, read again with the call's
+  state: Bash `eval`, `bash -c`/`sh -c`, PowerShell `Invoke-Expression`/`iex`,
+  `pwsh`/`powershell` `-Command` (and its prefixes and `/` spelling, and the
+  positional command of Windows PowerShell), `-EncodedCommand`, and
+  `Start-Process` of a shell with its `-ArgumentList`. Code the text does not
+  spell out (a shell reading stdin, `bash <<<`, `| bash`, `iex $s`,
+  `[scriptblock]::Create`, an encoded command that does not decode) is
+  refused.
 
 A target substitutes the variables assigned earlier in the same call from a
 string, another variable or `Join-Path` of those; environment variables
 (`$NAME` in Bash, `$env:NAME` in PowerShell, `%NAME%`); `$HOME`, `$PWD` and
-a `Join-Path` group. A target that still holds anything else (a variable
-assigned from a command, a loop or `read` variable, a member such as
-`$f.FullName`, a command substitution or `(...)` group, splatted parameters,
-pipeline input to a writing cmdlet, an encoded command that does not decode)
-is refused, since the hook cannot tell where it lands. `$null`, `NUL`,
-`/dev/null` and `\\.\` devices write nothing; `\\?\` paths are checked
-without the prefix.
+a `Join-Path` group. Bash variables follow subshell scope; a nested shell does
+not see the calling shell's assignments. A variable becomes unknown when the
+call rebinds it any other way: a scope-qualified or compound assignment, an
+assignment inside a `{...}` block, a `for`/`foreach`/`read`/`mapfile`/`printf
+-v` variable, `Set-Variable`/`New-Variable`/`Clear-Variable`/`Remove-Variable`,
+or `-OutVariable`, `-PipelineVariable`, `-ErrorVariable`, `Tee-Object
+-Variable` and their kin. An indirect rebinding (`[ref]`, `Get-Variable`,
+`.PSVariable`, `$ExecutionContext`, `SetEnvironmentVariable`, a write to the
+`env:` or `variable:` drive, `declare -n`, `source`) makes every variable
+unknown for the rest of the call.
+
+A relative target is checked against every directory the call may be in:
+`cd`, `pushd`, `Set-Location`, `sl`, `chdir` and `Push-Location` to a
+literal path add a directory; a change the text does not tell (`cd -`, a
+variable, an unmatched `popd`, `source`) makes later relative targets
+unresolved.
+
+A target that still holds anything else (a variable assigned from a command,
+a member such as `$f.FullName`, a command substitution or `(...)` group,
+splatted parameters, pipeline input to a writing cmdlet) is refused, since
+the hook cannot tell where it lands. `$null`, `NUL`, `/dev/null` and `\\.\`
+devices write nothing; `\\?\` paths are checked without the prefix; a
+`FileSystem::` provider path is checked as its file path, `Temp:` as the
+temporary directory, and the `Env:`, `Variable:`, `Function:`, `Alias:`,
+`Cert:` and registry drives hold no files. Any other multi-letter drive is
+refused. Paths are compared lexically: a write through a symbolic link or
+junction under a root is checked at the link's path. Files a program names
+in its own options (`git diff --output`, `git format-patch -o`, `sort -o`,
+`split`, `patch -o`, `python -c`, `powershell -File`) are writes the program
+makes and are not read.
 
 **Worktree cd.** In Claude Code, a top-level Bash `cd`/`pushd`, or any
 PowerShell location change, into a worktrees root is refused. Codex starts
