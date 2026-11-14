@@ -120,6 +120,17 @@ def _guard(command: str, rest: list[str], checkout: Path) -> int | None:
     return None
 
 
+def _release_pin(command: str, rest: list[str], explicit_root: str | None) -> int | None:
+    """STOP when a release copy acts on a project pinned to another release (`release_pin`)."""
+    scripts_on_path()
+    import cli_conventions
+    import release_pin
+    environ = dict(os.environ)
+    refusal = release_pin.check(command, rest, resolve_root(explicit_root, environ, Path.cwd()), CHECKOUT,
+                                os.getcwd(), environ)
+    return None if refusal is None else cli_conventions.refuse(refusal, wants_json(rest))
+
+
 def version() -> str:
     from importlib import metadata
 
@@ -185,6 +196,9 @@ def main(argv: list[str] | None = None, checkout: Path | None = None) -> int:
         return 2
     guarded = checkout or GUARDED_CHECKOUT or resolve_root(explicit_root, dict(os.environ), Path.cwd())
     refused = _guard(command, rest, guarded)
+    if refused is not None:
+        return refused
+    refused = _release_pin(command, rest, explicit_root)
     if refused is not None:
         return refused
     program = sys.argv[0]

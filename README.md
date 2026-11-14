@@ -174,7 +174,7 @@ this repository changes they are re-rendered, never edited:
 ```sh
 atc/scripts/check-skills.sh path/to/your-repo                           # current / drifted / orphaned / stale
 atc/scripts/link-skills.sh --prune path/to/your-repo                    # repair
-atc sync                                                               # every registered project, committed on its main (latest release)
+atc sync                                                               # every registered project, committed on its main (installed release)
 atc sync my-project --check                                            # one project, writing nothing
 atc sync --revision <sha>                                              # a SHA on main the Owner names instead
 ```

@@ -458,6 +458,7 @@ STOP_HINTS = {
     "INTEGRATION_BUSY": "wait for the running integration, then sync again",
     "REVISION_NOT_ON_MAIN": "name a commit on the ATC checkout's main",
     "NO_RELEASE_TAG": "fetch the tags, or name a revision with --revision",
+    "RELEASE_NOT_ON_MAIN": "install a release tagged on this checkout's main with atc install TAG",
     "EXPORT_FAILED": "check the ATC checkout's Git state",
     "GIT_FAILED": "check the project's Git state",
 }
@@ -596,13 +597,26 @@ def release_tags(root: Path, revision: str) -> tuple[str | None, str | None]:
     return None, tags[0][0] if tags else None
 
 
+def installed_release():
+    """The release this code is when it runs from a release copy (`release_pin`), else None."""
+    import release_pin
+    return release_pin.installed(Path(__file__).resolve().parents[3])
+
+
 def resolve_target(root: Path, revision: str | None) -> tuple[str, str | None, bool]:
-    """``(revision, tag, named)`` sync renders: the latest release tag on main, or the Owner-named SHA on main."""
+    """``(revision, tag, named)`` sync renders: the Owner-named SHA on main, else the installed release, so a
+    project never moves ahead of the tool, else the latest release tag on main."""
     if revision is not None:
         known = _git(root, "rev-parse", "--verify", "-q", f"{revision}^{{commit}}", check=False)
         if known.stdout.strip() != revision or _git(root, "merge-base", "--is-ancestor", revision, f"refs/heads/{MAIN}", check=False).returncode:
             raise SyncStop("REVISION_NOT_ON_MAIN", f"{revision} is not a commit SHA in the history of the ATC checkout's {MAIN}")
         return revision, release_tags(root, revision)[0], True
+    release = installed_release()
+    if release is not None:
+        if _git(root, "merge-base", "--is-ancestor", release.commit, f"refs/heads/{MAIN}", check=False).returncode:
+            raise SyncStop("RELEASE_NOT_ON_MAIN", f"the installed release {release.tag} ({release.commit[:12]}) is not "
+                                                  f"in the history of the ATC checkout's {MAIN}")
+        return release.commit, release.tag, False
     tags = merged_release_tags(root, f"refs/heads/{MAIN}")
     if not tags:
         raise SyncStop("NO_RELEASE_TAG", f"no vMAJOR.MINOR.PATCH tag in the history of {MAIN} in this checkout; "

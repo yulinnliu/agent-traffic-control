@@ -266,12 +266,9 @@ def test_install_is_an_atc_command():
 
 
 def test_doctor_names_the_copy_the_installed_atc_runs(root, tmp_path, monkeypatch):
+    """A release copy's line is in test_release_pin.py, with the copy's integrity."""
     monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
-    copy = tmp_path / "home" / ".atc" / "releases" / "v0.6.0"
-    copy.mkdir(parents=True)
-    assert doctor.install_check(copy, "0.6.0") == doctor.Check(
-        "atc install", "READY", f"atc 0.6.0 from the release copy {copy}")
     check = doctor.install_check(root, "0.6.0")
     assert check.status == "WARN" and "runs the canonical checkout" in check.detail
     assert doctor.install_check(tmp_path, "0.6.0").detail.endswith(", a development copy")

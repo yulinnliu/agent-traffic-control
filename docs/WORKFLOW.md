@@ -200,6 +200,27 @@ terminal where no `atc` runs. Earlier copies stay: a rollback is
 `atc install <earlier tag>`, and the Owner removes a copy no longer installed
 with `git worktree remove --force --force <copy>`.
 
+A release acts only on projects whose `.atc/atc.lock` pins it. While a
+project pins another revision, or none, the commands that run the task flow
+under its contract stop with `STOP RELEASE_MISMATCH` and a hint. A project
+behind the installed release, or with no lock, takes `atc sync <project>`:
+run from a release copy, sync with no `--revision` targets the installed
+release, not the latest tag. A project ahead of it, which sync never moves
+back without `--revision`, takes the Owner's `atc install` of the release
+it pins. These are `task create`, `update`, `resume` and `close`,
+`test ID` (but `--clean`, `--list` and `--private`), `integrate` and `push`,
+their `--check` rehearsals included, since a rehearsal answers whether the
+command would pass. `doctor`, `guard` and `task list` read and stay usable;
+`sync` and `install` are the fix; `init`, `add` and `remove` manage the map.
+The workspace root is never compared: its `main` is the governance itself.
+An `atc` that does not run from a release copy (`uv run atc` in a topic
+worktree, or one still installed from the canonical checkout) has no
+installed release, so nothing is compared. `atc doctor` lists each project's
+pin against the installed release, and reports a release copy that has
+tracked modifications or whose HEAD is not its tag's commit; commands do not
+refuse for that, since the hook write-protects the copy and only the Owner's
+own hand changes it.
+
 The canonical checkout stays the workspace that `atc` and every session
 read: task records, policies, governance and skills. Off `main` every `atc`
 command but `doctor` refuses with `CHECKOUT_NOT_MAIN`. A topic worktree runs

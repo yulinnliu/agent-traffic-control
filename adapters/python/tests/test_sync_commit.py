@@ -102,6 +102,64 @@ def test_sync_renders_the_latest_release_not_the_checkout(tmp_path: Path, capsys
     assert (project / ".atc/governance/CORE.md").read_text(encoding="utf-8") == "# CORE.md\n\nunreleased\n"
 
 
+def test_sync_from_a_release_copy_targets_the_installed_release(tmp_path: Path, capsys: pytest.CaptureFixture[str],
+                                                                 monkeypatch: pytest.MonkeyPatch) -> None:
+    """An installed release older than the latest tag: sync renders the installed one, which clears the release-pin
+    mismatch, so a project never moves ahead of the tool (docs/WORKFLOW.md § Installing a release)."""
+    import release_pin
+    from types import SimpleNamespace
+    root, project = committed_workspace(tmp_path)
+    released = git_out(root, "rev-parse", f"{RELEASE}^{{commit}}")
+    write(root / "shared/governance/CORE.md", "# CORE.md\n\nnewer\n")
+    commit_root(root, "newer")
+    run_git(root, "tag", "v0.0.2")
+    release = release_pin.Release(RELEASE, released, tmp_path / "releases" / RELEASE)
+    monkeypatch.setattr(sync_project, "installed_release", lambda: release)
+    demo = SimpleNamespace(name="demo", repo=str(project))
+    assert release_pin.mismatch(demo, release, root).token == "RELEASE_MISMATCH"
+    assert sync_project.main(["demo", "--check", "--verbose"], root=root) == 1
+    assert capsys.readouterr().out.startswith(f"target {RELEASE} ({released[:7]})\n")
+    assert sync_project.main(["demo"], root=root) == 0
+    assert (project / ".atc/atc.lock").read_text(encoding="utf-8").endswith(f'revision = "{released}"\n')
+    assert (project / ".atc/governance/CORE.md").read_text(encoding="utf-8") == "# CORE.md\n"
+    assert release_pin.mismatch(demo, release, root) is None
+
+
+def test_the_installed_release_is_the_copy_sync_runs_from(monkeypatch: pytest.MonkeyPatch) -> None:
+    import release_pin
+    monkeypatch.setattr(release_pin, "installed", lambda code: code)
+    assert sync_project.installed_release() == Path(sync_project.__file__).resolve().parents[3]
+    assert (sync_project.installed_release() / "adapters" / "python" / "scripts" / "sync_project.py").is_file()
+
+
+def test_sync_with_no_installed_release_targets_the_latest_tag(tmp_path: Path, capsys: pytest.CaptureFixture[str],
+                                                               monkeypatch: pytest.MonkeyPatch) -> None:
+    root, project = committed_workspace(tmp_path)
+    write(root / "shared/governance/CORE.md", "# CORE.md\n\nnewer\n")
+    newer = commit_root(root, "newer")
+    run_git(root, "tag", "v0.0.2")
+    monkeypatch.setattr(sync_project, "installed_release", lambda: None)
+    assert sync_project.main(["demo"], root=root) == 0
+    assert (project / ".atc/atc.lock").read_text(encoding="utf-8").endswith(f'revision = "{newer}"\n')
+    assert "v0.0.2" in git_out(project, "log", "-1", "--format=%s")
+
+
+def test_an_installed_release_off_main_stops_before_any_project(tmp_path: Path, capsys: pytest.CaptureFixture[str],
+                                                                 monkeypatch: pytest.MonkeyPatch) -> None:
+    import release_pin
+    root, project = committed_workspace(tmp_path)
+    run_git(root, "checkout", "-q", "-b", "topic")
+    side = commit_root(root, "topic")
+    run_git(root, "checkout", "-q", "main")
+    monkeypatch.setattr(sync_project, "installed_release",
+                        lambda: release_pin.Release("v0.0.2", side, tmp_path / "releases" / "v0.0.2"))
+    assert sync_project.main(["demo"], root=root) == 1
+    err = capsys.readouterr().err
+    assert err.startswith(f"STOP RELEASE_NOT_ON_MAIN: the installed release v0.0.2 ({side[:12]}) is not in the history")
+    assert "hint: install a release tagged on this checkout's main with atc install TAG" in err
+    assert not (project / ".atc").exists()
+
+
 def test_a_project_ahead_of_the_latest_release_is_left_alone(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     root, project = committed_workspace(tmp_path)
     write(root / "shared/governance/CORE.md", "# CORE.md\n\nahead\n")

@@ -160,9 +160,9 @@ repository 更新之後，要做的是重新 render，而不是手動去改：
 ```sh
 atc/scripts/check-skills.sh path/to/your-repo                           # current / drifted / orphaned / stale
 atc/scripts/link-skills.sh --prune path/to/your-repo                    # 修復
-atc sync                                                               # 所有已登記的專案，各自在 main 上 commit（最新 release）
+atc sync                                                               # 所有已登記的專案，各自在 main 上 commit（已安裝的 release）
 atc sync my-project --check                                            # 只看一個專案，不寫入
-atc sync --revision <sha>                                              # 最新 release 以外，改用 Owner 指定的 SHA
+atc sync --revision <sha>                                              # 改用 Owner 指定的 main 上 SHA
 ```
 
 render 出來的檔案都帶有 `managed-by: agent-traffic-control` 標記；沒有這個

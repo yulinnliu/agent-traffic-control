@@ -31,6 +31,18 @@ tracked modifications: `atc` and every session read it as the workspace.
 it would act on is the canonical one or a release copy. A module the installed `atc` lacks stops
 the command with `ERROR MISSING_DEPENDENCY` and the reinstall command.
 
+## Release pin
+
+An `atc` running from a release copy stops a task-flow command
+(`task create|update|resume|close`, `test ID` without `--clean`, `--list` or
+`--private`, `integrate`, `push`, with or without `--check`) on a registered
+project whose `.atc/atc.lock` does not pin that release's commit, with
+`STOP RELEASE_MISMATCH` and a hint: `atc sync <project>`, which then targets
+the installed release, when the pin is behind it or missing; the Owner's
+`atc install` of the pinned release when the pin is ahead of it. The workspace root is never compared,
+and a development copy compares nothing (`docs/WORKFLOW.md` § Installing a
+release).
+
 ## Command groups
 
 | Group | Commands |

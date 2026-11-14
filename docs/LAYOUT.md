@@ -85,16 +85,19 @@ Operational description of the tree; governance semantics live under
   hold the file with CRLF. A lock that does not parse, has a `version` other
   than `1`, or lacks a non-empty `source` or `revision` is a collision for
   sync and a failure for validation. `atc sync` renders and locks the
-  sync target: the highest `vMAJOR.MINOR.PATCH` tag in the history of ATC
-  `main`, or the SHA on `main` the Owner names with `--revision` (governance
-  `CORE.md` § Effective authority and revocation). It reads the tags of the
+  sync target: the SHA on `main` the Owner names with `--revision`
+  (governance `CORE.md` § Effective authority and revocation); else, when
+  `atc` runs from a release copy, the installed release's commit, which
+  must be in the history of ATC `main` (`STOP RELEASE_NOT_ON_MAIN`), so a
+  project never moves ahead of the tool; else the highest
+  `vMAJOR.MINOR.PATCH` tag in the history of ATC `main`. It reads the tags of the
   ATC checkout and never fetches, so that checkout holds the release tags:
   the Owner creates each one there, and another host fetches tags first. Sync
   writes the lock with the target as `revision` when the lock is missing,
   when its `source` differs from the governance repository, when sync changes
   any file it writes into the repository, or when the recorded revision is
   not in the history of ATC `main`. When the locked revision is ahead of the
-  latest release, sync writes nothing into that repository until a later
+  target release, sync writes nothing into that repository until a later
   release or a named `--revision`. `scripts/link-skills.sh` installs the
   checkout it runs from, at its `HEAD`; it reads the lock without parsing
   it, so it also rewrites a lock with an empty `revision`, and checks the
