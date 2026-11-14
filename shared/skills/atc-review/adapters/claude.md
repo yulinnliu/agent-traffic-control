@@ -5,7 +5,7 @@
   repository's `AGENTS.md` prescribes: its own worktree for a registered
   project, and for the workspace root whatever the root's `AGENTS.md`
   § Changing this repo states.
-- On Windows every command that spawns tests (`atc verify`, `atc test run`,
+- On Windows every command that spawns tests (`atc test`,
   `atc integrate --check`) runs through the PowerShell tool, never the Bash
   tool: Bash-tool child processes leave nonpaged pool allocations behind on
   this platform, root cause not found.

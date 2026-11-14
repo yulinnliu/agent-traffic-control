@@ -31,8 +31,8 @@ the Owner only for a clearance.
   change; a deletion outside the standard close-out.
 - **Standard procedure, no question:** the worktree and the task record; the
   writer and reviewer sessions; relaying reports and verdicts; the fix
-  re-review; `atc integrate --check`; `atc preflight push`; close-out and
-  archive (step 6). Each is reported once done.
+  re-review; `atc integrate <task> --check`; `atc push --check`;
+  `atc task close` and archive (step 6). Each is reported once done.
 
 ## Stops
 
@@ -54,8 +54,8 @@ Owner with what was observed:
 
 A coordinator that restarts or has lost its conversation rebuilds its state
 from durable sources, never from memory: the task record and
-`atc task list` (the queue is `atc task list --status planned`), git (the
-topic branch tip and `main`), `atc worktree audit`,
+`atc task list` (`-v` adds each worktree's findings), git (the topic
+branch tip and `main`),
 `<git common dir>/atc/integrations.jsonl`, the previous coordinator
 hand-over and the session list. A truncated notification or a verdict
 whose full text is missing is handled as § Stops says. An integration that
@@ -76,12 +76,10 @@ the map from task ID to session and nothing a record, Git or
   and how each approval reaches the session that acts on it; a peer
   session's relay is not the Owner's approval. Re-read the decisions already
   made before summarizing a plan.
-- Name work by its task ID, never by a list position. Work the Owner
-  queues gets its ID at once: `atc task plan --scope` where the project
-  declares `## Task records`, with `--rank`, `--after` and `--notes` for
-  its place and conditions, `atc task rank` to reorder and `atc task drop`
-  when the Owner drops it (`docs/TASKS.md` § Backlog). The Owner's rulings
-  on queued work go into the record's `decisions`.
+- Name work by its task ID, never by a list position. A task gets its ID
+  when `atc task create` opens it; work the Owner queues for later stays in
+  the coordinator hand-over until then. The Owner's rulings go into the
+  record's `decisions` (`atc task update <ID> --decision`).
 - Findings and small follow-ups fold into the task in progress; a new task
   is for new mainline work only. A LOW that needs no test change is fixed at
   once, others in the next round.
@@ -109,27 +107,24 @@ the map from task ID to session and nothing a record, Git or
 
 1. **Before opening.** Read the project's `AGENTS.md`, the task identity form
    it declares (governance `CORE.md` § Task identity), the task records, the
-   branches, the worktrees (`atc worktree audit` where they are managed) and
+   branches, the worktrees (`atc task list -v` where they are managed) and
    the titles of running sessions; another coordinator may be opening tasks
    in the same project. The task ID comes from the issuing source: where
-   the project declares `## Task records`, the record `atc task plan` or
-   `atc task new` issues, never a number the coordinator picks; where the
+   the project declares `## Task records`, the ID `atc task create` issues,
+   never a number the coordinator picks; where the
    project's `AGENTS.md` declares a ticketing system, that system's; in any
    other project the Owner names it, and an instruction without one is
    answered by asking the Owner for it. A task ID or branch name already
    taken is a collision (§ Stops). Done when the reads show the task ID and
    the branch name free.
-2. **Open the task record** in the project's form where the project
-   declares `## Task records`: `atc task start <ID>` in the topic worktree
-   for a planned task, `atc task new --scope` for work that was never
-   queued. Its scope and authority are the writer's contract. Commit it on
-   the topic branch; it reaches `main` with the topic's first integration.
-   A task the Owner pre-authorizes is bound on `main` before its work:
-   commit the record alone as the topic's first commit and give the Owner
-   that commit's integration command (step 5). Such a records-only range
-   needs no review (governance `VERIFICATION.md` § Documentation-only
-   verification). Done when the record is written, and bound on `main` when
-   the Owner pre-authorized the task.
+2. **Open the task** where the project declares `## Task records`:
+   `atc task create "<title>" --project <name> [--tests <level>]`, or
+   `--file <brief.md>` with `# title`, `## Scope`, `## Decisions` and
+   `## Tests`. It creates the worktree and branch and commits the record on
+   the branch; the record reaches `main` with the task's integration. Its
+   scope, decisions and test level are the writer's contract (governance
+   `VERIFICATION.md` § Testing, Test levels); `tests: none` needs the Owner's
+   decision line. Done when `create` prints the worktree.
 3. **Start the writer session**, named as § Sessions and decisions says, with
    the writer brief of [`references/briefs.md`](references/briefs.md), its
    working directory at the task's place: a project task at the project's
@@ -147,26 +142,25 @@ the map from task ID to session and nothing a record, Git or
    file is there and read whole.
 5. **Hand the Owner the integration.** A PASS does not by itself trigger an
    integration. On a PASS that carries an integration instruction, run
-   `atc integrate --check --json` with the instruction's arguments; it
-   needs no authority, and an authority of kind `missing` means the Owner's
-   decision is still to come (governance `GIT_WORKFLOW.md` § Integrate).
+   `atc integrate <task> --sha <SHA> --check --json`; it needs no authority
+   (governance `GIT_WORKFLOW.md` § Integrate).
    - On `preflight.verdict` `FF` or `NO_FF` with no `refusal`, or a
      `CHECKOUT_NOT_ON_MAIN` refusal for a root checkout, give the Owner the
      reviewed SHA, that verdict, `verification_reuse` (`REUSED` takes
      seconds; any other value runs the verifier, up to its timeout) and the
      command of governance `GIT_WORKFLOW.md` § Owner-run commands, filled
-     in. A record on `main` that grants `integrate_main` drops
-     `--owner-run` for `FF` (§ Task and authority).
-   - On a `refusal` whose `next` names a rebase (`REBASE_REQUIRED`, or
+     in.
+   - On a `refusal` whose `hint` names a rebase (`REBASE_REQUIRED`, or
      `OVERLAP` or `CONFLICT` of an unpublished topic), the writer rebases
      and reports the new tip. Run
-     `atc integrate --check --json --reviewed <reviewed SHA> --rebased <rebased tip>`
-     as governance `GIT_WORKFLOW.md` § After formal review states. When the
+     `atc integrate <task> --sha <reviewed SHA> --check --json`, which takes
+     the rebased tip from the task's branch, as governance `GIT_WORKFLOW.md`
+     § After formal review states. When the
      carry-over holds, give the Owner the command for the rebased tip,
      naming the carried-from SHA and the `main` commits in between; on
      `CARRY_OVER_REFUSED`, the reviewer re-reviews the rebased tip first.
-   - On any other `refusal`, follow its `next` (`GIT_WORKFLOW.md`
-     § Command results); a `next` that names a re-review goes back to the
+   - On any other `refusal`, follow its `hint` (`GIT_WORKFLOW.md`
+     § Command results); a `hint` that names a re-review goes back to the
      reviewer before the Owner gets a command.
 
    The Owner runs the command; you never run it and never send it to the
@@ -178,7 +172,7 @@ the map from task ID to session and nothing a record, Git or
      the same turn.
    - Not run, `main` unchanged: the command waits on the Owner; keep it
      ready to copy and ask for nothing else. A stop the Owner shows you
-     follows its token's `next`; a corrected command for the same SHA needs
+     follows its token's `hint`; a corrected command for the same SHA needs
      no new decision, a new SHA does.
    - `main` moved without the line: run the check again and give the
      command the new check calls for.
@@ -190,21 +184,18 @@ the map from task ID to session and nothing a record, Git or
    a precondition.
    - Confirm `main` at the integrated SHA and the task record at its
      post-integration state.
-   - From outside the task's worktree run
-     `atc close-out --task <task> --check`, then
-     `atc close-out --task <task>`, with the same `--skip` items on an
-     intermediate batch of a multi-batch topic. In a repository without
+   - From outside the task's worktree run `atc task close <task> --check`,
+     then `atc task close <task>`. In a repository without
      managed worktrees remove the topic branch with
      `git -C <main checkout> branch -d <topic branch>`; `-d` deletes only a
      branch `main` already contains.
-   - Archive the task's sessions, then run `atc close-out --task <task>`
-     again, with the same `--skip` items, for what a session's working
-     directory held. A refused archive is read through the session's state:
+   - Archive the task's sessions, then run `atc task close <task>` again
+     for what a session's working directory held. A refused archive is read through the session's state:
      a running session's writer ends its work; a pinned or idle one goes to
      the Owner.
    - Leave the items the task record's `keep` lists.
-   - Check with `atc tmp list` and `atc worktree list` that no scratch,
-     dependent run or worktree of the task is left, and that
+   - Check with `atc test --list <task>` and `atc task list <task> -v` that
+     no scratch, dependent run or worktree of the task is left, and that
      `~/.atc/reports/<task>-*.md` is gone. Remove a leftover the task owns:
      its report files and the scratches registered to it. An unregistered
      scratch, a kept worktree or anything else is the Owner's question.
@@ -213,13 +204,13 @@ the map from task ID to session and nothing a record, Git or
      `ANOMALY` lines, items outside the task, a pinned or idle session's
      refused archive) and the leftovers the item above puts to the Owner.
 
-   Done when each item is removed, kept by the record's `keep`, left by
-   `--skip` for a later batch or put to the Owner as an exception.
+   Done when each item is removed, kept by the record's `keep` or put to
+   the Owner as an exception.
 7. **Hand the Owner the push** (`DELIVERY.md` § 10). For whatever is
-   integrated and unpushed, run `atc preflight push --project <name> --json`,
-   give the Owner every commit it lists with its `task`, `authority` and
-   `push_approval`, and the push command of `GIT_WORKFLOW.md` § Owner-run
-   commands with the listed `main` tip; the push is done when
+   integrated and unpushed, run `atc push <name> --check`, give the Owner
+   the commits it lists and the push command of `GIT_WORKFLOW.md`
+   § Owner-run commands; a refusal (an unrecorded commit, `main` behind or
+   diverged) goes to the Owner instead. The push is done when
    `git ls-remote origin refs/heads/main` names that SHA or a descendant.
    Then write the coordinator hand-over the project's handoff rules call for
    (`hami-handoff-reminder` `references/handoff-document.md` § The handoff

@@ -30,10 +30,10 @@ Read first: <the files to read before starting>
 Work rules:
   Fixed text, one line each, in this order:
   - Reply in the Owner's language, role terms in English.
-  - Run the targeted tests by an explicit file list through
-    `atc test run --scratch <name> --tree <worktree> --task <ID> -- <files>`
-    (atc-review "Writer: the step report"); never the full suite: the
-    reviewer's `atc verify` is the one full run.
+  - Run the tests the task's level names: `atc test <ID>` for the related
+    tests, `-- <files>` for an explicit list (atc-review "Writer: the step
+    report"); never the full suite: the reviewer's `atc test <ID> --candidate`
+    is the one full run.
   - Amend before review; after review, new commits, except after a FAIL
     verdict (governance GIT_WORKFLOW.md § After formal review).
   - No background shells, no polling (governance DELIVERY.md § Background

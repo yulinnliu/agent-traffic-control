@@ -1,11 +1,14 @@
-# `atc test mutants`
+# `atc test --mutants`
 
 ```
-atc test mutants <scratch> <sha> <worktree> <mutants.json> --task <ID> [--python <py>] [--kill-rule failure|assertion] --tests <path>...
+atc test <task> --mutants <mutants.json> [--sha <sha>] [-- <test>...]
 ```
 
-Applies each mutant alone to the copy at `<tmp>/<scratch>/tree`, the export
-of `<sha>`, through `atc test run`, and restores its files after each run.
+Applies each mutant alone to the export of `<sha>` (default: the task
+branch's tip) at `<tmp>/<task>-<sha7>/tree`, built once with its own
+environment, and restores its files after each run. The tests after `--`
+judge every mutant; without them, the tests related to the task's changes
+since its `base_sha` do.
 Each run is pytest with `-x` and a 900-second timeout.
 
 ## Input
@@ -18,7 +21,9 @@ Each run is pytest with `-x` and a 900-second timeout.
 
 Every `old` occurs exactly once in its file; one that does not aborts the
 run. Edits follow the file's line endings. `tests` is optional: the pytest
-arguments that judge that mutant in place of `--tests`.
+arguments that judge that mutant in place of the default tests.
+`kill_rule` is optional: `failure` (default) or `assertion` for that
+mutant.
 
 ## Kill rule
 
@@ -32,18 +37,17 @@ arguments that judge that mutant in place of `--tests`.
 
 ## Result lines
 
-- `--task` registers the scratch under the task; a scratch registered to
-  another task stops with `SCRATCH_TASK_MISMATCH` (exit 9).
-- `--python` defaults to the copy's own `.venv`: in the directory the
-  scratch's registry line names, as `atc tmp checkout --lock-dir` records
-  it, else in `<scratch>/tree`; without one, `VENV_MISSING` (exit 9). An
-  interpreter whose environment installs the tree's packages from another
-  checkout stops with `COPY_IMPORT_MISMATCH` (exit 8), naming them.
-- `<sha>` must name a commit in `<worktree>`: otherwise `SHA_NOT_FOUND`
-  (exit 9) before the scratch is touched, then `PYTHON_NOT_FOUND`, the
-  scratch refusals of `atc test run`, `TIME_SLACK_INVALID` and
-  `PRIVATE_DESKTOP_INVALID` (exit 9).
-- The tests run once unmutated first, `--tests` together with every
+- The scratch is registered to the task; a scratch registered to another
+  task stops with `SCRATCH_TASK_MISMATCH` (exit 9).
+- The tests run with the export's own `.venv`, in the directory under the
+  tree whose `pyproject.toml` has `[tool.atc-testkit]`; without one,
+  `VENV_MISSING` (exit 9). An interpreter whose environment installs the
+  tree's packages from another checkout stops with `COPY_IMPORT_MISMATCH`
+  (exit 8), naming them.
+- `<sha>` must name a commit of the task's repository: otherwise
+  `SHA_NOT_FOUND` (exit 9) before the scratch is touched, then the scratch
+  refusals, `TIME_SLACK_INVALID` and `PRIVATE_DESKTOP_INVALID` (exit 9).
+- The tests run once unmutated first, the default tests together with every
   mutant's own `tests`. A red unmutated run prints `BASELINE-RED`, applies no
   mutant and exits 1.
 - Each mutant prints one line: `KILLED` with the `FAILED` line of a run the

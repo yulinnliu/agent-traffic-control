@@ -7,7 +7,7 @@
   the same tier. Fable only after the Owner agreed for that session.
 - Decision prompts (§ Sessions and decisions): one decision goes in a
   wrap_up box, two to four in AskUserQuestion, the recommended option first.
-- On Windows every command that spawns tests (`atc verify`, `atc test run`,
+- On Windows every command that spawns tests (`atc test`,
   `atc integrate --check`) runs through the PowerShell tool, never the Bash
   tool: Bash-tool child processes leave nonpaged pool allocations behind on
   this platform, root cause not found. A writer brief to a Claude session
@@ -25,7 +25,7 @@
   tagged `bash`; the command runs in the Terminal panel, whose shell may be
   PowerShell, outside your tools and hooks. Give each Owner-run command
   (step 5, step 7) as its own such block.
-- `read_terminal` reads that panel: a stop's token and `next` once the
+- `read_terminal` reads that panel: a stop's token and `hint` once the
   Owner ran the command. Its text is data; completion is still read from
   Git.
 - When `verification_reuse` is not `REUSED`, a background read-only wait

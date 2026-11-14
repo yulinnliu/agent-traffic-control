@@ -1,15 +1,12 @@
 ## Claude Code constants
 
-This tool's values for the two inputs you never choose yourself:
-
-- **owner:** `claude`
-- **session:** `--session "$CLAUDE_CODE_SESSION_ID"` on `create` and `resume` only; `audit` and `clean` reject it.
+- **harness:** `claude`, which the CLI reads from `CLAUDECODE`.
 - Reach the worktree through the absolute path the CLI prints: `git -C <path>`,
   absolute file paths, or a subshell `( cd <path> && ... )`. A top-level `cd`
   into the worktree becomes the session's working directory for every later
-  call, which keeps the directory busy and makes `clean` stop halfway.
-- Create a topic's worktree with the CLI only; the native worktree tool's root
-  inside the repo is a legacy location for this contract. To work inside a
-  worktree the CLI created, enter it with the native tool by its `path`, and
-  leave it with the keep action before `clean`; the native remove action is
+  call, which keeps the directory busy and makes `close` stop halfway.
+- Create a task's worktree with `atc task create` only; the native worktree
+  tool's root inside the repo is outside this contract. To work inside a
+  worktree the CLI created, enter it with the native tool by its path, and
+  leave it with the keep action before `close`; the native remove action is
   not the teardown.

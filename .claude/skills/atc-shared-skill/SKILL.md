@@ -67,10 +67,11 @@ stay in the canonical body so they exist once.
 
 ## Step 3 — render, never hand-write adapters
 
-Adapters are generated. From the checkout:
+Adapters are generated. From the checkout (`atc-maintain` runs as
+`uv run --locked atc-maintain` from an ATC worktree's `adapters/python`):
 
 ```
-atc sync --root                         # this checkout's own .claude/ .agents/ .dsh/, no commit
+atc-maintain sync --root                # this checkout's own .claude/ .agents/ .dsh/, no commit
 atc sync <project>                      # one registered project, committed on its main
 atc sync                                # every registered project, committed on its main
 scripts/link-skills.sh <repo> <name>    # a repository outside the workspace map, no Python
@@ -91,9 +92,9 @@ link) is a collision and left alone.
 
 ## Step 4 — guard against drift
 
-`atc validate` compares each adapter with the render of its canonical,
+`atc-maintain validate` compares each adapter with the render of its canonical,
 rejects orphaned adapters and canonical skills that point back at the
-checkout. `atc validate --projects` does the same for every registered
+checkout. `atc sync --check` does the same for every registered
 project. Run these commands locally as needed; GitHub Actions validation is
 started manually through the `validate.yml` workflow.
 

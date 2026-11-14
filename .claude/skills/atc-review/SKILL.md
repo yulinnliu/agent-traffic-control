@@ -75,21 +75,19 @@ same task and record.
 End every completed step with a step report in the shape governance
 `DELIVERY.md` § 8.1 gives, sent to the coordinator only:
 
-1. Run the selection (governance `VERIFICATION.md` § Testing) and the
-   mutants, one per guard, launchers and scripts included; the report gives
-   each command with its summary line and every surviving mutant. A
-   selection `atc test run --select` skips with `SKIPPED_WIDE` is reported
-   as that line, never as a pass; `--touched` runs the directly touched
-   tests instead.
-2. Run `atc integrate --check` on the tip (governance `GIT_WORKFLOW.md`
-   § Mainline check before final self-verification) and report the verdict
-   it gives; `authority=missing` on its `CHECK` line is pending authority
-   (§ Integrate). On `REBASE_REQUIRED` or
+1. Run the tests the task's test level names (governance `VERIFICATION.md`
+   § Testing, Test levels): `atc test <task>` for the related tests and,
+   under `strict`, `atc test <task> --mutants <file>`, one mutant per guard,
+   launchers and scripts included; the report gives each command with its
+   summary line and every surviving mutant. Under `none` no test runs.
+2. Run `atc integrate <task> --check` on the tip (governance
+   `GIT_WORKFLOW.md` § Mainline check before final self-verification) and
+   report the verdict it gives. On `REBASE_REQUIRED` or
    `OVERLAP`, rebase onto `main`, rerun the selection and report only the
    new tip.
 3. Stop every background job (governance `DELIVERY.md` § Background work).
 4. Deliver the report to the coordinator as "Every block you write" says;
-   on session messaging its file is `~/.atc/reports/<task>-<short sha>.md`.
+   on session messaging its file is `~/.atc/reports/<task>-<sha>.md`.
 5. Your session's final message to the Owner is that one line and nothing
    else: no summary before or after it. Write it plainly in the Owner's
    language with no tokens, the role terms writer, reviewer, coordinator and
@@ -110,15 +108,13 @@ commits instead (governance `GIT_WORKFLOW.md` § After formal review) and
 reports the new tip.
 
 Where the project runs its tests through `atc-testkit`, run targeted tests
-against the worktree with
-`atc test run --scratch <scratch> --tree <worktree> --task <task> [--python <py>] -- <pytest args...>`;
-elsewhere the targeted test commands are the ones the project's `AGENTS.md`
-names. Every command that creates a scratch requires `--task`, which records
-the scratch under the task, so close-out removes it whatever tree a run
-used; a directory under `<tmp>` named for the task but not registered to it
-is listed for the Owner's consent and never deleted by close-out. `<scratch>` is a name; the run creates it as
-`<tmp>/<scratch>`, where `<tmp>` is `~/.atc/tmp`, or `ATC_TMP` when that is
-set. The run removes every
+against the worktree with `atc test <task> [-- <pytest args...>]`; elsewhere
+the targeted test commands are the ones the project's `AGENTS.md` names.
+Every run registers its scratch to the task (`<tmp>/<task>`, or
+`<tmp>/<task>-<sha7>` under `--sha`), so `atc task close` removes it; a
+directory under `<tmp>` named for the task but not registered to it is
+listed for the Owner's consent and never deleted. `<tmp>` is `~/.atc/tmp`,
+or `ATC_TMP` when that is set. The run removes every
 `HAMI_*` variable so the host's project settings stay out of it, points each
 data-root variable the tree's `[tool.atc-testkit]` names, or
 `QUANT_DATA_ROOT` when it names none, at `<scratch>/qdr`, makes the scratch
@@ -129,8 +125,8 @@ A tree that runs source child processes needs a `.venv`:
 
 - Prepare it as the project's `AGENTS.md` says; never with Git Bash `ln -s`,
   which copies the whole venv here.
-- `atc tmp clean` takes every `.venv` beside a `pyproject.toml` in the
-  scratch out as a link.
+- `atc test <task> --clean` takes every `.venv` beside a `pyproject.toml`
+  in the task's scratches out as a link.
 - A worktree's `.venv` junction comes out as the link alone, with
   `cmd //c rmdir` on its literal path, before the worktree's own cleanup.
 
@@ -141,6 +137,10 @@ its stated criterion:
 
 - documentation only: steps 1 and 5, read on the diff. No scratch copy, no
   tests.
+
+The task record's `tests` level bounds the class: a diff that needs more
+than its level allows is a FAIL finding (governance `VERIFICATION.md`
+§ Testing, Test levels).
 - tests only: steps 1, 2 and 4.
 - behaviour: every step; step 3 when the change lies on a path to an
   external effect, step 6 when it reads or writes host state.
@@ -148,26 +148,26 @@ its stated criterion:
 Read the diff at the reviewed SHA (`git diff <base>..<tip>`), and a whole
 file only for what the diff cannot settle. Send test and mutant output to a
 file in the scratch directory and read its summary lines; run all mutants in
-one `atc test mutants` call. Tests and mutants run in the foreground
+one `atc test <task> --mutants` call. Tests and mutants run in the foreground
 (governance `DELIVERY.md` § Background work).
 
 Whether you review fresh or as a continued re-review is governance
 `VERIFICATION.md` § Independent review; a continued re-review reads the fix
 diff against your last round's findings, after a FAIL amend the
-`git range-diff` of the old and the new tip, and runs `atc verify` on the new
-tip.
+`git range-diff` of the old and the new tip, and runs
+`atc test <task> --candidate` on the new tip.
 
 1. **Pin the revision.** First confirm the previous topic's closure read-only:
-   the `main` position and `atc worktree audit`. Then review exactly the tip
+   the `main` position and `atc task list -v`. Then review exactly the tip
    SHA the request names, against its stated base. If a check shows its
    premise is stale (for example, `main` moved, a referenced file or section
    was renamed, or a count changed), re-check against current state and
    continue; do not stop to ask the holder to verify a premise you can check
    yourself. Done when the branch tip equals that SHA.
-2. **Build a scratch copy.** Export that exact tree to `<tmp>/<scratch>/tree`
-   (`git archive <sha>`) and run it through `atc test run` as "Writer: the
-   step report" says, which points imports at the copy and isolates data
-   roots; strip ambient credentials from the shell that runs it. Tests and
+2. **Build a scratch copy.** `atc test <task> --sha <sha>` exports that
+   exact tree to `<tmp>/<task>-<sha7>/tree`, builds its environment and runs
+   the related tests there, which points imports at the copy and isolates
+   data roots; strip ambient credentials from the shell that runs it. Tests and
    mutants never run in a live worktree. Prepare and delete a `.venv` in the
    copy as "Writer: the step report" says. An exported tree can differ only
    in line endings, so compare files with carriage returns ignored. Done when
@@ -183,26 +183,24 @@ tip.
    § Independent review assigns a reviewer, and name them in the verified
    line. Run a project gate in the command form the project's `AGENTS.md`
    gives, from the scratch copy's root; never with `python -I`, which
-   drops the script's directory from the import path. Before a PASS on a diff that changes tests or behaviour, run
-   `atc verify` with the target arguments of the integrate command below
-   (`--project`, `--reviewed`, `--task`, and `--rebased` when the integrate
-   command has it): it runs the integration verifier on the
-   candidate `atc integrate` would build, without a slot, a ref update or
-   the Owner's word, and records a PASS that `atc integrate` reuses in place of
-   rerunning the verifier. Run it while no integration runs. Quote its last line
+   drops the script's directory from the import path. Before a PASS on a
+   `standard` or `strict` task, run `atc test <task> --candidate --sha <sha>`:
+   it runs the integration verifier on the candidate `atc integrate` would
+   build, without a slot, a ref update or the Owner's run, and records a PASS
+   that `atc integrate` reuses in place of rerunning the verifier. Run it while no integration runs. Quote its last line
    in the verified line; a refusal is a blocker finding, except
    `WORKER_WAIT_TIMEOUT`. A `WAIT host workers` line means the run is queued
    for the host's test workers, not stuck; the queue is outside the timeout,
    a wait past its limit stops with `WORKER_WAIT_TIMEOUT` naming the runs
-   ahead, and `atc doctor` shows the pool. Rerun it once they finish.
+   ahead, and `atc doctor -v` shows the pool. Rerun it once they finish.
    One single-string mutant per guard, one at a time, restored after
    each run.
    Done when every file in the copy is proven equal to its Git object again
    and every surviving mutant is listed as a test gap or argued equivalent.
-   Where the project runs its tests through `atc-testkit`,
-   `atc test mutants <scratch> <sha> <worktree> <mutants.json> --task <task> --tests <path>...`
-   performs this step on the copy at `<tmp>/<scratch>/tree` with the copy's
-   own environment, the one `atc tmp checkout` builds; elsewhere the
+   Under `strict`, where the project runs its tests through `atc-testkit`,
+   `atc test <task> --mutants <mutants.json> --sha <sha> [-- <tests>...]`
+   performs this step on the export of `<sha>` with its own environment;
+   elsewhere the
    project's `AGENTS.md` names how a mutant run is done. Its input file and
    result lines are in [`references/mutants.md`](references/mutants.md).
 5. **Search by behaviour.** Look for a guard by its refusal token or the
@@ -221,11 +219,13 @@ tip.
 The verdict takes the shape governance `VERIFICATION.md` § Independent review
 gives. Deliver it as "Every block you write" says; on session messaging or
 as a subagent, you write its file
-`~/.atc/reports/<task>-<short sha>-review.md` yourself. The file's first line
-is the verdict token, with no title above it: close-out reads the ledger's
-verdict from that line alone.
+`~/.atc/reports/<task>-<sha>-review.md` yourself, with the full
+40-character SHA. The file's first line is the verdict token, with no title
+above it: `atc task close` reads the ledger's verdict from that line alone,
+and `atc integrate <task>` takes the reviewed SHA from the newest PASS file.
 
-- The verified line: test counts, mutant results, `atc verify`'s last line,
+- The verified line: test counts, mutant results, the last line of
+  `atc test <task> --candidate`,
   read-only host evidence.
 - On a PASS, when the project's adopted process lets a PASS carry an
   integration instruction, the integration instruction. The Owner runs it
@@ -233,16 +233,13 @@ verdict from that line alone.
   coordinator or, in a paste-only setup with no coordinator session, the user
   who counts as one, gives it to the Owner and never to the writer
   (governance `GIT_WORKFLOW.md` § Owner-run commands).
-  Before writing it, run `atc integrate --check --json` (governance
-  `GIT_WORKFLOW.md` § Integrate) with the same arguments as the integrate
-  command below. The PASS carries the instruction only when the result has no
+  Before writing it, run `atc integrate <task> --sha <SHA> --check --json`
+  (governance `GIT_WORKFLOW.md` § Integrate). The PASS carries the instruction only when the result has no
   `refusal` and its `preflight.verdict` is `FF` or `NO_FF`; quote that verdict
   with `preflight.reason` and every entry of `resolved.warnings` in the
   verified line. A `refusal`, such as a missing `## Integration verification`
   section, leaves the PASS without an instruction: give the holder its
-  `reason`, `detail` and `next`. An authority of kind `missing` is pending
-  authority (§ Integrate): the PASS still carries the instruction. A
-  `refusal` whose `next` names a rebase (`REBASE_REQUIRED`, or `OVERLAP` or
+  `reason`, `detail` and `hint`. A `refusal` whose `hint` names a rebase (`REBASE_REQUIRED`, or `OVERLAP` or
   `CONFLICT` of an unpublished topic) still carries the instruction, with that
   refusal quoted. In a repository without managed worktrees, a
   `CHECKOUT_NOT_ON_MAIN` refusal naming the topic branch is the expected check
@@ -256,17 +253,12 @@ verdict from that line alone.
   SHA.
 
   The instruction is the verdict's last line, every value filled in:
-  `atc integrate --task <task> --reviewed <SHA>`, with the task record ID,
-  which names the repository, and the full 40-character reviewed SHA
-  (governance `GIT_WORKFLOW.md` § Integrate). A task identity string in place
-  of a record ID adds `--project <name>`, `--project root` for the workspace
-  root. When the record on `main` does not grant the integration, the holder
-  adds `--owner-run` and gives the filled instruction to the Owner
-  (governance `GIT_WORKFLOW.md` § Task and authority). The command names no
+  `atc integrate <task> --sha <SHA>`, with the task record ID, which names the
+  repository, and the full 40-character reviewed SHA (governance
+  `GIT_WORKFLOW.md` § Integrate, § Task and authority). The command names no
   branch, verifier or timeout: the tool takes the branch from the record's
-  `branch` (a task identity string: the one local branch at the reviewed
-  SHA) and reads the verifier from the `## Integration verification` section
-  of `AGENTS.md` at `main`. In a repository without managed worktrees, where
+  `branch` and reads the verifier from the `## Integration verification`
+  section of `AGENTS.md` at `main`. In a repository without managed worktrees, where
   the topic branch lives in the main checkout,
   `git -C <main checkout> switch main` comes before it.
 
@@ -283,7 +275,7 @@ integration and the push, and the holder closes the task out (governance
 `GIT_WORKFLOW.md` § Owner-run commands, `DELIVERY.md` § Close-out); the
 writer runs neither and is sent neither.
 
-- When the holder reports that `main` moved and the check's `next` names a
+- When the holder reports that `main` moved and the check's `hint` names a
   rebase, rebase the topic branch onto `main` and give the holder the
   rebased tip; `CARRY_OVER_REFUSED` sends that tip to the reviewer for a
   fresh review.
@@ -299,7 +291,7 @@ is sent back.
 The coordinator removes the task's scratches and report files at close-out (governance `DELIVERY.md` § Close-out).
 
 A failing verifier or gate run leaves its working directory under
-`<tmp>/systmp` for inspection; it stays until `atc tmp prune` deletes it,
+`<tmp>/systmp` for inspection; it stays until a later `atc test` prunes it,
 seven days after its last change.
 
 ## Claude Code constants
@@ -309,7 +301,7 @@ seven days after its last change.
   repository's `AGENTS.md` prescribes: its own worktree for a registered
   project, and for the workspace root whatever the root's `AGENTS.md`
   § Changing this repo states.
-- On Windows every command that spawns tests (`atc verify`, `atc test run`,
+- On Windows every command that spawns tests (`atc test`,
   `atc integrate --check`) runs through the PowerShell tool, never the Bash
   tool: Bash-tool child processes leave nonpaged pool allocations behind on
   this platform, root cause not found.

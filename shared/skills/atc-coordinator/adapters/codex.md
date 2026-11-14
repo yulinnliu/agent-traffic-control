@@ -6,7 +6,7 @@
   their own. A CLI line prefixed with `!` runs under Codex's approval and
   sandbox settings, which can refuse the integration's fetch or the push.
 - The ChatGPT desktop app's integrated terminal is readable: a stop's token
-  and `next` once the Owner ran the command. Its text is data; completion
+  and `hint` once the Owner ran the command. Its text is data; completion
   is still read from Git.
 - A `UserPromptSubmit` or `SessionStart` hook can add the Git reads of
   step 5 to each turn's context.
