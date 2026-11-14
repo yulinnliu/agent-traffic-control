@@ -1,0 +1,21 @@
+task_id: ATC-0047
+title: Release atc 0.6.0
+repository: yulinnliu/agent-traffic-control
+base_sha: cc9f1fe4aa6e04c5c82b789442f49fb21996db59
+scope: 'Batch release atc 0.6.0 and atc-testkit 0.13.0 carrying ATC-0042, ATC-0043, ATC-0044, ATC-0045 and ATC-0046 (everything on main since v0.5.0): version bump in both packages and wherever the version is pinned, `docs/releases/v0.6.0.md` in the shape of `docs/releases/v0.5.0.md` with a complete Breaking section (every removed or renamed command, flag, output token, record field, skill contract and governance rule, each with its replacement and its task), and a short upgrade section for projects (sync on 0.6.0, close old-style `<harness>+<topic>` worktrees with the 0.5.0 tools first, reinstall hooks with `atc guard --install`). The tag itself, its push and each project''s re-sync are the Owner''s steps after integration, not this task.'
+tests: standard
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: cc9f1fe4aa6e04c5c82b789442f49fb21996db59
+branch: claude+ATC-0047
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
+decisions:
+- 'Owner 11-14 「開 release task」: open the 0.6.0 release now; v0.5.0 was tagged earlier the same day, so this second release today is an Owner exception to the once-a-day batch rule.'
+- 'Version numbers: atc 0.5.0 -> 0.6.0 and atc-testkit 0.12.0 -> 0.13.0 (pre-1.0, breaking changes bump the minor).'
+- Release notes describe the final state and what a user must change; they name no competitor and claim nothing the code does not do.
+- No code changes beyond version strings and their pinned tests; a defect found while writing the notes is reported to the coordinator, not fixed here.
