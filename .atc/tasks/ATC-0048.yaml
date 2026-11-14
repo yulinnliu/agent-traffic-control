@@ -1,0 +1,22 @@
+task_id: ATC-0048
+title: Install atc from a release tag
+repository: yulinnliu/agent-traffic-control
+base_sha: cc9f1fe4aa6e04c5c82b789442f49fb21996db59
+scope: The installed `atc` runs the code of a release tag, not of the canonical checkout's `main`, so integrating into `main` changes nothing a project runs until the Owner tags and installs a release. The installed copy is a detached Git worktree of the workspace root repository at the tag, with `atc` an editable install of its `adapters/python`; the PreToolUse hook that `atc guard --install` writes runs that copy's `pretooluse_hook.py`. When nothing else names the workspace root, `atc` finds it as the main worktree of the repository its own code lives in, so a release copy resolves to the canonical checkout. Add the Owner-run command that installs a given tag on this host (create the release copy, install it, report the old and new version) and its `--check`, with the tool, the hook guard and the hard-deny table treating it like `push`; `atc doctor` reports the installed version and the copy it runs from. Revisit the canonical-checkout guard (`CHECKOUT_NOT_MAIN`, `CHECKOUT_DIRTY`) for
+  what it still protects once the tool no longer runs from that checkout, and record the ruling. Update `AGENTS.md`, `adapters/python/README.md`, `docs/WORKFLOW.md`, `docs/ATC_HOME.md`, `docs/ENFORCEMENT.md`, `docs/TESTKIT.md` and every other text that says the installed `atc` runs the checkout's code. Development keeps `uv run --locked atc-maintain` and `uv run atc` in a topic worktree.
+tests: strict
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: cc9f1fe4aa6e04c5c82b789442f49fb21996db59
+branch: claude+ATC-0048
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
+decisions:
+- 'Owner 11-14 「照第1種，發布前就要弄好了吧?」: the installed `atc` follows a release tag instead of `main`, done before the 0.6.0 release so 0.6.0 is the first release installed this way; ATC-0047 integrates after this task and its notes describe the install.'
+- The release copy is a detached worktree of the workspace root repository (code, scripts, schemas and hook at one revision, no packaging change); a wheel or PyPI install is out of scope.
+- 'Installing a release on a host is an Owner action like push: agents may run only its `--check`.'
+- No change under `shared/governance/`; if one turns out to be needed, stop and report it to the coordinator.
