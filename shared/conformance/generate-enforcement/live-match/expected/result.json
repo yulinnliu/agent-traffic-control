@@ -1,1 +1,1 @@
-{"exit_code": 0, "output_contains": ["ok: enforcement configs are current"]}
+{"exit_code": 0, "output_contains": ["CURRENT enforcement configs"]}

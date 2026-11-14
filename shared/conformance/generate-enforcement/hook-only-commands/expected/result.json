@@ -1,4 +1,4 @@
 {
   "exit_code": 0,
-  "output_contains": ["generated: claude-code/settings.json, codex/hard-deny.rules, git-hooks/pre-commit"]
+  "output_contains": ["  files: claude-code/settings.json, codex/hard-deny.rules, git-hooks/pre-commit"]
 }

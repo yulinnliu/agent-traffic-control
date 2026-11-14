@@ -1,1 +1,1 @@
-{"exit_code": 1, "output_contains": ["drift: live-claude (", "live-codex (", "no single atc hard-deny block"]}
+{"exit_code": 1, "output_contains": ["DRIFT live-claude (", "live-codex (", "no single atc hard-deny block", "STOP DRIFT: ", "hint: regenerate"]}

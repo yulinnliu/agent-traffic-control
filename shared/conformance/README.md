@@ -31,8 +31,8 @@ access.
 | Tool | Directory | Verdict vocabulary |
 | --- | --- | --- |
 | adapter validation | `validate-adapters/` | `all checks passed`, or one line per failure |
-| policy loading | `load-policies/` | `ok: <kinds>`, `schema-violation`, `preset-regrants-hard-deny`, `approval-overlaps-hard-deny`, `duplicate-glob` |
-| enforcement generation | `generate-enforcement/` | `generated:`, `ok: enforcement configs are current`, `drift:` (files and `live-claude`/`live-codex`/`live-hook`), `unresolved-token`, plus golden files per harness |
+| policy loading | `load-policies/` | `OK <kinds>`, `PROBLEMS N found`, `schema-violation`, `preset-regrants-hard-deny`, `approval-overlaps-hard-deny`, `duplicate-glob` |
+| enforcement generation | `generate-enforcement/` | `GENERATED enforcement configs`, `CURRENT enforcement configs`, `DRIFT` (files and `live-claude`/`live-codex`/`live-hook`), `unresolved-token`, plus golden files per harness |
 | PreToolUse hook | `pretooluse-hook/` | a deny decision (`"permissionDecision": "deny"`) naming the rule, the refused path, the write target `the hook cannot resolve`, or `the PreToolUse hook could not decide`; the payload is `input/payload.json`, passed as `--payload` |
 | task record check | `task-records/` | `OK <dir>`, `invalid-yaml`, `schema-violation`, `id-mismatch`, `no-declaration`, `no-prefix-line`, `invalid-prefix`, `tests-none-undecided` |
 

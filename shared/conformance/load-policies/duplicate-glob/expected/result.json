@@ -1,1 +1,1 @@
-{"exit_code": 1, "output_contains": ["duplicate-glob: filesystem.deny lists 'logs/**' more than once"]}
+{"exit_code": 1, "output_contains": ["duplicate-glob: filesystem.deny lists 'logs/**' more than once", "PROBLEMS 1 found", "STOP POLICY_INVALID: ", "hint: fix them"]}

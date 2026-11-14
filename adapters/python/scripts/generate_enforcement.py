@@ -494,15 +494,22 @@ def main(argv: list[str] | None = None) -> int:
     if args.local_out and args.out and args.local_out.resolve().is_relative_to(args.out.resolve()):
         parser.error("--local-out must lie outside --out, which is committed and holds no absolute path")
 
-    def done(verdict: str, lines: list[str], code: int, **fields) -> int:
+    def done(verdict: str, lines: list[str], code: int, stop: tuple[str, str, str] | None = None,
+             **fields) -> int:
+        """``lines`` is the verdict line and its indented details; ``stop`` the refusal's token, detail and hint."""
         if args.json:
             print(json.dumps({"verdict": verdict, **fields}, indent=2))
-        else:
-            print("\n".join(lines))
+            return code
+        print("\n".join(lines))
+        if stop:
+            print(f"STOP {stop[0]}: {stop[1]}", file=sys.stderr)
+            print(f"hint: {stop[2]}", file=sys.stderr)
         return code
 
     def problem(problems: list[str]) -> int:
-        return done("PROBLEMS", problems, 1, problems=problems)
+        return done("PROBLEMS", [f"PROBLEMS {len(problems)} found", *(f"  {p}" for p in problems)], 1,
+                    ("POLICY_INVALID", "each problem line names the policy file and the rule",
+                     "fix them, then run atc-maintain guard again"), problems=problems)
 
     files: dict[str, str] = {}
     if args.policies is not None:
@@ -549,8 +556,11 @@ def main(argv: list[str] | None = None) -> int:
         if args.live_codex_hooks and not hooks_current(args.live_codex_hooks, groups["codex"]):
             found.append(f"live-codex-hooks ({args.live_codex_hooks})")
         if found:
-            return done("DRIFT", ["drift: " + ", ".join(found)], 1, drift=found)
-        return done("CURRENT", ["ok: enforcement configs are current"], 0, drift=[])
+            return done("DRIFT", ["DRIFT " + ", ".join(found)], 1,
+                        ("DRIFT", "the enforcement configs differ from the policies",
+                         "regenerate with atc-maintain guard --policies DIR --out DIR; the Owner runs "
+                         "atc guard --install for the live copies"), drift=found)
+        return done("CURRENT", ["CURRENT enforcement configs"], 0, drift=[])
     lines = []
     if args.policies is not None:
         for rel, content in files.items():
@@ -558,24 +568,24 @@ def main(argv: list[str] | None = None) -> int:
             target.parent.mkdir(parents=True, exist_ok=True)
             write_if_changed(target, content)
         os.chmod(args.out / "git-hooks/pre-commit", 0o755)
-        lines.append("generated: " + ", ".join(files))
+        lines.append("  files: " + ", ".join(files))
     local_target = None
     if local and args.local_out:
         local_target = args.local_out / LOCAL_FILE
         local_target.parent.mkdir(parents=True, exist_ok=True)
         write_if_changed(local_target, local[LOCAL_FILE])
-        lines.append(f"machine-local: {local_target} (from {args.workspace})")
+        lines.append(f"  machine-local: {local_target} (from {args.workspace})")
     elif local:
-        lines.append(f"machine-local: {args.workspace} names state roots; pass --local-out DIR to write {LOCAL_FILE}")
+        lines.append(f"  machine-local: {args.workspace} names state roots; pass --local-out DIR to write {LOCAL_FILE}")
     table_target = None
     installed: list[str] = []
     if table is not None:
         table_target = table_dir / HOOK_TABLE
         table_target.parent.mkdir(parents=True, exist_ok=True)
         write_if_changed(table_target, table)
-        lines.append(f"hook-table: {table_target}")
-    return done("GENERATED", lines, 0, files=list(files), local=str(local_target) if local_target else None,
-                hook_table=str(table_target) if table_target else None, installed=installed)
+        lines.append(f"  hook-table: {table_target}")
+    return done("GENERATED", ["GENERATED enforcement configs", *lines], 0, files=list(files),
+                local=str(local_target) if local_target else None, hook_table=str(table_target) if table_target else None, installed=installed)
 
 
 if __name__ == "__main__":

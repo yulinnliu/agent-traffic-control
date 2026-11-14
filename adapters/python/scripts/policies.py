@@ -115,7 +115,7 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
     check = sub.add_parser("check", allow_abbrev=False, help="validate a policy directory", **cli_conventions.form(
         "Validate the policy files in DIR: hard-deny.yaml, approval-required.yaml, permission-presets.yaml,\n"
-        "escalation.yaml. Prints `ok: <kinds>` or one problem per line.",
+        "escalation.yaml. Prints `OK <kinds>`, or `PROBLEMS N found` and one problem per line.",
         exit="0 ok; 1 problems found, or no policy file in DIR; 2 usage error",
         see="README.md § Commands"))
     check.add_argument("directory", type=Path, metavar="DIR", help="the policy directory to check")
@@ -128,8 +128,13 @@ def main(argv: list[str] | None = None) -> int:
         if args.json:
             print(json.dumps({"verdict": verdict, "directory": str(args.directory), "kinds": kinds,
                               "problems": problems}, indent=2))
+        elif problems:
+            print(f"PROBLEMS {len(problems)} found")
+            print("\n".join(f"  {problem}" for problem in problems))
+            print("STOP POLICY_INVALID: each problem line names the policy file and the rule", file=sys.stderr)
+            print("hint: fix them, then run atc-maintain policies check again", file=sys.stderr)
         else:
-            print("\n".join(problems) if problems else "ok: " + ", ".join(kinds))
+            print("OK " + ", ".join(kinds))
         return cli_conventions.STOP if problems else cli_conventions.OK
 
     try:
