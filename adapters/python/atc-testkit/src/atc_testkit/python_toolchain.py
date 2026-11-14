@@ -1,7 +1,7 @@
 """The Python toolchain: pytest, uv and the ``.venv`` (docs/TESTKIT.md § Toolchain).
 
-``pytest_arguments`` is the one place that builds pytest's options for a stage, ``atc test run``, the verifier's
-collection and ``atc test mutants``.
+``pytest_arguments`` is the one place that builds pytest's options for a stage, ``atc test ID``, the verifier's
+collection and ``atc test ID --mutants``.
 """
 from __future__ import annotations
 
@@ -145,7 +145,7 @@ class PythonToolchain:
         """The tree's ``.venv`` interpreter; ``VENV_MISSING`` names how to make one."""
         python = tree / VENV / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
         if not python.is_file():
-            raise Refusal("VENV_MISSING", f"{tree} has no .venv; make the scratch with `atc tmp checkout`, prepare "
+            raise Refusal("VENV_MISSING", f"{tree} has no .venv; make the scratch with `atc test ID --sha`, prepare "
                                           "the environment as the project's AGENTS.md says, or name one with --python")
         return str(python)
 

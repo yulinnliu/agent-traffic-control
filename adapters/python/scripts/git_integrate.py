@@ -36,20 +36,20 @@ from git_preflight import GitError, git, is_ancestor, merge_preflight, render, r
 from integration_slot import IntegrationSlot
 
 FULL_SHA = re.compile(r"[0-9a-f]{40}")
-# `--reviewed` and `--rebased`: the full SHA or a unique prefix (governance `GIT_WORKFLOW.md` § Integrate).
+# `--sha`: the full SHA or a unique prefix (governance `GIT_WORKFLOW.md` § Integrate).
 MIN_PREFIX = 12
 SHA_FORM = "the full SHA or a unique prefix of 12 or more hexadecimal characters"
-OWNER_RUN_QUOTE = "Owner run: approve integration"  # the quote `--owner-run` records (GIT_WORKFLOW.md § Owner-run commands)
+OWNER_RUN_QUOTE = "Owner run: approve integration"  # the authority every run records (GIT_WORKFLOW.md § Owner-run commands)
 CANDIDATE_ID_BYTES = 6
 BUDGET_EXCEEDED = "test budget exceeded: optimise the tests or ask the Owner; a retry does not help"
-WORKTREE_BRANCH = re.compile(r"worktree-[^+]+\+(?P<topic>.+)")
+WORKTREE_BRANCH = re.compile(r"(?:worktree-)?[^+/]+\+(?P<topic>.+)")
 # Formats: shared/conformance/verification-evidence/README.md
 # Every report schema a record wraps: /2 adds the compared time_slack, /1 is a project on an earlier testkit.
 REPORT_SCHEMAS = ("atc-verification-report/1", "atc-verification-report/2")
 EVIDENCE_SCHEMA = "atc-verification-evidence/2"
 EVIDENCE_DIR = ("atc", "verification-evidence")
 EVIDENCE_RETENTION_SECONDS = 14 * 24 * 3600
-CANDIDATE_RECORDS = "verify"  # the subdirectory of EVIDENCE_DIR holding `atc verify` records, which no gate reads
+CANDIDATE_RECORDS = "verify"  # the subdirectory of EVIDENCE_DIR holding `atc test --candidate` records, which no gate reads
 PASS, FAIL = "PASS", "FAIL"
 REUSED = "REUSED"
 RECORDS_ONLY = "RECORDS_ONLY"
@@ -93,18 +93,15 @@ NEXT = {
     "CARRY_OVER_REFUSED": "the rebased tip needs a fresh review; integrate the SHA that review names",
     "TASK_NOT_FOUND": "commit the task's record on the topic branch and re-review, or name the task the record holds",
     "TASK_BRANCH_MISMATCH": "integrate the branch the record binds, or correct the record on the topic and re-review",
-    "AUTHORITY_MISSING": "obtain the Owner's word and run again with --owner-words quoting it",
-    "AUTHORITY_NOT_FF": (
-        "a record's integrate_main covers FF only; obtain the Owner's word for this NO_FF and run again "
-        "with --owner-words quoting it"
-    ),
-    "AUTHORITY_NOT_INTEGRATED": "obtain the Owner's word and run again with --owner-words quoting it",
+    "AUTHORITY_MISSING": "the Owner runs atc integrate ID from their own terminal; that run is the authority",
+    "AUTHORITY_NOT_FF": "the Owner runs atc integrate ID from their own terminal; that run is the authority",
+    "AUTHORITY_NOT_INTEGRATED": "the Owner runs atc integrate ID from their own terminal; that run is the authority",
     "TASK_AUTHORITY_CHANGED": (
-        "move the authority change into a range that changes only .atc/tasks/ and integrate it with "
-        "--owner-words; keep authority and authority_basis of records on main unchanged elsewhere"
+        "move the authority change into a range that changes only .atc/tasks/ and integrate it on its own; "
+        "keep authority and authority_basis of records on main unchanged elsewhere"
     ),
-    "TASK_ID_TAKEN": "take the next number with atc task new on the topic, re-review, then run again",
-    "AUTHORITY_REFERENCE_REFUSED": "integrate a range that touches .atc/tasks/ with --task and --owner-words",
+    "TASK_ID_TAKEN": "take the next free number for the record on the topic, re-review, then run again",
+    "AUTHORITY_REFERENCE_REFUSED": "integrate a range that touches .atc/tasks/ under the ID of a record it changes",
 }
 
 
@@ -126,10 +123,10 @@ class Refused(Exception):
     def lines(self) -> list[str]:
         if self.code == ERROR:
             return [f"ERROR {self.token} {self.detail}", *self.extra]
-        return [f"STOP {self.token}: {self.detail}", f"next: {self.next}", *self.extra]
+        return [f"STOP {self.token}: {self.detail}", f"hint: {self.next}", *self.extra]
 
     def as_dict(self) -> dict:
-        found = {"verdict": self.kind, "reason": self.token, "detail": self.detail, "next": self.next}
+        found = {"verdict": self.kind, "reason": self.token, "detail": self.detail, "hint": self.next}
         return {**found, "evidence": self.evidence} if self.evidence is not None else found
 
 
@@ -168,7 +165,7 @@ def resolve_commit(repo: Path, value: str, flag: str) -> str:
                                     f"{', '.join(distinguishing(named, len(value)))}", evidence={"matches": named})
     if flag == "--reviewed":
         raise stop("REVIEWED_SHA_UNKNOWN", f"{gp.REASONS['REVIEWED_SHA_UNKNOWN']}: {value}")
-    raise stop("REVIEWED_SHA_UNKNOWN", f"--rebased names no commit in this repository: {value}")
+    raise stop("REVIEWED_SHA_UNKNOWN", f"the branch tip names no commit in this repository: {value}")
 
 
 def topic_name(branch: str) -> str:
@@ -398,7 +395,7 @@ def _tails(stdout: str, stderr: str) -> list[str]:
 
 
 def verifier_log(candidate_dir: Path) -> Path:
-    """The verifier's log beside its candidate and report; it outlives the candidate until `atc tmp prune`."""
+    """The verifier's log beside its candidate and report; it outlives the candidate until a later `atc test` prunes it."""
     return candidate_dir.with_name(candidate_dir.name + ".verify.log")
 
 
@@ -512,7 +509,7 @@ def _write_evidence(repo: Path, record: dict) -> Path:
 
 
 def candidate_record_path(repo: Path, verdict: str, expected_main: str, reviewed: str) -> Path:
-    """Where `atc verify` keeps the latest result for one candidate: its topology, base and reviewed SHA, each SHA
+    """Where `atc test --candidate` keeps the latest result for one candidate: its topology, base and reviewed SHA, each SHA
     by its first 12 characters; the record holds both in full and a reuse compares them."""
     name = f"{verdict}-{expected_main[:SHORT_SHA]}-{reviewed[:SHORT_SHA]}.json"
     return _evidence_dir(repo) / CANDIDATE_RECORDS / name
@@ -523,7 +520,7 @@ def _platform() -> dict:
 
 
 def _candidate_record(t: "Target", verdict: str, expected_main: str, built: "Built", result: str) -> dict:
-    """The record `atc verify` writes for its candidate (shared/conformance/verification-evidence/README.md)."""
+    """The record `atc test --candidate` writes for its candidate (shared/conformance/verification-evidence/README.md)."""
     return {
         "schema": EVIDENCE_SCHEMA,
         "kind": "verify",
@@ -963,7 +960,7 @@ def _check_records(candidate_dir: Path, candidate_sha: str) -> None:
 class Target:
     """Every value an integration runs with, resolved before anything runs.
 
-    ``reviewed`` is the source integrated; with ``--rebased`` it is the rebased
+    ``reviewed`` is the source integrated; with a rebased branch it is the rebased
     tip and ``carried_from`` the reviewed SHA whose approval carries over.
     """
 
@@ -1178,7 +1175,7 @@ def integrate(t: Target, progress: bool = True) -> tuple[int, dict]:
 
 
 def _reuse_note(reuse: dict | None) -> dict | None:
-    """What an evidence record and an integration line say about a reused `atc verify` record."""
+    """What an evidence record and an integration line say about a reused `atc test --candidate` record."""
     if reuse is None:
         return None
     return {"record": reuse["path"], "candidate_sha": reuse["candidate_sha"], "verified_at": reuse["verified_at"]}
@@ -1223,10 +1220,10 @@ def build_and_verify(
 ):
     """Build the candidate `atc integrate` would build in a detached worktree under `<tmp>/candidates` (the
     reviewed commit on `FF`, the merge on `NO_FF`), verify it with the verifier, or the record check for a
-    records-only range, and remove it when the block ends. It takes no slot and creates no ref (`atc verify`,
+    records-only range, and remove it when the block ends. It takes no slot and creates no ref (`atc test --candidate`,
     governance `VERIFICATION.md` § Independent review).
 
-    With ``reuse``, a passing `atc verify` record of the same candidate stands in for the verifier: an `FF`
+    With ``reuse``, a passing `atc test --candidate` record of the same candidate stands in for the verifier: an `FF`
     candidate is the reviewed commit and needs no worktree, a `NO_FF` one is built and must hold its tree."""
     if reuse is not None and verdict != "NO_FF":
         built.candidate_sha = reviewed
@@ -1319,8 +1316,8 @@ def _reused(built: Built, reuse: dict, progress: bool) -> None:
 
 
 def resolve_repo(args: argparse.Namespace, root: Path, cwd: str) -> tuple[str, Path]:
-    """The project name and main checkout: `--project` through workspace.yaml (`root` names the workspace
-    root), the repository whose declared prefix a record `--task` carries, or the project holding ``cwd``."""
+    """The project name and main checkout: the project ``args.project`` names (`root` names the workspace
+    root), the repository whose declared prefix the record ID carries, or the project holding ``cwd``."""
     try:
         ws = hw.load_workspace(root, dict(os.environ))
     except hw.Stop as exc:
@@ -1338,8 +1335,7 @@ def resolve_repo(args: argparse.Namespace, root: Path, cwd: str) -> tuple[str, P
     if args.task is not None:
         raise Refused(
             "USAGE",
-            f"--task {args.task} names no record of a declared task prefix; a task identity string needs "
-            "--project",
+            f"{args.task} names no record of a declared task prefix",
         )
     project = hw.infer_project(ws, cwd)
     if project is None:
@@ -1448,7 +1444,7 @@ def resolve_binding(
         # A recovered candidate is already on main; its range was checked by the run that made it,
         # and its authority is resolved here as for any other run.
         if args.task is None:
-            raise Refused("USAGE", "the reviewed SHA is already on main; name the integration's task with --task")
+            raise Refused("USAGE", "the reviewed SHA is already on main; name the integration's task")
         if getattr(args, "verify_only", False):
             return Binding([args.task], dict(NOT_CHECKED))
         if record_task is not None and branch is not None:
@@ -1460,14 +1456,14 @@ def resolve_binding(
     if rng.records_only:
         tasks = rng.task_ids
         if args.task is not None and args.task not in tasks:
-            raise Refused("USAGE", f"--task {args.task} names no record this records-only range changes: "
+            raise Refused("USAGE", f"{args.task} names no record this records-only range changes: "
                                    f"{', '.join(tasks)}; a records-only range integrates under one of the records "
-                                   f"it changes, so name one of them with --task, or add the record of "
+                                   f"it changes, so name one of them, or add the record of "
                                    f"{args.task} to the range")
     else:
         tasks = [] if args.task is None else [args.task]
     ta.check_range(repo, rng, main_tip, reviewed, may_change=rng.records_only and words is not None)
-    if args.task is None or getattr(args, "verify_only", False):  # `atc verify` checks no authority
+    if args.task is None or getattr(args, "verify_only", False):  # `atc test --candidate` checks no authority
         return Binding(tasks, dict(NOT_CHECKED), rng.records_only)
     return Binding(tasks, _authority(args, repo, main, main_tip, record_task, tasks, words), rng.records_only)
 
@@ -1487,22 +1483,20 @@ def resolve_authority_of(
     repo: Path, main: str, main_tip: str, task: str | None, record_task: str | None, tasks: list[str],
     words: dict | None,
 ) -> dict:
-    """Exactly one authority: the Owner's quoted words, or the record on main granting `integrate_main`."""
+    """Exactly one authority: the Owner's run of `atc integrate`, or the record on main granting `integrate_main`."""
     if words is not None:
         return words
     if record_task is None:
-        raise ta.Stop("AUTHORITY_MISSING", f"--task {task} is no task record; integrate with --owner-words")
+        raise ta.Stop("AUTHORITY_MISSING", f"{task} is no task record")
     if tasks != [record_task]:
         raise ta.Stop("AUTHORITY_MISSING", f"the range binds {', '.join(tasks)}; the record of {record_task} "
-                                           "covers that task alone; integrate with --owner-words")
+                                           "covers that task alone")
     return ta.record_authority(repo, record_task, main, main_tip, gp.read_integrations(repo))
 
 
 def resolve(args: argparse.Namespace, root: Path, cwd: str) -> Target:
     reviewed = sha_form(args.reviewed, "--reviewed")
     rebased = sha_form(args.rebased, "--rebased") if args.rebased is not None else None
-    if args.owner_words is not None and not args.owner_words.strip():
-        raise Refused("USAGE", "--owner-words needs the Owner's words, quoted")
     project, repo = resolve_repo(args, root, cwd)
     check_checkout(repo)
     fetched = "none"
@@ -1520,7 +1514,7 @@ def resolve(args: argparse.Namespace, root: Path, cwd: str) -> Target:
     if rebased is not None:
         rebased = resolve_commit(repo, rebased, "--rebased")
         if rebased == reviewed:
-            raise Refused("USAGE", "--rebased equals --reviewed; integrate the reviewed SHA without --rebased")
+            raise Refused("USAGE", "the rebased tip equals the reviewed SHA")
         carried_from, reviewed = reviewed, rebased
     match = ta.RECORD_ID.fullmatch(args.task or "")
     record_task = args.task if match and task_records.main_prefix(repo, main) == match["prefix"] else None
@@ -1542,24 +1536,16 @@ def resolve(args: argparse.Namespace, root: Path, cwd: str) -> Target:
         raise Refused("VERIFIER_ARGV_INVALID", f"AGENTS.md declares the verifier argv file {declared.argv_file}, but {problem}")
     argv, argv_source = declared_argv, f"AGENTS.md {declared.argv_file}"
 
-    declared_timeout = verification_section.DEFAULT_TIMEOUT if declared.timeout is None else declared.timeout
-    declared_from = "the default" if declared.timeout is None else f"AGENTS.md at {main}"
-    if args.verify_timeout is not None:
-        if args.verify_timeout <= 0:
-            raise Refused("VERIFY_TIMEOUT_INVALID", "--verify-timeout must be greater than zero")
-        timeout, timeout_source = args.verify_timeout, "--verify-timeout"
-        if timeout != declared_timeout:
-            warnings.append(f"--verify-timeout {timeout:g} differs from the {declared_timeout:g} seconds of {declared_from}")
-    else:
-        timeout, timeout_source = declared_timeout, "default" if declared.timeout is None else "AGENTS.md"
-        if timeout <= 0:
-            raise Refused("VERIFY_TIMEOUT_INVALID", f"AGENTS.md at {main} declares a verifier timeout that is not greater than zero")
+    timeout = verification_section.DEFAULT_TIMEOUT if declared.timeout is None else declared.timeout
+    timeout_source = "default" if declared.timeout is None else "AGENTS.md"
+    if timeout <= 0:
+        raise Refused("VERIFY_TIMEOUT_INVALID", f"AGENTS.md at {main} declares a verifier timeout that is not greater than zero")
 
     check_executable(argv[0])
     if warning := tool_checkout_warning():
         warnings.append(warning)
     verifier = {
-        "argv_file": declared.argv_file, "timeout": timeout, "timeout_overridden": timeout_source == "--verify-timeout",
+        "argv_file": declared.argv_file, "timeout": timeout,
     }
     return Target(
         repo, main, main_tip, branch, branch_source, reviewed, binding,
@@ -1620,50 +1606,71 @@ class _Parser(argparse.ArgumentParser):
 
 def build_parser() -> argparse.ArgumentParser:
     parser = _Parser(prog="atc integrate", allow_abbrev=False, **cli_conventions.form(
-        "Fast-forward main to a reviewed topic through a verified candidate.",
-        exit="0 integrated, or CHECK FF / CHECK NO_FF; 1 STOP before a candidate exists; 2 ERROR; 3 STOP after the candidate exists, main unchanged, or a required recovery",
+        "Fast-forward main to a task's reviewed branch through a verified candidate. The Owner runs it.",
+        "The reviewed SHA is the one the newest PASS review report of the task names\n"
+        "(~/.atc/reports/ID-SHA-review.md), or --sha. The branch is the one the task record names; commits after\n"
+        "the reviewed SHA stop it, and a branch rebased onto main carries the approval over when every patch-id\n"
+        "matches. The verifier and its timeout are the ones AGENTS.md on main declares.",
+        exit="0 integrated, or CHECK FF / CHECK NO_FF; 1 STOP before a candidate exists; 2 ERROR; 3 STOP after the "
+             "candidate exists, main unchanged, or a required recovery",
         see="GIT_WORKFLOW.md § Integrate, § Command results"))
-    cli_conventions.add_project(parser, " (default: the task's declared prefix)")
-    parser.add_argument("--reviewed", required=True, metavar="SHA", help="SHA named by the review: " + SHA_FORM)
-    parser.add_argument(
-        "--rebased", metavar="SHA",
-        help="SHA of the unpublished topic rebased onto main (" + SHA_FORM + "); integrates it carrying over the approval "
-        "of --reviewed when the rebase is clean and every patch-id matches",
-    )
-    parser.add_argument(
-        "--task", required=True, metavar="ID",
-        help="the task: a record ID with a declared prefix (it names the repository and the branch), or a task "
-        "identity string",
-    )
-    owner = parser.add_mutually_exclusive_group()
-    owner.add_argument(
-        "--owner-words", metavar="QUOTE",
-        help="the Owner's words granting this integration, quoted; without it or --owner-run the record on main "
-        "must grant integrate_main, which covers FF only",
-    )
-    owner.add_argument(
-        "--owner-run", dest="owner_words", action="store_const", const=OWNER_RUN_QUOTE,
-        help=f"the Owner runs this command, which is their decision; records the quote \"{OWNER_RUN_QUOTE}\"",
-    )
-    parser.add_argument(
-        "--verify-timeout", type=float, metavar="SECONDS",
-        help="maximum verifier runtime in seconds (default: the AGENTS.md declaration, else 300)",
-    )
+    parser.add_argument("task", metavar="ID", help="the task record ID; its prefix names the repository")
+    parser.add_argument("--sha", metavar="SHA", help="the reviewed SHA: " + SHA_FORM + " (default: the newest PASS "
+                                                     "review report's)")
     parser.add_argument("--check", action="store_true",
                         help="write nothing: resolve, preflight and warn without a slot or candidate; exit 0 when "
-                             "the integration would proceed; reuse= names whether it would reuse an `atc verify` "
-                             "record")
+                             "the integration would proceed")
     cli_conventions.add_json(parser)
     return parser
 
 
+def target_args(task: str, sha: str | None, root: Path, *, check: bool, verify_only: bool = False,
+                environ: dict[str, str] | None = None) -> argparse.Namespace:
+    """The resolved request for ``task``: the reviewed SHA from ``sha`` or the newest PASS review, and the
+    record's branch tip as the rebased SHA when the tip no longer descends from it."""
+    import close_out
+    environ = dict(os.environ) if environ is None else environ
+    try:
+        ws = hw.load_workspace(root, environ)
+    except hw.Stop as exc:
+        raise Refused(exc.result.code, f"{exc.result.target}: {exc.result.detail}") from exc
+    declaring = task_records.declaring(ws, task)
+    if len(declaring) != 1:
+        raise Refused("UNKNOWN_TASK", f"{task} is no record ID whose prefix one registered repository declares")
+    repo = Path(declaring[0].repo)
+    if sha is None:
+        found = close_out.latest_pass_review(task, environ)
+        if found is None:
+            raise stop("NO_REVIEWED_SHA", f"no PASS review report for {task} under ~/.atc/reports")
+        sha = found[0]
+        if len(sha) < MIN_PREFIX:
+            raise stop("REVIEWED_SHA_INVALID", f"the review report {found[1].name} names {sha}, shorter than "
+                                               f"{MIN_PREFIX} characters")
+    reviewed = resolve_commit(repo, sha_form(sha, "--sha"), "--reviewed")
+    args = argparse.Namespace(project=declaring[0].name, task=task, reviewed=reviewed, rebased=None,
+                              owner_words=OWNER_RUN_QUOTE, check=check, verify_only=verify_only)
+    try:
+        branch, _ = task_records.task_record(repo, task)
+    except cli_conventions.Refusal as refusal:
+        raise Refused("TASK_NOT_FOUND", refusal.detail) from None
+    tip = rev(repo, f"refs/heads/{branch}") if branch else None
+    main_tip = rev(repo, "main")
+    if tip is None or tip == reviewed or (main_tip and is_ancestor(repo, reviewed, main_tip)):
+        return args
+    if is_ancestor(repo, reviewed, tip):
+        raise stop("UNREVIEWED_COMMITS", f"{branch} at {tip} has commits after the reviewed SHA {reviewed}")
+    args.rebased = tip
+    return args
+
+
 def _report_refusal(report: gp.Report) -> dict:
-    return {"verdict": report.verdict, "reason": report.reason, "detail": report.detail, "next": report.next}
+    return {"verdict": report.verdict, "reason": report.reason, "detail": report.detail, "hint": report.next}
 
 
 def _print_stop_report(report: gp.Report, payload: dict, as_json: bool) -> None:
-    lines = render(report).splitlines()
-    print("\n".join(lines[:2]), file=sys.stderr)
+    print(f"{report.verdict} {report.reason}: {report.detail}", file=sys.stderr)
+    if report.next:
+        print(f"hint: {report.next}", file=sys.stderr)
     if as_json:
         print(json.dumps({**payload, "preflight": asdict(report), "refusal": _report_refusal(report)}, indent=2))
 
@@ -1734,7 +1741,7 @@ def check(t: Target, as_json: bool) -> int:
     reuse = check_reuse(t, report.verdict, report.evidence["main_tip"])
     if as_json:
         print(json.dumps({**payload, "preflight": asdict(report), **({"carried_over": carried} if carried else {}),
-                          "verification_reuse": reuse}, indent=2))
+                          "verification_reuse": reuse, "hint": None}, indent=2))
     else:
         print(render_check(report.verdict, report.reason, t, report.evidence["topic_tip"], carried, reuse))
     return 0
@@ -1759,46 +1766,54 @@ def check_reuse(t: Target, verdict: str, main_tip: str) -> str:
     return RECORDS_ONLY if t.binding.records_only else reuse_check(t, verdict, main_tip)[1]
 
 
-def main(argv: list[str] | None = None, root: Path = hw.ROOT, cwd: str | None = None) -> int:
+@contextmanager
+def _human_streams(as_json: bool):
+    """Human output: 12-character SHAs and project names in place of checkout paths."""
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(errors="backslashreplace")
+    streams = sys.stdout, sys.stderr
+    if not as_json:
+        sys.stdout, sys.stderr = _Human(streams[0]), _Human(streams[1])
+    try:
+        yield
+    finally:
+        sys.stdout, sys.stderr = streams
+
+
+def _name_paths(target: Target) -> None:
+    for stream in (sys.stdout, sys.stderr):
+        if isinstance(stream, _Human):
+            stream.paths.update({str(path): target.project for path in (target.repo, target.repo.resolve())
+                                 if path.is_absolute()})
+
+
+def main(argv: list[str] | None = None, root: Path = hw.ROOT, cwd: str | None = None) -> int:
     try:
         args = build_parser().parse_args(argv)
     except Refused as refusal:
         print("\n".join(refusal.lines()), file=sys.stderr)
         return refusal.code
-    if args.json:
+    with _human_streams(args.json):
         return _main(args, root, cwd)
-    streams = sys.stdout, sys.stderr
-    sys.stdout, sys.stderr = _Human(streams[0]), _Human(streams[1])
-    try:
-        return _main(args, root, cwd)
-    finally:
-        sys.stdout, sys.stderr = streams
 
 
 def _main(args: argparse.Namespace, root: Path, cwd: str | None) -> int:
     payload = {"command": "integrate"}
     try:
         locations.enter()
-        target = resolve(args, root, cwd or os.getcwd())
-        for stream in (sys.stdout, sys.stderr):
-            if isinstance(stream, _Human):
-                stream.paths.update({str(path): target.project for path in (target.repo, target.repo.resolve())
-                                     if path.is_absolute()})
-        if args.json:
-            print(target.line(), file=sys.stderr)
+        target = resolve(target_args(args.task, args.sha, root, check=args.check), root, cwd or os.getcwd())
+        _name_paths(target)
         for warning in target.warnings:
             print(f"WARNING {warning}", file=sys.stderr)
         if args.check:
             return check(target, args.json)
         code, result = integrate(target, progress=args.json)
     except locations.Refusal as refusal:
-        print(f"{refusal.token} {refusal.detail}", file=sys.stderr)
+        print(f"STOP {refusal.token}: {refusal.detail}", file=sys.stderr)
         if args.json:
             print(json.dumps({**payload, "refusal": {
-                "verdict": "REFUSAL", "reason": refusal.token, "detail": refusal.detail, "next": None,
+                "verdict": "STOP", "reason": refusal.token, "detail": refusal.detail, "hint": None,
             }}, indent=2))
         return refusal.code
     except Refused as refusal:
@@ -1813,20 +1828,9 @@ def _main(args: argparse.Namespace, root: Path, cwd: str | None) -> int:
     report = result.pop("report", None)
     refusal = result.pop("refusal", None)
     if not args.json:
-        if result.get("verification_reuse") == REUSED:
-            print(f"verify: {REUSED} {result.get('verification_reused')}", file=sys.stderr)
-        elif result.get("verification_reuse") and result.get("verification") == "PASS":
-            print(f"verify: RUN (evidence: {result['verification_reuse']})", file=sys.stderr)
         for key in ("verification_warning", "candidate_cleanup_warning", "integration_record_warning", "push_warning"):
             if result.get(key):
                 print(f"WARNING {result[key]}", file=sys.stderr)
-        unapproved = [entry for entry in (result.get("push") or {}).get("commits", []) if not entry["push_approval"]]
-        if unapproved:
-            print(
-                f"WARNING {len(unapproved)} commits in origin/{target.main}..{target.main} come from other integrations "
-                "or none; a push carries them and needs push approval for each",
-                file=sys.stderr,
-            )
         for entry in result.get("recovered_candidates", []):
             print(
                 f"NOTE recovery ref for candidate {entry['candidate_sha']}: {entry['disposition']}"
@@ -1838,34 +1842,15 @@ def _main(args: argparse.Namespace, root: Path, cwd: str | None) -> int:
     elif refusal is not None:
         _print_refusal(refusal, result, args.json)
     elif args.json:
-        print(json.dumps(result, indent=2))
+        print(json.dumps({**result, "hint": f"atc task close {args.task}"}, indent=2))
     else:
         print(render_result(result, target.binding, target.project, log))
     return code
 
 
-
-def build_verify_parser() -> argparse.ArgumentParser:
-    parser = _Parser(prog="atc verify", allow_abbrev=False, **cli_conventions.form(
-        "Run the integration verifier on the candidate `atc integrate` would build, without the Integration "
-        "Slot,\na ref update or authority. The last line is `VERIFY PASS <candidate> <FF|NO_FF>`.",
-        exit="0 VERIFY PASS; 1 STOP before a candidate exists; 2 ERROR; 3 the verifier failed or timed out",
-        see="VERIFICATION.md § Independent review"))
-    cli_conventions.add_project(parser, " (default: the task's declared prefix, else the working directory's project)")
-    parser.add_argument("--reviewed", required=True, metavar="SHA", help="SHA named by the review: " + SHA_FORM)
-    parser.add_argument("--rebased", metavar="SHA",
-                        help="SHA of the topic rebased onto main, as `atc integrate --rebased` takes it")
-    parser.add_argument("--task", metavar="ID", help="the task as `atc integrate --task` takes it; it resolves the target (the "
-                        "record's branch, a records-only range, the project) and no authority is checked")
-    parser.add_argument("--verify-timeout", type=float, metavar="SECONDS",
-                        help="maximum verifier runtime in seconds, as `atc integrate --verify-timeout` takes it")
-    cli_conventions.add_json(parser)
-    return parser
-
-
 def verify(t: Target, as_json: bool) -> int:
-    """`atc verify`: preflight as `--check` does, then `build_and_verify` with no slot."""
-    payload = {"command": "verify", "resolved": {**asdict(t), "repo": str(t.repo)}}
+    """`atc test ID --candidate`: preflight as `--check` does, then `build_and_verify` with no slot."""
+    payload = {"command": "test", "resolved": {**asdict(t), "repo": str(t.repo)}}
     if t.branch is None:
         _print_refusal(
             stop("ALREADY_MERGED", f"the reviewed SHA {t.reviewed} is already reachable from {t.main}; nothing to verify"),
@@ -1912,53 +1897,60 @@ def verify(t: Target, as_json: bool) -> int:
     if built.cleanup_warning:
         print(f"WARNING {built.cleanup_warning}", file=sys.stderr)
     if as_json:
-        print(json.dumps({**payload, **result, "verdict": report.verdict, "log": log,
+        print(json.dumps({**payload, **result, "verdict": "PASS", "exit_code": 0, "hint": None,
+                          "merge": report.verdict, "log": log,
                           "candidate_cleanup_warning": built.cleanup_warning}, indent=2))
         return 0
     if built.warning:
         print(f"WARNING {built.warning}", file=sys.stderr)
-    print(f"VERIFY PASS {built.candidate_sha} {report.verdict}" + (f" log {log}" if log else ""))
+    print(f"PASS candidate {built.candidate_sha} {report.verdict}" + (f" log {log}" if log else ""))
     return 0
 
 
-def verify_main(argv: list[str] | None = None, root: Path = hw.ROOT, cwd: str | None = None) -> int:
-    """`atc verify`: the target options of `atc integrate`, resolved as `--check` resolves them."""
-    for stream in (sys.stdout, sys.stderr):
-        if hasattr(stream, "reconfigure"):
-            stream.reconfigure(errors="backslashreplace")
+def run_candidate(task: str, sha: str | None, root: Path = hw.ROOT, cwd: str | None = None,
+                  as_json: bool = False) -> int:
+    """`atc test ID --candidate [--sha SHA]`: the candidate `atc integrate ID` would build, verified without the
+    Integration Slot, a ref update or authority; the SHA defaults to the branch tip the record names."""
+    with _human_streams(as_json):
+        try:
+            locations.enter()
+            target = resolve(target_args(task, sha or _branch_tip(task, root), root, check=True, verify_only=True),
+                             root, cwd or os.getcwd())
+            _name_paths(target)
+            for warning in target.warnings:
+                print(f"WARNING {warning}", file=sys.stderr)
+            return verify(target, as_json)
+        except locations.Refusal as refusal:
+            print(f"STOP {refusal.token}: {refusal.detail}", file=sys.stderr)
+            return refusal.code
+        except Refused as refusal:
+            _print_refusal(refusal, {"command": "test"}, as_json)
+            return refusal.code
+        except (GitError, RuntimeError) as exc:
+            _print_refusal(Refused("GIT" if isinstance(exc, GitError) else "RUNTIME", str(exc)), {"command": "test"},
+                           as_json)
+            return ERROR
+
+
+def _branch_tip(task: str, root: Path) -> str:
+    """The tip of the branch the record of ``task`` names."""
     try:
-        args = build_verify_parser().parse_args(argv)
-    except Refused as refusal:
-        print("\n".join(refusal.lines()), file=sys.stderr)
-        return refusal.code
-    args.owner_words = None
-    args.check = args.verify_only = True
-    streams = sys.stdout, sys.stderr
-    if not args.json:
-        sys.stdout, sys.stderr = _Human(streams[0]), _Human(streams[1])
+        ws = hw.load_workspace(root, dict(os.environ))
+    except hw.Stop as exc:
+        raise Refused(exc.result.code, f"{exc.result.target}: {exc.result.detail}") from exc
+    declaring = task_records.declaring(ws, task)
+    if len(declaring) != 1:
+        raise Refused("UNKNOWN_TASK", f"{task} is no record ID whose prefix one registered repository declares")
+    repo = Path(declaring[0].repo)
     try:
-        locations.enter()
-        target = resolve(args, root, cwd or os.getcwd())
-        for stream in (sys.stdout, sys.stderr):
-            if isinstance(stream, _Human):
-                stream.paths.update({str(path): target.project for path in (target.repo, target.repo.resolve())
-                                     if path.is_absolute()})
-        if args.json:
-            print(target.line(), file=sys.stderr)
-        for warning in target.warnings:
-            print(f"WARNING {warning}", file=sys.stderr)
-        return verify(target, args.json)
-    except locations.Refusal as refusal:
-        print(f"{refusal.token} {refusal.detail}", file=sys.stderr)
-        return refusal.code
-    except Refused as refusal:
-        _print_refusal(refusal, {"command": "verify"}, args.json)
-        return refusal.code
-    except (GitError, RuntimeError) as exc:
-        _print_refusal(Refused("GIT" if isinstance(exc, GitError) else "RUNTIME", str(exc)), {"command": "verify"}, args.json)
-        return ERROR
-    finally:
-        sys.stdout, sys.stderr = streams
+        branch, _ = task_records.task_record(repo, task)
+    except cli_conventions.Refusal as refusal:
+        raise Refused("TASK_NOT_FOUND", refusal.detail) from None
+    tip = rev(repo, f"refs/heads/{branch}") if branch else None
+    if tip is None:
+        raise stop("NO_BRANCH_AT_REVIEWED", f"the branch {branch} the record of {task} names is no local branch")
+    return tip
+
 
 if __name__ == "__main__":
     sys.exit(main())

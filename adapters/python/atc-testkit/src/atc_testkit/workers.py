@@ -513,7 +513,7 @@ class Budget:
         return memory_cap(available - ramping, self.per_worker), available - ramping
 
     def annotate(self, **values) -> None:
-        """Add ``log`` or ``limit`` to this run's ledger row, for ``atc test status``."""
+        """Add ``log`` or ``limit`` to this run's ledger row, for ``atc doctor -v``."""
         if self.row is not None:
             self.row.update(**values)
 

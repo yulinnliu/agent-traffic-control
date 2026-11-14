@@ -1,4 +1,4 @@
-"""``atc tmp checkout``: a commit exported into a registered scratch, its environment built (docs/ATC_HOME.md § Checkout)."""
+"""The export behind ``atc test ID --sha``: a commit exported into a registered scratch, its environment built (docs/ATC_HOME.md § Checkout)."""
 from __future__ import annotations
 
 import argparse
@@ -96,9 +96,9 @@ def sync(directory: Path, environ: Mapping[str, str], run: SyncRun | None = None
 
 def checkout(argv: Sequence[str], environ: Mapping[str, str] | None = None, run: SyncRun | None = None,
              say: Callable[[str], None] = print) -> int:
-    """``atc tmp checkout <sha> --task <ID>``: export, register, then sync; refusals exit 9, a failed sync 1."""
+    """``<sha> --task <ID>``: export, register, then sync; refusals exit 9, a failed sync 1."""
     parser = argparse.ArgumentParser(
-        prog="atc tmp checkout", allow_abbrev=False,
+        prog="atc test --sha", allow_abbrev=False,
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description="Export <sha> into <tmp>/<scratch>/tree, register the scratch with its task, source worktree\n"
                     "and commit, and build its environment with the tree's toolchain, `uv sync --locked` for Python.",
@@ -110,7 +110,7 @@ def checkout(argv: Sequence[str], environ: Mapping[str, str] | None = None, run:
     parser.add_argument("--worktree", metavar="DIR", help="the repository that holds SHA (default: the working directory's)")
     parser.add_argument("--scratch", metavar="NAME", help="scratch name (default: ID-<first 7 characters of the commit>)")
     parser.add_argument("--lock-dir", default=".", metavar="DIR",
-                        help="the directory under the tree that holds uv.lock, where `atc test run` runs (default: the tree)")
+                        help="the directory under the tree that holds uv.lock, where the tests run (default: the tree)")
     args = parser.parse_args(argv)
     environ = os.environ if environ is None else environ
     if not scratch.TASK_ID.fullmatch(args.task):
@@ -124,8 +124,7 @@ def checkout(argv: Sequence[str], environ: Mapping[str, str] | None = None, run:
     if not lock_dir.is_relative_to(tree.resolve()):
         raise Refusal("LOCK_DIR_OUTSIDE_TREE", f"{args.lock_dir} is outside {tree}")
     if tree.exists():
-        raise Refusal("SCRATCH_TREE_EXISTS", f"{tree} exists; remove the scratch with `atc tmp clean {place.name}` "
-                                             "or name another with --scratch")
+        raise Refusal("SCRATCH_TREE_EXISTS", f"{tree} exists; remove it with `atc test {args.task} --clean`")
     scratch.register(root, place, lock_dir, task=args.task, source=str(worktree), commit=commit,
                      project=committed_project_name(worktree, commit, lock_dir.relative_to(tree.resolve())))
     export(worktree, commit, tree)

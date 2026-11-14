@@ -21,7 +21,7 @@ UNKNOWN_EXIT = 9
 
 
 class Toolchain(Protocol):
-    """What the gate, the verifier and the ``atc test`` and ``atc tmp`` commands ask of a toolchain."""
+    """What the gate, the verifier and ``atc test`` ask of a toolchain."""
     name: str
     entry_argv: tuple[str, ...]
     no_tests_exit: int

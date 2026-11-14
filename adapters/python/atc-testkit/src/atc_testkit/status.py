@@ -1,4 +1,4 @@
-"""``atc test status``: the active test runs from the host pool's ledger rows (docs/TESTKIT.md § Commands).
+"""``atc doctor -v``: the active test runs from the host pool's ledger rows (docs/TESTKIT.md § Commands).
 
 It reads the rows and the tail of each run's log; it removes no row and holds no token.
 """

@@ -102,7 +102,7 @@ class Guard:
             return
         where = item.nodeid if item is not None else "collection or session start, before any test"
         message = (f"{WINDOW_TOKEN} {where} opened a Tk window on the interactive desktop; run it through "
-                   f"`atc test run` (a private desktop) or mark the test {INTERACTIVE_MARKER}")
+                   f"`atc test ID` (a private desktop) or mark the test {INTERACTIVE_MARKER}")
         if item is not None:
             self.refused[item.nodeid] = message
         raise InteractiveDesktopWindow(message)

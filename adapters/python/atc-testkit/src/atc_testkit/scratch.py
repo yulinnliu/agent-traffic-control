@@ -339,7 +339,7 @@ def dependent_runs(root: Path, directory: str) -> list[str]:
 
 def clean(arguments: Sequence[str], *, say: Callable[[str], None] = print, environ=None,
           with_runs: bool = False, check: bool = False) -> int:
-    """``atc tmp clean``: the highest exit code across the directories.
+    """``atc test ID --clean``: the highest exit code across the directories.
 
     A scratch's dependent runs are listed; ``with_runs`` deletes them too, before the scratch. ``check``
     rehearses: each line says what the run would do, and nothing is deleted, unregistered or locked.
@@ -409,7 +409,7 @@ def _relative_tree(row: Row) -> str:
 
 def list_scratches(*, say: Callable[[str], None] = print, environ=None, as_json: bool = False,
                    now: datetime | None = None) -> int:
-    """``atc tmp list``: one line per scratch (name, tree, age, ``missing``, task); ``as_json`` prints every row with its size."""
+    """``atc test --list``: one line per scratch (name, tree, age, ``missing``, task); ``as_json`` prints every row with its size."""
     root = locations.locate(environ).tmp
     rows = registered(root)
     sizes = [_size(row.scratch) if os.path.isdir(row.scratch) else None for row in rows]
@@ -426,7 +426,7 @@ def list_scratches(*, say: Callable[[str], None] = print, environ=None, as_json:
         say("  ".join(fields))
     missing = [os.path.basename(row.scratch) for row, size in zip(rows, sizes) if size is None]
     if missing:
-        say(f"{len(missing)} missing; atc tmp clean {' '.join(missing)} drops their rows")
+        say(f"{len(missing)} missing; atc test ID --clean drops their rows")
     leftovers = leftover_candidates(root / CANDIDATES, now)
     for path, data in leftovers:
         repo = data.get("repo") if data else _owning_repository(str(path))
@@ -437,7 +437,7 @@ def list_scratches(*, say: Callable[[str], None] = print, environ=None, as_json:
         say("  ".join([f"{CANDIDATES}/{path.name}", _age(created, now), "leftover", owner.describe(data),
                        repo or "repository gone"]))
     if leftovers:
-        say(f"{len(leftovers)} leftover candidates; atc tmp prune removes them")
+        say(f"{len(leftovers)} leftover candidates; the next atc test prunes them")
     return 0
 
 
@@ -600,7 +600,7 @@ def _prune_leftover_candidates(parent: Path, say: Callable[[str], None], now: da
 
 
 def prune(*, say: Callable[[str], None] = print, environ=None, now: datetime | None = None) -> int:
-    """``atc tmp prune``: entries of ``systmp`` and ``candidates`` older than seven days, and candidates whose owner
+    """The prune every ``atc test`` run starts with: entries of ``systmp`` and ``candidates`` older than seven days, and candidates whose owner
     is gone; 1 on any refusal."""
     places = locations.locate(environ)
     now = now or datetime.now(UTC)

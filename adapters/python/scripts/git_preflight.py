@@ -1,35 +1,22 @@
 #!/usr/bin/env python3
 """Read-only Git preflight for the lifecycle in shared/governance/GIT_WORKFLOW.md.
 
-`push` runs `git fetch origin` and lists every commit a push of main would
-carry, grouped by the integration that brought it in (PUSH / STOP).
-`merge_preflight()` evaluates that file's integration table for `atc
-integrate`, and `cleanup_preflight()` judges a worktree's removal for `atc
-worktree clean`. None of them writes a branch, the index or the working
-tree: conflicts are detected with `git merge-tree --write-tree`, which creates
-only unreferenced objects, and the fetch updates only remote-tracking refs.
-
-Usage:
-  git_preflight.py push [--project <name>] [--integration <sha>] [--json]
-
-`--project` names a project registered in workspace.yaml, `root` the workspace
-root; without it, the project holding the working directory.
-
-A STOP verdict carries a `next:` line naming the step that resolves it
-(governance `GIT_WORKFLOW.md` § Integrate and § Command results).
-
-Exit status: 0 for PUSH; 1 for STOP; 2 for a usage or git error.
+`push_preflight()` runs `git fetch origin` and lists every commit a push of main would carry, grouped by
+the integration that brought it in, for `atc push`. `merge_preflight()` evaluates that file's integration
+table for `atc integrate`, and `cleanup_preflight()` judges a worktree's removal for `atc task close`. None
+of them writes a branch, the index or the working tree: conflicts are detected with
+`git merge-tree --write-tree`, which creates only unreferenced objects, and the fetch updates only
+remote-tracking refs. A STOP carries the step that resolves it (governance `GIT_WORKFLOW.md` § Integrate).
 """
 
 from __future__ import annotations
 
-import argparse
 import json
 import os
 import re
 import subprocess
-import sys
-from dataclasses import asdict, dataclass, field
+
+from dataclasses import dataclass, field
 from pathlib import Path
 
 # Hook-exported variables would redirect every `git -C <repo>` call to the
@@ -76,10 +63,10 @@ REASONS = {
     ),
 }
 
-_RUN_WITH_REVIEWED = "run again with the full SHA the formal review named"
+_RUN_WITH_REVIEWED = "run again with --sha and the full SHA the formal review named"
 _REVIEW_DELTA = "review the delta, or re-review"
 _REBASE = (
-    "rebase the unpublished topic onto main, then run again with --rebased <rebased tip>; "
+    "rebase the unpublished topic onto main, then run again; "
     "the approval carries over only when the rebase is clean and every patch-id matches, "
     "otherwise the rebased tip needs a fresh review"
 )
@@ -535,68 +522,3 @@ def render(report: Report) -> str:
             value = ", ".join(value) if value else "-"
         lines.append(f"  {key}: {value}")
     return "\n".join(lines)
-
-
-def build_parser() -> argparse.ArgumentParser:
-    import cli_conventions
-    parser = argparse.ArgumentParser(prog="atc preflight", allow_abbrev=False, **cli_conventions.form(
-        "Read-only Git preflight for the lifecycle in GIT_WORKFLOW.md.",
-        exit="0 PUSH; 1 STOP; 2 ERROR", see="GIT_WORKFLOW.md § Publication boundary"))
-    sub = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
-    push = sub.add_parser("push", allow_abbrev=False, help="fetch origin and list what a push of main would carry",
-                          **cli_conventions.form("Fetch origin and list what a push of main would carry.",
-                                                 exit="0 PUSH; 1 STOP; 2 ERROR",
-                                                 see="GIT_WORKFLOW.md § Publication boundary"))
-    cli_conventions.add_project(push, " (default: the working directory's project)")
-    push.add_argument("--integration", metavar="SHA",
-                      help="candidate SHA whose commits carry push approval; every other commit is flagged")
-    cli_conventions.add_json(push)
-    return parser
-
-
-def checkout_of(project: str | None, root: Path | None, cwd: str) -> Path:
-    """The main checkout `--project` names (`root` the workspace root), else the working directory's project."""
-    import managed_worktree as hw  # imports this module, so not at the top
-
-    root = hw.ROOT if root is None else root
-    try:
-        ws = hw.load_workspace(root, dict(os.environ))
-    except hw.Stop as exc:
-        raise GitError(f"{exc.result.code} {exc.result.target}: {exc.result.detail}") from None
-    registered = f"registered: {', '.join(sorted(ws.projects)) or 'none'}"
-    root_project = hw.root_project(ws)
-    if project is not None:
-        found = root_project if project == root_project.name else ws.projects.get(project)
-        if found is None:
-            raise GitError(f"UNKNOWN_PROJECT {project} is not in {root / 'workspace.yaml'}; {registered}")
-        return Path(found.repo)
-    found = hw.infer_project(ws, cwd)
-    if found is None:
-        raise GitError(f"UNKNOWN_PROJECT no --project and the working directory {cwd} is in no registered project; "
-                       f"{registered}; the workspace root takes --project root")
-    return Path(found.repo)
-
-
-def main(argv: list[str] | None = None, root: Path | None = None, cwd: str | None = None) -> int:
-    argv = sys.argv[1:] if argv is None else argv
-    args = build_parser().parse_args(argv)
-    try:
-        repo = checkout_of(args.project, root, cwd or os.getcwd())
-        own = rev(repo, args.integration) if args.integration else None
-        if args.integration and own is None:
-            raise GitError(f"cannot resolve --integration {args.integration}")
-        report, listing = push_preflight(repo, "main", own)
-    except GitError as exc:
-        print(f"ERROR {exc}", file=sys.stderr)
-        return 2
-    if args.json:
-        print(json.dumps({**asdict(report), **({"push": listing} if listing else {})}, indent=2))
-    else:
-        print(FULL_SHA_WORD.sub(r"\1", render(report)))
-        if listing:
-            print("\n".join(render_push(listing)))
-    return 0 if report.verdict == "PUSH" else 1
-
-
-if __name__ == "__main__":
-    sys.exit(main())

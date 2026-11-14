@@ -1,4 +1,4 @@
-"""``atc test run`` and ``atc test mutants`` (docs/TESTKIT.md § Commands)."""
+"""The runs behind ``atc test ID`` and ``atc test ID --mutants`` (docs/TESTKIT.md § Commands)."""
 from __future__ import annotations
 
 import argparse
@@ -87,7 +87,7 @@ for srcs, flag in ((listed, True), (others, False)):
 print("\n".join(bad))
 sys.exit(1 if bad else 0)
 """
-GUARD_NEXT = ("next: run with the copy's own environment, built by `atc tmp checkout` or the project's AGENTS.md "
+GUARD_NEXT = ("next: run with the copy's own environment, built by `atc test ID --sha` or the project's AGENTS.md "
               "preparation in the copy, and its interpreter")
 
 
@@ -130,7 +130,7 @@ def check_task(task: str) -> None:
 
 def copy_interpreter(root: Path, place: Path) -> str:
     """The interpreter of the copy's own environment: the ``.venv`` of the tree the scratch's registry line names
-    inside it, as ``atc tmp checkout --lock-dir`` records it, else of ``<scratch>/tree``; ``VENV_MISSING`` without."""
+    inside it, as the export records it, else of ``<scratch>/tree``; ``VENV_MISSING`` without."""
     row = next((row for row in scratch.registered(root) if locations.same_path(row.scratch, place)), None)
     tree = place / "tree"
     if row is not None and row.tree and Path(os.path.realpath(row.tree)).is_relative_to(os.path.realpath(place)):
@@ -336,7 +336,7 @@ def _apply(tree: Path, mutant: Mapping, touched: set[str], originals: dict[Path,
 
 
 def mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None = None) -> int:
-    """``atc test mutants <scratch> <sha> <worktree> <mutants.json> --python <py> --tests <path>...``.
+    """``<scratch> <sha> <worktree> <mutants.json> --python <py> --tests <path>...``.
 
     The command holds one host worker token from before its baseline to its end (docs/TESTKIT.md § Host worker
     budget).
@@ -352,7 +352,7 @@ def mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None = None
 def _mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None,
              held: list[tuple[host_workers.Budget, host_workers.Grant]]) -> int:
     parser = argparse.ArgumentParser(
-        prog="atc test mutants", allow_abbrev=False,
+        prog="atc test --mutants", allow_abbrev=False,
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description="Apply each mutant alone to <scratch>/tree and run the tests on it.",
         epilog="Exit: 0 when every mutant ran and every file is restored, survivors named on the last line; 1 for a\n"
@@ -365,8 +365,9 @@ def _mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None,
                         help="commit the export was made from; touched files are compared with it at the end")
     parser.add_argument("worktree", metavar="DIR", help="repository that holds SHA")
     parser.add_argument("mutants", metavar="FILE",
-                        help="JSON list of mutants: {label, edits: [{path, old, new}], tests?: [...]}, paths "
-                             "relative to the tree; a mutant's own tests replace --tests for it")
+                        help="JSON list of mutants: {label, edits: [{path, old, new}], tests?: [...], kill_rule?}, paths "
+                             "relative to the tree; a mutant's own tests and kill_rule replace --tests and --kill-rule "
+                             "for it")
     parser.add_argument("--task", required=True, metavar="ID",
                         help="the task the scratch belongs to, for example ATC-0008; a scratch registered to another "
                              "task is refused")
@@ -394,7 +395,7 @@ def _mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None,
     tree = place / "tree"
     if private:
         print(EXCLUSION_NOTE, flush=True)
-    budget = stages.open_budget(f"atc test mutants {args.scratch}", environ, root=Path(worktree),
+    budget = stages.open_budget(f"atc test --mutants {args.scratch}", environ, root=Path(worktree),
                                 max_wait=MUTANT_SECONDS)
     try:
         held.append((budget, budget.acquire("mutants", 1, 1)))
@@ -407,10 +408,10 @@ def _mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None,
     reports = place / JUNIT
     attempts = 0
 
-    def attempt(label: str, tests: Sequence[str]) -> tuple[str, str]:
+    def attempt(label: str, tests: Sequence[str], rule: str = KILL_FAILURE) -> tuple[str, str]:
         nonlocal attempts
         junit = None
-        if args.kill_rule == KILL_ASSERTION:
+        if rule == KILL_ASSERTION:
             reports.mkdir(exist_ok=True)
             junit = reports / f"{attempts:03d}-{LABEL_CHARACTERS.sub('_', label)[:40]}.xml"
             junit.unlink(missing_ok=True)
@@ -433,7 +434,11 @@ def _mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None,
             originals: dict[Path, bytes] = {}
             try:
                 _apply(tree, mutant, touched, originals)
-                verdict, summary = attempt(mutant["label"], mutant.get("tests") or args.tests)
+                rule = mutant.get("kill_rule", args.kill_rule)
+                if rule not in (KILL_FAILURE, KILL_ASSERTION):
+                    raise Refusal("MUTANT_INVALID", f"{mutant['label']}: kill_rule {rule!r} is not "
+                                                    f"{KILL_FAILURE} or {KILL_ASSERTION}")
+                verdict, summary = attempt(mutant["label"], mutant.get("tests") or args.tests, rule)
                 print(f"{verdict:<8} {mutant['label']} -> {summary}", flush=True)
                 finished += 1
                 if verdict == SURVIVED:
@@ -464,7 +469,7 @@ def _mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None,
     return aborted or (1 if mismatched else 0)
 
 
-# The flag form (docs/TESTKIT.md § `atc test run --tree`)
+# One run (docs/TESTKIT.md § Commands)
 
 TIMEOUT_EXIT = 124
 INTERRUPTED_EXIT = 130
@@ -501,7 +506,7 @@ def changed_paths(tree: Path, base: str, row: scratch.Row | None) -> list[str]:
         return sorted({*tracked, *untracked})
     if row is None or not row.source or not row.commit:
         raise Refusal("SELECTION_SOURCE_UNKNOWN", f"{tree} is no Git working tree and its scratch names no source "
-                                                  "commit; make it with `atc tmp checkout`")
+                                                  "commit; make it with `atc test ID --sha`")
     paths = _git_lines(row.source, "diff", "--name-only", base, row.commit)
     if paths is None:
         raise Refusal("SELECTION_BASE_UNKNOWN", f"{base} or {row.commit} names no commit in {row.source}")
@@ -686,14 +691,14 @@ def summary(result: Result | None, log: Path) -> tuple[str, int]:
 
 
 def run(argv: Sequence[str], environ: MutableMapping[str, str] | None = None) -> int:
-    """``atc test run --scratch <name> --task <ID> [--tree <tree>] [--python <py>] [<option>...] [-- <pytest args>]``."""
+    """``--scratch <name> --task <ID> [--tree <tree>] [--python <py>] [<option>...] [-- <pytest args>]``."""
     argv = list(argv)
     pytest_arguments: list[str] = []
     if "--" in argv:
         at = argv.index("--")
         argv, pytest_arguments = argv[:at], argv[at + 1:]
     parser = argparse.ArgumentParser(
-        prog="atc test run", allow_abbrev=False,
+        prog="atc test", allow_abbrev=False,
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description="One isolated pytest run in a scratch, its output kept in a log.",
         epilog="Exit: pytest's code; 124 after --timeout or when the wait for host workers passes its limit,\n"
@@ -702,7 +707,7 @@ def run(argv: Sequence[str], environ: MutableMapping[str, str] | None = None) ->
     parser.add_argument("--scratch", required=True, metavar="NAME",
                         help="scratch name, a direct child of the ATC temporary root")
     parser.add_argument("--tree", metavar="DIR", help="the tree the tests run in (default: the tree the scratch's registry line "
-                                       "names, as `atc tmp checkout` records it)")
+                                       "names, as the export records it)")
     parser.add_argument("--python", metavar="PATH", help="interpreter that runs pytest (default: the tree's .venv)")
     parser.add_argument("--task", required=True, metavar="ID",
                         help="the task the scratch belongs to, for example ATC-0008; a scratch registered to another "
@@ -751,7 +756,7 @@ def run(argv: Sequence[str], environ: MutableMapping[str, str] | None = None) ->
             total = _count(python, tree, place, environ, private, pytest_arguments)
             if items and total and items >= fraction * total:
                 print(f"{head}, {items} of {total} tests ({items * 100 // total}%) >= {SELECT_FRACTION_KEY} "
-                      f"{fraction:g}", f"{SKIPPED_WIDE} the reviewer's atc verify runs these; run them here with "
+                      f"{fraction:g}", f"{SKIPPED_WIDE} the reviewer's atc test ID --sha --all runs these; run them here with "
                       "--wide, or the touched files with --touched", sep="\n", flush=True)
                 return 0
         print(head, flush=True)
@@ -762,7 +767,7 @@ def run(argv: Sequence[str], environ: MutableMapping[str, str] | None = None) ->
     print(f"LOG {log}", flush=True)
     if private:
         print(EXCLUSION_NOTE, flush=True)
-    budget = stages.open_budget(f"atc test run {place.name}", environ, root=tree, max_wait=args.timeout)
+    budget = stages.open_budget(f"atc test {place.name}", environ, root=tree, max_wait=args.timeout)
     xdist = xdist_installed(python, tree, environ)
     workers, pytest_arguments = _worker_request(pytest_arguments, tree, environ, xdist)
     if workers is not None and workers.source == stages.SOURCE_DEFAULT and budget.active:
