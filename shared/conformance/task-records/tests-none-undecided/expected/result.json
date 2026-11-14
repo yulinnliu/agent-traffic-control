@@ -1,0 +1,6 @@
+{
+  "exit_code": 1,
+  "output_contains": [
+    "tests-none-undecided: DEMO-0001.yaml:"
+  ]
+}

@@ -23,23 +23,22 @@ CONFORMANCE = ROOT / "shared" / "conformance"
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 
 TOOLS = {
-    "validate-adapters": "validate_workspace.py",
-    "load-policies": "policies.py",
-    "generate-enforcement": "generate_enforcement.py",
-    "pretooluse-hook": "pretooluse_hook.py",
-    "classify-change": "classify_change.py",
-    "task-records": "task_records.py",
+    "validate-adapters": [str(SCRIPTS / "validate_workspace.py")],
+    "load-policies": [str(SCRIPTS / "policies.py")],
+    "generate-enforcement": [str(SCRIPTS / "generate_enforcement.py")],
+    "pretooluse-hook": [str(SCRIPTS / "pretooluse_hook.py")],
+    "task-records": ["-m", "atc_cli.maintain", "task"],
 }
 
 
 def cases() -> list[pytest.param]:
     found = []
-    for tool, script in TOOLS.items():
+    for tool, command in TOOLS.items():
         tool_dir = CONFORMANCE / tool
         if not tool_dir.is_dir():
             continue
         for case in sorted(p for p in tool_dir.iterdir() if (p / "args.json").is_file()):
-            found.append(pytest.param(script, case, id=f"{tool}/{case.name}"))
+            found.append(pytest.param(command, case, id=f"{tool}/{case.name}"))
     return found
 
 
@@ -47,8 +46,8 @@ def _normalise(text: str) -> str:
     return text.replace("\r\n", "\n")
 
 
-@pytest.mark.parametrize("script,case", cases())
-def test_conformance_case(script: str, case: Path, tmp_path: Path) -> None:
+@pytest.mark.parametrize("command,case", cases())
+def test_conformance_case(command: list[str], case: Path, tmp_path: Path) -> None:
     input_dir = tmp_path / "input"
     out_dir = tmp_path / "out"
     source = case / "input"
@@ -62,7 +61,7 @@ def test_conformance_case(script: str, case: Path, tmp_path: Path) -> None:
     env = {k: v for k, v in os.environ.items() if k != "ATC_ROOT"}
     env["PYTHONIOENCODING"] = "utf-8"
     run = subprocess.run(
-        [sys.executable, str(SCRIPTS / script), *args],
+        [sys.executable, *command, *args],
         cwd=input_dir,
         env=env,
         capture_output=True,

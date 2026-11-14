@@ -32,6 +32,7 @@ TITLE_WIDTH = 60
 REMOTE_URL = re.compile(r"^(?:[a-z][a-z0-9+.-]*://[^/]+/|[^/@:]+@[^/:]+:)(?:.*/)?([^/]+/[^/]+?)(?:\.git)?/?$")
 REPOSITORY_ENV = ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY")
 RECORD_ID = re.compile(r"^(?P<prefix>[A-Z][A-Z0-9]{1,7})-[0-9]{4}$")
+NO_TESTKIT_DECISION = "tests: none, the repository declares no [tool.atc-testkit]"
 TESTKIT_TABLE = re.compile(r"^\s*\[tool\.atc-testkit[\].]", re.MULTILINE)
 TEST_DIR_DEPTH = 2
 
@@ -77,6 +78,9 @@ def record_problems(name: str, text: str, prefix: str | None, schema: Draft20201
             problems.append(f"id-mismatch: {name}: task_id {task_id} differs from the file name")
         if prefix and not task_id.startswith(f"{prefix}-"):
             problems.append(f"id-mismatch: {name}: task_id {task_id} lacks the declared prefix {prefix}")
+    if isinstance(data, dict) and data.get("tests") == "none" and not data.get("decisions"):
+        problems.append(f"tests-none-undecided: {name}: tests is none but the record has no decision line; "
+                        "tests none needs the Owner's decision")
     return problems
 
 
@@ -363,6 +367,8 @@ def create(root: Path, environ: dict[str, str], cwd: str, title: str | None, sco
     testkit = test_directory(repo) is not None
     level = tests or fields.get("tests") or ("standard" if testkit else "none")
     check_tests_level(level, decisions, testkit)
+    if not testkit and not decisions:
+        decisions = [NO_TESTKIT_DECISION]
     numbers = taken_numbers(repo, prefix)
     number = max(numbers, default=0) + 1
     if number > 9999:
@@ -666,7 +672,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="atc task", allow_abbrev=False, **cli_conventions.form(
         "Create, update, list, resume and close tasks: a worktree, a branch and a record each.",
         exit="0 OK; 1 STOP; 2 ERROR; 3 PARTIAL (close: an item refused after another was deleted)",
-        see="docs/TASKS.md § Commands; docs/WORKFLOW.md"))
+        see="docs/TASKS.md § Commands; docs/WORKFLOW.md § The flow"))
     sub = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
     create_parser = sub.add_parser("create", allow_abbrev=False, help="create the worktree, branch and record",
                                    **cli_conventions.form(
