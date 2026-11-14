@@ -1,4 +1,4 @@
-"""docs/TESTKIT.md § Commands: the flag form of ``atc test run``, its log, summary line and selection."""
+"""docs/TESTKIT.md § Commands: the scratch run behind ``atc test ID``, its log, summary line and selection."""
 from __future__ import annotations
 
 import os
@@ -19,15 +19,21 @@ DROPPED_SETTINGS = ("ATC_PRIVATE_DESKTOP", "PYTHONDONTWRITEBYTECODE", "PYTHONPYC
 
 
 TASK = "ATC-0044"
+# The scratch run's entry point in a child, so that its environment and exit code are what a caller sees; a
+# refusal is printed as ``TOKEN detail`` with its code, as the CLI prints it.
+RUN = ("import sys\nfrom atc_testkit import testrun\nfrom atc_testkit.locations import Refusal\n"
+       "try:\n    sys.exit(testrun.run(sys.argv[1:]))\n"
+       "except Refusal as refusal:\n    print(f'{refusal.token} {refusal.detail}', file=sys.stderr)\n"
+       "    sys.exit(refusal.code)\n")
 
 
 def run_command(*args: str, **env: str) -> subprocess.CompletedProcess[str]:
-    """The command in the caller's environment less `DROPPED_SETTINGS`, with `--task TASK` unless it names one."""
+    """The run in the caller's environment less `DROPPED_SETTINGS`, with `--task TASK` unless it names one."""
     environment = {key: value for key, value in os.environ.items()
                    if not key.startswith(("PYTEST_", "GIT_")) and key not in DROPPED_SETTINGS}
     environment.update(env, PYTHONIOENCODING="utf-8")
     task = () if "--task" in args else ("--task", TASK)
-    return subprocess.run([sys.executable, "-m", "atc_testkit.commands", "test", "run", *task, *args], env=environment,
+    return subprocess.run([sys.executable, "-c", RUN, *task, *args], env=environment,
                           capture_output=True, text=True, encoding="utf-8", stdin=subprocess.DEVNULL)
 
 
@@ -94,7 +100,7 @@ def test_the_tree_comes_from_the_registry_and_python_from_its_venv(tree: Path, a
     assert run.returncode == 9 and run.stderr.startswith("TREE_NOT_FOUND ")
     scratch.register(atc_tmp, atc_tmp / "f4", tree)
     run = run_command("--scratch", "f4")
-    assert run.returncode == 9 and run.stderr.startswith("VENV_MISSING ") and "atc tmp checkout" in run.stderr
+    assert run.returncode == 9 and run.stderr.startswith("VENV_MISSING ") and "atc test ID --sha" in run.stderr
 
 
 @pytest.mark.integration
@@ -109,8 +115,8 @@ def test_a_scratch_records_its_task_and_refuses_another(tree: Path, atc_tmp: Pat
 
 @pytest.mark.integration
 def test_a_run_without_a_task_is_a_usage_error_and_creates_nothing(tree: Path, atc_tmp: Path) -> None:
-    run = subprocess.run([sys.executable, "-m", "atc_testkit.commands", "test", "run", "--scratch", "f11", "--tree",
-                          str(tree)], env={**os.environ, "ATC_TMP": str(atc_tmp)}, capture_output=True, text=True,
+    run = subprocess.run([sys.executable, "-c", RUN, "--scratch", "f11", "--tree", str(tree)],
+                         env={**os.environ, "ATC_TMP": str(atc_tmp)}, capture_output=True, text=True,
                          encoding="utf-8", stdin=subprocess.DEVNULL)
     assert run.returncode == 2 and "--task" in run.stderr
     assert not (atc_tmp / "f11").exists() and scratch.registered(atc_tmp) == []
@@ -226,8 +232,8 @@ def test_a_wide_selection_is_skipped_and_touched_runs_the_changed_tests(tree: Pa
     assert run.returncode == 0, run.stdout + run.stderr
     assert run.stdout.splitlines() == [
         "SELECT HEAD: 1 changed paths, 1 test paths, 1 of 2 tests (50%) >= select_full_fraction 0.5",
-        f"{testrun.SKIPPED_WIDE} the reviewer's atc verify runs these; run them here with --wide, or the touched "
-        "files with --touched"]
+        f"{testrun.SKIPPED_WIDE} the reviewer's atc test ID --sha --all runs these; run them here with --wide, or "
+        "the touched files with --touched"]
     (tree / "pyproject.toml").write_text('[project]\nname = "flagged"\nversion = "1"\n[tool.atc-testkit]\n'
                                          'selector = ["sel.py"]\nselect_full_fraction = 0.75\n', encoding="utf-8")
     run = run_command("--scratch", "f8", "--tree", str(tree), "--python", sys.executable, "--select", "HEAD")

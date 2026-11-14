@@ -1,4 +1,5 @@
-"""docs/ATC_HOME.md § Scratch registry and § Deleting: ``atc tmp list``, ``clean`` and ``prune``."""
+"""docs/ATC_HOME.md § Scratch registry and § Deleting: ``atc test --list``, ``atc test ID --clean`` and the prune
+every run does first."""
 from __future__ import annotations
 
 import ast
@@ -13,7 +14,7 @@ import sys
 import pytest
 
 import atc_testkit
-from atc_testkit import commands, isolation, locations, owner, scratch
+from atc_testkit import isolation, locations, owner, scratch
 
 
 def link_directory(link: Path, target: Path) -> None:
@@ -431,7 +432,7 @@ def test_list_prints_one_line_per_scratch_and_deletes_nothing(atc_tmp: Path, tmp
         "present  tree  3d  ATC-0008",
         "absent  tree  3d  missing",
         f"outside  {tmp_path / 'elsewhere'}  3d",
-        "1 missing; atc tmp clean absent drops their rows",
+        "1 missing; atc test ID --clean drops their rows",
     ]
     assert present.is_dir()
 
@@ -741,10 +742,10 @@ def test_dependent_runs_are_listed_and_taken_with_runs(atc_tmp: Path, capsys: py
     assert run.is_dir() and registered_names(atc_tmp) == ["run", "other"]
     review = scratch_dir(atc_tmp, "review")
     scratch.register(atc_tmp, review, review / "tree")
-    assert commands.main(["tmp", "clean", "--with-runs", "review"]) == 0
-    assert capsys.readouterr().out.splitlines() == [f"DELETED {run}", f"DELETED {review}"]
+    lines: list[str] = []
+    assert scratch.clean(["review"], with_runs=True, say=lines.append) == 0
+    assert lines == [f"DELETED {run}", f"DELETED {review}"]
     assert other.is_dir() and registered_names(atc_tmp) == ["other"]
-    assert commands.main(["tmp", "clean", "--with-runs"]) == 2
 
 
 # candidates and their owners
@@ -813,10 +814,10 @@ def test_list_names_leftover_candidates_and_the_missing_scratches_to_clean(repos
         scratch.register(atc_tmp, atc_tmp / name, atc_tmp / name / "tree")
     lines: list[str] = []
     scratch.list_scratches(say=lines.append)
-    assert lines[2] == "2 missing; atc tmp clean a1 b2 drops their rows"
+    assert lines[2] == "2 missing; atc test ID --clean drops their rows"
     assert lines[3].split("  ")[0::2] == [f"candidates/{gone.name}", "leftover", str(repository)]
     assert lines[3].split("  ")[3] == f"verify ATC-0001, pid {os.getpid()}"
-    assert lines[4:] == ["1 leftover candidates; atc tmp prune removes them"]
+    assert lines[4:] == ["1 leftover candidates; the next atc test prunes them"]
 
 
 @pytest.mark.integration

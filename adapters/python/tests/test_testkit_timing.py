@@ -85,8 +85,12 @@ def test_the_ci_runner_refuses_a_bad_slack(monkeypatch: pytest.MonkeyPatch,
 
 
 @pytest.mark.unit
-def test_atc_test_run_refuses_a_bad_slack(tmp_path: Path, atc_tmp: Path) -> None:
-    done = subprocess.run([sys.executable, "-m", "atc_testkit.commands", "test", "run", "--scratch", "s", "--task", "ATC-0044",
+def test_a_scratch_run_refuses_a_bad_slack(tmp_path: Path, atc_tmp: Path) -> None:
+    wrapper = ("import sys\nfrom atc_testkit import testrun\nfrom atc_testkit.locations import Refusal\n"
+               "try:\n    sys.exit(testrun.run(sys.argv[1:]))\n"
+               "except Refusal as refusal:\n    print(f'{refusal.token} {refusal.detail}', file=sys.stderr)\n"
+               "    sys.exit(refusal.code)\n")
+    done = subprocess.run([sys.executable, "-c", wrapper, "--scratch", "s", "--task", "ATC-0044",
                            "--tree", str(tmp_path), "--python", sys.executable, "--", "tests"],
                           capture_output=True, text=True,
                           env={**os.environ, "ATC_TMP": str(atc_tmp), timing.SLACK_VARIABLE: "31"})

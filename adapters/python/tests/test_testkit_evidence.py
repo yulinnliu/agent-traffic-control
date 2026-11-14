@@ -12,6 +12,7 @@ import tomllib
 from pathlib import Path
 
 import pytest
+import yaml
 
 TESTKIT_SRC = Path(__file__).parents[1] / "atc-testkit/src"
 sys.path.insert(0, str(TESTKIT_SRC))
@@ -75,13 +76,27 @@ def isolate(base: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return base / "repo"
 
 
+TASK_IDS = {"first": "ATC-0001", "second": "ATC-0002"}
+
+
+def task_record(task: str, branch: str) -> str:
+    """The record a topic branch carries: its own copy, naming the branch, that `atc integrate ID` reads."""
+    return yaml.safe_dump({
+        "task_id": task, "repository": "example/repo", "base_sha": "0" * 40, "scope": "evidence",
+        "governance_source": "example/governance", "governance_revision": "0" * 40, "branch": branch,
+        "authority": {"edit": True, "commit": True, "push_topic": False, "integrate_main": False,
+                      "push_main": False, "deploy": False},
+    }, sort_keys=False, allow_unicode=True)
+
+
 def build(root: Path) -> Path:
     root.mkdir()
     run_git(root, "init", "-q", "-b", "main")
     commit(root, "uv.lock", "lock 1\n")
     commit(root, ".python-version", "3.13\n")
     commit(root, ARGV_FILE, json.dumps(verifier_argv()))
-    commit(root, "AGENTS.md", f"# AGENTS.md\n\n## Integration verification\n\n- Verifier argv file: {ARGV_FILE}\n")
+    commit(root, "AGENTS.md", f"# AGENTS.md\n\n## Task records\n\n- Task prefix: ATC\n\n"
+                              f"## Integration verification\n\n- Verifier argv file: {ARGV_FILE}\n")
     return root
 
 
@@ -92,6 +107,8 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 def topic(repo: Path, edits: dict[str, str], branch: str) -> str:
     run_git(repo, "switch", "-q", "-c", branch)
+    task = TASK_IDS.get(branch, "ATC-0009")
+    commit(repo, f".atc/tasks/{task}.yaml", task_record(task, branch))
     for path, content in edits.items():
         commit(repo, path, content)
     tip = run_git(repo, "rev-parse", "HEAD")
@@ -110,10 +127,8 @@ def workspace_beside(repo: Path) -> Path:
 
 
 def integrate(repo: Path, branch: str, reviewed: str) -> None:
-    """`atc integrate` of ``reviewed``, the tip of ``branch``, the one local branch there."""
-    assert gi.main([
-        "--project", repo.name, "--reviewed", reviewed, "--task", "test", "--owner-words", "Owner: integrate",
-    ], root=workspace_beside(repo)) == 0
+    """`atc integrate ID --sha SHA` of ``reviewed``, the tip of ``branch``, whose record names that branch."""
+    assert gi.main([TASK_IDS[branch], "--sha", reviewed], root=workspace_beside(repo)) == 0
 
 
 def decide(repo: Path, pushed: str, paths, stages=STAGES) -> ev.Decision:

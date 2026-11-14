@@ -136,15 +136,11 @@ def test_kill_tree_ends_a_process_and_what_it_started(tmp_path: Path) -> None:
 def test_run_streams_the_output_and_returns_the_code_on_a_private_desktop(tmp_path: Path) -> None:
     (tmp_path / "name.py").write_text(DESKTOP_NAME, encoding="utf-8")
     code = f"import runpy,sys; runpy.run_path({str(tmp_path / 'name.py')!r}); sys.exit(5)"
-    run = subprocess.run([sys.executable, "-m", "atc_testkit.commands", "test", "private", "--", sys.executable,
-                          "-c", code], cwd=tmp_path, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    # `atc test --private -- COMMAND` is desktop.run(COMMAND) from the working directory with the environment
+    child = ("import os, sys\nfrom atc_testkit import desktop\n"
+             "sys.exit(desktop.run(sys.argv[1:], cwd=os.getcwd(), env=dict(os.environ)))\n")
+    run = subprocess.run([sys.executable, "-c", child, sys.executable, "-c", code], cwd=tmp_path,
+                         capture_output=True, text=True, stdin=subprocess.DEVNULL)
     lines = run.stdout.split()
     assert run.returncode == 5, run.stdout + run.stderr
     assert lines[:2] == ["desktop:", "private"] and lines[2].startswith("atc_")
-
-
-@pytest.mark.unit
-def test_private_without_a_command_prints_its_usage(capsys: pytest.CaptureFixture[str]) -> None:
-    from atc_testkit import commands
-    assert commands.main(["test", "private", "--"]) == 2
-    assert capsys.readouterr().err.startswith("usage: atc test private")

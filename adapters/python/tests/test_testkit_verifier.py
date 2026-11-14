@@ -593,6 +593,14 @@ sys.exit(verifier.main(project))
 """
 
 
+# The record the topic branch carries; its own copy names the branch, which `atc integrate ATC-0001` reads.
+TASK_RECORD = ("task_id: ATC-0001\nrepository: example/fixture\nbase_sha: '" + "0" * 40 + "'\nscope: fixture\n"
+               "governance_source: example/governance\ngovernance_revision: '" + "0" * 40 + "'\nbranch: topic\n"
+               "authority:\n  edit: true\n  commit: true\n  push_topic: false\n  integrate_main: false\n"
+               "  push_main: false\n  deploy: false\n")
+TASK = "ATC-0001"
+
+
 @pytest.fixture()
 def integration_repo(tmp_path: Path, atc_tmp: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     for key in [key for key in os.environ if key.startswith("GIT_")]:
@@ -612,12 +620,17 @@ def integration_repo(tmp_path: Path, atc_tmp: Path, monkeypatch: pytest.MonkeyPa
     (root / "pyproject.toml").write_text('[tool.pytest.ini_options]\npythonpath = ["src"]\n', encoding="utf-8")
     (root / "verify.json").write_text(json.dumps([sys.executable, "verify.py"]), encoding="utf-8")
     (root / "AGENTS.md").write_text(
-        "# AGENTS.md\n\n## Integration verification\n\n- Verifier argv file: verify.json\n", encoding="utf-8",
+        "# AGENTS.md\n\n## Task records\n\n- Task prefix: ATC\n\n"
+        "## Integration verification\n\n- Verifier argv file: verify.json\n", encoding="utf-8",
     )
     git(root, "init", "-q", "-b", "main")
     git(root, "add", ".")
     git(root, "commit", "-q", "-m", "base")
     git(root, "switch", "-q", "-c", "topic")
+    (root / ".atc/tasks").mkdir(parents=True)
+    (root / ".atc/tasks/ATC-0001.yaml").write_text(TASK_RECORD, encoding="utf-8")
+    git(root, "add", ".")
+    git(root, "commit", "-q", "-m", "open ATC-0001")
     (root / "src/fixture_prod/tool.py").write_text("x = 1\n", encoding="utf-8")
     git(root, "add", ".")
     git(root, "commit", "-q", "-m", "topic")
@@ -640,8 +653,7 @@ def workspace_beside(repo: Path) -> Path:
 
 def integrate(root: Path) -> int:
     tip = (root / ".git/atc-test-tip").read_text(encoding="utf-8")
-    return gi.main(["--project", root.name, "--reviewed", tip, "--task", "test-owner-authorization",
-                    "--owner-words", "Owner: integrate"], root=workspace_beside(root))
+    return gi.main([TASK, "--sha", tip], root=workspace_beside(root))
 
 
 def test_atc_integrate_runs_the_skeleton_to_a_pass(integration_repo: Path, atc_tmp: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -668,9 +680,10 @@ def test_atc_integrate_reports_the_skeletons_refusal_token(integration_repo: Pat
     assert len(kept) == 1 and (kept[0] / "pytest-parallel.log").is_file()
 
 
-def verify(root: Path, *extra: str) -> int:
+def verify(root: Path) -> int:
+    """`atc test ATC-0001 --candidate --sha TIP`."""
     tip = (root / ".git/atc-test-tip").read_text(encoding="utf-8")
-    return gi.verify_main(["--project", root.name, "--reviewed", tip, *extra], root=workspace_beside(root))
+    return gi.run_candidate(TASK, tip, root=workspace_beside(root))
 
 
 @pytest.mark.integration
@@ -684,7 +697,7 @@ def test_atc_verify_runs_the_verifier_on_the_candidate_without_the_slot_or_a_ref
     captured = capsys.readouterr()
     assert code == 0, captured
     last = captured.out.splitlines()[-1]
-    assert last.startswith("VERIFY PASS ") and " FF log " in last
+    assert last.startswith("PASS candidate ") and " FF log " in last
     assert git(integration_repo, "rev-parse", "main") == before and git(integration_repo, "for-each-ref") == refs
     assert git(integration_repo, "worktree", "list", "--porcelain").count("worktree ") == 1
     assert [path.suffix for path in (atc_tmp / "candidates").iterdir()] == [".log"]
@@ -694,7 +707,7 @@ def test_atc_verify_runs_the_verifier_on_the_candidate_without_the_slot_or_a_ref
 def test_atc_integrate_reuses_the_root_forms_verify_record(
         integration_repo: Path, atc_tmp: Path, capsys: pytest.CaptureFixture[str]) -> None:
     tip = (integration_repo / ".git/atc-test-tip").read_text(encoding="utf-8")
-    check = ["--project", integration_repo.name, "--reviewed", tip, "--task", "test-owner-authorization", "--check"]
+    check = [TASK, "--sha", tip, "--check"]
     assert gi.main([*check, "--json"], root=workspace_beside(integration_repo)) == 0
     assert json.loads(capsys.readouterr().out)["verification_reuse"] == "NO_RECORD"
     assert verify(integration_repo) == 0, capsys.readouterr()
@@ -704,8 +717,9 @@ def test_atc_integrate_reuses_the_root_forms_verify_record(
     assert gi.main(check, root=workspace_beside(integration_repo)) == 0
     assert capsys.readouterr().out.rstrip().endswith(" reuse=REUSED")
     assert [path.suffix for path in (atc_tmp / "candidates").iterdir()] == [".log"]
-    assert integrate(integration_repo) == 0, capsys.readouterr()
-    assert " REUSED " in capsys.readouterr().err
+    assert gi.main([TASK, "--sha", tip, "--json"], root=workspace_beside(integration_repo)) == 0
+    captured = capsys.readouterr()
+    assert json.loads(captured.out)["verification_reused"] and " REUSED " in captured.err
     line = json.loads((integration_repo / ".git/atc/integrations.jsonl").read_text(encoding="utf-8").splitlines()[-1])
     assert line["reviewed"] == tip and line["verification_evidence"]["candidate_sha"] == tip
 
@@ -725,4 +739,4 @@ def test_atc_verify_reports_the_verifiers_refusal_and_moves_nothing(
     captured = capsys.readouterr()
     assert any(line.startswith("STOP VERIFICATION_FAILED") for line in captured.err.splitlines())
     assert "verifier: TESTS_FAILED" in captured.err
-    assert "VERIFY PASS" not in captured.out and git(integration_repo, "rev-parse", "main") == before
+    assert "PASS candidate" not in captured.out and git(integration_repo, "rev-parse", "main") == before

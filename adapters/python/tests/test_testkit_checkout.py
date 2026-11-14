@@ -1,4 +1,4 @@
-"""docs/ATC_HOME.md § Checkout: ``atc tmp checkout`` exports a commit into a registered scratch and builds its environment."""
+"""docs/ATC_HOME.md § Checkout: ``atc test ID --sha`` exports a commit into a registered scratch and builds its environment."""
 from __future__ import annotations
 
 import io
@@ -12,7 +12,7 @@ import threading
 
 import pytest
 
-from atc_testkit import checkout, commands, scratch
+from atc_testkit import checkout, scratch
 
 pytestmark = pytest.mark.integration
 TASK = "ATC-0008"
@@ -94,11 +94,12 @@ def test_the_scratch_name_and_the_lock_directory_can_be_named(source: tuple[Path
     (["HEAD", "--task", TASK, "--scratch", "../out"], "SCRATCH_OUTSIDE_TMP"),
 ])
 def test_a_refusal_before_the_export_creates_nothing(source: tuple[Path, str], atc_tmp: Path, argv: list[str],
-                                                    token: str, capsys: pytest.CaptureFixture[str]) -> None:
+                                                    token: str) -> None:
     repo, _sha = source
     sync = Sync()
-    assert commands.main(["tmp", "checkout", *argv, "--worktree", str(repo)]) == 9
-    assert capsys.readouterr().err.startswith(f"{token} ")
+    with pytest.raises(checkout.Refusal) as refused:
+        run([*argv, "--worktree", str(repo)], sync, dict(os.environ))
+    assert (refused.value.token, refused.value.code) == (token, 9)
     assert not sync.calls and scratch.registered(atc_tmp) == []
     assert [entry.name for entry in atc_tmp.iterdir() if entry.is_dir() and entry.name != "systmp"] == []
 
@@ -116,7 +117,7 @@ def test_an_existing_tree_is_refused_and_kept(source: tuple[Path, str], atc_tmp:
     kept.write_text("x", encoding="utf-8")
     with pytest.raises(checkout.Refusal) as refused:
         run([sha, "--task", TASK, "--worktree", str(repo)], Sync(), dict(os.environ))
-    assert refused.value.token == "SCRATCH_TREE_EXISTS" and f"atc tmp clean {TASK}-{sha[:7]}" in refused.value.detail
+    assert refused.value.token == "SCRATCH_TREE_EXISTS" and f"atc test {TASK} --clean" in refused.value.detail
     assert kept.read_text(encoding="utf-8") == "x"
 
 

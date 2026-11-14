@@ -1,4 +1,4 @@
-"""`atc test status` and doctor's memory lines: what a person sees of the host's test runs and memory
+"""`atc doctor -v` and doctor's memory lines: what a person sees of the host's test runs and memory
 (docs/TESTKIT.md § Commands, § Host worker budget)."""
 from __future__ import annotations
 
@@ -112,4 +112,4 @@ def test_a_doctor_warning_leaves_the_exit_code_alone(monkeypatch: pytest.MonkeyP
                                                      capsys: pytest.CaptureFixture[str]) -> None:
     monkeypatch.setattr(doctor, "diagnose", lambda root: [doctor.Check("memory", "WARN", "low")])
     assert doctor.main([]) == 0
-    assert capsys.readouterr().out.endswith("Doctor: 0 error(s), 1 warning(s), 0 not initialized.\n")
+    assert "READY doctor: 0 error(s), 1 warning(s), 0 not initialized\n" in capsys.readouterr().out

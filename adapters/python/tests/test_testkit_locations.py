@@ -162,16 +162,34 @@ def outside_a_pytest(*args: str, cwd: Path | None = None) -> subprocess.Complete
                           encoding="utf-8", stdin=subprocess.DEVNULL)
 
 
+# A child that calls one entry point and prints a refusal as ``TOKEN detail`` with its exit code, as the CLI does.
+CHILD = ("import sys\n"
+         "from atc_testkit import scratch, testrun\n"
+         "from atc_testkit.locations import Refusal\n"
+         "try:\n"
+         "    code = {call}\n"
+         "except Refusal as refusal:\n"
+         "    print(f'{{refusal.token}} {{refusal.detail}}', file=sys.stderr)\n"
+         "    code = refusal.code\n"
+         "sys.exit(code)\n")
+
+
+CALLS = {"list": "scratch.list_scratches()", "prune": "scratch.prune()"}
+
+
+@pytest.mark.integration
 @pytest.mark.parametrize("command", ["list", "prune"])
 def test_a_link_stops_atc_tmp(linked: tuple[Path, Path], command: str) -> None:
-    assert_refused(outside_a_pytest("-m", "atc_testkit.commands", "tmp", command), linked[0])
+    assert_refused(outside_a_pytest("-c", CHILD.format(call=CALLS[command])), linked[0])
 
 
-def test_a_link_stops_atc_test_run_before_its_scratch_exists(linked: tuple[Path, Path], tmp_path: Path, atc_tmp: Path) -> None:
+@pytest.mark.integration
+def test_a_link_stops_atc_test_run_before_its_scratch_exists(linked: tuple[Path, Path], tmp_path: Path,
+                                                             atc_tmp: Path) -> None:
     tree = tmp_path / "tree"
     tree.mkdir()
-    run = outside_a_pytest("-m", "atc_testkit.commands", "test", "run", "--scratch", "scratch", "--task", "ATC-0044", "--tree", str(tree),
-                           "--python", sys.executable, "--", "tests")
+    run = outside_a_pytest("-c", CHILD.format(call="testrun.run(sys.argv[1:])"), "--scratch", "scratch", "--task",
+                           "ATC-0044", "--tree", str(tree), "--python", sys.executable, "--", "tests")
     assert_refused(run, linked[0])
     assert not (atc_tmp / "scratch").exists() and not (atc_tmp / "scratch-dirs.tsv").exists()
 

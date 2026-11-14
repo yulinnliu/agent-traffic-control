@@ -50,7 +50,7 @@ def build_parser() -> argparse.ArgumentParser:
         "its timeout key bounds the run. -v streams pytest's output.",
         exit="pytest's code for a run (0 passed); 1 a mutant run that survived or failed its baseline, a STOP;\n"
              "2 ERROR; 8 a guard refusal; 9 a refusal before the run; 124 a timeout; 130 interrupted",
-        see="docs/TESTKIT.md § Commands; docs/WORKFLOW.md"))
+        see="docs/TESTKIT.md § Commands; docs/WORKFLOW.md § The flow"))
     parser.add_argument("task", nargs="?", metavar="ID", help="the task record ID")
     form = parser.add_mutually_exclusive_group()
     form.add_argument("--mutants", metavar="FILE", help="JSON list of mutants: {label, edits: [{path, old, new}], "
@@ -215,15 +215,15 @@ def main(argv: list[str] | None = None, root: Path = ROOT, environ: dict[str, st
         if args.task or not rest:
             parser.error("--private takes no ID and a command after --")
         return desktop.run(rest, cwd=os.getcwd(), env=environ)
-    if args.list:
-        return list_scratches(args.task, environ, args.json)
-    if args.task is None:
-        parser.error("an ID is required")
-    if (args.clean or args.candidate) and (rest or args.all):
-        parser.error("--clean and --candidate take no tests and no --all")
-    if args.clean and args.sha:
-        parser.error("--clean takes no --sha")
     try:
+        if args.list:
+            return list_scratches(args.task, environ, args.json)
+        if args.task is None:
+            parser.error("an ID is required")
+        if (args.clean or args.candidate) and (rest or args.all):
+            parser.error("--clean and --candidate take no tests and no --all")
+        if args.clean and args.sha:
+            parser.error("--clean takes no --sha")
         if args.clean:
             task_records.workspace(root, environ)
             return clean(args.task, environ)

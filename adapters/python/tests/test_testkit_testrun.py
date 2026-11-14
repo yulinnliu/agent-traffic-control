@@ -1,4 +1,4 @@
-"""docs/TESTKIT.md § Commands: ``atc test run`` and ``atc test mutants``, and the ``atc`` dispatch."""
+"""docs/TESTKIT.md § Commands: the scratch run and the mutant run behind ``atc test ID``."""
 from __future__ import annotations
 
 import json
@@ -9,11 +9,29 @@ from pathlib import Path
 
 import pytest
 
-import atc_cli
-from atc_testkit import commands, python_toolchain, scratch, testrun
+from atc_testkit import python_toolchain, scratch, testrun
 from atc_testkit.locations import Refusal
 
 TASK = "ATC-0044"
+# A child process runs one of testrun's entry points; a refusal is printed as ``TOKEN detail`` with its exit code.
+ENTRY = ("import sys\n"
+         "from atc_testkit import testrun\n"
+         "from atc_testkit.locations import Refusal\n"
+         "try:\n"
+         "    code = getattr(testrun, sys.argv[1])(sys.argv[2:])\n"
+         "except Refusal as refusal:\n"
+         "    print(f'{refusal.token} {refusal.detail}', file=sys.stderr)\n"
+         "    code = refusal.code\n"
+         "sys.exit(code)\n")
+
+
+def mutants(argv: list[str]) -> int:
+    """``testrun.mutants`` in this process, a refusal printed as the child prints it."""
+    try:
+        return testrun.mutants(argv)
+    except Refusal as refusal:
+        print(f"{refusal.token} {refusal.detail}", file=sys.stderr)
+        return refusal.code
 MODULE = ("from pathlib import Path\nimport os, tempfile\n"
           "def value():\n    return 1\n")
 REPORTING_TEST = """import os, tempfile
@@ -30,17 +48,18 @@ def test_value(tmp_path):
 """
 
 
-def run_command(*args: str, cwd: Path | None = None, **env: str) -> subprocess.CompletedProcess[str]:
+def run_command(entry: str, *args: str, cwd: Path | None = None, **env: str) -> subprocess.CompletedProcess[str]:
+    """``testrun.<entry>(args)`` in a child process with the caller's environment."""
     environment = {key: value for key, value in os.environ.items() if not key.startswith("PYTEST_")}
     environment.update(env, PYTHONIOENCODING="utf-8")
-    return subprocess.run([sys.executable, "-m", "atc_testkit.commands", *args], cwd=cwd, env=environment,
+    return subprocess.run([sys.executable, "-c", ENTRY, entry, *args], cwd=cwd, env=environment,
                           capture_output=True, text=True, encoding="utf-8", stdin=subprocess.DEVNULL)
 
 
 def run_tests(tree: Path | str, scratch_name: str, python: str, *args: str, cwd: Path | None = None,
               **env: str) -> subprocess.CompletedProcess[str]:
-    """``atc test run`` with pytest's output streamed, so a test's prints reach stdout."""
-    return run_command("test", "run", "--scratch", scratch_name, "--task", TASK, "--tree", str(tree), "--python", python,
+    """One scratch run with pytest's output streamed, so a test's prints reach stdout."""
+    return run_command("run", "--scratch", scratch_name, "--task", TASK, "--tree", str(tree), "--python", python,
                        "--progress", "--", *args, cwd=cwd, **env)
 
 
@@ -237,11 +256,11 @@ def test_the_exclusion_joins_a_given_marker_expression() -> None:
 
 @pytest.mark.integration
 def test_a_run_without_its_scratch_option_prints_the_usage() -> None:
-    run = run_command("test", "run", "a", "b", "c")
+    run = run_command("run", "a", "b", "c")
     assert run.returncode == 2 and "--scratch" in run.stderr
 
 
-# ``atc test mutants``
+# the mutant run
 
 
 GIT_IDENTITY = ("-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "core.autocrlf=false")
@@ -255,7 +274,7 @@ class Export:
     def run(self, tmp_path: Path, mutants: list[dict], *options: str, **env: str) -> subprocess.CompletedProcess[str]:
         listing = tmp_path / "mutants.json"
         listing.write_text(json.dumps(mutants), encoding="utf-8")
-        return run_command("test", "mutants", self.place.name, self.sha, str(self.worktree), str(listing),
+        return run_command("mutants", self.place.name, self.sha, str(self.worktree), str(listing),
                            "--task", TASK, "--python", sys.executable, *options, "--tests", "tests", **env)
 
 
@@ -312,8 +331,8 @@ def test_the_assertion_rule_kills_only_by_assertion(export: Export, tmp_path: Pa
     assert lines[1].startswith("KILLED") and "K one" in lines[1]
     assert lines[2].startswith("INCONCLUSIVE E three -> failed by") and "not by an assertion" in lines[2]
     assert lines[-1] == "done: 2 of 2 mutants, 0 survived"
-    assert sorted(path.name for path in (export.place / "junit").iterdir()) == [
-        "000-baseline.xml", "001-K_one.xml", "002-E_three.xml"]
+    # the baseline runs under the failure rule, so only the mutants under the assertion rule leave a report
+    assert sorted(path.name for path in (export.place / "junit").iterdir()) == ["001-K_one.xml", "002-E_three.xml"]
 
 
 @pytest.mark.integration
@@ -497,28 +516,29 @@ def test_a_timeout_returns_no_code(tmp_path: Path) -> None:
     assert result.code is None
 
 
-def test_a_result_line_stays_on_stdout_and_a_refusal_goes_to_stderr(atc_tmp: Path, capsys: pytest.CaptureFixture[str],
-                                                                    monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.integration
+def test_a_list_or_clean_reports_its_lines_and_a_refusal_raises(atc_tmp: Path, capsys: pytest.CaptureFixture[str],
+                                                    monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ATC_TMP", "relative")
-    assert commands.main(["tmp", "list"]) == 9
-    captured = capsys.readouterr()
-    assert captured.out == "" and captured.err.startswith("ATC_TMP_UNSUITABLE ")
+    with pytest.raises(Refusal) as refused:
+        scratch.list_scratches()
+    assert (refused.value.token, refused.value.code) == ("ATC_TMP_UNSUITABLE", 9)
     monkeypatch.setenv("ATC_TMP", str(atc_tmp))
     (atc_tmp / "s").mkdir()
-    assert commands.main(["tmp", "clean", "s"]) == 0
-    captured = capsys.readouterr()
-    assert captured.out == f"DELETED {atc_tmp / 's'}\n" and captured.err == ""
-    assert commands.main(["tmp", "clean", "systmp"]) == 1
-    captured = capsys.readouterr()
-    assert captured.out.startswith("REFUSED ") and captured.err.startswith("STOP SCRATCH_REFUSED: 1 refused;")
+    lines: list[str] = []
+    assert scratch.clean(["s"], say=lines.append) == 0
+    assert lines == [f"DELETED {atc_tmp / 's'}"] and capsys.readouterr().err == ""
+    lines.clear()
+    assert scratch.clean(["systmp"], say=lines.append) == 1
+    assert lines and lines[0].startswith("REFUSED ")
 
 
 def test_mutants_need_the_export(export: Export, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     listing = tmp_path / "m.json"
     listing.write_text("[]", encoding="utf-8")
     other = export.place.parent / "other"
-    code = commands.main(["test", "mutants", other.name, export.sha, str(export.worktree), str(listing),
-                          "--task", TASK, "--python", sys.executable, "--tests", "tests"])
+    code = mutants([other.name, export.sha, str(export.worktree), str(listing),
+                    "--task", TASK, "--python", sys.executable, "--tests", "tests"])
     assert code == 9 and capsys.readouterr().err.startswith("TREE_NOT_FOUND ")
 
 
@@ -529,59 +549,11 @@ def test_mutants_refuse_a_sha_that_names_no_commit_before_the_baseline(
     listing = tmp_path / "m.json"
     listing.write_text(json.dumps([KILLED]), encoding="utf-8")
     other = export.place.parent / "other"
-    code = commands.main(["test", "mutants", other.name, sha, str(export.worktree), str(listing),
-                          "--task", TASK, "--python", sys.executable, "--tests", "tests"])
+    code = mutants([other.name, sha, str(export.worktree), str(listing),
+                    "--task", TASK, "--python", sys.executable, "--tests", "tests"])
     captured = capsys.readouterr()
     assert code == 9 and captured.err.startswith(f"SHA_NOT_FOUND {sha} names no commit in ")
     assert captured.out == "" and not other.exists()
-
-
-# dispatch
-
-
-@pytest.mark.parametrize("arguments", [("test",), ("test", "other"), ("tmp",), ("tmp", "list", "x"), ("tmp", "list", "--json", "x"), ("tmp", "clean"),
-                                       ("tmp", "clean", "--tree-name", "p"), ("tmp", "clean", "--project"),
-                                       ("tmp", "clean", "--tree"), ("other",)])
-def test_a_wrong_command_exits_two(arguments: tuple[str, ...], atc_tmp: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    assert commands.main(list(arguments)) == 2
-    captured = capsys.readouterr()
-    assert captured.out == "" and captured.err.startswith("usage: atc ")
-
-
-@pytest.mark.parametrize(("arguments", "attribute", "module", "expected"), [
-    (["test", "run", "--scratch", "a"], "run", testrun, (["--scratch", "a"],)),
-    (["test", "mutants", "a"], "mutants", testrun, (["a"],)),
-    (["tmp", "list"], "list_scratches", scratch, ()),
-    (["tmp", "list", "--json"], "list_scratches", scratch, ({"as_json": True},)),
-    (["tmp", "prune"], "prune", scratch, ()),
-    (["tmp", "clean", "a", "b"], "clean", scratch, (["a", "b"], {"with_runs": False})),
-    (["tmp", "clean", "--with-runs", "a"], "clean", scratch, (["a"], {"with_runs": True})),
-])
-def test_atc_reaches_the_package_with_its_arguments_and_returns_its_exit_code(
-        monkeypatch: pytest.MonkeyPatch, arguments: list[str], attribute: str, module, expected: tuple) -> None:
-    seen = []
-
-    def record(*args, say=None, **kwargs):
-        assert say is None or callable(say)  # tmp clean and prune pass the line printer that counts REFUSED lines
-        seen.append(args + ((kwargs,) if kwargs else ()))
-        return 41
-    monkeypatch.setattr(module, attribute, record)
-    assert atc_cli.main(arguments) == 41
-    assert seen == [expected]
-
-
-@pytest.mark.unit
-def test_a_prune_refusal_ends_with_a_stop_line_on_stderr(monkeypatch: pytest.MonkeyPatch,
-                                                          capsys: pytest.CaptureFixture[str]) -> None:
-    def refusing(*, say):
-        say("DELETED a")
-        say("REFUSED b (is itself a link)")
-        return 1
-    monkeypatch.setattr(scratch, "prune", refusing)
-    assert commands.main(["tmp", "prune"]) == 1
-    captured = capsys.readouterr()
-    assert captured.out.splitlines() == ["DELETED a", "REFUSED b (is itself a link)"]
-    assert captured.err.startswith("STOP PRUNE_REFUSED: 1 refused;")
 
 
 @pytest.mark.integration
@@ -590,8 +562,8 @@ def test_mutants_refuse_an_invalid_private_desktop_value_before_the_baseline(
     listing = tmp_path / "m.json"
     listing.write_text("[]", encoding="utf-8")
     monkeypatch.setenv("ATC_PRIVATE_DESKTOP", "yes")
-    code = commands.main(["test", "mutants", export.place.name, export.sha, str(export.worktree), str(listing),
-                          "--task", TASK, "--python", sys.executable, "--tests", "tests"])
+    code = mutants([export.place.name, export.sha, str(export.worktree), str(listing),
+                    "--task", TASK, "--python", sys.executable, "--tests", "tests"])
     captured = capsys.readouterr()
     assert code == 9 and captured.err.startswith("PRIVATE_DESKTOP_INVALID ") and "BASELINE" not in captured.out
 
@@ -602,8 +574,8 @@ def test_mutants_register_the_scratch_to_its_task_and_refuse_another(export: Exp
     assert [row.task for row in scratch.registered(export.place.parent)] == [TASK]
     listing = tmp_path / "m.json"
     listing.write_text(json.dumps([KILLED]), encoding="utf-8")
-    run = run_command("test", "mutants", export.place.name, export.sha, str(export.worktree), str(listing),
-                      "--task", "ATC-0001", "--python", sys.executable, "--tests", "tests")
+    run = run_command("mutants", export.place.name, export.sha, str(export.worktree), str(listing),
+                      "--task", "ATC-0001","--python", sys.executable, "--tests", "tests")
     assert run.returncode == 9 and run.stderr.startswith("SCRATCH_TASK_MISMATCH ") and "BASELINE" not in run.stdout
 
 
@@ -611,8 +583,8 @@ def test_mutants_register_the_scratch_to_its_task_and_refuse_another(export: Exp
 def test_mutants_without_a_task_are_a_usage_error(export: Export, tmp_path: Path) -> None:
     listing = tmp_path / "m.json"
     listing.write_text("[]", encoding="utf-8")
-    run = run_command("test", "mutants", export.place.name, export.sha, str(export.worktree), str(listing),
-                      "--python", sys.executable, "--tests", "tests")
+    run = run_command("mutants", export.place.name, export.sha, str(export.worktree), str(listing),
+                      "--python",sys.executable, "--tests", "tests")
     assert run.returncode == 2 and "--task" in run.stderr and scratch.registered(export.place.parent) == []
 
 
@@ -621,8 +593,8 @@ def test_mutants_default_to_the_copys_own_environment(export: Export, tmp_path: 
                                                       capsys: pytest.CaptureFixture[str]) -> None:
     listing = tmp_path / "m.json"
     listing.write_text("[]", encoding="utf-8")
-    code = commands.main(["test", "mutants", export.place.name, export.sha, str(export.worktree), str(listing),
-                          "--task", TASK, "--tests", "tests"])
+    code = mutants([export.place.name, export.sha, str(export.worktree), str(listing),
+                    "--task", TASK, "--tests", "tests"])
     err = capsys.readouterr().err
     assert code == 9 and err.startswith("VENV_MISSING ") and str(export.place / "tree") in err
 
@@ -712,9 +684,9 @@ def test_a_mutants_refusal_before_the_registry_line_creates_no_directory(export:
     listing.write_text("[]", encoding="utf-8")
     root = export.place.parent
     common = [str(export.worktree), str(listing), "--task", TASK, "--python", sys.executable, "--tests", "tests"]
-    assert commands.main(["test", "mutants", "fresh", export.sha, *common]) == 9
+    assert mutants(["fresh", export.sha, *common]) == 9
     assert capsys.readouterr().err.startswith("TREE_NOT_FOUND ") and not (root / "fresh").exists()
     monkeypatch.setenv("ATC_PRIVATE_DESKTOP", "yes")
-    assert commands.main(["test", "mutants", export.place.name, export.sha, *common]) == 9
+    assert mutants([export.place.name, export.sha, *common]) == 9
     assert capsys.readouterr().err.startswith("PRIVATE_DESKTOP_INVALID ") and scratch.registered(root) == []
     assert unregistered(root) == [export.place.name] and not (export.place / "qdr").exists()
