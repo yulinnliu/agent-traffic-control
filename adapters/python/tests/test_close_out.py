@@ -10,6 +10,7 @@ import pytest
 
 import close_out
 import git_preflight
+import managed_worktree as hw
 import task_records
 from atc_testkit import scratch, testrun
 from atc_testkit.locations import Refusal
@@ -254,6 +255,30 @@ def test_a_squash_that_fails_a_check_stays_unmerged(ws: Workspace, atc_tmp: Path
     outcome, why = outcomes(payload)[str(topic)]
     assert (outcome, why.split(":")[0]) == ("REFUSED", "UNMERGED"), (payload, err)
     assert topic.is_dir() and run_git(ws.repo, "tag", "--list", f"archive/{TASK}") == ""
+
+
+@pytest.mark.parametrize("race", ["tag", "branch"])
+def test_a_squash_close_whose_branch_or_archive_tag_moves_after_the_check_refuses_the_branch(
+        ws: Workspace, atc_tmp: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, race: str,
+        capsys: pytest.CaptureFixture[str]) -> None:
+    topic, tip, environ = squashed(ws, tmp_path, atc_tmp)
+    main = run_git(ws.repo, "rev-parse", "main")
+    moved = f"refs/tags/archive/{TASK}" if race == "tag" else f"refs/heads/{SQUASH_BRANCH}"
+    real_git = hw.git
+
+    def racing(repo, *args, readonly=False, input=None):
+        result = real_git(repo, *args, readonly=readonly, input=input)
+        if args[:2] == ("worktree", "remove") and result.returncode == 0:
+            run_git(ws.repo, "update-ref", moved, main)
+        return result
+
+    monkeypatch.setattr(hw, "git", racing)
+    code, payload, err = close(ws, environ, capsys, ws.root)
+    found = outcomes(payload)
+    assert code == 3 and payload["verdict"] == "REFUSED", (payload, err)
+    assert found[str(topic)][0] == "DELETED" and not topic.exists()
+    assert found[f"refs/heads/{SQUASH_BRANCH}"][0] == "REFUSED"
+    assert run_git(ws.repo, "rev-parse", f"refs/heads/{SQUASH_BRANCH}") == (tip if race == "tag" else main)
 
 
 def test_a_squash_whose_branch_moved_past_the_source_tip_stays_unmerged(

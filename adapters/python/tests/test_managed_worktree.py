@@ -703,6 +703,35 @@ def test_remove_accepts_an_earlier_contracts_lock_with_its_session(ws: Workspace
     assert hw.remove(ws.ctx(), f"claude+{TASK}", task_id=TASK).code == "OK"
 
 
+def moving_after_removal(monkeypatch: pytest.MonkeyPatch, ref: str, to: str) -> None:
+    """Move ``ref`` to ``to`` right after Git removes the worktree: between the check and the branch's deletion."""
+    real_git = hw.git
+
+    def racing(repo, *args, readonly=False, input=None):
+        result = real_git(repo, *args, readonly=readonly, input=input)
+        if args[:2] == ("worktree", "remove") and result.returncode == 0:
+            run_git(Path(repo), "update-ref", ref, to)
+        return result
+
+    monkeypatch.setattr(hw, "git", racing)
+
+
+@pytest.mark.parametrize("race", ["tag", "branch"])
+def test_abandon_keeps_the_branch_when_it_or_the_archive_tag_moves_after_the_check(
+        ws: Workspace, monkeypatch: pytest.MonkeyPatch, race: str) -> None:
+    """The branch is compare-and-deleted against the checked tip, with the tag verified, in one transaction."""
+    hw.create(ws.ctx(), "claude", TASK)
+    path = ws.worktrees / f"claude+{TASK}"
+    tip = commit(path, "work.txt", "work\n")
+    main = run_git(ws.repo, "rev-parse", "main")
+    moved = f"refs/tags/archive/{TASK}" if race == "tag" else f"refs/heads/claude+{TASK}"
+    moving_after_removal(monkeypatch, moved, main)
+    result = hw.remove(ws.ctx(), f"claude+{TASK}", abandon=True, task_id=TASK)
+    assert (result.code, result.evidence["branch_kept"]) == ("OK", True), result.evidence
+    assert not path.exists()
+    assert run_git(ws.repo, "rev-parse", f"refs/heads/claude+{TASK}") == (tip if race == "tag" else main)
+
+
 @pytest.mark.parametrize("annotated", [False, True])
 def test_abandon_preserves_the_exact_tag_and_leaves_other_worktrees(ws: Workspace, annotated: bool) -> None:
     hw.create(ws.ctx(), "claude", TASK)

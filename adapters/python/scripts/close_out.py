@@ -211,35 +211,37 @@ def rehearse_report(repo: Path, task: str, report: Path) -> str:
 
 
 def worktree_item(ctx: hw.Context, branch: str, task: str, cwd: str, check: bool, abandon: bool,
-                  squash: str | None = None) -> str | None:
-    """One item line for the task's worktree and branch; None when the task has none. A topic ``squash``
-    integrated is removed as an abandoned one is, its tip kept as `archive/<ID>`."""
+                  squash: str | None = None) -> list[str]:
+    """The item lines for the task's worktree and branch; none when the task has no worktree. A topic
+    ``squash`` integrated is removed as an abandoned one is, its tip kept as `archive/<ID>`. A branch that
+    survives its worktree's removal, as when it or the archive tag moved meanwhile, is a REFUSED item."""
     archive = abandon or squash is not None
     kept_as = f", squash-integrated as {squash}" if squash else ""
     try:
         target, _ = hw.located(ctx, branch)
     except hw.Stop as stop:
         if stop.result.code == "NOT_FOUND":
-            return None
-        return f"REFUSED {stop.result.target} ({stop.result.code}: {stop.result.detail})"
+            return []
+        return [f"REFUSED {stop.result.target} ({stop.result.code}: {stop.result.detail})"]
     if _real(cwd).is_relative_to(_real(target)):
-        return f"REFUSED {target} (the working directory is inside it; run it from elsewhere)"
+        return [f"REFUSED {target} (the working directory is inside it; run it from elsewhere)"]
     if check:
         try:
             refusal, _, _ = hw.assess(ctx, branch, archive, task)
         except hw.Stop as stop:
             refusal = stop.result
         if refusal is not None:
-            return f"REFUSED {target} ({refusal.code}: {refusal.detail})"
-        return f"DELETE {target} (branch {branch}{kept_as}{', archived as archive/' + task if archive else ''})"
+            return [f"REFUSED {target} ({refusal.code}: {refusal.detail})"]
+        return [f"DELETE {target} (branch {branch}{kept_as}{', archived as archive/' + task if archive else ''})"]
     try:
         result = hw.remove(ctx, branch, archive, task)
     except hw.Stop as stop:
         result = stop.result
     if result.code != "OK":
-        return f"REFUSED {target} ({result.code}: {result.detail})"
-    kept = " (branch kept: " + result.evidence.get("git", "") + ")" if result.evidence.get("branch_kept") else ""
-    return f"DELETED {target}{kept}"
+        return [f"REFUSED {target} ({result.code}: {result.detail})"]
+    if result.evidence.get("branch_kept"):
+        return [f"DELETED {target}", f"REFUSED refs/heads/{branch} (branch kept: {result.evidence.get('git', '')})"]
+    return [f"DELETED {target}"]
 
 
 def close(root: Path, environ: dict[str, str], cwd: str, task: str, *, check: bool = False, abandon: bool = False,
@@ -261,8 +263,8 @@ def close(root: Path, environ: dict[str, str], cwd: str, task: str, *, check: bo
         worktree = Path(found["worktree"]) if found else None
         if "worktree" in keep:
             lines += [f"KEPT {worktree} (record keep)"] if worktree else []
-        elif (line := worktree_item(ctx, branch, task, cwd, check, abandon, squash)) is not None:
-            lines.append(line)
+        else:
+            lines += worktree_item(ctx, branch, task, cwd, check, abandon, squash)
     tmp = locations.locate(environ).tmp
     scratches = task_scratches(tmp, task, worktree)
     if "scratches" in keep:

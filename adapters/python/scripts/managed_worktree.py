@@ -531,6 +531,8 @@ def remove(ctx: Context, branch: str, abandon: bool = False, task_id: str = "") 
         tagged = git(repo, "tag", tag, tip)
         if tagged.returncode != 0:
             return Result("ARCHIVE_MISMATCH", target, f"cannot tag {tag}: {first_line(tagged.stderr)}")
+    # The tag as checked, before anything changes: the deletion below verifies it is still there.
+    oid = git(repo, "rev-parse", f"refs/tags/{tag}", readonly=True).stdout.strip() if abandon else ""
     reason = entry["locked"]
     unlocked = git(repo, "worktree", "unlock", target)
     if unlocked.returncode != 0:
@@ -543,7 +545,6 @@ def remove(ctx: Context, branch: str, abandon: bool = False, task_id: str = "") 
         return mutation_failure(repo, target, "remove failed", removed, restoration)
     if abandon:
         # Verify the archive tag and compare-and-delete the branch in one ref transaction.
-        oid = git(repo, "rev-parse", f"refs/tags/{tag}", readonly=True).stdout.strip()
         deleted = git(repo, "update-ref", "--stdin",
                       input=f"start\nverify refs/tags/{tag} {oid}\ndelete refs/heads/{branch} {tip}\nprepare\ncommit\n")
     else:
