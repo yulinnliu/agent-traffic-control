@@ -408,5 +408,3 @@ def test_list_shows_the_files_two_open_tasks_both_change(ws: Workspace, capsys: 
     assert "OVERLAP DEMO-0001 DEMO-0002: 7 files: src/0.py, src/1.py, src/2.py, src/3.py, src/4.py (+2)" in overlaps_lines
     status, out, _ = ws.cli(capsys, "list", "--project", PROJECT, "--json", cwd=ws.root)
     assert {"project": PROJECT, "tasks": ["DEMO-0001", "DEMO-0002"], "files": sorted(shared)} in json.loads(out)["overlaps"]
-
-
