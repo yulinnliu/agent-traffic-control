@@ -1,3 +1,0 @@
-README.md
-docs/guide.md
-tests/test_guide.py

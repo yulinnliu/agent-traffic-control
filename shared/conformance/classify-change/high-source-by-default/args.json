@@ -1,1 +1,0 @@
-["--policy", "{input}/escalation.yaml", "--changed", "{input}/changed.txt"]
