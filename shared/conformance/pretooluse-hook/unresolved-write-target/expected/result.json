@@ -1,0 +1,7 @@
+{
+  "exit_code": 0,
+  "output_contains": [
+    "\"permissionDecision\": \"deny\"",
+    "`$_.FullName` holds a variable, expression, command output or pipeline input that the hook cannot resolve"
+  ]
+}

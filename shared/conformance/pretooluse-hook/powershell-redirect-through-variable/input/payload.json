@@ -1,0 +1,7 @@
+{
+  "tool_name": "PowerShell",
+  "tool_input": {
+    "command": "$o = 'C:\\out\\rev-diff.txt'; git -C C:\\ws\\repo diff a b > $o"
+  },
+  "cwd": "C:\\ws\\repo"
+}

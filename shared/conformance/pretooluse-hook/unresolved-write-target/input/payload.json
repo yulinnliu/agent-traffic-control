@@ -1,0 +1,7 @@
+{
+  "tool_name": "PowerShell",
+  "tool_input": {
+    "command": "Get-ChildItem C:\\ws\\repo | ForEach-Object { Remove-Item $_.FullName }"
+  },
+  "cwd": "C:\\ws\\repo"
+}

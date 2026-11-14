@@ -5,6 +5,9 @@ Roots C:\\hami and C:\\tmpok need not exist; the write-scope cases are those of 
 
 from __future__ import annotations
 
+import io
+import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -99,6 +102,8 @@ def test_a_denied_command_names_its_rule(tool, command, rule):
     ("Bash", "atc verify --task ATC-1 && echo done"),
     ("PowerShell", "Start-Process atc -ArgumentList 'verify' -Wait"),
     ("PowerShell", "atc test run --scratch s -- t.py; atc verify --task ATC-1"),
+    ("PowerShell", "atc test run --scratch s -- t.py 2>&1 | Select-Object -Last 5"),
+    ("PowerShell", "atc verify --task ATC-1 *>&1 | Out-String"),
 ])
 def test_an_allowed_command_passes(tool, command):
     assert decide(tool, command=command) is None
@@ -143,6 +148,16 @@ def test_a_linked_worktree_reads_its_own_head(tmp_path):
     assert "`git-push-main`" in decide("Bash", cwd=str(tree), rules=table(), command="git push")
 
 
+@pytest.mark.parametrize("command", ["git push origin $(git branch --show-current)",
+                                     "git push origin `git branch --show-current`"])
+def test_a_push_to_a_substituted_refspec_reads_the_checked_out_branch(tmp_path, command):
+    main = git_repo(tmp_path / "main", "main")
+    topic = git_repo(tmp_path / "topic", "topic")
+    assert "`git-push-main`" in decide("Bash", cwd=str(main), command=command)
+    assert decide("Bash", cwd=str(topic), command=command) is None
+    assert "`git-push-main`" in decide("PowerShell", cwd=str(main), command="git push origin (git branch --show-current)")
+
+
 def test_a_push_from_an_unresolvable_directory_counts_as_main(tmp_path):
     assert "`git-push-main`" in decide("Bash", cwd=str(tmp_path / "nowhere"), command="git push")
 
@@ -179,8 +194,28 @@ def test_a_notebook_path_is_checked():
     "git worktree add /c/out/wt",
     "touch ~/../../out.txt",
     "mkdir /c/out/$NAME",
+    "sed -i 's/a/b/' /c/out/f",
+    "sed -i.bak -e 's/a/b/' /c/out/f",
+    "perl -pi -e 's/a/b/' /c/out/f",
+    "curl -sSo /c/out/f https://example.invalid",
+    "curl --output=/c/out/f https://example.invalid",
+    "wget -O /c/out/f https://example.invalid",
+    "mv /c/out/a /c/hami/a",
+    "cp -t /c/out /c/hami/a",
+    "cp --target-directory=/c/out /c/hami/a",
+    "install -d /c/out/d",
+    "cp $(ls /c/hami/a) /c/out/dest",
+    "bash -c 'echo x > /c/out/f'",
+    'sh -c "rm -rf /c/out"',
+    "pwsh -Command \"Set-Content C:\\\\out\\\\f 'v'\"",
+    'cmd //c "echo x > C:\\\\out\\\\f"',
+    'cmd //c "cd C:\\\\hami && del C:\\\\out\\\\f"',
+    'D="$OUTSIDE_DIR/x"; mkdir -p "$D"',
+    "echo x > /c/hami/a 2> /c/out/err",
+    "cp /c/hami/a /c/out/b 2> /c/hami/log",
 ])
-def test_a_bash_write_outside_the_roots_is_refused(command):
+def test_a_bash_write_outside_the_roots_is_refused(monkeypatch, command):
+    monkeypatch.setenv("OUTSIDE_DIR", "C:\\out")
     assert decide("Bash", command=command) is not None
 
 
@@ -193,8 +228,15 @@ def test_a_bash_write_outside_the_roots_is_refused(command):
     "mkdir -p \"$TEMP/q/rv\"",
     "python -m pytest --basetemp=C:/tmpok/q/bt",
     "cat > /c/hami/f <<'EOF'\nmkdir /c/out\nEOF",
-    "rm -rf \"$UNKNOWN_DIR\"",
     "mkdir rel/dir",
+    'echo "a > /c/out/b"',
+    "git commit -m \"$(cat <<'EOF'\nfix: a -> $b\nEOF\n)\"",
+    'D="$TEMP/x"; mkdir -p "$D" && echo ok > "$D/f"',
+    "echo x > $PWD/f",
+    "sed -n 's/a/b/p' /c/out/f",
+    "curl -o /c/hami/f https://example.invalid",
+    "ls 2>&1 | head",
+    'cmd //c "dir C:\\\\out > nul"',
 ])
 def test_a_bash_command_inside_the_roots_or_read_only_is_allowed(command):
     assert decide("Bash", command=command) is None
@@ -212,9 +254,47 @@ def test_a_bash_command_inside_the_roots_or_read_only_is_allowed(command):
     "[System.IO.Directory]::Delete('C:\\out')",
     "cmd /c rmdir /s /q C:\\out",
     "Set-Content -Path:C:\\out\\f -Value x",
+    "$o=\"$env:OUTSIDE_DIR\\rev-diff.txt\"; git -C C:\\hami diff a b > $o",
+    "git log >> C:\\out\\log.txt",
+    "git log 2> C:\\out\\err.txt",
+    "git log *> C:\\out\\all.txt",
+    "git log 3>&1 > C:\\out\\log.txt",
+    "Out-File -FilePath C:\\out\\f",
+    "'x' | Out-File -Fi C:\\out\\f",
+    "Set-Content C:\\out\\f 'v'",
+    "Set-Content -Va v C:\\out\\f",
+    "Set-Content -Va v -Pa C:\\out\\f",
+    "Add-Content -LiteralPath C:\\out\\f -Value v",
+    "Set-Content -Value (Get-Date) -Path C:\\out\\d.txt",
+    "Get-Process | Tee-Object -FilePath C:\\out\\t.txt",
+    "Get-Process | Export-Csv C:\\out\\p.csv",
+    "New-Item -Path C:\\hami -Name ..\\..\\out -ItemType Directory",
+    "Move-Item C:\\out\\a C:\\hami\\a",
+    "Copy-Item -Path C:\\hami\\a -Destination C:\\out\\b",
+    "Expand-Archive C:\\hami\\a.zip -DestinationPath C:\\out",
+    "$p = Join-Path $env:OUTSIDE_DIR 'q'; Remove-Item $p -Recurse",
+    "Set-Content (Join-Path $env:OUTSIDE_DIR 'x') 'v'",
+    "$env:W = 'C:\\out'; New-Item -ItemType Directory $env:W",
+    "[System.IO.File]::WriteAllText(\"$env:OUTSIDE_DIR\\x.txt\", 'hi')",
+    "[IO.File]::AppendAllLines('C:\\out\\x', $lines)",
+    "[IO.File]::Copy('C:\\hami\\a', 'C:\\out\\b')",
+    "[IO.File]::Move('C:\\out\\a', 'C:\\hami\\b')",
+    "[IO.Directory]::CreateDirectory('C:\\out\\d')",
+    "$w = [IO.StreamWriter]::new('C:\\out\\x')",
+    "$w = New-Object System.IO.StreamWriter('C:\\out\\x')",
+    "New-Object -TypeName IO.FileStream -ArgumentList 'C:\\out\\x', 'Create'",
+    "$xml.Save('C:\\out\\x.xml')",
+    "Invoke-WebRequest https://example.invalid -OutFile C:\\out\\f",
+    "Start-Process git -ArgumentList 'log' -RedirectStandardOutput C:\\out\\o.txt -Wait",
+    "pwsh -Command \"Set-Content C:\\out\\x 'v'\"",
+    "powershell -EncodedCommand UgBlAG0AbwB2AGUALQBJAHQAZQBtACAAQwA6AFwAbwB1AHQA",
+    "bash -c 'echo x > /c/out/f'",
+    "cmd /c \"echo x > C:\\out\\f\"",
+    "Remove-Item \\\\?\\C:\\out\\f",
 ])
-def test_a_powershell_write_outside_the_roots_is_refused(command):
-    assert decide("PowerShell", command=command) is not None
+def test_a_powershell_write_outside_the_roots_is_refused(monkeypatch, command):
+    monkeypatch.setenv("OUTSIDE_DIR", "C:\\out")
+    assert "outside the directories" in decide("PowerShell", command=command)
 
 
 @pytest.mark.parametrize("command", [
@@ -225,11 +305,57 @@ def test_a_powershell_write_outside_the_roots_is_refused(command):
     "Remove-Item C:\\hami\\x -Recurse",
     "New-Item -ItemType Junction -Path C:\\hami\\v -Target C:\\out",
     "New-Item -ItemType Directory -Force $env:TEMP\\q",
-    "foreach ($d in 'C:\\x') { Remove-Item $d }",
     "Remove-Item -Path C:\\hami\\x -ErrorAction SilentlyContinue",
+    "$o=\"$env:TEMP\\rev-diff.txt\"; git -C C:\\hami diff a b > $o",
+    "$o = 'C:\\hami\\o.txt'; git log > $o",
+    "git log *> $null",
+    "git log > NUL",
+    "$p = Join-Path $env:TEMP 'q'; Remove-Item $p -Recurse",
+    "$p = Join-Path -Path C:\\hami -ChildPath 'q'; Remove-Item $p",
+    "Set-Content (Join-Path $env:TEMP 'x') \"line $i\"",
+    "[IO.File]::WriteAllText(\"$env:TEMP\\x.txt\", \"hi $name\")",
+    "[IO.File]::Copy('C:\\out\\a', 'C:\\hami\\b')",
+    "$text = [IO.File]::ReadAllText('C:\\out\\a')",
+    "Get-Process | Tee-Object -Variable procs",
+    "Write-Host @args",
+    "New-Item -ItemType File -Name x.txt",
+    "Copy-Item C:\\out\\a",
+    "'x' > C:\\hami\\f.txt 2>&1",
+    "[regex]::Replace($s, 'a', 'b')",
 ])
 def test_a_powershell_command_inside_the_roots_or_read_only_is_allowed(command):
     assert decide("PowerShell", command=command) is None
+
+
+@pytest.mark.parametrize("tool, command, target", [
+    ("Bash", 'rm -rf "$UNKNOWN_DIR"', "$UNKNOWN_DIR"),
+    ("Bash", 'x=$(mktemp); echo hi > "$x"', "$x"),
+    ("Bash", "echo hi > $(mktemp)", "(...)"),
+    ("Bash", 'for f in a b; do rm "$f"; done', "$f"),
+    ("Bash", 'f=/c/hami/x; for f in /c/out; do rm -rf "$f"; done', "$f"),
+    ("Bash", 'TEMP=$(mktemp -d); rm -rf "$TEMP"', "$TEMP"),
+    ("Bash", "read d; mkdir $d", "$d"),
+    ("PowerShell", "git diff > $o", "$o"),
+    ("PowerShell", "$o = Get-Location; Set-Content $o x", "$o"),
+    ("PowerShell", "$o = \"$env:TEMP\\x\" + $suffix; Remove-Item $o", "$o"),
+    ("PowerShell", "foreach ($d in 'C:\\x') { Remove-Item $d }", "$d"),
+    ("PowerShell", "$d = 'C:\\hami\\x'; foreach ($d in 'C:\\out') { Remove-Item $d }", "$d"),
+    ("PowerShell", "Get-ChildItem C:\\out | Remove-Item", "$_"),
+    ("PowerShell", "Get-ChildItem | ForEach-Object { Remove-Item $_.FullName }", "$_.FullName"),
+    ("PowerShell", "$f = Get-Item x; Remove-Item $f.FullName", "$f.FullName"),
+    ("PowerShell", "Remove-Item (Get-Item C:\\out)", "(...)"),
+    ("PowerShell", "git diff > (Join-Path $unknown 'x')", "(...)"),
+    ("PowerShell", "Copy-Item @params", "$@splatted parameters"),
+    ("PowerShell", "[IO.File]::Delete($f.FullName)", "$f.FullName"),
+    ("PowerShell", "(Get-Item C:\\out\\f).Delete()", "$(object).Delete()"),
+    ("PowerShell", "pwsh -EncodedCommand !!!", "$(encoded command)"),
+    ("PowerShell", "Set-Content \"$env:NOT_SET_ANYWHERE\\x\" v", "$env:NOT_SET_ANYWHERE\\x"),
+])
+def test_a_write_target_the_text_does_not_resolve_is_refused(monkeypatch, tool, command, target):
+    monkeypatch.delenv("UNKNOWN_DIR", raising=False)
+    monkeypatch.delenv("NOT_SET_ANYWHERE", raising=False)
+    reason = decide(tool, command=command)
+    assert reason is not None and "cannot resolve" in reason and f"`{target}`" in reason
 
 
 @pytest.mark.parametrize("tool, command", [
@@ -285,6 +411,54 @@ def test_codex_reads_a_shell_call_as_bash_and_as_powershell():
     assert "`git-reset-hard`" in decide("Bash", harness="codex", command="& git reset --hard")
     assert "`git-reset-hard`" in decide("Bash", harness="codex", command="Start-Job { git reset --hard }")
     assert decide("Bash", command="Start-Job { git reset --hard }") is None
+
+
+# Payload decoding
+
+
+def run_main(monkeypatch, capsys, tmp_path, raw: bytes, encoding: str = "cp950") -> str:
+    """The hook's stdout for `raw` piped on stdin, read by a console whose code page is `encoding`."""
+    path = tmp_path / "table.json"
+    path.write_text(json.dumps(table()), encoding="utf-8")
+    monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(raw), encoding=encoding))
+    assert hook.main(["--table", str(path)]) == 0
+    return capsys.readouterr().out
+
+
+# "\u4e2d" ends in the byte 0xAD, which cp950 pairs with the backslash after it.
+CJK_WRITE = {"tool_name": "Write", "cwd": CWD,
+             "tool_input": {"file_path": "C:\\hami\\notes.md", "content": "\u4e2d\\x C:\\hami\\x"}}
+
+
+def test_a_utf8_payload_with_cjk_and_backslashes_is_read_on_a_cp950_console(monkeypatch, capsys, tmp_path):
+    raw = json.dumps(CJK_WRITE, ensure_ascii=False).encode("utf-8")
+    with pytest.raises(json.JSONDecodeError):  # the console code page's reading: the reported failure
+        json.loads(raw.decode("cp950"))
+    assert run_main(monkeypatch, capsys, tmp_path, raw) == ""
+    outside = dict(CJK_WRITE, tool_input=dict(CJK_WRITE["tool_input"], file_path="C:\\out\\\u4e2d\u6587.md"))
+    assert "outside the directories" in run_main(
+        monkeypatch, capsys, tmp_path, json.dumps(outside, ensure_ascii=False).encode("utf-8"))
+
+
+@pytest.mark.parametrize("raw, words", [
+    (b'{"tool_name": "Write", "tool_input": {"file_path": "\xff\xfe"}}', "is not UTF-8"),
+    (b'{"tool_name": "Write", "tool_input": ', "is not valid JSON"),
+    (b'["Write"]', "is not a JSON object"),
+])
+def test_a_payload_that_cannot_be_read_is_refused_with_its_cause(monkeypatch, capsys, tmp_path, raw, words):
+    out = json.loads(run_main(monkeypatch, capsys, tmp_path, raw, encoding="utf-8"))
+    reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert "the tool call's payload" in reason and words in reason
+
+
+def test_a_payload_file_is_read_as_utf8(tmp_path, capsys):
+    path = tmp_path / "table.json"
+    path.write_text(json.dumps(table()), encoding="utf-8")
+    payload = tmp_path / "payload.json"
+    payload.write_bytes(json.dumps(CJK_WRITE, ensure_ascii=False).encode("utf-8"))
+    assert hook.main(["--table", str(path), "--payload", str(payload)]) == 0
+    assert capsys.readouterr().out == ""
 
 
 def test_codex_apply_patch_paths_are_checked():

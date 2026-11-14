@@ -3,8 +3,9 @@
 
 Reads the hook payload on stdin (or --payload) and the table `atc enforce --hook-out` writes, then prints one
 deny decision or nothing. Command rules match every simple command of a Bash or PowerShell call after
-normalisation; file rules, the write roots and the hook's own files bind the paths a call writes; a top-level
-`cd` into a worktrees root is refused (Claude Code only). An error of the hook itself denies the call.
+normalisation; file rules, the write roots and the hook's own files bind the paths a call writes, and a write
+target the call's text does not resolve is refused; a top-level `cd` into a worktrees root is refused (Claude
+Code only). The payload is read as UTF-8 bytes. An error of the hook itself denies the call.
 Standard library only: docs/ENFORCEMENT.md § PreToolUse hook.
 """
 
@@ -45,14 +46,16 @@ UV_VALUE = {
 PYTHON_VALUE = {"-X", "-W", "-c"}
 PYTHONS = {"python", "python3", "py", "pythonw"}
 MODULE_COMMANDS = {"atc_cli": "atc"}
-SHELLS_BASH = {"bash", "sh", "zsh", "dash"}
-SHELLS_PWSH = {"pwsh", "powershell"}
 PWSH_JOBS = {"start-job", "sajb", "start-threadjob"}
 PUSH_VALUE = {"--repo", "-o", "--push-option", "--receive-pack", "--exec"}
 PUSH_EVERYTHING = {"--all", "--mirror", "--branches"}
 
 
 class TableError(Exception):
+    pass
+
+
+class PayloadError(Exception):
     pass
 
 
@@ -112,7 +115,7 @@ def start_process(words: list[str]) -> list[str]:
 
 def normalise(words: list[str], cwd: str, nested: bool = False) -> list[tuple[list[str], str]]:
     """The argvs a simple command runs, each with its directory; argv[0] by `command_name`."""
-    words = [word.replace(g.QUOTED, "").replace(g.EXPAND, "$") for word in words]
+    words = [word.replace(g.QUOTED, "").replace(g.EXPAND, "$").replace(g.REDIR, ">") for word in words]
     i = 0
     while i < len(words):
         word = words[i]
@@ -144,15 +147,12 @@ def normalise(words: list[str], cwd: str, nested: bool = False) -> list[tuple[li
     if head == "start-process":
         launched = start_process(words)
         return normalise(launched, cwd, nested) if launched else []
-    if not nested and head in SHELLS_BASH:
-        for j, word in enumerate(words[1:], 1):
-            if re.fullmatch(r"-[a-z]*c[a-z]*", word) and j + 1 < len(words):
-                return [hit for _, sub, _ in g.bash_simple_commands(words[j + 1]) for hit in normalise(sub, cwd, True)]
-    if not nested and head in SHELLS_PWSH:
-        for j, word in enumerate(words[1:], 1):
-            if word.lower() in ("-command", "-c") and j + 1 < len(words):
-                text = " ".join(words[j + 1:])
-                return [hit for sub, _ in g.pwsh_simple_commands(text) for hit in normalise(sub, cwd, True)]
+    script = None if nested else g.shell_script(words)
+    if script is not None:
+        dialect, text = script
+        if dialect == "bash":
+            return [hit for _, sub, _ in g.bash_simple_commands(text or "") for hit in normalise(sub, cwd, True)]
+        return [hit for sub, _ in g.pwsh_simple_commands(text or "") for hit in normalise(sub, cwd, True)]
     if head == "git":
         directory, j = cwd, 1
         while j < len(words) and words[j].startswith("-"):
@@ -223,7 +223,7 @@ def pushes_to(args: list[str], branches: list[str], directory: str) -> bool:
             return True
         source, colon, destination = spec.lstrip("+").partition(":")
         target = destination if colon and destination else source
-        if target == "HEAD" or target.startswith("HEAD~") or target.startswith("HEAD^"):
+        if target == "HEAD" or target.startswith("HEAD~") or target.startswith("HEAD^") or g.GROUP in target:
             if checked_out():
                 return True
             continue
@@ -268,7 +268,7 @@ def command_denial(table: dict, tool: str, text: str, harness: str, cwd: str, ba
         for argv, directory in normalise(words, cwd):
             for rule in table["commands"]:
                 if command_rule_hit(rule, argv, directory, backgrounded or background):
-                    return (f"Refused: `{' '.join(argv)}` matches hard-deny rule `{rule['id']}` "
+                    return (f"Refused: `{' '.join(g.plain(word) for word in argv)}` matches hard-deny rule `{rule['id']}` "
                             f"({rule.get('source', 'policy')}). {rule.get('reason', '')}".rstrip())
     return None
 
@@ -319,9 +319,16 @@ def path_denial(table: dict, target: str, path: str) -> str | None:
 
 def write_denial(table: dict, targets: list[str], cwd: str) -> str | None:
     for target in targets:
-        path = w.resolve(target, cwd)
+        try:
+            path = w.resolve(target, cwd)
+        except w.Unresolved:
+            return (f"Refused: the write target `{g.plain(target)}` holds a variable, expression, command output "
+                    f"or pipeline input that the hook cannot resolve from the call's text, so it cannot tell "
+                    f"whether the write stays inside the directories an agent may write to "
+                    f"({', '.join(table['write_roots'])}). Name the path literally, or assign it earlier in the "
+                    f"same call from a literal, an environment variable or `Join-Path` of those.")
         if path is not None:
-            reason = path_denial(table, target, path)
+            reason = path_denial(table, g.plain(target), path)
             if reason:
                 return reason
     return None
@@ -362,9 +369,9 @@ def decide(payload: dict, table: dict, harness: str) -> str | None:
             return reason
     targets: list[str] = []
     if tool == "Bash" or harness == "codex":
-        targets += w.bash_writes(text)
+        targets += w.bash_writes(text, cwd)
     if tool == "PowerShell" or harness == "codex":
-        targets += w.pwsh_writes(text, str(Path.home()))
+        targets += w.pwsh_writes(text, str(Path.home()), cwd)
     return write_denial(table, targets, cwd)
 
 
@@ -389,16 +396,30 @@ def parse(argv: list[str]) -> dict[str, str]:
     return options
 
 
+def read_payload(source: str) -> dict:
+    """The tool call's payload: UTF-8 JSON bytes from `source` or stdin, whatever the console code page."""
+    raw = Path(source).read_bytes() if source else sys.stdin.buffer.read()
+    try:
+        payload = json.loads(raw.decode("utf-8-sig"))
+    except UnicodeDecodeError as exc:
+        raise PayloadError(f"is not UTF-8 ({exc})") from exc
+    except ValueError as exc:
+        raise PayloadError(f"is not valid JSON ({exc})") from exc
+    if not isinstance(payload, dict):
+        raise PayloadError("is not a JSON object")
+    return payload
+
+
 def main(argv: list[str] | None = None) -> int:
     try:
         if IMPORT_ERROR is not None:
             raise IMPORT_ERROR
         options = parse(sys.argv[1:] if argv is None else argv)
-        raw = Path(options["--payload"]).read_text(encoding="utf-8") if options["--payload"] else sys.stdin.read()
-        payload = json.loads(raw)
-        if not isinstance(payload, dict):
-            raise ValueError("the payload is not a JSON object")
+        payload = read_payload(options["--payload"])
         reason = decide(payload, load_table(Path(options["--table"])), options["--harness"])
+    except PayloadError as exc:
+        reason = (f"Refused: the tool call's payload {exc}, so the PreToolUse hook could not decide. "
+                  f"Retry the call; if it recurs, the Owner repairs the hook from their own terminal with `{REPAIR}`.")
     except Exception as exc:  # the hook fails closed: its own error refuses the call
         reason = (f"Refused: the PreToolUse hook could not decide ({type(exc).__name__}: {exc}). "
                   f"The Owner repairs it from their own terminal with `{REPAIR}`.")

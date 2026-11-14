@@ -166,8 +166,12 @@ by token, with a rule's `argv_prefix`:
 - `uv run [options]`, `uvx`, `python -m <module>` (`atc_cli` reads as
   `atc`), `cmd /c` and `Start-Process -FilePath ... -ArgumentList ...` resolve
   to the command they launch;
-- `bash -c`, `sh -c`, `pwsh -Command` and `powershell -Command` strings are
-  lexed again, one level deep;
+- `bash -c`, `sh -c`, `pwsh -Command` and `powershell -Command` strings, and
+  a decoded `-EncodedCommand`, are lexed again, one level deep;
+- a command substitution (`$(...)`, backticks) or PowerShell group (`(...)`,
+  `$(...)`, `@(...)`) is its own command, and the command around it keeps
+  its later words; a push refspec that is a substitution reads the
+  checked-out branch;
 - `argv[0]` compares by basename, case-folded, without `.exe`;
 - git's options before the subcommand are dropped; `-C <path>` becomes the
   command's directory.
@@ -177,25 +181,63 @@ refspec, without `+` and `refs/heads/`); a glob refspec, `--all`, `--mirror`
 and `--branches` always match, and `HEAD` or no refspec reads the branch from
 the directory's `HEAD` file, counting a directory it cannot resolve as on
 a listed branch. A command runs in the background when the call sets
-`run_in_background`, when a lone `&` ends it, or when PowerShell starts it
+`run_in_background`, when a lone `&` ends it (not the `&` of `2>&1`), or when PowerShell starts it
 with `Start-Job`, `Start-ThreadJob` or `Start-Process` without `-Wait`.
 
 A Codex `Bash` call carries no shell name, so it is read both as Bash and as
-PowerShell. Codex `apply_patch` targets come from its `*** Add File:`,
+PowerShell, and a write target either reading refuses refuses the call. Codex `apply_patch` targets come from its `*** Add File:`,
 `*** Update File:`, `*** Delete File:` and `*** Move to:` lines.
 
 **Paths.** A file tool's path, an `apply_patch` target, and each write target
-of a shell call (`write_targets.py`: the writing verbs, redirections,
-`cmd /c`, `--basetemp`, .NET file writes) is refused when it lies in a
-protected path, matches a filesystem rule denying `edit` or `write`, or lies
-outside every write root. A target that cannot be resolved is allowed.
+of a shell call is refused when it lies in a protected path, matches a
+filesystem rule denying `edit` or `write`, or lies outside every write root.
+The write targets of a shell call (`write_targets.py`) are:
+
+- redirections: Bash `>`, `>>`, `2>`, `&>` outside quotes; PowerShell `>`,
+  `>>`, `2>`, `3>` and `*>` outside quotes; `cmd /c` redirections;
+- Bash `mkdir`, `rm`, `rmdir`, `touch`, `tee`, `truncate`, `unlink`,
+  `shred`, every operand of `mv` and `install -d`, the destination of `cp`,
+  `ln`, `install`, `rsync` and `scp` (`-t`/`--target-directory` included),
+  the files of `sed -i` and `perl -i`, `curl -o`/`--output`/`--output-dir`,
+  `wget -O`/`-P`, `tar -C`, `unzip -d`, `dd of=`, `git clone`, `git init`
+  and `git worktree add`;
+- PowerShell `New-Item` (joined with `-Name`), `Remove-Item`, `Clear-Content`
+  and their aliases on every path; `Set-Content`, `Add-Content`, `Out-File`,
+  `Tee-Object`, `Export-Csv`, `Export-Clixml`, `Rename-Item` and
+  `Start-Transcript` on their path; `Copy-Item`, `Move-Item`,
+  `Expand-Archive` and `Compress-Archive` on the destination (the working
+  directory when none is named) and, for a move, the source; `-OutFile`,
+  `-RedirectStandardOutput` and `-RedirectStandardError` on any command.
+  A parameter matches by any prefix of three characters or more, the dash
+  included;
+- .NET writes: `[IO.File]` and `[IO.Directory]` methods by the arguments
+  they write (`Copy` its destination, `Move` both, `WriteAll*`, `AppendAll*`,
+  `Create*`, `Open*`, `Delete` the first), `[IO.StreamWriter]::new`,
+  `[IO.FileStream]::new` and `New-Object` of either, `.Save()`, `.CopyTo()`
+  and `.MoveTo()` on their argument, and `.Delete()` on its object;
+- `cmd /c` verbs (`rmdir`, `del`, `mkdir`, `copy`, `move`, `xcopy`,
+  `robocopy`, `mklink`), pytest `--basetemp`, and the script of a nested
+  `bash -c`, `pwsh -Command` or `pwsh -EncodedCommand`, read again.
+
+A target substitutes the variables assigned earlier in the same call from a
+string, another variable or `Join-Path` of those; environment variables
+(`$NAME` in Bash, `$env:NAME` in PowerShell, `%NAME%`); `$HOME`, `$PWD` and
+a `Join-Path` group. A target that still holds anything else (a variable
+assigned from a command, a loop or `read` variable, a member such as
+`$f.FullName`, a command substitution or `(...)` group, splatted parameters,
+pipeline input to a writing cmdlet, an encoded command that does not decode)
+is refused, since the hook cannot tell where it lands. `$null`, `NUL`,
+`/dev/null` and `\\.\` devices write nothing; `\\?\` paths are checked
+without the prefix.
 
 **Worktree cd.** In Claude Code, a top-level Bash `cd`/`pushd`, or any
 PowerShell location change, into a worktrees root is refused. Codex starts
 each command in the session's `cwd`.
 
-**Failure.** Any error of the engine (an unreadable payload, a missing or
-invalid table) prints a deny naming the error and the Owner's repair,
+**Failure.** The payload is read as UTF-8 bytes, whatever the console code
+page; one that is not UTF-8, not JSON or not an object prints a deny naming
+that cause. Any other error of the engine (a missing or invalid table)
+prints a deny naming the error and the Owner's repair,
 `atc enforce --install-hooks`. The Claude Code entry also sets
 `"onFailure": "block"` (Claude Code 2.1.295 or later) and `"timeout": 10`,
 so a hook that cannot start, crashes or stalls blocks the call. Codex offers

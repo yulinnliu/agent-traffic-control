@@ -1,11 +1,15 @@
 """Shell lexers shared by the PreToolUse hook: Bash and PowerShell source split into simple commands.
 
 Heredocs, quotes, subshells, `$(...)`, backticks, PowerShell here-strings and comments are handled;
-a `$` that expands is marked EXPAND and a PowerShell quoted string opens with QUOTED. Standard library only.
+a `$` that expands is marked EXPAND, a PowerShell quoted string opens with QUOTED, an unquoted Bash `>`
+is REDIR, and a command substitution or PowerShell `(...)` group stands in its command's word as the
+placeholder GROUP<n>GROUP while its own commands are listed separately. Standard library only.
 """
 
 from __future__ import annotations
 
+import base64
+import binascii
 import ntpath
 import re
 from pathlib import Path
@@ -21,9 +25,24 @@ PWSH_VALUE_PARAMS = {
 }
 BASH_DECLARE = {"export", "declare", "typeset", "local", "readonly"}
 
-# Lexer marks: EXPAND stands for a `$` that expands, QUOTED opens a PowerShell quoted string.
+# Lexer marks: EXPAND stands for a `$` that expands, QUOTED opens a PowerShell quoted string, GROUP
+# brackets the number of a substitution or group, REDIR is an unquoted Bash `>`.
 EXPAND = "\0"
 QUOTED = "\1"
+GROUP = "\2"
+REDIR = "\3"
+PLACEHOLDER = re.compile(GROUP + r"(\d+)" + GROUP)
+
+
+def placeholder(number: int) -> str:
+    return f"{GROUP}{number}{GROUP}"
+
+
+def plain(word: str) -> str:
+    """A marked word as the user wrote it, a group shown as `(...)`."""
+    word = PLACEHOLDER.sub("(...)", word.replace(QUOTED, ""))
+    return word.replace(EXPAND, "$").replace(REDIR, ">")
+
 
 def cd_reason(tool: str, target: str) -> str:
     where = "at the top level of a Bash call" if tool == "Bash" else "in a PowerShell call"
@@ -61,6 +80,9 @@ def bash_simple_commands(text: str) -> list[tuple[int, list[str], bool]]:
     depth = 0
     backtick = False
     heredocs: list[str] = []
+    # One entry per open `(`: None for a subshell, else the substituting command's words, word and in_word.
+    stack: list[tuple[list[str], list[str], bool] | None] = []
+    groups = 0
     i, n = 0, len(text)
 
     def end_word() -> None:
@@ -75,6 +97,25 @@ def bash_simple_commands(text: str) -> list[tuple[int, list[str], bool]]:
         if words:
             commands.append((depth, words.copy(), background))
             words.clear()
+
+    def open_substitution() -> None:
+        nonlocal in_word, depth
+        stack.append((words.copy(), word.copy(), in_word))
+        words.clear()
+        word.clear()
+        in_word = False
+        depth += 1
+
+    def close_group() -> None:
+        nonlocal in_word, depth, groups
+        end_command()
+        depth = max(depth - 1, 0)
+        saved = stack.pop() if stack else None
+        if saved is not None:
+            words[:], word[:] = saved[0], saved[1]
+            groups += 1
+            word.append(placeholder(groups))
+            in_word = True
 
     while i < n:
         c = text[i]
@@ -103,6 +144,8 @@ def bash_simple_commands(text: str) -> list[tuple[int, list[str], bool]]:
                 if text[i] == "\\" and i + 1 < n and text[i + 1] in '$`"\\\n':
                     i += 1
                     word.append(text[i])
+                elif text[i] == "`":
+                    word.append(EXPAND + "`")
                 else:
                     word.append(EXPAND if text[i] == "$" else text[i])
                 i += 1
@@ -129,23 +172,30 @@ def bash_simple_commands(text: str) -> list[tuple[int, list[str], bool]]:
             i = n if eol < 0 else eol
             continue
         if c == "`":
-            if in_word and not backtick:
-                word.append(EXPAND)
-            end_command()
+            if backtick:
+                close_group()
+            else:
+                open_substitution()
             backtick = not backtick
-            depth = depth + 1 if backtick else max(depth - 1, 0)
             i += 1
             continue
-        if c == "(" or (c == "$" and text.startswith("$(", i)):
-            if in_word and c == "$":
-                word.append(EXPAND)
+        if c == "$" and text.startswith("$(", i):
+            open_substitution()
+            i += 2
+            continue
+        if c == "(":
             end_command()
+            stack.append(None)
             depth += 1
-            i += 2 if c == "$" else 1
+            i += 1
             continue
         if c == ")":
-            end_command()
-            depth = max(depth - 1, 0)
+            close_group()
+            i += 1
+            continue
+        if c == ">":
+            word.append(REDIR)
+            in_word = True
             i += 1
             continue
         if c in ";&|":
@@ -161,6 +211,8 @@ def bash_simple_commands(text: str) -> list[tuple[int, list[str], bool]]:
         word.append(EXPAND if c == "$" else c)
         in_word = True
         i += 1
+    while stack:  # an unclosed group still ends its command's words
+        close_group()
     end_command()
     return commands
 
@@ -183,7 +235,7 @@ def bash_assign(variables: dict[str, str], words: list[str]) -> None:
         if not match:
             continue
         name, append, value = match.group(1), match.group(2), word[match.end():]
-        if EXPAND in value or "`" in value or (append and name not in variables):
+        if EXPAND in value or GROUP in value or "`" in value or (append and name not in variables):
             variables.pop(name, None)
         else:
             variables[name] = variables[name] + value if append else value
@@ -222,10 +274,20 @@ def pwsh_commands(text: str) -> list[list[str]]:
 
 def pwsh_simple_commands(text: str) -> list[tuple[list[str], bool]]:
     """Split PowerShell source into commands, each with whether a trailing `&` runs it as a background job."""
-    commands: list[tuple[list[str], bool]] = []
+    return [(words, background) for words, background, _ in pwsh_parse(text)]
+
+
+def pwsh_parse(text: str) -> list[tuple[list[str], bool, int | None]]:
+    """PowerShell commands, inner ones first: words, backgrounded, and the number of the `(...)` group holding it.
+
+    A `(...)`, `$(...)` or `@(...)` group stands in its command's word as `placeholder(<number>)`.
+    """
+    commands: list[tuple[list[str], bool, int | None]] = []
     words: list[str] = []
     word: list[str] = []
     in_word = False
+    stack: list[tuple[list[str], list[str], bool, int]] = []
+    groups = 0
     i, n = 0, len(text)
 
     def end_word() -> None:
@@ -238,8 +300,16 @@ def pwsh_simple_commands(text: str) -> list[tuple[list[str], bool]]:
     def end_command(background: bool = False) -> None:
         end_word()
         if words:
-            commands.append((words.copy(), background))
+            commands.append((words.copy(), background, stack[-1][3] if stack else None))
             words.clear()
+
+    def close_group() -> None:
+        nonlocal in_word
+        end_command()
+        saved_words, saved_word, _, number = stack.pop()
+        words[:], word[:] = saved_words, saved_word
+        word.append(placeholder(number))
+        in_word = True
 
     while i < n:
         c = text[i]
@@ -289,6 +359,25 @@ def pwsh_simple_commands(text: str) -> list[tuple[list[str], bool]]:
             in_word = True
             i += 2
             continue
+        if c == "&" and i and text[i - 1] == ">":  # `2>&1`, `*>&1`: a redirection, not a job
+            word.append(c)
+            i += 1
+            continue
+        if c == "(":
+            if word and word[-1] in (EXPAND, "@") and text[i - 1] in "$@":
+                word.pop()
+                in_word = bool(word)
+            groups += 1
+            stack.append((words.copy(), word.copy(), in_word, groups))
+            words.clear()
+            word.clear()
+            in_word = False
+            i += 1
+            continue
+        if c == ")" and stack:
+            close_group()
+            i += 1
+            continue
         if c in ";|&(){}\n":
             # `&` after a command's words starts it as a job; before them it is the call operator.
             end_word()
@@ -302,6 +391,8 @@ def pwsh_simple_commands(text: str) -> list[tuple[list[str], bool]]:
         word.append(EXPAND if c == "$" else c)
         in_word = True
         i += 1
+    while stack:  # an unclosed group still ends its command's words
+        close_group()
     end_command()
     return commands
 
@@ -348,6 +439,39 @@ def pwsh_targets(text: str) -> list[str]:
             targets.append(expand(arg, variables, fold=True))
             break
     return targets
+
+
+SHELLS_BASH = {"bash", "sh", "zsh", "dash"}
+SHELLS_PWSH = {"pwsh", "powershell"}
+
+
+def program(word: str) -> str:
+    """A command word by basename, case-folded, without `.exe`."""
+    base = word.replace("\\", "/").rsplit("/", 1)[-1].lower()
+    return base[:-4] if base.endswith(".exe") else base
+
+
+def shell_script(words: list[str]) -> tuple[str, str | None] | None:
+    """("bash" or "pwsh", script) of a `bash -c`, `pwsh -Command` or `-EncodedCommand` argv of plain words.
+
+    The script is None when an encoded command does not decode.
+    """
+    head = program(words[0]) if words else ""
+    if head in SHELLS_BASH:
+        for j, word in enumerate(words[1:], 1):
+            if re.fullmatch(r"-[a-z]*c[a-z]*", word) and j + 1 < len(words):
+                return "bash", words[j + 1]
+    if head in SHELLS_PWSH:
+        for j, word in enumerate(words[1:], 1):
+            lower = word.lower()
+            if lower == "-c" or (len(lower) >= 4 and "-command".startswith(lower)):
+                return "pwsh", " ".join(words[j + 1:])
+            if lower in ("-e", "-ec") or (len(lower) >= 4 and "-encodedcommand".startswith(lower)):
+                try:
+                    return "pwsh", base64.b64decode(words[j + 1], validate=True).decode("utf-16-le")
+                except (IndexError, binascii.Error, UnicodeDecodeError, ValueError):
+                    return "pwsh", None
+    return None
 
 
 def windows(path: str) -> str:
