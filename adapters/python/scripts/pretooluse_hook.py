@@ -232,8 +232,29 @@ def pushes_to(args: list[str], branches: list[str], directory: str) -> bool:
     return False
 
 
+def skip_atc_globals(argv: list[str]) -> list[str]:
+    """argv of `atc` as its command sees it: every `--root DIR` / `--root=DIR` before a `--` removed, wherever it
+    stands, as `take_root` in atc_cli removes them (so `--root --check` is a directory, never a `--check`)."""
+    if argv[:1] != ["atc"]:
+        return argv
+    kept, index = [argv[0]], 1
+    while index < len(argv):
+        arg = argv[index]
+        if arg == "--":
+            kept.extend(argv[index:])
+            break
+        if arg == "--root":
+            index += 2
+            continue
+        if not arg.startswith("--root="):
+            kept.append(arg)
+        index += 1
+    return kept
+
+
 def command_rule_hit(rule: dict, argv: list[str], directory: str, background: bool) -> bool:
     prefix = rule["argv_prefix"]
+    argv = skip_atc_globals(argv)
     if len(argv) < len(prefix) or argv[0] != command_name(prefix[0]) or argv[1:len(prefix)] != prefix[1:]:
         return False
     rest = argv[len(prefix):]

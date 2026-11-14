@@ -1,7 +1,7 @@
 {
   "tool_name": "Bash",
   "tool_input": {
-    "command": "atc verify --task ATC-1 &"
+    "command": "atc test ATC-1 &"
   },
   "cwd": "C:\\ws\\repo"
 }

@@ -23,12 +23,12 @@ def table(**overrides) -> dict:
     base = {
         "version": 1,
         "commands": [
-            {"id": "atc-integrate-owner-voice", "argv_prefix": ["atc", "integrate"],
-             "with_args": ["--owner-run", "--owner-words"], "unless_args": ["--check"]},
-            {"id": "atc-integrate", "argv_prefix": ["atc", "integrate"], "unless_args": ["--check"]},
+            {"id": "atc-integrate", "argv_prefix": ["atc", "integrate"], "unless_args": ["--check", "--help", "-h"]},
+            {"id": "atc-push", "argv_prefix": ["atc", "push"], "unless_args": ["--check", "--help", "-h"]},
+            {"id": "atc-remove", "argv_prefix": ["atc", "remove"], "unless_args": ["--check", "--help", "-h"]},
+            {"id": "atc-guard-install", "argv_prefix": ["atc", "guard"], "with_args": ["--install"]},
             {"id": "git-push-main", "argv_prefix": ["git", "push"], "push_targets": ["main"]},
-            {"id": "atc-verify-background", "argv_prefix": ["atc", "verify"], "background": True},
-            {"id": "atc-test-run-background", "argv_prefix": ["atc", "test", "run"], "background": True},
+            {"id": "atc-test-background", "argv_prefix": ["atc", "test"], "background": True},
             {"id": "git-reset-hard", "argv_prefix": ["git", "reset", "--hard"]},
         ],
         "filesystem": [
@@ -67,21 +67,27 @@ def decide(tool: str, harness: str = "claude", cwd: str = CWD, rules: dict | Non
     ("Bash", "cmd //c git reset --hard", "git-reset-hard"),
     ("PowerShell", "& 'C:\\Program Files\\Git\\cmd\\git.exe' reset --hard", "git-reset-hard"),
     ("PowerShell", "pwsh -Command \"git reset --hard\"", "git-reset-hard"),
-    ("Bash", "atc integrate --task ATC-1 --reviewed abc", "atc-integrate"),
-    ("Bash", "uv run --locked --project adapters/python atc integrate --task ATC-1", "atc-integrate"),
-    ("Bash", "python -m atc_cli integrate --task ATC-1", "atc-integrate"),
-    ("PowerShell", "atc integrate --task ATC-1 --owner-words 'yes'", "atc-integrate-owner-voice"),
-    ("PowerShell", "atc integrate --task ATC-1 --owner-run", "atc-integrate-owner-voice"),
+    ("Bash", "atc integrate ATC-1 --sha abc", "atc-integrate"),
+    ("Bash", "uv run --locked --project adapters/python atc integrate ATC-1", "atc-integrate"),
+    ("Bash", "python -m atc_cli integrate ATC-1", "atc-integrate"),
+    ("PowerShell", "atc push root", "atc-push"),
+    ("PowerShell", "atc remove sandbox", "atc-remove"),
+    ("PowerShell", "atc guard --install", "atc-guard-install"),
+    ("Bash", "atc --root . push root", "atc-push"),
+    ("Bash", "atc --root . remove X", "atc-remove"),
+    ("Bash", "atc --root . guard --install", "atc-guard-install"),
+    ("Bash", "atc --root . integrate ATC-1", "atc-integrate"),
+    ("Bash", "atc --root=. push --all", "atc-push"),
     ("Bash", "git push origin topic:main", "git-push-main"),
     ("Bash", "git push origin +topic:refs/heads/main", "git-push-main"),
     ("Bash", "git push origin main", "git-push-main"),
     ("Bash", "git push origin --delete main", "git-push-main"),
     ("Bash", "git push origin 'refs/heads/*:refs/heads/*'", "git-push-main"),
     ("Bash", "git push --mirror origin", "git-push-main"),
-    ("Bash", "atc verify --task ATC-1 &", "atc-verify-background"),
-    ("PowerShell", "atc verify --task ATC-1 &", "atc-verify-background"),
-    ("PowerShell", "Start-ThreadJob { atc test run --scratch s -- t.py }", "atc-test-run-background"),
-    ("PowerShell", "Start-Process atc -ArgumentList 'verify','--task','ATC-1'", "atc-verify-background"),
+    ("Bash", "atc test ATC-1 &", "atc-test-background"),
+    ("PowerShell", "atc test ATC-1 --all &", "atc-test-background"),
+    ("PowerShell", "Start-ThreadJob { atc test ATC-1 -- -q }", "atc-test-background"),
+    ("PowerShell", "Start-Process atc -ArgumentList 'test','ATC-1'", "atc-test-background"),
 ])
 def test_a_denied_command_names_its_rule(tool, command, rule):
     reason = decide(tool, command=command)
@@ -89,30 +95,34 @@ def test_a_denied_command_names_its_rule(tool, command, rule):
 
 
 @pytest.mark.parametrize("tool, command", [
-    ("Bash", "atc integrate --check --task ATC-1 --reviewed abc"),
-    ("Bash", "atc integrate --check --task ATC-1 --owner-words 'Owner run: approve integration'"),
-    ("PowerShell", "atc integrate --check=1 --owner-run --task ATC-1"),
+    ("Bash", "atc integrate ATC-1 --check --sha abc"),
+    ("Bash", "atc integrate --help"),
+    ("PowerShell", "atc integrate ATC-1 --check=1"),
+    ("Bash", "atc push root --check"),
+    ("Bash", "atc --root . push root --check"),
+    ("Bash", "atc remove sandbox --check"),
+    ("Bash", "atc guard"),
     ("Bash", "git push origin topic"),
     ("Bash", "git push origin main:topic"),
     ("Bash", "git reset --soft HEAD~1"),
     ("Bash", "echo 'git reset --hard'"),
-    ("Bash", "git commit -m 'atc integrate --task X'"),
-    ("Bash", "atc verify --task ATC-1"),
-    ("Bash", "atc verify --task ATC-1 2>&1 | tail -5"),
-    ("Bash", "atc verify --task ATC-1 && echo done"),
-    ("PowerShell", "Start-Process atc -ArgumentList 'verify' -Wait"),
-    ("PowerShell", "atc test run --scratch s -- t.py; atc verify --task ATC-1"),
-    ("PowerShell", "atc test run --scratch s -- t.py 2>&1 | Select-Object -Last 5"),
-    ("PowerShell", "atc verify --task ATC-1 *>&1 | Out-String"),
+    ("Bash", "git commit -m 'atc integrate ATC-1'"),
+    ("Bash", "atc test ATC-1"),
+    ("Bash", "atc test ATC-1 2>&1 | tail -5"),
+    ("Bash", "atc test ATC-1 && echo done"),
+    ("PowerShell", "Start-Process atc -ArgumentList 'test','ATC-1' -Wait"),
+    ("PowerShell", "atc test ATC-1 --all; atc test ATC-1"),
+    ("PowerShell", "atc test ATC-1 -- -q 2>&1 | Select-Object -Last 5"),
+    ("PowerShell", "atc test ATC-1 *>&1 | Out-String"),
 ])
 def test_an_allowed_command_passes(tool, command):
     assert decide(tool, command=command) is None
 
 
 def test_the_background_flag_of_the_call_counts():
-    assert "`atc-test-run-background`" in decide("PowerShell", command="atc test run --scratch s -- t.py",
-                                                 run_in_background=True)
-    assert decide("PowerShell", command="atc test run --scratch s -- t.py", run_in_background=False) is None
+    assert "`atc-test-background`" in decide("PowerShell", command="atc test ATC-1 -- -q",
+                                             run_in_background=True)
+    assert decide("PowerShell", command="atc test ATC-1 -- -q", run_in_background=False) is None
 
 
 def git_repo(path: Path, branch: str) -> Path:
@@ -867,8 +877,8 @@ REVIEW_LEGITIMATE = [
     ('PowerShell', '$o = "$env:TEMP\\claude\\x.txt"; git diff | Out-File -Encoding utf8 $o'),
     ('PowerShell', "git log --format='%h %s' -5"),
     ('PowerShell', 'Get-Content C:\\out\\a | ForEach-Object { $_ }'),
-    ('PowerShell', 'atc test run --scratch s --task ATC-1 -- -q 2>&1 | Select-Object -Last 5'),
-    ('PowerShell', '& "C:\\Users\\Andy Liu\\.local\\bin\\atc.exe" verify --task ATC-1 2>&1 | Tee-Object -FilePath "$env:TEMP\\claude\\v.log"'),
+    ('PowerShell', 'atc test ATC-1 -- -q 2>&1 | Select-Object -Last 5'),
+    ('PowerShell', '& "C:\\Users\\Andy Liu\\.local\\bin\\atc.exe" test ATC-1 2>&1 | Tee-Object -FilePath "$env:TEMP\\claude\\v.log"'),
     ('PowerShell', '$r = git rev-parse HEAD; Write-Output $r'),
     ('PowerShell', 'Copy-Item C:\\out\\a C:\\hami\\b'),
     ('PowerShell', 'New-Item -ItemType Directory -Force C:\\hami\\d | Out-Null'),

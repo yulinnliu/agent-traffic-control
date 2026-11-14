@@ -2,6 +2,6 @@
   "exit_code": 0,
   "output_contains": [
     "\"permissionDecision\": \"deny\"",
-    "atc-test-run-background"
+    "atc-test-background"
   ]
 }

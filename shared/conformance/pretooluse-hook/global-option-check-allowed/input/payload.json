@@ -1,0 +1,7 @@
+{
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "atc --root . push root --check"
+  },
+  "cwd": "C:\\ws\\repo"
+}

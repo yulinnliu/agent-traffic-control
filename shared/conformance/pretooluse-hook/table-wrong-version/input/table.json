@@ -2,31 +2,45 @@
   "version": 2,
   "commands": [
     {
-      "id": "atc-integrate-owner-voice",
-      "argv_prefix": [
-        "atc",
-        "integrate"
-      ],
-      "with_args": [
-        "--owner-run",
-        "--owner-words"
-      ],
-      "unless_args": [
-        "--check"
-      ],
-      "reason": "These flags carry the Owner's own words.",
-      "source": "policies/hard-deny.yaml"
-    },
-    {
       "id": "atc-integrate",
       "argv_prefix": [
         "atc",
         "integrate"
       ],
       "unless_args": [
-        "--check"
+        "--check",
+        "--help",
+        "-h"
       ],
       "reason": "Integration is the Owner's act.",
+      "source": "policies/hard-deny.yaml"
+    },
+    {
+      "id": "atc-push",
+      "argv_prefix": [
+        "atc",
+        "push"
+      ],
+      "unless_args": [
+        "--check",
+        "--help",
+        "-h"
+      ],
+      "reason": "Publication is the Owner's act.",
+      "source": "policies/hard-deny.yaml"
+    },
+    {
+      "id": "atc-remove",
+      "argv_prefix": [
+        "atc",
+        "remove"
+      ],
+      "unless_args": [
+        "--check",
+        "--help",
+        "-h"
+      ],
+      "reason": "Unregistering a project is the Owner's act.",
       "source": "policies/hard-deny.yaml"
     },
     {
@@ -42,21 +56,10 @@
       "source": "policies/hard-deny.yaml"
     },
     {
-      "id": "atc-verify-background",
+      "id": "atc-test-background",
       "argv_prefix": [
         "atc",
-        "verify"
-      ],
-      "background": true,
-      "reason": "Verification runs in the foreground.",
-      "source": "policies/hard-deny.yaml"
-    },
-    {
-      "id": "atc-test-run-background",
-      "argv_prefix": [
-        "atc",
-        "test",
-        "run"
+        "test"
       ],
       "background": true,
       "reason": "Tests run in the foreground.",
@@ -91,6 +94,18 @@
       ],
       "reason": "Deletes untracked files.",
       "source": "projects.p"
+    },
+    {
+      "id": "atc-guard-install",
+      "argv_prefix": [
+        "atc",
+        "guard"
+      ],
+      "with_args": [
+        "--install"
+      ],
+      "reason": "The hook's table changes only from the Owner's own terminal.",
+      "source": "policies/hard-deny.yaml"
     }
   ],
   "filesystem": [
