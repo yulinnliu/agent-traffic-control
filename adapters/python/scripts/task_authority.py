@@ -13,7 +13,7 @@ from pathlib import Path
 
 import yaml
 
-from git_preflight import git, is_ancestor
+from git_preflight import git
 
 TASKS_DIR = ".atc/tasks"
 RECORD_ID = re.compile(r"^(?P<prefix>[A-Z][A-Z0-9]{1,7})-[0-9]{4}$")
@@ -130,44 +130,3 @@ def check_record(repo: Path, task_id: str, reviewed: str, branch: str) -> None:
     if bound != branch:
         raise Stop("TASK_BRANCH_MISMATCH", f"{record_path(task_id)} binds branch {bound}, but the integrated branch "
                                            f"is {branch}")
-
-
-def grant_commit(repo: Path, main_tip: str, path: str) -> str | None:
-    """The newest first-parent commit of `main` whose parsed grant differs from its first parent's copy."""
-    log = git(repo, "log", "--first-parent", "--format=%H", main_tip, "--", path).stdout.split()
-    for sha in log:
-        parent = git(repo, "rev-parse", "--verify", "--quiet", f"{sha}^1", check=False).stdout.strip()
-        before = parse(show(repo, parent, path)) if parent else None
-        if grant_fields(parse(show(repo, sha, path))) != grant_fields(before):
-            return sha
-    return None
-
-
-def integrated_binding(repo: Path, grant: str, task_id: str, integrations: list[dict]) -> dict | None:
-    """The records-only Owner-run line of ``task_id`` whose new commits include ``grant``."""
-    for line in integrations:
-        authority = line.get("authority")
-        base = line.get("main_before")
-        if (line.get("task") == task_id and line.get("records_only") is True
-                and isinstance(authority, dict) and authority.get("kind") == "owner_words"
-                and isinstance(base, str) and is_ancestor(repo, grant, line["candidate_sha"])
-                and not is_ancestor(repo, grant, base)):
-            return line
-    return None
-
-
-def record_authority(repo: Path, task_id: str, main: str, main_tip: str, integrations: list[dict]) -> dict:
-    """The record on `main` as integration authority, or the refusal saying why it is none."""
-    path = record_path(task_id)
-    record = parse(show(repo, main_tip, path))
-    if record is None or record is UNREADABLE:
-        raise Stop("AUTHORITY_MISSING", f"{main} holds no readable {path}")
-    authority = record.get("authority")
-    if not isinstance(authority, dict) or authority.get("integrate_main") is not True:
-        raise Stop("AUTHORITY_MISSING", f"{path} on {main} does not grant integrate_main")
-    grant = grant_commit(repo, main_tip, path)
-    if grant is None or integrated_binding(repo, grant, task_id, integrations) is None:
-        raise Stop("AUTHORITY_NOT_INTEGRATED", f"the grant of {task_id} on {main} (commit {grant}) did not enter "
-                                               f"{main} through a records-only atc integrate run by the Owner "
-                                               "in this clone")
-    return {"kind": "record", "task_id": task_id}

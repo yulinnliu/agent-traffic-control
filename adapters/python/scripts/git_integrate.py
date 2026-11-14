@@ -93,9 +93,6 @@ NEXT = {
     "CARRY_OVER_REFUSED": "the rebased tip needs a fresh review; integrate the SHA that review names",
     "TASK_NOT_FOUND": "commit the task's record on the topic branch and re-review, or name the task the record holds",
     "TASK_BRANCH_MISMATCH": "integrate the branch the record binds, or correct the record on the topic and re-review",
-    "AUTHORITY_MISSING": "the Owner runs atc integrate ID from their own terminal; that run is the authority",
-    "AUTHORITY_NOT_FF": "the Owner runs atc integrate ID from their own terminal; that run is the authority",
-    "AUTHORITY_NOT_INTEGRATED": "the Owner runs atc integrate ID from their own terminal; that run is the authority",
     "TASK_AUTHORITY_CHANGED": (
         "move the authority change into a range that changes only .atc/tasks/ and integrate it on its own; "
         "keep authority and authority_basis of records on main unchanged elsewhere"
@@ -937,14 +934,6 @@ def render_binding(binding: Binding) -> str:
     return f"task={json.dumps(tasks, ensure_ascii=False)} authority={binding.authority['kind']}{records_only}"
 
 
-def authority_verdict_stop(binding: Binding, verdict: str) -> Refused | None:
-    """A record's `integrate_main` covers `FF` only."""
-    if binding.authority.get("kind") == "record" and verdict == "NO_FF":
-        return stop("AUTHORITY_NOT_FF", f"the record of {binding.authority['task_id']} on main grants integrate_main, "
-                                        "which covers FF only; this integration is NO_FF")
-    return None
-
-
 def _check_records(candidate_dir: Path, candidate_sha: str) -> None:
     """The record check in place of the verifier, for a range that changes only `.atc/tasks/`."""
     problems = task_records.problems(candidate_dir)
@@ -1045,8 +1034,6 @@ def integrate(t: Target, progress: bool = True) -> tuple[int, dict]:
             result["stale_candidate_refs"] = stale_candidate_refs
         if report.verdict == "STOP":
             return STOP_BEFORE_CANDIDATE, {**result, "report": report}
-        if refusal := authority_verdict_stop(t.binding, report.verdict):
-            return STOP_BEFORE_CANDIDATE, {**result, "refusal": refusal}
         if t.carried_from:
             try:
                 result["carried_over"] = carry_over(repo, main, t.carried_from, reviewed, main_before)
@@ -1437,8 +1424,9 @@ def resolve_binding(
     args: argparse.Namespace, repo: Path, main: str, main_tip: str, branch: str | None, branch_source: str,
     reviewed: str,
 ) -> Binding:
-    """The tasks and authority of the run (`docs/TASKS.md` § Authority on `main`), or the stop that refuses them."""
-    words = {"kind": "owner_words", "quote": args.owner_words} if args.owner_words is not None else None
+    """The tasks of the run and its authority, the Owner's run (governance `GIT_WORKFLOW.md` § Task and authority),
+    or the stop that refuses them."""
+    words = {"kind": "owner_words", "quote": args.owner_words}
     match = ta.RECORD_ID.fullmatch(args.task or "")
     record_task = args.task if match and task_records.main_prefix(repo, main) == match["prefix"] else None
     if branch is None or branch_source == "recovery":
@@ -1450,7 +1438,7 @@ def resolve_binding(
             return Binding([args.task], dict(NOT_CHECKED))
         if record_task is not None and branch is not None:
             ta.check_record(repo, record_task, reviewed, branch)
-        return Binding([args.task], _authority(args, repo, main, main_tip, record_task, [args.task], words))
+        return Binding([args.task], words)
     rng = ta.scan(repo, git(repo, "merge-base", main_tip, reviewed).stdout.strip(), reviewed)
     if record_task is not None and not rng.records_only:
         ta.check_record(repo, record_task, reviewed, branch)
@@ -1463,36 +1451,10 @@ def resolve_binding(
                                    f"{args.task} to the range")
     else:
         tasks = [] if args.task is None else [args.task]
-    ta.check_range(repo, rng, main_tip, reviewed, may_change=rng.records_only and words is not None)
+    ta.check_range(repo, rng, main_tip, reviewed, may_change=rng.records_only)
     if args.task is None or getattr(args, "verify_only", False):  # `atc test --candidate` checks no authority
         return Binding(tasks, dict(NOT_CHECKED), rng.records_only)
-    return Binding(tasks, _authority(args, repo, main, main_tip, record_task, tasks, words), rng.records_only)
-
-
-def _authority(args: argparse.Namespace, repo: Path, main: str, main_tip: str, record_task: str | None,
-               tasks: list[str], words: dict | None) -> dict:
-    """The run's authority; under `--check` a missing grant is reported as `missing`, not a stop (governance `GIT_WORKFLOW.md` § Integrate)."""
-    try:
-        return resolve_authority_of(repo, main, main_tip, args.task, record_task, tasks, words)
-    except ta.Stop as missing:
-        if not args.check or missing.token != "AUTHORITY_MISSING":
-            raise
-        return {"kind": "missing", "detail": missing.detail}
-
-
-def resolve_authority_of(
-    repo: Path, main: str, main_tip: str, task: str | None, record_task: str | None, tasks: list[str],
-    words: dict | None,
-) -> dict:
-    """Exactly one authority: the Owner's run of `atc integrate`, or the record on main granting `integrate_main`."""
-    if words is not None:
-        return words
-    if record_task is None:
-        raise ta.Stop("AUTHORITY_MISSING", f"{task} is no task record")
-    if tasks != [record_task]:
-        raise ta.Stop("AUTHORITY_MISSING", f"the range binds {', '.join(tasks)}; the record of {record_task} "
-                                           "covers that task alone")
-    return ta.record_authority(repo, record_task, main, main_tip, gp.read_integrations(repo))
+    return Binding(tasks, words, rng.records_only)
 
 
 def resolve(args: argparse.Namespace, root: Path, cwd: str) -> Target:
@@ -1735,9 +1697,6 @@ def check(t: Target, as_json: bool) -> int:
     if report.verdict == "STOP":
         _print_stop_report(report, payload, as_json)
         return STOP_BEFORE_CANDIDATE
-    if refusal := authority_verdict_stop(t.binding, report.verdict):
-        _print_refusal(refusal, {**payload, "preflight": asdict(report)}, as_json)
-        return refusal.code
     carried = None
     if t.carried_from:
         try:

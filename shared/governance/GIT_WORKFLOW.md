@@ -145,11 +145,11 @@ Record the updated `base_sha`, finalize the draft commits, then run the affected
 checks on the resulting tip. Reuse only evidence that still applies to that
 revision and environment under `VERIFICATION.md`.
 
-Before its step report the writer runs `atc integrate --check` on its tip and
-puts the verdict token in the report. On `REBASE_REQUIRED` or `OVERLAP` it
-rebases onto `main` itself and reports the new tip. A writer whose task has
-no grant on `main` gets `AUTHORITY_MISSING` from that check (§ Integrate) and
-reports that token as pending authority.
+Before its step report the writer runs `atc integrate <task> --sha <tip> --check`
+and puts the verdict token in the report. On `REBASE_REQUIRED` or `OVERLAP` it
+rebases onto `main` itself and reports the new tip. The Owner's later run is
+the integration's authority (§ Task and authority), so the check reports none
+as missing.
 
 Published history follows the publication restrictions below. After formal
 review, use the frozen-history and integration rules below; a task-authorized
