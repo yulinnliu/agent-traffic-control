@@ -597,19 +597,21 @@ log. In order:
 
 1. Before the run, each refusal exits 9 and runs no test. `--task` is
    required (usage error, exit 2) and has the task form `ATC-0008`; another
-   form stops with `TASK_INVALID`. Check and
-   create the scratch: `SCRATCH_OUTSIDE_TMP`, `SCRATCH_PATH_TOO_LONG`,
-   `SCRATCH_NOT_RESOLVED`, `SCRATCH_NOT_CREATED`. Resolve `--tree` and a
+   form stops with `TASK_INVALID`. Check the scratch without creating it:
+   `SCRATCH_OUTSIDE_TMP`, `SCRATCH_PATH_TOO_LONG`, `SCRATCH_NOT_RESOLVED`,
+   and `SCRATCH_NOT_CREATED` for a path that holds a file. Resolve `--tree` and a
    path-form `--python` against the caller's directory:
    `TREE_NOT_FOUND`, `PYTHON_NOT_FOUND`. `--tree` defaults to the tree the
    scratch's registry line names, as `atc tmp checkout` records it; without
    either, `TREE_NOT_FOUND`. `--python` defaults to the interpreter of the
    tree's environment (§ Toolchain); without one, `VENV_MISSING`, which
    names `atc tmp checkout` and the project's `AGENTS.md` preparation, and
-   never another Python. The scratch then gets its registry line
-   (`ATC_HOME.md` § Scratch registry) with the task `--task` names; a
-   scratch whose line names another task stops with
-   `SCRATCH_TASK_MISMATCH`.
+   never another Python. Only then does the scratch get its registry line
+   (`ATC_HOME.md` § Scratch registry) with the task `--task` names, and
+   after that its directory and `qdr`; a scratch whose line names another
+   task stops with `SCRATCH_TASK_MISMATCH`, and one that cannot be made
+   with `SCRATCH_NOT_CREATED`. So a refusal before the line leaves no
+   directory, and a later one leaves the scratch registered.
 2. `--select <base>` runs the tree's `[tool.atc-testkit]` `selector`, a
    list of strings: the argv of a command that takes changed paths as
    arguments and prints the test paths to run as a JSON array on its last
@@ -724,8 +726,9 @@ memory clamp.
 - The runs use the copy's own environment: `--python` defaults to the
   `.venv` interpreter of the directory the scratch's registry line names
   inside the scratch, as `atc tmp checkout --lock-dir` records it, else of
-  `<scratch>/tree`; without one, `VENV_MISSING`. The scratch gets its
-  registry line with `--task` before the baseline. The import guard of
+  `<scratch>/tree`; without one, `VENV_MISSING`. After every refusal of
+  this list but `SCRATCH_NOT_CREATED` has passed, the scratch gets its
+  registry line with `--task`, before anything is created in it. The import guard of
   `atc test run` runs before each run on `<scratch>/tree`, so an interpreter
   whose environment installs the tree's packages from another checkout
   stops the command with `COPY_IMPORT_MISMATCH` (exit 8).

@@ -224,3 +224,25 @@ def test_a_bad_ref_is_refused_with_gits_stderr_before_any_archive_bytes(source: 
         checkout.export(repo, "no-such-ref", tmp_path / "tree")
     assert refused.value.token == "EXPORT_FAILED"
     assert "; git: fatal: " in refused.value.detail and "no-such-ref" in refused.value.detail.split("; git: ")[1]
+
+
+def test_a_failed_export_leaves_the_scratch_registered_to_its_task(source: tuple[Path, str], atc_tmp: Path,
+                                                                    monkeypatch: pytest.MonkeyPatch) -> None:
+    repo, sha = source
+
+    def failing(worktree, commit, tree):
+        tree.mkdir(parents=True)
+        raise checkout.Refusal("EXPORT_FAILED", "stand-in")
+    monkeypatch.setattr(checkout, "export", failing)
+    with pytest.raises(checkout.Refusal, match="EXPORT_FAILED"):
+        run([sha, "--task", TASK, "--worktree", str(repo), "--lock-dir", "sub"], Sync(), dict(os.environ))
+    place = atc_tmp / f"{TASK}-{sha[:7]}"
+    [row] = scratch.registered(atc_tmp)
+    assert (row.scratch, row.task, row.project, row.commit) == (str(place), TASK, "inner", sha)
+    assert place.is_dir()
+
+
+@pytest.mark.parametrize(("lock_dir", "expected"), [(".", "top"), ("sub", "inner"), ("absent", "absent")])
+def test_the_project_name_is_read_from_the_commit(source: tuple[Path, str], lock_dir: str, expected: str) -> None:
+    repo, sha = source
+    assert checkout.committed_project_name(repo, sha, Path(lock_dir)) == expected

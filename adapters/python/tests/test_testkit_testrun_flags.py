@@ -260,3 +260,42 @@ def test_wide_and_touched_take_select_and_exclude_each_other(tmp_path: Path, arg
     with pytest.raises(SystemExit) as stopped:
         testrun.run(["--scratch", "x", *arguments], {})
     assert stopped.value.code == 2 and ("--wide" in capsys.readouterr().err)
+
+
+def unregistered(root: Path) -> list[str]:
+    """The scratch directories under ``root`` that no registry line names: what ATC-0044 decision (a) forbids."""
+    rows = [os.path.normcase(row.scratch) for row in scratch.registered(root)]
+    return sorted(child.name for child in root.iterdir()
+                  if child.is_dir() and child.name.lower() not in scratch.RESERVED_NAMES
+                  and os.path.normcase(child) not in rows)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(("arguments", "token"), [
+    ((), "TREE_NOT_FOUND"),
+    (("--tree", "{tree}"), "VENV_MISSING"),
+    (("--tree", "{tree}", "--python", "{absent}"), "PYTHON_NOT_FOUND"),
+    (("--tree", "{absent}"), "TREE_NOT_FOUND"),
+])
+def test_a_refusal_before_the_registry_line_creates_no_directory(tree: Path, atc_tmp: Path, tmp_path: Path,
+                                                                   arguments: tuple[str, ...], token: str) -> None:
+    values = {"tree": str(tree), "absent": str(tmp_path / "absent" / "python.exe")}
+    run = run_command("--scratch", "f12", *(argument.format(**values) for argument in arguments))
+    assert run.returncode == 9 and run.stderr.startswith(f"{token} "), run.stderr
+    assert not (atc_tmp / "f12").exists() and unregistered(atc_tmp) == [] and scratch.registered(atc_tmp) == []
+
+
+@pytest.mark.integration
+def test_a_refusal_after_the_registry_line_leaves_a_registered_scratch(tree: Path, atc_tmp: Path) -> None:
+    run = run_command("--scratch", "f13", "--tree", str(tree), "--python", sys.executable, "--select", "0" * 40)
+    assert run.returncode == 9 and run.stderr.startswith("SELECTION_SOURCE_UNKNOWN ")
+    assert (atc_tmp / "f13").is_dir() and unregistered(atc_tmp) == []
+    assert [(row.scratch, row.task) for row in scratch.registered(atc_tmp)] == [(str(atc_tmp / "f13"), TASK)]
+
+
+@pytest.mark.integration
+def test_a_scratch_path_that_holds_a_file_is_refused_unregistered(tree: Path, atc_tmp: Path) -> None:
+    (atc_tmp / "f14").write_text("a file", encoding="utf-8")
+    run = run_command("--scratch", "f14", "--tree", str(tree), "--python", sys.executable)
+    assert run.returncode == 9 and run.stderr.startswith("SCRATCH_NOT_CREATED ")
+    assert scratch.registered(atc_tmp) == []

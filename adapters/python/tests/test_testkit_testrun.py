@@ -694,3 +694,27 @@ def test_a_refused_guard_names_the_copys_own_environment(tree: Path, atc_tmp: Pa
     (tree / "src/fixture_pkg/__init__.py").write_text("raise ImportError('broken')\n", encoding="utf-8")
     run = run_tests(str(tree), "s", sys.executable, "tests")
     assert run.returncode == 8 and testrun.GUARD_NEXT in run.stderr
+
+
+def unregistered(root: Path) -> list[str]:
+    """The scratch directories under ``root`` that no registry line names: what ATC-0044 decision (a) forbids."""
+    rows = [os.path.normcase(row.scratch) for row in scratch.registered(root)]
+    return sorted(child.name for child in root.iterdir()
+                  if child.is_dir() and child.name.lower() not in scratch.RESERVED_NAMES
+                  and os.path.normcase(child) not in rows)
+
+
+@pytest.mark.integration
+def test_a_mutants_refusal_before_the_registry_line_creates_no_directory(export: Export, tmp_path: Path,
+                                                                         capsys: pytest.CaptureFixture[str],
+                                                                         monkeypatch: pytest.MonkeyPatch) -> None:
+    listing = tmp_path / "m.json"
+    listing.write_text("[]", encoding="utf-8")
+    root = export.place.parent
+    common = [str(export.worktree), str(listing), "--task", TASK, "--python", sys.executable, "--tests", "tests"]
+    assert commands.main(["test", "mutants", "fresh", export.sha, *common]) == 9
+    assert capsys.readouterr().err.startswith("TREE_NOT_FOUND ") and not (root / "fresh").exists()
+    monkeypatch.setenv("ATC_PRIVATE_DESKTOP", "yes")
+    assert commands.main(["test", "mutants", export.place.name, export.sha, *common]) == 9
+    assert capsys.readouterr().err.startswith("PRIVATE_DESKTOP_INVALID ") and scratch.registered(root) == []
+    assert unregistered(root) == [export.place.name] and not (export.place / "qdr").exists()

@@ -150,10 +150,11 @@ A scratch is the working directory of one isolated test run made through
 2. The scratch is `--scratch`, by default `<ID>-<first seven characters of
    the commit>`, resolved as § Test scratch says. A `tree` already in it
    stops with `SCRATCH_TREE_EXISTS`, which names `atc tmp clean`.
-3. `git archive` of the commit is unpacked into `<tmp>/<scratch>/tree`, and
-   the scratch gets its registry line with its task, the source worktree
-   and the full commit, and as its `tree` the `--lock-dir` directory, where
-   `atc test run --scratch` runs; the line prints as
+3. The scratch gets its registry line with its task, the source worktree
+   and the full commit, its `project` read from the commit's
+   `--lock-dir/pyproject.toml`, and as its `tree` the `--lock-dir`
+   directory, where `atc test run --scratch` runs. Then `git archive` of
+   the commit is unpacked into `<tmp>/<scratch>/tree`; the line prints as
    `CHECKOUT <scratch> <tree> <commit>`.
 4. `uv sync --locked` runs in `--lock-dir` (a directory under the tree,
    default the tree itself) without `VIRTUAL_ENV` and
@@ -162,8 +163,9 @@ A scratch is the working directory of one isolated test run made through
    which names the project's `AGENTS.md` preparation; a failed sync stops
    with `SYNC_FAILED` and the sync's last twenty lines (exit 1).
 
-Refusals exit 9 unless stated. A refusal after step 3 leaves the scratch
-registered, so `atc tmp clean <scratch>` removes it.
+Refusals exit 9 unless stated. A refusal before step 3 creates nothing; one
+from step 3 on, `EXPORT_FAILED` among them, leaves the scratch registered,
+so `atc tmp clean <scratch>` and close-out remove it.
 
 ## Scratch registry
 

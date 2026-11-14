@@ -138,15 +138,24 @@ def copy_interpreter(root: Path, place: Path) -> str:
     return toolchains.for_tree(tree).interpreter(tree)
 
 
-def prepare_scratch(argument: str, environ: MutableMapping[str, str]) -> tuple[Path, Path]:
-    """``<tmp>`` and the scratch, checked and with its data root created; refusals exit 9."""
+def locate_scratch(argument: str, environ: MutableMapping[str, str]) -> tuple[Path, Path]:
+    """``<tmp>`` and the scratch, checked and nothing created; a scratch path that holds a file is
+    ``SCRATCH_NOT_CREATED``. Refusals exit 9."""
     root = locations.locate(environ).tmp
     place = scratch.resolve_scratch(argument, root)
+    if place.exists() and not place.is_dir():
+        raise Refusal("SCRATCH_NOT_CREATED", f"{argument}: {place} exists and is no directory")
+    return root, place
+
+
+def claim_scratch(root: Path, place: Path, tree: Path, task: str) -> None:
+    """Register the scratch with ``task``, then create it and its data root: every check that can refuse runs
+    before this, so no refusal leaves an unregistered directory, and one after it leaves a registered one."""
+    scratch.register(root, place, tree, task=task)
     try:
         (place / "qdr").mkdir(parents=True, exist_ok=True)
     except OSError as error:
-        raise Refusal("SCRATCH_NOT_CREATED", f"{argument}: {error}") from error
-    return root, place
+        raise Refusal("SCRATCH_NOT_CREATED", f"{place.name}: {error}") from error
 
 
 def pythonpath_directories(tree: Path) -> list[str]:
@@ -230,8 +239,8 @@ def execute(tree_argument: str, scratch_argument: str, python_argument: str, pyt
     """One captured pytest run of a mutant; a refusal raises ``Refusal`` with its token and exit code."""
     tree = resolve_tree(tree_argument)
     python = resolve_python(python_argument)
-    root, place = prepare_scratch(scratch_argument, environ)
-    scratch.register(root, place, tree, task=task)
+    root, place = locate_scratch(scratch_argument, environ)
+    claim_scratch(root, place, tree, task)
     private = isolate(tree, place, python, environ)
     command = _pytest_command(python, tree, place, environ, private, pytest_arguments, junit)
     return _capture(command, tree, environ, private, timeout)
@@ -376,12 +385,14 @@ def _mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None,
     verify_commit(worktree, args.sha)
     python = resolve_python(args.python) if args.python else None
     entries = json.loads(Path(args.mutants).read_text(encoding="utf-8-sig"))
-    root, place = prepare_scratch(args.scratch, environ)
-    tree = place / "tree"
+    root, place = locate_scratch(args.scratch, environ)
+    tree = resolve_tree(str(place / "tree"))
     python = python or copy_interpreter(root, place)
-    scratch.register(root, place, resolve_tree(str(tree)), task=args.task)
     timing.resolve(environ)
-    if private_desktop(environ):
+    private = private_desktop(environ)
+    claim_scratch(root, place, tree, args.task)
+    tree = place / "tree"
+    if private:
         print(EXCLUSION_NOTE, flush=True)
     budget = stages.open_budget(f"atc test mutants {args.scratch}", environ, root=Path(worktree),
                                 max_wait=MUTANT_SECONDS)
@@ -713,7 +724,7 @@ def run(argv: Sequence[str], environ: MutableMapping[str, str] | None = None) ->
         parser.error("--wide and --touched exclude each other")
     check_task(args.task)
     environ = os.environ if environ is None else environ
-    root, place = prepare_scratch(args.scratch, environ)
+    root, place = locate_scratch(args.scratch, environ)
     row = _registered_row(root, place)
     if args.tree is not None:
         tree = resolve_tree(args.tree)
@@ -722,7 +733,7 @@ def run(argv: Sequence[str], environ: MutableMapping[str, str] | None = None) ->
     else:
         raise Refusal("TREE_NOT_FOUND", f"the scratch {place.name} names no tree; pass --tree")
     python = resolve_python(args.python) if args.python else toolchains.for_tree(tree).interpreter(tree)
-    scratch.register(root, place, tree, task=args.task)
+    claim_scratch(root, place, tree, args.task)
     paths = changed_paths(tree, args.select, row) if args.select else None
     environ["PYTHONUNBUFFERED"] = "1"
     private = isolate(tree, place, python, environ)

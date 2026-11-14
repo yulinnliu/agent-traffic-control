@@ -8,6 +8,7 @@ from pathlib import Path
 import subprocess
 import tarfile
 import threading
+import tomllib
 
 from . import locations, scratch, toolchain as toolchains
 from .git import git_env
@@ -72,6 +73,18 @@ def export(worktree: Path, commit: str, tree: Path) -> None:
         raise Refusal("EXPORT_FAILED", f"{commit} into {tree}: {_text(stderr)}")
 
 
+def committed_project_name(worktree: Path, commit: str, lock_dir: Path) -> str:
+    """``[project].name`` of ``<lock_dir>/pyproject.toml`` at ``commit``, read before the export; the lock
+    directory's name (the tree's for ``.``) when that file or key is absent, as ``scratch.project_name`` reads it."""
+    path = (lock_dir / "pyproject.toml").as_posix()
+    shown = _git(worktree, "show", f"{commit}:{path}")
+    try:
+        name = tomllib.loads(shown.stdout)["project"]["name"] if shown.returncode == 0 else None
+    except (ValueError, KeyError, TypeError):
+        name = None
+    return name if isinstance(name, str) and name else (lock_dir.name or TREE)
+
+
 def _text(stderr: list[bytes]) -> str:
     return b"".join(stderr).decode("utf-8", errors="replace").strip()
 
@@ -113,9 +126,9 @@ def checkout(argv: Sequence[str], environ: Mapping[str, str] | None = None, run:
     if tree.exists():
         raise Refusal("SCRATCH_TREE_EXISTS", f"{tree} exists; remove the scratch with `atc tmp clean {place.name}` "
                                              "or name another with --scratch")
-    export(worktree, commit, tree)
     scratch.register(root, place, lock_dir, task=args.task, source=str(worktree), commit=commit,
-                     project=scratch.project_name(lock_dir))
+                     project=committed_project_name(worktree, commit, lock_dir.relative_to(tree.resolve())))
+    export(worktree, commit, tree)
     say(f"CHECKOUT {place.name} {tree} {commit}")
     venv = sync(lock_dir, environ, run)
     say(f"SYNCED {venv}")

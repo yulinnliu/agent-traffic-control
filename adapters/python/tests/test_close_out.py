@@ -353,3 +353,10 @@ def test_check_lists_unregistered_scratches_named_for_the_task_for_consent_and_k
     assert code == 0 and sum(line.startswith("CONSENT ") for line in lines) == 2, (lines, err)
     assert (atc_tmp / f"{TASK.lower()}-review").is_dir() and (atc_tmp / TASK).is_dir()
     assert not (atc_tmp / "mine").exists()
+
+
+def test_the_consent_list_leaves_out_the_scratches_close_out_takes(atc_tmp: Path) -> None:
+    for name in (f"{TASK}-mine", f"{TASK}-other"):
+        (atc_tmp / name).mkdir()
+    assert close_out.unregistered_scratches(atc_tmp, TASK, [str(atc_tmp / f"{TASK}-mine")]) == [
+        atc_tmp / f"{TASK}-other"]
