@@ -167,6 +167,23 @@ checked `main` tip and reads `origin/main` back. `atc push --all` asks y/N
 per repository. The coordinator then archives the task's sessions
 (`DELIVERY.md` § Close-out and § 10).
 
+## Build trees
+
+```text
+atc checkout <project> <sha>
+atc checkout <project> <sha> --remove
+```
+
+A build runs from a clean tree of a project at an exact commit on its
+`main`, never from a task worktree. `atc checkout` makes a detached worktree
+`worktrees/<project>/build+<sha7>/`, locked so no worktree cleanup removes
+it; it has no task record and no branch, so no commit comes from it.
+`--no-git` exports the commit into a scratch under the ATC home instead.
+Both are registered scratches, so `atc test --list` shows them; a commit not
+in the history of `main` stops with `NOT_ON_MAIN`, and a path that holds
+something else with `PATH_OCCUPIED`. `--remove` removes the tree and its
+registry line.
+
 ## Installing a release
 
 The installed `atc` runs a release copy, never `main`: integrating a root

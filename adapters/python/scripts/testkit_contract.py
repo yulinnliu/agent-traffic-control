@@ -1,8 +1,7 @@
-"""Read-only workspace bridge to the canonical opted-in testkit checker."""
+"""Read-only workspace bridge to the canonical opted-in testkit checker, `atc_testkit.check` as installed with
+`atc`, so an installed wheel needs no source file beside it."""
 from pathlib import Path
-import importlib.util
 
-SOURCE = Path(__file__).resolve().parents[1] / 'atc-testkit/src/atc_testkit/check.py'
 RECORD = 'vendor/atc-testkit.json'
 
 
@@ -15,7 +14,5 @@ def record(project: Path) -> Path | None:
 def problems(project: Path, *, hooks: bool = False) -> list[str]:
     if record(project) is None:
         return []
-    spec = importlib.util.spec_from_file_location('_workspace_testkit_contract', SOURCE)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module.repository_problems(project, hooks=hooks)
+    from atc_testkit import check
+    return check.repository_problems(project, hooks=hooks)

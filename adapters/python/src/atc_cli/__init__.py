@@ -17,6 +17,8 @@ Workspace:
   doctor      diagnose runtime readiness; changes nothing
   guard       check, or --install, the PreToolUse hook and its permission rules
   install     install a release tag as this host's atc, or --check it
+  checkout    make a clean tree of a project at a commit on its main, for a build
+  hook        decide one PreToolUse hook call (the command the hook entry runs)
 
 --root DIR    the workspace directory to act on, before or after the command
               (shared/conformance/CLI.md § Root resolution)
@@ -48,7 +50,16 @@ COMMANDS = {
     "doctor": "doctor",
     "guard": "guard",
     "install": "release_install",
+    "checkout": "build_checkout",
 }
+HOOK = "hook"
+HOOK_USAGE = """usage: atc hook [--harness {claude,codex}] [--table FILE] [--payload FILE]
+
+Decide one PreToolUse hook call: read the payload on stdin, or from --payload, and print a deny decision or
+nothing. It reads no workspace, so it runs before root resolution and the checkout guard.
+
+Exit: 0 decided (a deny decision on stdout, or nothing); 2 the decision could not be written
+See: docs/ENFORCEMENT.md § PreToolUse hook"""
 GUARD_EXEMPT = ("doctor",)
 # Commands that act on the working directory when no workspace is found: `init` creates one there, `doctor`
 # reports that it is missing.
@@ -136,15 +147,29 @@ def _release_pin(command: str, rest: list[str], root: Path) -> int | None:
     return None if refusal is None else cli_conventions.refuse(refusal, wants_json(rest))
 
 
-def version() -> str:
+def package_version() -> str:
+    """This atc's version, from its installed distribution, else `unknown`."""
     from importlib import metadata
-
-    from atc_testkit import __version__ as testkit
     try:
-        atc = metadata.version("agent-traffic-control")
+        return metadata.version("agent-traffic-control")
     except metadata.PackageNotFoundError:
-        atc = "unknown"
-    return f"atc {atc} (atc-testkit {testkit})"
+        return "unknown"
+
+
+def version() -> str:
+    from atc_testkit import __version__ as testkit
+    return f"atc {package_version()} (atc-testkit {testkit})"
+
+
+def hook(rest: list[str]) -> int:
+    """`atc hook`: the PreToolUse engine alone, importing nothing but its standard-library modules."""
+    if any(arg in ("-h", "--help") for arg in rest):
+        escape_unencodable_output()
+        print(HOOK_USAGE)
+        return 0
+    scripts_on_path()
+    import pretooluse_hook
+    return pretooluse_hook.main(rest)
 
 
 def take_root(args: list[str]) -> tuple[str | None, list[str], str | None]:
@@ -181,10 +206,12 @@ def wants_json(rest: list[str]) -> bool:
 
 def main(argv: list[str] | None = None, checkout: Path | None = None) -> int:
     """``checkout`` is the checkout the guard reads, by default the resolved root; tests name one."""
+    args = list(sys.argv[1:] if argv is None else argv)
+    if args[:1] == [HOOK]:
+        return hook(args[1:])
     escape_unencodable_output()
     if argv is None:
         _child_encoding()
-    args = list(sys.argv[1:] if argv is None else argv)
     if args[:1] in (["--version"], ["-V"]):
         print(version())
         return 0

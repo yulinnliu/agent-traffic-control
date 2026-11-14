@@ -20,7 +20,7 @@ pytestmark = pytest.mark.integration
 SUBCOMMANDS = [
     ("task",), ("task", "create"), ("task", "update"), ("task", "list"), ("task", "resume"), ("task", "close"),
     ("test",), ("integrate",), ("push",), ("init",), ("add",), ("remove",), ("sync",), ("doctor",), ("guard",),
-    ("install",),
+    ("install",), ("checkout",), ("hook",),
 ]
 
 # A directory without workspace.yaml is not a canonical checkout, so the guard lets the command through.

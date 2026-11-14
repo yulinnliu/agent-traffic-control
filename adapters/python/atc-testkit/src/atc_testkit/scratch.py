@@ -149,6 +149,11 @@ def register(root: Path, scratch: Path, tree: Path, now: datetime | None = None,
         _write_registry(root, [*lines, "\t".join(map(field, (project or project_name(tree), scratch, tree, created, task, source, commit)))])
 
 
+def unregister(root: Path, directory: str) -> None:
+    """Drop the registry line of ``directory``, which the caller has removed; nothing when it has none."""
+    _unregister(root, directory)
+
+
 def _unregister(root: Path, directory: str) -> None:
     if not (root / REGISTRY_NAME).exists():
         return

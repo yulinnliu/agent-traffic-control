@@ -52,7 +52,11 @@ release).
 | Group | Commands |
 | --- | --- |
 | Task lifecycle | `task` (`create`, `update`, `list`, `resume`, `close`), `test`, `integrate`, `push` |
-| Workspace | `init`, `add`, `remove`, `sync`, `doctor`, `guard`, `install` |
+| Workspace | `init`, `add`, `remove`, `sync`, `doctor`, `guard`, `install`, `checkout`, `hook` |
+
+`atc hook` is the command a PreToolUse hook entry runs: it reads no
+workspace, so it runs before root resolution and the canonical checkout
+guard.
 
 `atc --help` lists them by group, one line each; `atc --version` prints the
 `atc` and `atc-testkit` versions. The maintainer commands (`atc-maintain sync

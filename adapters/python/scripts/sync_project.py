@@ -649,11 +649,8 @@ def content_repository(root: Path) -> Path:
 
 
 def running_version() -> str:
-    from importlib import metadata
-    try:
-        return metadata.version("agent-traffic-control")
-    except metadata.PackageNotFoundError:
-        return "unknown"
+    import atc_cli
+    return atc_cli.package_version()
 
 
 def resolve_target(root: Path, revision: str | None) -> tuple[str, str | None, bool]:
