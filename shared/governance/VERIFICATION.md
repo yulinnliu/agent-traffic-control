@@ -258,6 +258,24 @@ Flaky or timing-sensitive tests:
 - Time-box stress experiments: one targeted run with temporary instrumentation
   that is reverted and never committed, then decide.
 
+#### Test levels
+
+Each task record carries `tests: none | standard | strict`, set by
+`atc task create` or `atc task update --tests`, or by `## Tests` in `--file`:
+
+- `none`: a text-only change. The reviewer reads the diff; no test runs. The
+  record carries an Owner decision line for it.
+- `standard`, the default: the writer runs the related tests
+  (`atc test <task>`); the reviewer runs `atc test <task> --sha <sha>` and
+  `atc test <task> --candidate`.
+- `strict`: a change to a guard (a refusal, a deletion, authority, a safety
+  boundary, data integrity). `standard`, plus `atc test <task> --mutants
+  <file>` by the writer and by the reviewer.
+
+A project with `atc-testkit` defaults to `standard`; a project without it has
+only `none`. A reviewer may FAIL a task whose diff exceeds its level. The
+project's CI after a push still runs.
+
 Projects that adopt `atc-testkit` follow its contract in
 `adapters/python/atc-testkit/README.md`, read from the same governance revision.
 The category meanings, marker rules and selection behavior are defined there, for
@@ -313,11 +331,11 @@ final round to be fresh.
 
 A reviewer's targeted tests are its own choice: the tests that settle its own
 doubts, such as a finding, a suspected gap or a test it adds in its scratch,
-named in its verdict. Before a PASS on a diff that changes tests or
-behaviour, it also runs `atc verify` with the integrate command's target
-arguments, which runs the integration verifier's own checks and selection on
-the candidate `atc integrate` would build, and quotes its last line in the
-verified line; a refusal is a blocker finding. Apart from that run it does
+named in its verdict. Before a PASS it runs what the task's test level
+(§ Testing, Test levels) names; `atc test <task> --candidate` runs the
+integration verifier's own checks and selection on the candidate
+`atc integrate` would build, and its last line is quoted in the verified line;
+a refusal is a blocker finding. Apart from that run it does
 not rerun the selection the writer ran at the reviewed SHA. The full
 regression of § Full regression timing and evidence reuse, by default the
 project's manually dispatched remote CI, is the safety net.
@@ -325,7 +343,7 @@ project's manually dispatched remote CI, is the safety net.
 A verdict's first line is the verdict token, then one line per finding
 (severity, `file:line`, required fix), the verified items as one line, and no
 narrative. A PASS ends with the runnable
-`atc integrate --task ... --reviewed ...` line, except where the project's
+`atc integrate <task> --sha <sha>` line, except where the project's
 process gives a PASS no integration instruction or the reviewer's
 `atc integrate --check` refuses one; such a PASS ends with that refusal's
 reason and next step instead.

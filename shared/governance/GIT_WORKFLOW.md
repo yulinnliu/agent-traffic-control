@@ -187,7 +187,7 @@ for alignment with task-oriented branch naming.
 - After a FAIL verdict the writer may instead amend or squash the fixes into
   the reviewed commits. The verdict's SHA is void; the re-review reads
   `git range-diff` of the old and the new tip against the findings, and
-  `atc verify` runs on the new tip. Not when another branch stacks on the
+  `atc test <task> --candidate` runs on the new tip. Not when another branch stacks on the
   reviewed commits or the topic was pushed; after a PASS the history stays
   frozen as above.
 - If the reviewed SHA is no longer an ancestor of the branch tip, the review
@@ -199,12 +199,11 @@ for alignment with task-oriented branch naming.
   only when that tip is based on the current `main`, neither range holds a
   merge commit, the commit count and order are unchanged, every
   `git patch-id --stable` matches, and replaying the reviewed commits onto
-  `main` is conflict-free and yields the rebased tree. `atc integrate
-  --rebased` checks this and still runs the full verification on the rebased
-  tip. Otherwise the rebased tip needs a fresh review.
+  `main` is conflict-free and yields the rebased tree. `atc integrate` checks
+  this when the branch tip no longer descends from the reviewed SHA, and still
+  runs the full verification on the rebased tip. Otherwise the rebased tip needs a fresh review.
 - After a rebase the writer reports only the new tip. The coordinator runs
-  `atc integrate --check`, with `--rebased` when a review exists, for the
-  carry-over and `OVERLAP`, and runs no range-diff or file diff by hand.
+  `atc integrate <task> --check` for the carry-over and `OVERLAP`, and runs no range-diff or file diff by hand.
 
 ## Integrate
 
@@ -221,7 +220,7 @@ and target refs immediately before the update.
 with its reason code for a stop row, `FF` for the fast-forward row and `NO_FF`
 for the compatible-merge row. The unpublished-topic row stops as
 `REBASE_REQUIRED`, or as `CONFLICT` or `OVERLAP` when the trial merge finds
-one, each with a `next:` naming the rebase.
+one, each with a `hint:` naming the rebase.
 
 Before evaluating the table, `atc integrate` (`--check` included) runs
 `git fetch origin`. A local `main` behind or diverged from `origin/main` stops
@@ -235,26 +234,26 @@ takes no slot, creates no candidate and prints one `CHECK` line: the
 verdict, a reason code, the project, branch, tip and task binding; `--json`
 carries the full evidence. Its verdict is a topology decision; integration still
 requires the authority and verification steps of this section. The check
-resolves the task's authority as the integration does, but needs none: it
-always names the task, and without `--owner-words` a task whose record grants
-no `integrate_main` reports `authority=missing` where the integration stops
-with `AUTHORITY_MISSING`. After the reviewer's PASS the check runs before the
-Owner is asked:
+needs no authority (`Task and authority`). After the reviewer's PASS the check
+runs before the Owner is asked:
 
 ```text
-atc integrate --check --project <project> --reviewed <sha> --task <task> [--owner-words <quote>]
+atc integrate <task> --check
 ```
 
 Its `verification_reuse` says whether the integration will reuse the
-reviewer's `atc verify` record of the same candidate or run the verifier
+reviewer's `atc test <task> --candidate` record of the same candidate or run
+the verifier
 (`shared/conformance/verification-evidence/README.md` § Integration reuse).
 
 The Python integration adapter acquires the repository Integration Slot before
 preflight, prepares the integration revision in an isolated candidate worktree,
-and requires a passing verification command before updating `main`. Name the
-reviewed commit by its full 40-character SHA or a unique prefix of at least 12
-characters, which the run resolves once to the full SHA the integration record
-holds; an ambiguous prefix stops. Name the task and its authority as
+and requires a passing verification command before updating `main`. The
+reviewed commit is the one the task's newest PASS review report names
+(`~/.atc/reports/<task>-<sha>-review.md`), or `--sha` with its full
+40-character SHA or a unique prefix of at least 12 characters; the run
+resolves it once to the full SHA the integration record holds, and an
+ambiguous prefix stops. The task and its authority are as
 `Task and authority` below states; `Integration verifier source` names where
 the verification argv comes from. The command
 runs from the candidate checkout with these environment variables:
@@ -270,8 +269,8 @@ When verification passes with a valid report, the adapter writes an evidence
 record for the candidate under the repository's Git common directory after
 `main` is updated and read back. A missing or invalid report leaves
 integration unaffected and writes no record. The report and record formats
-are defined in `shared/conformance/verification-evidence/README.md`. `atc verify`
-writes a record of its own candidate, passed or failed, apart from the
+are defined in `shared/conformance/verification-evidence/README.md`.
+`atc test <task> --candidate` writes a record of its own candidate, passed or failed, apart from the
 records the pre-push gate reads; within the active slot `atc integrate`
 reuses its latest passing one in place of rerunning the verifier when the
 candidate tree, expected main, reviewed SHA, verifier argv and timeout,
@@ -286,8 +285,8 @@ authority, whether the range is records-only, and the time (the keys are in
 `Task and authority`). For a carried-over review, `reviewed` holds the
 rebased tip and `carried_over_from` the SHA the review named; the evidence
 record carries the same pair. The pre-push gate reads only the verification
-evidence of `Test evidence` below, never this record; `atc preflight push`
-reads it to group the commits of a push (`Publication boundary`).
+evidence of `Test evidence` below, never this record; `atc push` reads it
+to check every commit of a push (`Publication boundary`).
 
 The verifier must test the candidate identified by `ATC_INTEGRATION_SHA`, not
 resolve a moving branch name. A nonzero result, changed candidate HEAD, dirty
@@ -306,15 +305,16 @@ serialized by the lock.
 | --- | --- |
 | Tip ≠ reviewed SHA, or reviewed SHA not an ancestor of the tip | Stop: review the delta, or re-review |
 | `main` is the merge-base (fast-forward possible) | Verify the reviewed tip, then `git merge --ff-only <verified-full-sha>` |
-| `main` advanced; topic unpublished | Stop: rebase onto `main`, then integrate the rebased tip with `--rebased`, which carries the review over under `After formal review`; a rebase that resolves conflicts, or any refused carry-over, needs a fresh review |
+| `main` advanced; topic unpublished | Stop: rebase onto `main`, then integrate again; the rebased tip carries the review over under `After formal review`; a rebase that resolves conflicts, or any refused carry-over, needs a fresh review |
 | `main` advanced; topic published; the merge would conflict | Stop: reconcile on the topic branch with a new commit (merge `main` in, or fix forward), never by rewriting; re-review that commit |
 | `main` advanced; topic published; some file changed on both sides | Stop: a reviewer judges semantic overlap, then prepare a merge candidate or reconcile as above |
 | `main` advanced; topic published; no conflict, no shared file | Prepare and verify a merge candidate under the procedure below, then advance `main` to it |
 
-With `--reviewed <reviewed SHA> --rebased <rebased tip>`, the rebased tip
-takes the place of the reviewed SHA throughout the table: the first row
-compares the branch tip with the rebased tip, and the fast-forward row
-verifies and integrates it. The carry-over check runs after the table and
+The branch is the one the task record names. When its tip descends from the
+reviewed SHA with commits after it, the run stops (`UNREVIEWED_COMMITS`). When
+its tip does not descend from the reviewed SHA, the tip is a rebase: it takes
+the place of the reviewed SHA throughout the table, the fast-forward row
+verifies and integrates it, and the carry-over check runs after the table and
 before any candidate exists.
 
 ### Repository integration queue
@@ -396,12 +396,12 @@ a new integration.
 
 The source branch stays as review evidence; deleting it is a separate
 decision. Matching trees or patches never establish authorization or
-completeness by themselves. Plain `atc-worktree` cleanup checks ancestry only
-and reports a squashed topic as `UNMERGED`. With valid cleanup authority, a
-squashed Hami Managed Worktree is cleaned up with `cleanup --squash-integrated`
-(see its skill), which verifies the recorded SHAs, tree and retained ref; the
-caller checks the squash commit message and the integration record. The worktree
-is never removed by hand.
+completeness by themselves. `atc task close` checks ancestry and refuses a
+squashed topic as `NOT_MERGED`. With valid cleanup authority, a squashed Hami
+Managed Worktree is closed with `atc task close <task> --abandon`, which keeps
+the branch tip as the tag `archive/<task>`; the caller first checks the squash
+commit message and the integration record. The worktree is never removed by
+hand.
 
 ## Git environment in hooks and tests
 
@@ -435,60 +435,31 @@ Formal evidence follows `VERIFICATION.md`; changing the delivered revision inval
 
 ## Task and authority
 
-`atc integrate` names the task with `--task` and takes its authority from
-exactly one source.
+`atc integrate <task>` names the task by its record ID: `<prefix>-<four
+digits>`, with a prefix declared under `## Task records` in `AGENTS.md`,
+derives the repository. The record must exist in the reviewed commit's tree
+(`TASK_NOT_FOUND`), and its `branch` is the integrated branch; for a
+records-only range that branch is already at the reviewed SHA
+(`NO_BRANCH_AT_REVIEWED`). A range whose changed paths all lie under
+`.atc/tasks/` is records-only: the record check runs in place of the verifier.
+Recovering an interrupted integration names the same task.
 
-- `--task` is required. `<prefix>-<four digits>`, with a prefix declared
-  under `## Task records` in `AGENTS.md`, names a task record and derives the
-  repository from the prefix. The record must exist in the reviewed commit's
-  tree (`TASK_NOT_FOUND`), and its `branch` is the integrated branch, which
-  must hold the reviewed SHA as its tip; for a records-only range that branch
-  is already at the reviewed SHA (`NO_BRANCH_AT_REVIEWED`). Any other value is
-  a task identity string (`CORE.md` § Task identity) and needs `--project`
-  (`root` for the workspace root); it integrates the one local branch at the
-  reviewed SHA.
-- The authority is either the record on `main` with `integrate_main: true`,
-  or `--owner-words <quote>` with the Owner's words quoted, or `--owner-run`
-  on a command the Owner runs, which records the decision label
-  `Owner run: approve integration` as the `--owner-words` quote.
-- A range whose changed paths all lie under `.atc/tasks/` is records-only: the
-  record check runs in place of the verifier.
-- Recovering an interrupted integration takes `--task`.
+The Owner runs every integration; the workspace's hard-deny policy denies an
+agent `atc integrate` but `--check` and `--help`. The Owner running the
+command is the authority, after the reviewer's unconditional PASS on the
+exact SHA; the run records the decision label
+`Owner run: approve integration` as its quote, and no local artifact attests
+it. The coordinator gives the Owner the command (§ Owner-run commands), never
+runs it and never relays it to a writer. A record's `authority` grants
+nothing by itself; only the coordinator, who hears the Owner, writes it.
 
-A record grants nothing by itself; the Owner's words do. A record on `main`
-with `integrate_main: true` is the Owner's integration authority for `FF`
-after an unconditional PASS on the exact SHA, never for `NO_FF`
-(`AUTHORITY_NOT_FF`), a push or a deploy.
-
-An agent runs `atc integrate --task <ID> --reviewed <SHA>` only on the
-authority of a record on `main` that grants `integrate_main`, after the
-reviewer's unconditional PASS on that SHA; `--owner-run` and `--owner-words`
-stay the Owner's, and an agent passes them only with `--check`. Where the
-workspace's hard-deny policy denies an agent `atc integrate` but `--check`,
-the Owner runs every integration. Authority is split by flag:
-
-- on the record's authority `atc integrate --task <ID>` runs without
-  `--owner-run` (§ Owner-run commands);
-- only the coordinator, who hears the Owner, writes a record's `authority`;
-- `--owner-run` carries the Owner's decision: the Owner runs the
-  integration command the coordinator gives (§ Owner-run commands). The
-  coordinator never runs it and never relays it to a writer. The Owner
-  running the command is the authority; no local artifact attests it.
-
-In a paste-only setup with no coordinator session, the user writes the
-instruction and runs it, with their own words as the quote.
-
-The writer keeps the record's `delivery.status`. A grant ends the moment the
-Owner narrows or revokes it, whatever the record on `main` still reads. A
-grant counts only when it entered `main` through this machine's records-only
-`--owner-words` integration. `docs/TASKS.md` § Authority on `main` states how
-`atc integrate` finds the grant's commit and what it refuses.
+In a paste-only setup with no coordinator session, the user runs the
+command themself.
 
 Each `integrations.jsonl` line carries `task`, `records_only` and
-`authority`: `{"kind": "record", "task_id": ...}`,
-`{"kind": "owner_words", "quote": ...}` or `{"kind": "sync"}` for a
-governance sync commit; `{"kind": "unclassified"}` remains a value readers
-accept in existing logs. A records-only integration that binds several tasks
+`authority`: `{"kind": "owner_words", "quote": ...}` or `{"kind": "sync"}`
+for a governance sync commit; `{"kind": "record", "task_id": ...}` and
+`{"kind": "unclassified"}` remain values readers accept in existing logs. A records-only integration that binds several tasks
 writes one line per task with the same candidate, and every records-only line
 carries `main_before`.
 
@@ -496,8 +467,8 @@ carries `main_before`.
 
 After the reviewer's PASS and the check above, the coordinator gives the
 Owner each command to run, one at a time: the integration, and after
-`atc preflight push` the push of `main` (§ Publication boundary). Each is one
-line that runs unchanged in PowerShell and in a POSIX shell:
+`atc push <project> --check` the push of `main` (§ Publication boundary). Each
+is one line that runs unchanged in PowerShell and in a POSIX shell:
 
 - one command, with no `cd`, `&&`, `;`, pipe, redirection or variable;
 - a checkout named by `git -C "<drive>:/<path>"`, the Windows drive path
@@ -506,29 +477,26 @@ line that runs unchanged in PowerShell and in a POSIX shell:
 - every SHA in full, 40 characters.
 
 ```text
-atc integrate --task <task> --reviewed <40-character SHA> --owner-run
-git -C "<main checkout>" push origin <40-character SHA>:refs/heads/main
+atc integrate <task> --sha <40-character SHA>
+atc push <project>
 ```
 
-A task identity string adds `--project <name>`; a record on `main` that
-grants `integrate_main` for `FF` drops `--owner-run`. A records-only range
-takes the same form.
+A records-only range takes the same form.
 
 The coordinator reads completion from Git, never from a report that the
 command ran: the integration is done when `<git common dir>/atc/integrations.jsonl`
 holds a line with the task and the reviewed SHA whose `candidate_sha` is
 `main` or its ancestor; the push is done when `git ls-remote origin
 refs/heads/main` names the pushed SHA or a descendant of it. Until then the
-command waits on the Owner; a stop's token and `next` (§ Command results)
+command waits on the Owner; a stop's token and `hint` (§ Command results)
 decide what follows, and the Owner's decision binds the SHA it named.
 
 ## Integration verifier source
 
 The verifier argv file and timeout come only from the
 `## Integration verification` section of `AGENTS.md` at the `main` revision
-being integrated into (`Project verification section` below). Only
-`--verify-timeout` may override the declared timeout; a value that differs
-from the declaration is reported as a warning. A repository whose `main`
+being integrated into (`Project verification section` below); nothing
+overrides the declared timeout. A repository whose `main`
 revision has no such section stops the integration; the caller obtains one
 from the owner.
 
@@ -552,7 +520,7 @@ Every registered project's `AGENTS.md` carries a section headed exactly
   impact-selected tests when the diff qualifies. The verifier is the sole
   judge of that exception.
 
-`atc validate --projects` reports a registered project whose `AGENTS.md`
+`atc sync --check` reports a registered project whose `AGENTS.md`
 lacks the section or names a missing or malformed argv file.
 
 ### Candidate checkout
@@ -612,11 +580,11 @@ with the change left uncommitted; a failed `git commit`, such as a hook
 refusal, stops it with the rendered files written and staged. Either way the
 next sync stops as dirty until the Owner resolves the checkout. Every file
 sync writes is committed: a project that ignores or excludes one stops before
-anything is written, and `atc validate --projects` reports it.
-`atc preflight push` shows a sync commit as `sync from <ATC revision>`.
+anything is written, and `atc sync --check` reports it.
+`atc push` accepts a sync commit by its `sync` line in the integration ledger.
 
 A change sync does not render, such as a project file that cites a renamed
-skill, goes through a topic and `## Integrate`. `atc sync --root` renders
+skill, goes through a topic and `## Integrate`. `atc-maintain sync --root` renders
 the adapters of the ATC checkout it runs in, linked worktree included, and
 commits nothing; run it in the topic that changes a
 canonical skill.
@@ -641,8 +609,8 @@ remote branch/ref, verify all of the following for the specific target:
 Local worktree cleanup, remote ref deletion, and evidence retention are
 separate operations with separate capability and authority boundaries.
 Integrating a different topic never by itself makes an older WIP branch
-cleanup-ready. For Hami Managed Worktree contract 1, use its existing
-`atc-worktree` capability for local cleanup; do not bypass its identity,
+cleanup-ready. For Hami Managed Worktree contract 2, use
+`atc task close <task>` for local cleanup; do not bypass its identity,
 lock, clean-tree or merged-state checks. Nothing here automatically
 authorizes force push, remote deletion, or cleanup of another writer's work.
 
@@ -655,28 +623,26 @@ the cause and the next step, and a usage error prints the usage line, not the
 whole help. A run that did not complete reports `TIMEOUT` or `INTERRUPTED`
 with the last lines of its log, never a pass.
 
-`atc integrate` and `atc preflight` end with one of these exit codes; every
-other command's codes are in `shared/conformance/CLI.md` § Exit codes:
+`atc integrate` ends with one of these exit codes; every other command's
+codes are in `shared/conformance/CLI.md` § Exit codes:
 
 | Exit | Meaning |
 | --- | --- |
-| 0 | Integrated, a `CHECK FF` or `CHECK NO_FF` line, or a preflight `PUSH` verdict |
+| 0 | Integrated, or a `CHECK FF` or `CHECK NO_FF` line |
 | 1 | Stopped before a candidate exists: a preflight `STOP` verdict, a missing `## Integration verification` section, ref drift found before the candidate, a failed fetch, a local `main` behind or diverged from `origin/main`, a required rebase, or a refused carry-over |
 | 2 | `ERROR`: an invalid invocation or a Git or runtime fault |
 | 3 | Stopped after the candidate exists: the verifier failed or timed out, the candidate changed, or the refs drifted before the update, each with `main` unchanged; or a required recovery, where `main` or its checkout no longer matches the candidate after the update, found by that update or at the start of a later run |
 
 The first stderr line of a refusal takes one of these forms:
 
-- `STOP <TOKEN>: <detail>` for exits 1 and 3, followed by a `next:` line
+- `STOP <TOKEN>: <detail>` for exits 1 and 3, followed by a `hint:` line
   naming the step that resolves the stop: the `Integrate` table's step for a
   stop that is a row of it, otherwise the step below;
-- `ERROR <TOKEN> <detail>` for exit 2;
-- `<TOKEN> <detail>` for a refusal from `atc-testkit`, with the exit code
-  `docs/TESTKIT.md` assigns that token.
+- `ERROR <TOKEN> <detail>` for exit 2.
 
 | Stop | Next step |
 | --- | --- |
-| No reviewed SHA, or one that is invalid, ambiguous or names no commit | Run again with the full SHA the formal review named |
+| No PASS review report, or a reviewed SHA that is invalid, ambiguous or names no commit | Run again with `--sha` and the full SHA the formal review named |
 | Topic already merged into `main` | Nothing to integrate; continue with `Cleanup trigger` |
 | Several local branches at the reviewed SHA | Delete or move the other local branches at the reviewed SHA, or integrate with the task's record ID |
 | No local branch at the reviewed SHA, and none containing it | Restore the reviewed topic branch at the reviewed SHA, or run again with the full SHA the formal review named |
@@ -696,10 +662,13 @@ The first stderr line of a refusal takes one of these forms:
 Publishing a ref/revision is separately governed by `DELIVERY.md`.
 
 `push_main` authority for a push of `main` must cover every commit in
-`origin/main..main`, including commits other topics integrated. List them
-before the push with `atc preflight push`, which fetches `origin` first; the
-`push:` lines of `atc integrate` give the same list and flag each commit
-outside that integration as lacking push approval. The Owner runs the push
-with the SHA `atc preflight push` listed as `main`'s tip
-(§ Owner-run commands), so the push carries exactly the commits the
-preflight listed.
+`origin/main..main`, including commits other topics integrated. The Owner
+pushes with `atc push <project>...` (§ Owner-run commands); the hard-deny
+policy denies an agent `atc push` but `--check` and `--help`. Each run
+fetches `origin`, stops when local `main` is behind or diverged from
+`origin/main`, and refuses a push that carries a commit no integration or
+governance sync recorded in `<git common dir>/atc/integrations.jsonl`. It
+pushes exactly the `main` tip it checked, as `<sha>:refs/heads/main`, and
+reads `origin/main` back. `atc push --check`, and bare `atc push`, list each
+repository's commits and push nothing; `atc push --all` asks y/N per
+repository.
