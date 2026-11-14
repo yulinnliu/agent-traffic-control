@@ -1,0 +1,22 @@
+task_id: ATC-0045
+repository: yulinnliu/agent-traffic-control
+base_sha: 4340b01a4b03808f79e0d0a2a9ac7d948ead3ac7
+scope: 'Close two PreToolUse hook gaps in adapters/python/scripts/pretooluse_hook.py:
+  PowerShell output redirection and file-writing cmdlets are checked against the write
+  roots, and hook payloads are decoded as UTF-8 so CJK plus backslashes never raise
+  JSONDecodeError.'
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: 4340b01a4b03808f79e0d0a2a9ac7d948ead3ac7
+branch: worktree-claude+hook-gaps
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
+decisions:
+  - "Owner 11-14: open ATC-0045 for CURRENT.md item 14 (source: Hami-Coordinator report from HQT-0025/HQ-0006), separate from ATC-0044 because the files do not overlap and the review focus is the safety boundary."
+  - "(a) Source: on 2026-11-13 a reviewer subagent ran `$o=\"$env:TEMP\\hqt0025-rev-diff.txt\"; git -C <worktree> diff <base> <tip> > $o` in the PowerShell tool and created C:\\Users\\ANDYLI~1\\AppData\\Local\\Temp\\hqt0025-rev-diff.txt outside the write roots; a later Remove-Item on a sibling %TEMP% path was refused. The engine checks -Redirect* parameters (~103) but not `>`, `>>`, `2>`, `*>`, Out-File, Set-Content/Add-Content -Path, Tee-Object -FilePath, New-Item, Copy-Item/Move-Item -Destination, or [IO.File]::Write*. Check every PowerShell write target (including variables assigned earlier in the same command and environment-variable expansions) against the write roots; a target the engine cannot resolve statically is refused, not allowed. Audit the Bash path for the same class (redirections, tee, cp/mv targets) and fix any gap found."
+  - "(b) Source: the hook fails with JSONDecodeError on some Write/Edit payloads holding CJK text plus backslashes. Likely cause: pretooluse_hook.py ~397 reads sys.stdin with the console code page (cp950 on this host). Read stdin as bytes and decode UTF-8; reproduce first with a test payload, and keep a failure to parse the payload a refusal (fail closed) with a clear message."
+  - "The enforcement table `atc enforce` generates and `~/.claude/hooks` stay untouched; reinstalling hooks after integration is the Owner's step. Do not remove the delete-path checks that already work. No version bump."
