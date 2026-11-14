@@ -906,3 +906,20 @@ def test_a_review_bypass_is_refused(monkeypatch, tool, command):
 @pytest.mark.parametrize("tool, command", REVIEW_LEGITIMATE)
 def test_a_common_command_stays_allowed(tool, command):
     assert decide(tool, command=command, cwd="C:\\hami\\repo") is None
+
+
+@pytest.mark.parametrize("tool, command", [
+    ("Bash", 'eval "$UNKNOWN_DIR"'),
+    ("PowerShell", "$a = 'C:\\out\\o'; if ($x) { $a = 'C:\\hami\\a' }; Set-Content $a 1"),
+    ("PowerShell", "Set-Alias w $c; w C:\\out\\o.txt 1"),
+    ("PowerShell", "$a = 'C:\\hami\\a'; Set-Content variable:a 'C:\\out\\o'; Set-Content $a 1"),
+    ("PowerShell", "Start-Process pwsh -ArgumentList '-c', 'Set-Content C:\\out\\o 1'"),
+    ("PowerShell", "Set-Content Out:\\o.txt 1"),
+])
+def test_what_the_shell_model_cannot_follow_is_refused(monkeypatch, tool, command):
+    monkeypatch.delenv("UNKNOWN_DIR", raising=False)
+    assert decide(tool, command=command, cwd="C:\\hami\\repo") is not None
+
+
+def test_cmd_switches_before_c_still_read_its_line():
+    assert decide("PowerShell", command='cmd /d /c "echo a > C:\\hami\\o.txt"', cwd="C:\\hami\\repo") is None
