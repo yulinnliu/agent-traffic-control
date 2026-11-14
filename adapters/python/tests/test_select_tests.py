@@ -224,8 +224,7 @@ def test_shared_paths_select_the_tests_that_read_their_area(graph):
 ])
 def test_a_task_record_selects_the_tests_that_name_the_record_directory(graph, path):
     assert chosen(graph, path) == ["tests/test_close_out.py", "tests/test_integrate_task.py",
-                                   "tests/test_task_records.py", "tests/test_testkit_testrun.py",
-                                   "tests/test_testkit_testrun_flags.py", "tests/test_testkit_verifier.py"]
+                                   "tests/test_task_records.py", "tests/test_testkit_verifier.py"]
 
 
 def test_a_task_record_no_test_names_falls_back_to_the_full_suite(graph, monkeypatch):

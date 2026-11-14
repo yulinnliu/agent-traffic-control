@@ -208,9 +208,12 @@ several, the working directory's.
    repository's `integrations.jsonl`:
    `{"kind": "report", "task", "role", "sha", "verdict", "file", "closed_at"}`.
    `role` is `reviewer` for `<ID>-<sha>-review.md`, else `unknown` with `sha`
-   `null`; a reviewer's `verdict` is the first whole word `CONDITIONAL PASS`,
-   `PASS` or `FAIL` of the file's first non-empty line, a leading `#` ignored
-   and a word after `NO` or `NOT` skipped, else `null`. A line that cannot be
+   `null`; a reviewer's `verdict` is the first whole word `CONDITIONAL PASS`
+   (also written `CONDITIONAL-PASS` or `CONDITIONAL_PASS`), `PASS` or `FAIL`
+   of the file's first non-empty line in any case, a leading `#` ignored and
+   a word after `NO` or `NOT` skipped, also across `A`, `AN` or `YET`, else
+   `null`. A `PASS` followed by an unnegated `CONDITIONAL` before any `FAIL`,
+   as in `PASS (conditional)`, is `CONDITIONAL PASS`. A line that cannot be
    written ends the file `REFUSED` with the error and keeps it. Readers of
    integrations take only lines with a `candidate_sha`, so these lines change
    no status.

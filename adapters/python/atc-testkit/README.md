@@ -179,8 +179,9 @@ The rows down to `product_module_prefixes` are required; the others are optional
 | `toolchain` | the toolchain's name, `python` when absent |
 
 The selection policy and the static checks stay in the project's gate script.
-Workspace validator, doctor and onboarding inspect opted-in projects. Onboarding
-reports drift while preserving project-owned settings. CI executes the check
+The workspace validator, doctor and `atc sync` inspect opted-in projects.
+`atc sync --check` reports drift, and `atc sync` preserves project-owned
+settings. CI executes the check
 directly and requires no skill.
 
 `SelectionPolicy.critical_prefixes` reserves important inputs for conservative

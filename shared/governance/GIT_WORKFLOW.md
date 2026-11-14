@@ -594,8 +594,8 @@ the lock. Add the section and the file in the project first, then sync.
 
 ## Governance sync commits
 
-`atc onboard --sync --project <project>` and `atc onboard --sync --all`
-commit what they render on each project's `main` and append the commit to
+`atc sync <project>` and `atc sync` commit what they render on each
+project's `main` and append the commit to
 `<git common dir>/atc/integrations.jsonl` with `kind: sync`. Such a commit
 bypasses `## Integrate`: it needs no review and no `integrate_main` authority
 of its own, because the ATC revision it names determines its content and
@@ -616,9 +616,9 @@ anything is written, and `atc validate --projects` reports it.
 `atc preflight push` shows a sync commit as `sync from <ATC revision>`.
 
 A change sync does not render, such as a project file that cites a renamed
-skill, goes through a topic and `## Integrate`. `atc onboard --sync
---root-only` renders the adapters of the ATC checkout it runs in, linked
-worktree included, and commits nothing; run it in the topic that changes a
+skill, goes through a topic and `## Integrate`. `atc sync --root` renders
+the adapters of the ATC checkout it runs in, linked worktree included, and
+commits nothing; run it in the topic that changes a
 canonical skill.
 
 ## Cleanup trigger

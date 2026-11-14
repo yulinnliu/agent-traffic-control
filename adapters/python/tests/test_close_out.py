@@ -314,7 +314,14 @@ def test_kept_reports_write_no_summary(done, capsys: pytest.CaptureFixture[str])
 @pytest.mark.parametrize(("line", "verdict"), [
     ("# ATC-0026 review: PASS at 1a2b3c4", "PASS"), ("CONDITIONAL PASS: rebase first", "CONDITIONAL PASS"),
     ("FAIL - two findings", "FAIL"), ("PASSED every test", None), ("NO PASS yet; FAIL", "FAIL"), ("NOT PASS", None),
-    ("", None), ("## Verdict", None)])
+    ("", None), ("## Verdict", None),
+    ("CONDITIONAL-PASS", "CONDITIONAL PASS"), ("CONDITIONAL_PASS at abc1234", "CONDITIONAL PASS"),
+    ("Conditional PASS", "CONDITIONAL PASS"), ("conditional pass: rebase first", "CONDITIONAL PASS"),
+    ("pass", "PASS"), ("Fail - one finding", "FAIL"), ("**CONDITIONAL PASS**", "CONDITIONAL PASS"),
+    ("PASS (conditional)", "CONDITIONAL PASS"), ("PASS, conditional on a rebase", "CONDITIONAL PASS"),
+    ("PASS, not conditional", "PASS"), ("PASS; FAIL if conditional", "PASS"),
+    ("NOT CONDITIONAL PASS; FAIL", "FAIL"), ("Not a PASS", None), ("not yet PASS; FAIL", "FAIL"),
+    ("NO findings, PASS", "PASS"), ("pass-through review: FAIL", "FAIL")])
 def test_the_verdict_is_a_whole_word_of_the_first_line(line: str, verdict: str | None) -> None:
     assert close_out.verdict_of(line) == verdict
 

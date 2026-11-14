@@ -144,17 +144,36 @@ def consent_count(counts: dict[str, int]) -> str:
 
 REPORT_NAME = re.compile(r"(?P<task>.+?)-(?P<sha>[0-9a-f]{7,40})(?P<review>-review)?\.md")
 NEGATIONS = frozenset({"NO", "NOT"})
+FILLERS = frozenset({"A", "AN", "YET"})
+JOINED_CONDITIONAL = frozenset({"CONDITIONAL-PASS", "CONDITIONAL_PASS"})
+
+
+def _negated(words: list[str], index: int) -> bool:
+    """Whether ``NO`` or ``NOT`` stands before ``words[index]``, across ``A``, ``AN`` and ``YET``."""
+    index -= 1
+    while index >= 0 and words[index] in FILLERS:
+        index -= 1
+    return index >= 0 and words[index] in NEGATIONS
 
 
 def verdict_of(line: str) -> str | None:
-    """The first whole-word ``CONDITIONAL PASS``, ``PASS`` or ``FAIL`` of a line, a leading ``#`` stripped and a
-    negated word skipped."""
-    words = re.findall(r"[\w-]+", line.lstrip().lstrip("#"))
+    """The first whole-word ``CONDITIONAL PASS``, ``PASS`` or ``FAIL`` of a line in any case, a leading ``#``
+    stripped and a negated word skipped; a ``PASS`` that a later, unnegated ``CONDITIONAL`` qualifies before any
+    ``FAIL`` is ``CONDITIONAL PASS``."""
+    words = [word.upper() for word in re.findall(r"[\w-]+", line.lstrip().lstrip("#"))]
     for index, word in enumerate(words):
-        before = words[index - 1] if index else ""
-        if word == "CONDITIONAL" and words[index + 1:index + 2] == ["PASS"] and before not in NEGATIONS:
+        if _negated(words, index):
+            continue
+        if word in JOINED_CONDITIONAL or (word == "CONDITIONAL" and words[index + 1:index + 2] == ["PASS"]):
             return "CONDITIONAL PASS"
-        if word in ("PASS", "FAIL") and before not in NEGATIONS and before != "CONDITIONAL":
+        if word == "FAIL":
+            return word
+        if word == "PASS" and (not index or words[index - 1] != "CONDITIONAL"):
+            for later in range(index + 1, len(words)):
+                if words[later] == "FAIL":
+                    break
+                if words[later] == "CONDITIONAL" and not _negated(words, later):
+                    return "CONDITIONAL PASS"
             return word
     return None
 
