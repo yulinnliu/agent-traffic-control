@@ -14,7 +14,7 @@ from test_atc_cli import NOT_CANONICAL, SUBCOMMANDS, ascii_stdout, call, parsers
 pytestmark = pytest.mark.integration
 
 METAVAR_WORDS = {"NAME", "ID", "SHA", "DIR", "FILE", "PATH", "TEXT", "URL", "OWNER", "REPO", "PROJECT", "COMMAND",
-                 "N", "EVENT_ID", "TITLE"}
+                 "N", "EVENT_ID", "TITLE", "TAG"}
 
 
 def metavar_ok(metavar: str) -> bool:
