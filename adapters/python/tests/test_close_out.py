@@ -204,7 +204,8 @@ OWNER_SQUASH = {"kind": "owner_words", "quote": "squash ATC topic onto main"}
 
 
 def squashed(ws: Workspace, tmp_path: Path, atc_tmp: Path, *, on_main: bool = True, tree_of: str = "tip",
-             parent: str = "main", **line: object) -> tuple[Path, str, dict[str, str]]:
+             parent: str = "main", moved_on: bool = False, second_parent: bool = False,
+             **line: object) -> tuple[Path, str, dict[str, str]]:
     """A topic of two commits squashed onto ``main`` by `git commit-tree` and recorded as a squash: the squash
     commit's tree comes from ``tree_of`` (`tip` or `first`); with ``parent`` `moved` its parent is a commit
     `main` gained after the recorded target tip."""
@@ -214,9 +215,12 @@ def squashed(ws: Workspace, tmp_path: Path, atc_tmp: Path, *, on_main: bool = Tr
     before = run_git(ws.repo, "rev-parse", "main")
     on = before if parent == "main" else commit(ws.repo, {"moved.txt": "m\n"})
     tree = run_git(ws.repo, "rev-parse", f"{tip if tree_of == 'tip' else first}^{{tree}}")
-    squash = run_git(ws.repo, "commit-tree", tree, "-p", on, "-m", f"squash {tip}")
+    extra = ["-p", run_git(ws.repo, "commit-tree", tree, "-p", on, "-m", "side")] if second_parent else []
+    squash = run_git(ws.repo, "commit-tree", tree, "-p", on, *extra, "-m", f"squash {tip}")
     if on_main:
         run_git(ws.repo, "merge", "-q", "--ff-only", squash)
+    if moved_on:
+        commit(ws.repo, {"later.txt": "later\n"})
     entry = {"kind": "squash", "task": TASK, "records_only": False, "candidate_sha": squash, "main_before": before,
              "reviewed": tip, "authority": OWNER_SQUASH, **line}
     ws.integrate(ws.repo, **{key: value for key, value in entry.items() if value is not None})
@@ -281,6 +285,24 @@ def test_a_squash_close_whose_branch_or_archive_tag_moves_after_the_check_refuse
     assert run_git(ws.repo, "rev-parse", f"refs/heads/{SQUASH_BRANCH}") == (tip if race == "tag" else main)
 
 
+def test_a_squash_closes_after_main_moves_on(ws: Workspace, atc_tmp: Path, tmp_path: Path,
+                                             capsys: pytest.CaptureFixture[str]) -> None:
+    topic, tip, environ = squashed(ws, tmp_path, atc_tmp, moved_on=True)
+    code, payload, err = close(ws, environ, capsys, ws.root)
+    assert code == 0, (payload, err)
+    assert outcomes(payload)[str(topic)][0] == "DELETED" and not topic.exists()
+    assert run_git(ws.repo, "rev-parse", f"refs/tags/archive/{TASK}") == tip
+
+
+def test_a_squash_with_a_merge_commit_stays_unmerged(ws: Workspace, atc_tmp: Path, tmp_path: Path,
+                                                     capsys: pytest.CaptureFixture[str]) -> None:
+    topic, _tip, environ = squashed(ws, tmp_path, atc_tmp, second_parent=True)
+    code, payload, err = close(ws, environ, capsys, ws.root)
+    outcome, why = outcomes(payload)[str(topic)]
+    assert (outcome, why.split(":")[0]) == ("REFUSED", "UNMERGED"), (payload, err)
+    assert topic.is_dir() and run_git(ws.repo, "tag", "--list", f"archive/{TASK}") == ""
+
+
 def test_a_squash_whose_branch_moved_past_the_source_tip_stays_unmerged(
         ws: Workspace, atc_tmp: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     topic, _tip, environ = squashed(ws, tmp_path, atc_tmp)
@@ -295,6 +317,97 @@ def test_a_squash_commit_off_main_is_not_integrated(ws: Workspace, atc_tmp: Path
     topic, _tip, environ = squashed(ws, tmp_path, atc_tmp, on_main=False)
     code, _payload, err = close(ws, environ, capsys, ws.root)
     assert (code, err.split(" ", 2)[1].rstrip(":")) == (1, "NOT_INTEGRATED") and topic.is_dir()
+
+
+def leave_directory(ws: Workspace, topic: Path) -> None:
+    """Git unregisters the worktree but its directory stays behind, empty."""
+    run_git(ws.repo, "worktree", "remove", "--force", "--force", str(topic))
+    topic.mkdir()
+
+
+@pytest.mark.parametrize("branch", ["merged", "gone"])
+def test_the_empty_directory_git_left_is_removed_with_its_merged_branch(done, branch: str,
+                                                                         capsys: pytest.CaptureFixture[str]) -> None:
+    ws, topic, environ = done
+    leave_directory(ws, topic)
+    if branch == "gone":
+        run_git(ws.repo, "branch", "-D", "worktree-claude+widget")
+    code, payload, err = close(ws, environ, capsys, ws.root, "--check")
+    assert code == 0 and outcomes(payload)[str(topic)][0] == "DELETE" and topic.is_dir(), (payload, err)
+    code, payload, err = close(ws, environ, capsys, ws.root)
+    assert code == 0 and outcomes(payload)[str(topic)][0] == "DELETED", (payload, err)
+    assert not topic.exists() and run_git(ws.repo, "branch", "--list", "worktree-claude+widget") == ""
+
+
+@pytest.mark.parametrize("shape, code_and_detail", [
+    ("not-empty", "PATH_UNSAFE: unregistered"),
+    ("file", "PATH_UNSAFE: the leftover is not a plain directory"),
+    ("unmerged", "UNMERGED: branch worktree-claude+widget is not merged into main"),
+])
+def test_a_leftover_that_fails_a_condition_is_refused_and_kept(done, shape: str, code_and_detail: str,
+                                                               capsys: pytest.CaptureFixture[str]) -> None:
+    ws, topic, environ = done
+    if shape == "unmerged":
+        commit(topic, {"later.txt": "x\n"})
+    leave_directory(ws, topic) if shape != "file" else run_git(ws.repo, "worktree", "remove", "--force", "--force",
+                                                               str(topic))
+    if shape == "not-empty":
+        (topic / "left.txt").write_text("x", encoding="utf-8")
+    if shape == "file":
+        topic.write_text("x", encoding="utf-8")
+    code, payload, err = close(ws, environ, capsys, ws.root)
+    assert outcomes(payload)[str(topic)] == ("REFUSED", code_and_detail), (payload, err)
+    assert topic.exists() and run_git(ws.repo, "branch", "--list", "worktree-claude+widget") != ""
+
+
+def test_a_leftover_behind_a_reparse_point_is_refused(done, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    ws, topic, environ = done
+    run_git(ws.repo, "worktree", "remove", "--force", "--force", str(topic))
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    _link(topic, outside)
+    code, payload, err = close(ws, environ, capsys, ws.root)
+    outcome, why = outcomes(payload)[str(topic)]
+    assert (outcome, why.split(":")[0]) == ("REFUSED", "PATH_UNSAFE"), (payload, err)
+    assert outside.is_dir()
+
+
+def test_a_busy_leftover_keeps_the_branch(done, monkeypatch: pytest.MonkeyPatch,
+                                          capsys: pytest.CaptureFixture[str]) -> None:
+    ws, topic, environ = done
+    leave_directory(ws, topic)
+    real_rmdir = os.rmdir
+
+    def busy(path, *args, **kwargs) -> None:
+        if os.path.normcase(str(path)) != os.path.normcase(str(topic)):
+            return real_rmdir(path, *args, **kwargs)
+        raise PermissionError(13, "Access is denied", str(path))
+
+    monkeypatch.setattr(hw.os, "rmdir", busy)
+    code, payload, err = close(ws, environ, capsys, ws.root)
+    outcome, why = outcomes(payload)[str(topic)]
+    assert (outcome, why.split(":")[0]) == ("REFUSED", "PERMISSION_DENIED"), (payload, err)
+    assert run_git(ws.repo, "branch", "--list", "worktree-claude+widget") != ""
+
+
+def test_a_leftovers_branch_that_moves_after_the_check_is_kept(done, monkeypatch: pytest.MonkeyPatch,
+                                                               capsys: pytest.CaptureFixture[str]) -> None:
+    ws, topic, environ = done
+    leave_directory(ws, topic)
+    earlier = run_git(ws.repo, "rev-parse", "main~1")
+    real_rmdir = os.rmdir
+
+    def racing(path, *args, **kwargs) -> None:
+        real_rmdir(path, *args, **kwargs)
+        if os.path.normcase(str(path)) == os.path.normcase(str(topic)):
+            run_git(ws.repo, "update-ref", "refs/heads/worktree-claude+widget", earlier)
+
+    monkeypatch.setattr(hw.os, "rmdir", racing)
+    code, payload, err = close(ws, environ, capsys, ws.root)
+    found = outcomes(payload)
+    assert code == 3 and found[str(topic)][0] == "DELETED", (payload, err)
+    assert found["refs/heads/worktree-claude+widget"][0] == "REFUSED"
+    assert run_git(ws.repo, "rev-parse", "refs/heads/worktree-claude+widget") == earlier
 
 
 def _link(link: Path, target: Path) -> None:
@@ -326,6 +439,28 @@ def ledger_reports(ws: Workspace) -> list[dict]:
     path = ws.repo / ".git" / "atc" / "integrations.jsonl"
     return [entry for entry in map(json.loads, path.read_text(encoding="utf-8").splitlines())
             if entry.get("kind") == "report"]
+
+
+def test_kept_reports_write_no_ledger_line(ws: Workspace, atc_tmp: Path, tmp_path: Path,
+                                           capsys: pytest.CaptureFixture[str]) -> None:
+    topic = ws.worktree(ws.repo, "claude+kept", "worktree-claude+kept")
+    tip = commit(topic, {f".atc/tasks/{TASK}.yaml": record(TASK, "worktree-claude+kept", keep=["reports"])})
+    run_git(ws.repo, "merge", "-q", "--ff-only", "worktree-claude+kept")
+    ws.integrate(ws.repo, task=TASK, candidate_sha=tip, records_only=False)
+    reports = tmp_path / "home" / ".atc" / "reports"
+    reports.mkdir(parents=True)
+    (reports / f"{TASK}-x.md").write_text("r", encoding="utf-8")
+    environ = {"CLAUDECODE": "1", "ATC_TMP": str(atc_tmp), "USERPROFILE": str(tmp_path / "home"),
+               "HOME": str(tmp_path / "home")}
+    code, payload, _err = close(ws, environ, capsys, ws.root)
+    assert code == 0 and outcomes(payload)[str(reports / f"{TASK}-x.md")] == ("KEPT", "record keep")
+    assert (reports / f"{TASK}-x.md").is_file() and ledger_reports(ws) == []
+
+
+def test_close_prints_one_verdict_line(done, capsys: pytest.CaptureFixture[str]) -> None:
+    ws, _topic, environ = done
+    assert task_records.main(["close", TASK], root=ws.root, environ=environ, cwd=str(ws.root)) == 0
+    assert capsys.readouterr().out.splitlines() == [f"CLOSED {TASK}: 4 deleted"]
 
 
 def test_each_deleted_report_but_a_writer_report_leaves_a_summary_line(

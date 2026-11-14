@@ -10,6 +10,7 @@ found and removed the same way.
 
 from __future__ import annotations
 
+import functools
 import os
 import re
 import stat
@@ -68,6 +69,18 @@ class Stop(Exception):
     def __init__(self, result: Result) -> None:
         super().__init__(result.code)
         self.result = result
+
+
+def filesystem_refusal_stops(function):
+    """A filesystem refusal anywhere below ``function`` (an ACL, a busy or vanished entry) is `PERMISSION_DENIED`."""
+    @functools.wraps(function)
+    def guarded(ctx, *args, **kwargs):
+        try:
+            return function(ctx, *args, **kwargs)
+        except OSError as exc:
+            raise Stop(Result("PERMISSION_DENIED", exc.filename or ctx.project.worktrees,
+                              f"{type(exc).__name__}: {exc.strerror or exc}")) from exc
+    return guarded
 
 
 class ProbeLeftBehind(Stop):
@@ -383,6 +396,7 @@ def find(ctx: Context, branch: str) -> dict | None:
     return next((e for e in list_worktrees(ctx.project.repo)[1:] if e.get("branch") == branch), None)
 
 
+@filesystem_refusal_stops
 def create(ctx: Context, harness: str, task_id: str) -> Result:
     """The task's worktree and branch from main, locked with `<harness>:<ID>`."""
     name = identity(harness, task_id)
@@ -392,6 +406,10 @@ def create(ctx: Context, harness: str, task_id: str) -> Result:
     if os.path.lexists(target):
         registered = any(key(e["worktree"]) == key(target) for e in list_worktrees(repo)[1:])
         return Result("ALREADY_EXISTS" if registered else "PATH_UNSAFE", target, "" if registered else "unregistered")
+    holder = next((e for e in list_worktrees(repo)[1:]
+                   if (e.get("branch") or "").endswith(f"+{task_id}") and e.get("branch") != name), None)
+    if holder is not None:
+        return Result("IDENTITY_MISMATCH", target, f"task {task_id} is held by {holder['branch']}")
     if branch_present(repo, name):
         return Result("IDENTITY_MISMATCH", target, f"branch {name} exists without this worktree")
     check_resolved(target)
@@ -418,6 +436,7 @@ def create(ctx: Context, harness: str, task_id: str) -> Result:
     return Result("UNSUPPORTED_ENVIRONMENT", target, "git worktree add failed", evidence)
 
 
+@filesystem_refusal_stops
 def located(ctx: Context, branch: str) -> tuple[str, dict]:
     """The worktree of ``branch``, checked: registered, directly under the project's worktrees root, safe."""
     entry = find(ctx, branch)
@@ -431,6 +450,7 @@ def located(ctx: Context, branch: str) -> tuple[str, dict]:
     return target, entry
 
 
+@filesystem_refusal_stops
 def resume(ctx: Context, branch: str) -> Result:
     target, entry = located(ctx, branch)
     if not os.path.isdir(target):
@@ -478,8 +498,12 @@ def cleanup_branch_config(repo: str, branch: str) -> dict:
 
 
 def lock_problem(target: str, entry: dict) -> Result | None:
-    """The worktree `<a>+<b>` must be locked by `<a>:<b>` (contract 2 `<harness>:<ID>`; an earlier contract's
-    `<owner>:<topic>[:<session>]`): a missing lock or one naming another holder refuses its removal."""
+    """The worktree `<a>+<b>` must have the branch `<a>+<b>` (an earlier contract's `worktree-<a>+<b>`) and be
+    locked by `<a>:<b>` (contract 2 `<harness>:<ID>`; an earlier contract's `<owner>:<topic>[:<session>]`): a
+    branch of another name, a missing lock or one naming another holder refuses its removal."""
+    name = os.path.basename(target)
+    if entry.get("branch") not in (name, f"worktree-{name}"):
+        return Result("IDENTITY_MISMATCH", target, f"branch {entry.get('branch')} does not name {name}")
     reason = entry.get("locked")
     if reason is None:
         return Result("IDENTITY_AMBIGUOUS", target, "lock missing")
@@ -489,6 +513,7 @@ def lock_problem(target: str, entry: dict) -> Result | None:
     return None
 
 
+@filesystem_refusal_stops
 def assess(ctx: Context, branch: str, abandon: bool = False, task_id: str = "") -> tuple[Result | None, str, dict]:
     """Whether the worktree of ``branch`` may be removed: (refusal or None, target, entry). Changes nothing."""
     target, entry = located(ctx, branch)
@@ -517,6 +542,7 @@ def assess(ctx: Context, branch: str, abandon: bool = False, task_id: str = "") 
     return None, target, entry
 
 
+@filesystem_refusal_stops
 def remove(ctx: Context, branch: str, abandon: bool = False, task_id: str = "") -> Result:
     """Remove the worktree of ``branch`` and the branch: merged into main, or under ``abandon`` kept reachable
     by the local tag `archive/<ID>` at its tip."""
@@ -570,6 +596,47 @@ def candidate_result(path: str, candidates: str) -> Result | None:
     return Result("CANDIDATE_IN_USE", path, detail, evidence)
 
 
+@filesystem_refusal_stops
+def remove_leftover(ctx: Context, branch: str, check: bool = False) -> Result | None:
+    """The empty directory Git left at ``branch``'s managed path after unregistering its worktree: removed, with
+    the branch compare-and-deleted, when it is a plain empty directory no worktree holds and the branch is merged
+    into main or already gone. None when no such directory exists."""
+    repo = ctx.project.repo
+    target = os.path.join(ctx.project.worktrees, branch.removeprefix("worktree-"))
+    if not os.path.lexists(target):
+        return None
+    check_target_path(ctx.ws, ctx.project, target, ctx.externals)
+    # A registered worktree is never empty (it holds its `.git` file), so the emptiness check refuses one.
+    if is_reparse(target) or not os.path.isdir(target):
+        return Result("PATH_UNSAFE", target, "the leftover is not a plain directory")
+    with os.scandir(target) as entries:
+        if next(entries, None) is not None:
+            return Result("PATH_UNSAFE", target, "unregistered")
+    tip = commit_of(repo, "refs/heads/" + branch)
+    if tip is not None:
+        main_tip = commit_of(repo, "main")
+        if main_tip is None:
+            return Result("UNSUPPORTED_ENVIRONMENT", target, "cannot resolve main")
+        if not is_ancestor(repo, tip, main_tip):
+            return Result("UNMERGED", target, f"branch {branch} is not merged into main")
+    evidence: dict = {"branch": branch, "branch_present": tip is not None, "branch_kept": False}
+    if check:
+        return Result("OK", target, "leftover", evidence)
+    require_writable(repo, target)
+    # rmdir removes only an empty directory, so an entry that arrives after the check stops it.
+    os.rmdir(target)
+    if tip is not None:
+        # Compare-and-delete: a branch that moved since the merge check is kept.
+        deleted = git(repo, "update-ref", "-d", "refs/heads/" + branch, tip)
+        evidence["branch_kept"] = deleted.returncode != 0
+        if deleted.returncode != 0:
+            evidence["git"] = first_line(deleted.stderr)
+        else:
+            evidence.update(cleanup_branch_config(repo, branch))
+    return Result("OK", target, "leftover removed", evidence)
+
+
+@filesystem_refusal_stops
 def audit(ctx: Context, environ: dict[str, str] | None = None) -> list[Result]:
     """Every worktree of the project with whether it is removable; unregistered directories are findings."""
     ws, project = ctx.ws, ctx.project

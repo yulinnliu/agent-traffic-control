@@ -210,6 +210,24 @@ def rehearse_report(repo: Path, task: str, report: Path) -> str:
     return f"DELETE {report} (ledger line: role {summary['role']}, verdict {summary['verdict'] or 'null'})"
 
 
+def leftover_item(ctx: hw.Context, branch: str, check: bool) -> list[str]:
+    """The item lines for the empty directory Git left at the branch's managed path (`hw.remove_leftover`)."""
+    try:
+        result = hw.remove_leftover(ctx, branch, check)
+    except hw.Stop as stop:
+        result = stop.result
+    if result is None:
+        return []
+    if result.code != "OK":
+        return [f"REFUSED {result.target} ({result.code}: {result.detail})"]
+    with_branch = f", branch {branch}" if result.evidence.get("branch_present") else ""
+    if check:
+        return [f"DELETE {result.target} (empty directory Git left{with_branch})"]
+    if result.evidence.get("branch_kept"):
+        return [f"DELETED {result.target}", f"REFUSED refs/heads/{branch} (branch kept: {result.evidence.get('git', '')})"]
+    return [f"DELETED {result.target}"]
+
+
 def worktree_item(ctx: hw.Context, branch: str, task: str, cwd: str, check: bool, abandon: bool,
                   squash: str | None = None) -> list[str]:
     """The item lines for the task's worktree and branch; none when the task has no worktree. A topic
@@ -221,7 +239,7 @@ def worktree_item(ctx: hw.Context, branch: str, task: str, cwd: str, check: bool
         target, _ = hw.located(ctx, branch)
     except hw.Stop as stop:
         if stop.result.code == "NOT_FOUND":
-            return []
+            return [] if archive else leftover_item(ctx, branch, check)
         return [f"REFUSED {stop.result.target} ({stop.result.code}: {stop.result.detail})"]
     if _real(cwd).is_relative_to(_real(target)):
         return [f"REFUSED {target} (the working directory is inside it; run it from elsewhere)"]

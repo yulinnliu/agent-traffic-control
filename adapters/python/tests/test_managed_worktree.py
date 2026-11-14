@@ -675,6 +675,49 @@ def test_remove_refuses_a_worktree_locked_by_another_holder(ws: Workspace, reaso
     assert target.is_dir() and ws.locked(target) == reason
 
 
+def test_create_refuses_an_id_another_harness_holds(ws: Workspace) -> None:
+    hw.create(ws.ctx(), "codex", TASK)
+    result = hw.create(ws.ctx(), "claude", TASK)
+    assert (result.code, result.detail) == ("IDENTITY_MISMATCH", f"task {TASK} is held by codex+{TASK}")
+    assert not (ws.worktrees / f"claude+{TASK}").exists()
+
+
+def test_create_is_not_held_by_an_id_that_only_ends_the_same(ws: Workspace) -> None:
+    run_git(ws.repo, "worktree", "add", "-q", "-b", f"codex+X{TASK}", str(ws.worktrees / f"codex+X{TASK}"), "main")
+    assert hw.create(ws.ctx(), "claude", TASK).code == "OK"
+
+
+def test_a_branch_that_disagrees_with_its_directory_is_flagged_and_kept(ws: Workspace) -> None:
+    path = ws.worktrees / f"claude+{TASK}"
+    run_git(ws.repo, "worktree", "add", "-q", "--lock", "--reason", LOCK, "-b", "claude+DEMO-0002", str(path), "main")
+    [audited] = hw.audit(ws.ctx())
+    expected = ("IDENTITY_MISMATCH", f"branch claude+DEMO-0002 does not name claude+{TASK}")
+    assert (audited.code, audited.detail) == expected
+    removed = hw.remove(ws.ctx(), "claude+DEMO-0002", task_id=TASK)
+    assert (removed.code, removed.detail) == expected and path.is_dir()
+
+
+def test_an_old_style_branch_names_its_directory(ws: Workspace) -> None:
+    path = ws.worktrees / "claude+topic"
+    run_git(ws.repo, "worktree", "add", "-q", "--lock", "--reason", "claude:topic:s1", "-b", "worktree-claude+topic",
+            str(path), "main")
+    assert [r.code for r in hw.audit(ws.ctx())] == ["OK"]
+
+
+@pytest.mark.parametrize("entry_point", ["create", "audit"])
+def test_a_filesystem_refusal_is_permission_denied(ws: Workspace, monkeypatch: pytest.MonkeyPatch,
+                                                   entry_point: str) -> None:
+    hw.create(ws.ctx(), "claude", "DEMO-0002")
+
+    def refuse(path: str) -> bool:
+        raise PermissionError(13, "Access is denied", path)
+
+    monkeypatch.setattr(hw, "is_reparse", refuse)
+    call = (lambda: hw.create(ws.ctx(), "claude", TASK)) if entry_point == "create" else (lambda: hw.audit(ws.ctx()))
+    result = refusal(call)
+    assert (result.code, result.detail) == ("PERMISSION_DENIED", "PermissionError: Access is denied")
+
+
 def test_create_refuses_a_branch_that_exists_without_its_worktree(ws: Workspace) -> None:
     run_git(ws.repo, "branch", f"claude+{TASK}", "main")
     result = hw.create(ws.ctx(), "claude", TASK)
@@ -905,6 +948,97 @@ def test_audit_names_candidates_in_use_and_left_over(ws: Workspace, atc_tmp: Pat
     by_code = {r.code: r for r in results}
     assert set(by_code) == {"CANDIDATE_LEFTOVER", "CANDIDATE_IN_USE"}
     assert f"pid {os.getpid()}" in by_code["CANDIDATE_IN_USE"].detail
+
+
+def test_abandon_refuses_a_reparse_point_in_the_tree(ws: Workspace, tmp_path: Path) -> None:
+    hw.create(ws.ctx(), "claude", TASK)
+    path = ws.worktrees / f"claude+{TASK}"
+    commit(path, "work.txt", "work\n")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "keep.txt").write_text("keep", encoding="utf-8")
+    (path / "sub").mkdir()
+    make_link(path / "sub" / "link", outside)
+    (ws.repo / ".git" / "info").mkdir(exist_ok=True)
+    (ws.repo / ".git" / "info" / "exclude").write_text("sub/\n", encoding="utf-8")
+    result = refusal(lambda: hw.remove(ws.ctx(), f"claude+{TASK}", abandon=True, task_id=TASK))
+    assert (result.code, result.detail) == ("PATH_UNSAFE", "reparse")
+    assert (outside / "keep.txt").exists() and path.is_dir()
+    assert run_git(ws.repo, "tag", "--list", f"archive/{TASK}") == ""
+
+
+def test_abandon_refuses_a_dirty_worktree(ws: Workspace) -> None:
+    hw.create(ws.ctx(), "claude", TASK)
+    path = ws.worktrees / f"claude+{TASK}"
+    commit(path, "work.txt", "work\n")
+    (path / "uncommitted.txt").write_text("x", encoding="utf-8")
+    result = refusal(lambda: hw.remove(ws.ctx(), f"claude+{TASK}", abandon=True, task_id=TASK))
+    assert result.code == "DIRTY"
+    assert path.is_dir() and (path / "uncommitted.txt").exists()
+    assert run_git(ws.repo, "tag", "--list", f"archive/{TASK}") == ""
+
+
+def test_a_legacy_checkout_outside_the_worktrees_root_is_refused_by_resume_and_remove(ws: Workspace) -> None:
+    legacy = ws.repo / ".claude" / "worktrees" / f"claude+{TASK}"
+    legacy.parent.mkdir(parents=True)
+    run_git(ws.repo, "worktree", "add", "--lock", "--reason", f"claude:{TASK}:s1", "-b", f"claude+{TASK}",
+            str(legacy), "main")
+    assert stopped(lambda: hw.resume(ws.ctx(), f"claude+{TASK}")) == "PATH_UNSAFE"
+    result = refusal(lambda: hw.remove(ws.ctx(), f"claude+{TASK}", task_id=TASK))
+    assert (result.code, result.detail) == ("PATH_UNSAFE", "outside-root")
+    assert legacy.is_dir()
+
+
+def test_remove_refuses_a_reparse_point_on_the_path(ws: Workspace, tmp_path: Path) -> None:
+    hw.create(ws.ctx(), "claude", TASK)
+    target = ws.worktrees / f"claude+{TASK}"
+    backing = tmp_path / "backing"
+    backing.mkdir()
+    shutil.move(str(target), str(backing / target.name))
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    make_link(target, empty)
+    result = refusal(lambda: hw.remove(ws.ctx(), f"claude+{TASK}", task_id=TASK))
+    assert (result.code, result.detail) == ("PATH_UNSAFE", "reparse")
+    assert (backing / target.name).is_dir() and hw.is_reparse(str(target))
+
+
+def test_create_into_an_occupied_path_is_refused(ws: Workspace) -> None:
+    occupied = ws.worktrees / f"claude+{TASK}"
+    occupied.mkdir(parents=True)
+    before = hw.list_worktrees(str(ws.repo))
+    result = refusal(lambda: hw.create(ws.ctx(), "claude", TASK))
+    assert (result.code, result.detail) == ("PATH_UNSAFE", "unregistered")
+    assert hw.list_worktrees(str(ws.repo)) == before and occupied.is_dir()
+
+
+def test_create_of_an_existing_identity_never_mutates(ws: Workspace) -> None:
+    hw.create(ws.ctx(), "claude", TASK)
+    path = ws.worktrees / f"claude+{TASK}"
+    tip = run_git(ws.repo, "rev-parse", f"refs/heads/claude+{TASK}")
+    result = refusal(lambda: hw.create(ws.ctx(), "claude", TASK))
+    assert result.code == "ALREADY_EXISTS"
+    assert ws.locked(path) == LOCK
+    assert run_git(ws.repo, "rev-parse", f"refs/heads/claude+{TASK}") == tip
+
+
+def test_create_over_an_unlocked_registration_is_already_exists_and_writes_no_lock(ws: Workspace) -> None:
+    hw.create(ws.ctx(), "claude", TASK)
+    path = ws.worktrees / f"claude+{TASK}"
+    run_git(ws.repo, "worktree", "unlock", str(path))
+    result = hw.create(ws.ctx(), "claude", TASK)
+    assert result.code == "ALREADY_EXISTS"
+    assert ws.locked(path) is None and path.is_dir()
+
+
+def test_other_stop_is_not_reported_as_a_leftover_probe(tmp_path: Path) -> None:
+    def create(path: str) -> None:
+        raise hw.Stop(hw.Result("UNSUPPORTED_ENVIRONMENT", str(tmp_path), "x"))
+
+    with pytest.raises(hw.Stop) as stop:
+        hw.probe(str(tmp_path), create, os.rmdir)
+    assert not isinstance(stop.value, hw.ProbeLeftBehind)
+    assert stop.value.result.code == "UNSUPPORTED_ENVIRONMENT"
 
 
 # doctor line (contract 2)

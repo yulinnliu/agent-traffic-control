@@ -247,6 +247,27 @@ def test_create_bases_the_task_on_the_main_tip(ws: Workspace, capsys: pytest.Cap
 
 # list
 
+def test_create_prints_one_verdict_line(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    status, out, err = ws.cli(capsys, "create", "widget", "--scope", "s", cwd=ws.repo)
+    assert status == 0, err
+    lines = out.splitlines()
+    assert len(lines) == 1 and lines[0].startswith("CREATED DEMO-0001 ")
+
+
+def test_invalid_task_id_is_a_usage_error(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    for task in ("bad-id", "Upper-1"):
+        status = task_records.main(["close", task], root=ws.root, environ=dict(HARNESS), cwd=str(ws.repo))
+        err = capsys.readouterr().err
+        assert status == 2 and err.startswith("ERROR TASK_INVALID "), (task, err)
+
+
+def test_uninferable_cwd_lists_the_registered_names(ws: Workspace, tmp_path: Path,
+                                                    capsys: pytest.CaptureFixture[str]) -> None:
+    status = task_records.main(["list"], root=ws.root, environ=dict(HARNESS), cwd=str(tmp_path))
+    err = capsys.readouterr().err
+    assert status == 2 and "UNKNOWN_PROJECT" in err and f"registered: {PROJECT}" in err
+
+
 def test_list_derives_each_status(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
     main_records = {
         ".atc/tasks/DEMO-0001.yaml": record("DEMO-0001", "t-closed"),
