@@ -1,10 +1,12 @@
 task_id: DEMO-0002
+title: Add the widget
 repository: example/demo
 base_sha: '1111111111111111111111111111111111111111'
 scope: 'Plan § A: add the widget'
+tests: standard
 governance_source: example/governance
 governance_revision: '2222222222222222222222222222222222222222'
-branch: worktree-alice+widget
+branch: claude+DEMO-0002
 authority:
   edit: true
   commit: true
@@ -13,7 +15,6 @@ authority:
   push_main: false
   deploy: false
 authority_basis: 'Owner: integrate DEMO-0002 when its review passes'
-closure:
-  state: closed
-  note: done
+decisions:
+  - 'Owner: the widget keeps its old name'
 writer: alice

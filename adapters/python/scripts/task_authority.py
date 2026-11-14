@@ -97,7 +97,7 @@ def scan(repo: Path, base: str, reviewed: str) -> Range:
 def check_range(repo: Path, rng: Range, main_tip: str, reviewed: str, may_change: bool) -> None:
     """`TASK_ID_TAKEN` and `TASK_AUTHORITY_CHANGED` for each record file the range changes.
 
-    ``may_change`` holds for a records-only range under `--owner-words`, the
+    ``may_change`` holds for a records-only range under the Owner's run, the
     only range that may change a grant on `main` or add a record granting more
     than `edit` and `commit`.
     """
@@ -122,7 +122,7 @@ def check_range(repo: Path, rng: Range, main_tip: str, reviewed: str, may_change
 
 
 def check_record(repo: Path, task_id: str, reviewed: str, branch: str) -> None:
-    """`TASK_NOT_FOUND` and `TASK_BRANCH_MISMATCH` for the record `--task` names."""
+    """`TASK_NOT_FOUND` and `TASK_BRANCH_MISMATCH` for the record the task ID names."""
     record = parse(show(repo, reviewed, record_path(task_id)))
     if record is None:
         raise Stop("TASK_NOT_FOUND", f"the reviewed commit {reviewed} holds no {record_path(task_id)}")
@@ -144,7 +144,7 @@ def grant_commit(repo: Path, main_tip: str, path: str) -> str | None:
 
 
 def integrated_binding(repo: Path, grant: str, task_id: str, integrations: list[dict]) -> dict | None:
-    """The records-only `--owner-words` line of ``task_id`` whose new commits include ``grant``."""
+    """The records-only Owner-run line of ``task_id`` whose new commits include ``grant``."""
     for line in integrations:
         authority = line.get("authority")
         base = line.get("main_before")
@@ -161,13 +161,13 @@ def record_authority(repo: Path, task_id: str, main: str, main_tip: str, integra
     path = record_path(task_id)
     record = parse(show(repo, main_tip, path))
     if record is None or record is UNREADABLE:
-        raise Stop("AUTHORITY_MISSING", f"{main} holds no readable {path}; integrate with --owner-words")
+        raise Stop("AUTHORITY_MISSING", f"{main} holds no readable {path}")
     authority = record.get("authority")
     if not isinstance(authority, dict) or authority.get("integrate_main") is not True:
-        raise Stop("AUTHORITY_MISSING", f"{path} on {main} does not grant integrate_main; integrate with --owner-words")
+        raise Stop("AUTHORITY_MISSING", f"{path} on {main} does not grant integrate_main")
     grant = grant_commit(repo, main_tip, path)
     if grant is None or integrated_binding(repo, grant, task_id, integrations) is None:
         raise Stop("AUTHORITY_NOT_INTEGRATED", f"the grant of {task_id} on {main} (commit {grant}) did not enter "
-                                               f"{main} through a records-only atc integrate with --owner-words "
-                                               "in this clone; integrate with --owner-words")
+                                               f"{main} through a records-only atc integrate run by the Owner "
+                                               "in this clone")
     return {"kind": "record", "task_id": task_id}

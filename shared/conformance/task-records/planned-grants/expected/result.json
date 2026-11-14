@@ -1,8 +1,0 @@
-{
-  "exit_code": 1,
-  "output_contains": [
-    "schema-violation: DEMO-0003.yaml: authority/edit:",
-    "schema-violation: DEMO-0003.yaml: rank:",
-    "schema-violation: DEMO-0003.yaml: after/0:"
-  ]
-}

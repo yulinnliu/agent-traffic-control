@@ -2,20 +2,17 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://agent-traffic-control/schemas/task.schema.json",
   "title": "Task record",
-  "description": "One task of one repository, kept in .atc/tasks/<task_id>.yaml (docs/TASKS.md § Record); a planned record has no branch, base_sha or governance_revision and grants nothing (docs/TASKS.md § Backlog).",
+  "description": "One task of one repository, kept in .atc/tasks/<task_id>.yaml (docs/TASKS.md § Record); atc task create writes it with the task's worktree and branch.",
   "type": "object",
-  "required": ["task_id", "repository", "scope", "governance_source", "authority"],
-  "dependentRequired": {
-    "branch": ["base_sha", "governance_revision"],
-    "base_sha": ["branch", "governance_revision"],
-    "governance_revision": ["branch", "base_sha"]
-  },
+  "required": ["task_id", "repository", "scope", "governance_source", "authority", "branch", "base_sha", "governance_revision"],
   "properties": {
     "task_id": {"$ref": "#/$defs/task_id"},
+    "title": {"type": "string", "minLength": 1},
     "repository": {"type": "string", "minLength": 1},
     "repository_identity_status": {"type": "string"},
     "base_sha": {"$ref": "#/$defs/sha"},
     "scope": {"type": "string", "minLength": 1},
+    "tests": {"enum": ["none", "standard", "strict"]},
     "governance_source": {"type": "string", "minLength": 1},
     "governance_revision": {"$ref": "#/$defs/sha"},
     "branch": {"type": "string", "minLength": 1},
@@ -33,24 +30,12 @@
       }
     },
     "authority_basis": {"type": "string", "minLength": 1},
-    "closure": {
-      "type": "object",
-      "required": ["state", "note"],
-      "additionalProperties": false,
-      "properties": {
-        "state": {"enum": ["closed", "abandoned"]},
-        "note": {"type": "string", "minLength": 1}
-      }
-    },
     "keep": {
       "type": "array",
       "uniqueItems": true,
       "items": {"enum": ["worktree", "scratches", "reports"]}
     },
-    "rank": {"type": "integer", "minimum": 1},
-    "after": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/task_id"}},
-    "notes": {"type": "string", "minLength": 1},
-    "version": {"type": "string", "minLength": 1}
+    "decisions": {"anyOf": [{"type": "array", "items": {"type": "string", "minLength": 1}}, {"type": "object"}]}
   },
   "allOf": [
     {
@@ -68,23 +53,6 @@
         }
       },
       "then": {"required": ["authority_basis"]}
-    },
-    {
-      "if": {"not": {"required": ["branch"]}},
-      "then": {
-        "properties": {
-          "authority": {
-            "properties": {
-              "edit": {"const": false},
-              "commit": {"const": false},
-              "push_topic": {"const": false},
-              "integrate_main": {"const": false},
-              "push_main": {"const": false},
-              "deploy": {"const": false}
-            }
-          }
-        }
-      }
     }
   ],
   "$defs": {

@@ -1,6 +1,0 @@
-{
-  "exit_code": 1,
-  "output_contains": [
-    "schema-violation: DEMO-0003.yaml: <root>: 'base_sha' is a dependency of 'branch'"
-  ]
-}
