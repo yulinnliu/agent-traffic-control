@@ -10,12 +10,12 @@ skill never depends on an environment variable naming this checkout, so the
 copies work in a repository that knows nothing about it. No orphaned adapter
 is left behind after a canonical skill is removed.
 The task records under `.atc/tasks/` and their `## Task records` declaration
-are checked here and, with --projects, in each project, along with one task
-prefix per repository (`docs/TASKS.md`).
+are checked here and, through `project_problems` (`atc sync --check`), in each
+project, along with one task prefix per repository (`docs/TASKS.md`).
 
-By default only checks this repo's own `.claude/skills/`, `.agents/skills/`
-and `.dsh/skills/` — the ones CI can see. Pass --projects to also check each
-project listed in the real (gitignored, machine-local) workspace.yaml, for
+`atc-maintain validate` checks only this repo's own `.claude/skills/`,
+`.agents/skills/` and `.dsh/skills/` — the ones CI can see. `project_problems`
+checks each project listed in the real (gitignored, machine-local) workspace.yaml, for
 whichever of those projects actually exist on disk right now — each must
 carry adapters for every `adoption: baseline` skill, the pointer line in
 AGENTS.md and a current `.atc/` (lock, bootloader, vendored governance), all
@@ -77,48 +77,48 @@ TOOL_DIRS = (".claude", ".agents", ".dsh")
 # Tool directory -> the overlay name a canonical skill may ship under adapters/.
 TOOL_KEYS = {".claude": "claude", ".agents": "codex", ".dsh": "dsh"}
 # workspace.yaml's top-level map: project name -> the tools (TOOL_KEYS values) or `all` (docs/LAYOUT.md).
-SKILL_TOOLS = "skill_tools"
+SKILL_HARNESSES = "skill_harnesses"
 ALL_TOOLS = "all"
 
 
 def tool_dirs_for(value: object) -> tuple[str, ...]:
-    """The tool directories one ``skill_tools`` value selects, in TOOL_DIRS order; absent or `all` is every one."""
+    """The tool directories one ``skill_harnesses`` value selects, in TOOL_DIRS order; absent or `all` is every one."""
     if value is None or value == ALL_TOOLS or not isinstance(value, list):
         return TOOL_DIRS
     return tuple(tool_dir for tool_dir in TOOL_DIRS if TOOL_KEYS[tool_dir] in value)
 
 
-def skill_tools_problems(value: object, projects: object) -> list[str]:
-    """Shape problems of workspace.yaml's ``skill_tools``: a mapping from a registered project to `all` or a
-    non-empty list of distinct tool names."""
+def skill_harnesses_problems(value: object, projects: object) -> list[str]:
+    """Shape problems of workspace.yaml's ``skill_harnesses``: a mapping from a registered project to `all` or a
+    non-empty list of distinct harness names."""
     if not isinstance(value, dict):
-        return [f"'{SKILL_TOOLS}' must be a mapping of project name to a list of tools or '{ALL_TOOLS}'"]
+        return [f"'{SKILL_HARNESSES}' must be a mapping of project name to a list of harnesses or '{ALL_TOOLS}'"]
     names = ", ".join(TOOL_KEYS.values())
     problems = []
     for name, tools in value.items():
         if not isinstance(projects, dict) or name not in projects:
-            problems.append(f"{SKILL_TOOLS}.{name}: not a registered project")
+            problems.append(f"{SKILL_HARNESSES}.{name}: not a registered project")
         if tools == ALL_TOOLS:
             continue
         if not isinstance(tools, list) or not tools:
-            problems.append(f"{SKILL_TOOLS}.{name} must be '{ALL_TOOLS}' or a non-empty list of {names}")
+            problems.append(f"{SKILL_HARNESSES}.{name} must be '{ALL_TOOLS}' or a non-empty list of {names}")
             continue
         unknown = [tool for tool in tools if tool not in TOOL_KEYS.values()]
         if unknown:
-            problems.append(f"{SKILL_TOOLS}.{name}: unknown tool {', '.join(map(repr, unknown))}; one of {names}")
+            problems.append(f"{SKILL_HARNESSES}.{name}: unknown harness {', '.join(map(repr, unknown))}; one of {names}")
         elif len(set(tools)) != len(tools):
-            problems.append(f"{SKILL_TOOLS}.{name} lists a tool twice")
+            problems.append(f"{SKILL_HARNESSES}.{name} lists a harness twice")
     return problems
 
 
-def load_skill_tools(path: Path) -> dict[str, tuple[str, ...]]:
-    """{project: tool directories} for every project ``skill_tools`` in ``path`` names; an unlisted project
+def load_skill_harnesses(path: Path) -> dict[str, tuple[str, ...]]:
+    """{project: tool directories} for every project ``skill_harnesses`` in ``path`` names; an unlisted project
     gets every tool directory. Shape problems are load_and_check_workspace_yaml's to report."""
     try:
         doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     except (OSError, yaml.YAMLError):
         return {}
-    value = doc.get(SKILL_TOOLS) if isinstance(doc, dict) else None
+    value = doc.get(SKILL_HARNESSES) if isinstance(doc, dict) else None
     if not isinstance(value, dict):
         return {}
     return {name: tool_dirs_for(tools) for name, tools in value.items()}
@@ -299,8 +299,8 @@ def load_and_check_workspace_yaml(path: Path) -> tuple[str | None, dict[str, dic
                 fail(f"{path}: projects.{name}: {reserved}")
                 continue
             safe_projects[name] = entry
-    if SKILL_TOOLS in doc:
-        for problem in skill_tools_problems(doc[SKILL_TOOLS], projects):
+    if SKILL_HARNESSES in doc:
+        for problem in skill_harnesses_problems(doc[SKILL_HARNESSES], projects):
             fail(f"{path}: {problem}")
     return root_val, safe_projects
 
@@ -548,7 +548,7 @@ def check_adapter_tree(
     against the canonical skills of ``source`` (this checkout by default).
 
     Every skill in ``required`` must have an adapter in each of ``tool_dirs``,
-    the directories ``skill_tools`` selects: the workspace root requires every
+    the directories ``skill_harnesses`` selects: the workspace root requires every
     canonical skill in every directory, a registered project requires the
     ``adoption: baseline`` ones. Other canonical skills are optional for a
     project and are checked only when adopted. A managed adapter in a directory
@@ -581,7 +581,7 @@ def check_adapter_tree(
         if f".{tool_dir}" not in tool_dirs:
             for name in sorted(adapter_like & set(canonical)):
                 fail(f"{label}: .{tool_dir}/skills/{name}/ is a managed adapter in a tool directory "
-                     f"{SKILL_TOOLS} does not select — run sync")
+                     f"{SKILL_HARNESSES} does not select — run sync")
             continue
         for name in sorted(set(required) - actual_names):
             fail(f"{label}: .{tool_dir}/skills/{name}/ missing")
@@ -786,11 +786,11 @@ def check_project_enforcement(project_path: Path, label: str) -> None:
         return
     drift = generate_enforcement.drift(generate_enforcement.render(hard), project_path / "generated" / "enforcement")
     if drift:
-        fail(f"{label}: generated/enforcement/ differs from policies/hard-deny.yaml: {', '.join(drift)} — run atc enforce")
+        fail(f"{label}: generated/enforcement/ differs from policies/hard-deny.yaml: {', '.join(drift)} — run atc-maintain guard")
 
 
 def report_machine_local(project_path: Path, label: str, workspace_yaml: Path) -> None:
-    """Report, never fail: `.claude/settings.local.json` carries the state-root deny `atc enforce` renders."""
+    """Report, never fail: `.claude/settings.local.json` carries the state-root deny `atc-maintain guard` renders."""
     import generate_enforcement
     try:
         roots = generate_enforcement.state_roots(workspace_yaml)
@@ -802,9 +802,9 @@ def report_machine_local(project_path: Path, label: str, workspace_yaml: Path) -
     expected = json.loads(generate_enforcement.local_settings(roots))["permissions"]["deny"]
     current = generate_enforcement.machine_local(generate_enforcement.deny_entries(target), keep=True)
     if not current:
-        print(f"--projects: {label}: machine-local state deny missing from .claude/settings.local.json; run atc enforce --local-out and merge")
+        print(f"sync --check: {label}: machine-local state deny missing from .claude/settings.local.json; run atc-maintain guard --local-out and merge")
     elif current != expected:
-        print(f"--projects: {label}: machine-local state deny in .claude/settings.local.json differs from {workspace_yaml.name}; run atc enforce --local-out and merge")
+        print(f"sync --check: {label}: machine-local state deny in .claude/settings.local.json differs from {workspace_yaml.name}; run atc-maintain guard --local-out and merge")
 
 
 def report_hook(workspace_yaml: Path) -> None:
@@ -814,7 +814,7 @@ def report_hook(workspace_yaml: Path) -> None:
         return
     found = generate_enforcement.hook_drift(workspace_yaml)
     if found:
-        print(f"--projects: pretooluse hook differs from the policies: {'; '.join(found)}; the Owner runs atc enforce --install-hooks")
+        print(f"sync --check: pretooluse hook differs from the policies: {'; '.join(found)}; the Owner runs atc guard --install")
 
 
 def check_atc_dir(project_path: Path, label: str, source: Path | None = None) -> None:
@@ -868,7 +868,7 @@ def check_tracked(project_path: Path, label: str, canonical: dict[str, dict], so
     """Every file sync writes is committed (GIT_WORKFLOW.md § Governance sync commits).
 
     A file Git ignores or excludes can never be committed and fails; a file
-    not committed yet, as `atc bootstrap add` leaves its first sync, is
+    not committed yet, as `atc add` leaves its first sync, is
     reported."""
     paths = sync_written_paths(project_path, canonical, source)
     if not paths or not git_toplevel(project_path):
@@ -883,7 +883,7 @@ def check_tracked(project_path: Path, label: str, canonical: dict[str, dict], so
     for path in untracked("--ignored", "--exclude-standard"):
         fail(f"{label}: {path} is written by sync but Git ignores or excludes it; every file sync writes is committed")
     for path in untracked("--exclude-standard"):
-        print(f"--projects: {label}: {path} is written by sync and not committed yet")
+        print(f"sync --check: {label}: {path} is written by sync and not committed yet")
 
 
 def check_root_atc() -> None:
@@ -976,14 +976,14 @@ def check_projects(canonical: dict[str, dict], project_checkouts: dict[str, Path
             fail("--project-checkout requires workspace.yaml so candidate names can be verified as registered")
         else:
             print(
-                "--projects: no workspace.yaml at the workspace root — nothing "
+                "sync --check: no workspace.yaml at the workspace root — nothing "
                 "to check (this is expected in CI; run locally after setting "
                 "one up)."
             )
         return
 
     root_val, safe_projects = load_and_check_workspace_yaml(real_workspace_yaml)
-    selected_tools = load_skill_tools(real_workspace_yaml)
+    selected_tools = load_skill_harnesses(real_workspace_yaml)
 
     if root_val is not None:
         configured_root = Path(root_val).expanduser().resolve()
@@ -1006,7 +1006,7 @@ def check_projects(canonical: dict[str, dict], project_checkouts: dict[str, Path
                 if explicit_candidate:
                     fail(f"projects.{name}: explicit candidate checkout {project_path} is not a directory")
                 else:
-                    print(f"--projects: '{name}' -> {project_path} not present, skipping")
+                    print(f"sync --check: '{name}' -> {project_path} not present, skipping")
                 continue
             label = f"projects.{name}"
             # Synced files are current when they equal what the locked revision renders (docs/LAYOUT.md).
@@ -1030,13 +1030,11 @@ def check_projects(canonical: dict[str, dict], project_checkouts: dict[str, Path
 
 def main(argv: list[str] | None = None) -> int:
     import cli_conventions
-    parser = argparse.ArgumentParser(prog="atc validate", allow_abbrev=False, **cli_conventions.form(
+    parser = argparse.ArgumentParser(prog="atc-maintain validate", allow_abbrev=False, **cli_conventions.form(
         "Check this checkout's contract: workspace.yaml.example, canonical skills against their managed adapters,\n"
         "and task records. With --projects, also every registered project on disk.",
         exit="0 every check passed; 1 problems found, all of them printed; 2 usage error",
         see="adapters/python/README.md § validate"))
-    parser.add_argument("--projects", action="store_true",
-                        help="also check each project in the local workspace.yaml and user-level skill copies")
     parser.add_argument("--adapters-only", action="store_true", help="check only canonical skills and their adapters")
     parser.add_argument("--root", metavar="DIR", help="the ATC checkout to validate, as the global atc --root")
     parser.add_argument("--project-checkout", action="append", default=[], metavar="NAME=PATH",
@@ -1067,7 +1065,7 @@ def main(argv: list[str] | None = None) -> int:
         check_shipped_files_are_self_contained()
         check_workspace_env()
 
-    if args.projects or project_checkouts:
+    if project_checkouts:
         check_projects(canonical, project_checkouts, root_prefix=root_prefix)
         check_user_level_duplicates(canonical, Path.home())
 
@@ -1075,13 +1073,33 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({"verdict": "PROBLEMS" if FAILURES else "OK", "problems": FAILURES}, indent=2))
         return 1 if FAILURES else 0
     if FAILURES:
-        print(f"validate_workspace: {len(FAILURES)} problem(s) found:\n")
+        print(f"PROBLEMS {len(FAILURES)} found")
         for f in FAILURES:
-            print(f"  - {f}")
+            print(f"  {f}")
+        print("STOP VALIDATION_FAILED: each problem line names the file and the fix", file=sys.stderr)
+        print("hint: fix them, then run atc-maintain validate again", file=sys.stderr)
         return 1
 
-    print("validate_workspace: all checks passed.")
+    print(f"OK {ROOT.name}")
     return 0
+
+
+def project_problems(root: Path, names: list[str] | None = None) -> list[str]:
+    """`atc sync --check`: the problems of each registered project on disk and of user-level skill copies;
+    with ``names``, only the problems that name one of them or a user-level copy."""
+    global ROOT
+    original = ROOT
+    FAILURES.clear()
+    try:
+        ROOT = Path(root).resolve()
+        canonical = load_canonical_skills()
+        check_projects(canonical, root_prefix=check_task_records(ROOT, label="workspace root"))
+        check_user_level_duplicates(canonical, Path.home())
+        found = [f for f in FAILURES if not names or "user-level" in f or any(name in f for name in names)]
+    finally:
+        ROOT = original
+        FAILURES.clear()
+    return found
 
 
 if __name__ == "__main__":

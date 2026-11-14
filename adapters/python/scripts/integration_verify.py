@@ -29,9 +29,9 @@ DOCUMENTATION_PREFIX = "docs/"
 TASK_RECORDS = ".atc/tasks/"
 
 WORKSPACE_CHECK = StaticCheck("workspace", "WORKSPACE_VALIDATION_FAILED",
-                              ("uv", "run", "--locked", "python", "scripts/validate_workspace.py"), cwd=ADAPTER_DIR)
+                              ("uv", "run", "--locked", "atc-maintain", "validate"), cwd=ADAPTER_DIR)
 POLICY_CHECK = StaticCheck("policies", "POLICY_CHECK_FAILED",
-                           ("uv", "run", "--locked", "python", "scripts/policies.py", "check",
+                           ("uv", "run", "--locked", "atc-maintain", "policies", "check",
                             "../../shared/policies/examples"), cwd=ADAPTER_DIR)
 
 

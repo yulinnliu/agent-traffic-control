@@ -109,7 +109,7 @@ def contradictions(loaded: dict[str, dict]) -> list[str]:
 
 def main(argv: list[str] | None = None) -> int:
     import cli_conventions
-    parser = argparse.ArgumentParser(prog="atc policies", allow_abbrev=False, **cli_conventions.form(
+    parser = argparse.ArgumentParser(prog="atc-maintain policies", allow_abbrev=False, **cli_conventions.form(
         "Load a policy directory, validate each file against its schema, and refuse contradictions.",
         exit="0 ok; 1 problems found; 2 usage error", see="README.md § Commands"))
     sub = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")

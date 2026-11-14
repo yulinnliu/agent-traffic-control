@@ -124,8 +124,8 @@ jobs:
           enable-cache: true
       - run: uv run --locked python -m atc_testkit.ci --stages
       - run: uv run --locked python -m atc_testkit.ci --slow
-      - run: uv run --locked python scripts/validate_workspace.py
-      - run: uv run --locked python scripts/policies.py check ../../shared/policies/examples
+      - run: uv run --locked atc-maintain validate
+      - run: uv run --locked atc-maintain policies check ../../shared/policies/examples
 
   # The release is split so the write token never meets build code: release-build checks out, runs uv and builds
   # with a read-only token; release-draft runs no project code and hands the token only to its gh steps.

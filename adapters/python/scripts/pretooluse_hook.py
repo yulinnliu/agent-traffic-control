@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """PreToolUse hook for Claude Code and Codex: deny a tool call the composed hard-deny table forbids.
 
-Reads the hook payload on stdin (or --payload) and the table `atc enforce --hook-out` writes, then prints one
+Reads the hook payload on stdin (or --payload) and the table `atc guard --install` writes, then prints one
 deny decision or nothing. Command rules match every simple command of a Bash or PowerShell call after
 normalisation; file rules, the write roots and the hook's own files bind the paths a call writes, and a write
 target the call's text does not resolve is refused; a top-level `cd` into a worktrees root is refused (Claude
@@ -30,7 +30,7 @@ else:
 
 TABLE_VERSION = 1
 DEFAULT_TABLE = Path.home() / ".atc" / "enforcement" / "pretooluse.json"
-REPAIR = "atc enforce --install-hooks"
+REPAIR = "atc guard --install"
 FILE_TOOLS = {"Edit", "Write", "NotebookEdit"}
 WRITE_MODES = {"edit", "write"}
 
@@ -289,7 +289,7 @@ def path_denial(table: dict, target: str, path: str) -> str | None:
     for protected in table["protected"]:
         if g.within(path, protected):
             return (f"Refused: {target} is part of the PreToolUse hook (its table or engine); the Owner "
-                    f"changes it with `atc enforce` from their own terminal.")
+                    f"changes it with `atc guard --install` from their own terminal.")
     slash = path.replace("\\", "/")
     for rule in table["filesystem"]:
         if not WRITE_MODES & set(rule.get("modes", [])):

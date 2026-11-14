@@ -12,8 +12,9 @@ absolute paths, written to --local-out (never under --out). A filesystem glob ho
 refused (`unresolved-token`).
 
 --hook-out composes the PreToolUse hook's table from the workspace policy, every registered project's policy
-and the workspace map; --install-hooks (the Owner's) also writes the hook entries into the Claude Code and
-Codex settings. Command entries with a hook-only condition reach the table only.
+and the workspace map; `atc guard --install` (the Owner's) writes it and the hook entries into the Claude Code
+and Codex settings. Command entries with a hook-only condition reach the table only. This is
+`atc-maintain guard`.
 """
 
 from __future__ import annotations
@@ -437,7 +438,7 @@ def drift(files: dict[str, str], out: Path) -> list[str]:
 
 def main(argv: list[str] | None = None) -> int:
     import cli_conventions
-    parser = argparse.ArgumentParser(prog="atc enforce", allow_abbrev=False, **cli_conventions.form(
+    parser = argparse.ArgumentParser(prog="atc-maintain guard", allow_abbrev=False, **cli_conventions.form(
         __doc__.splitlines()[0], "\n".join(__doc__.strip().splitlines()[2:]),
         exit="0 generated, or current under --check; 1 drift under --check, or a policy problem; 2 usage error",
         see="docs/ENFORCEMENT.md § Outputs, § Drift, § PreToolUse hook"))
@@ -463,10 +464,6 @@ def main(argv: list[str] | None = None) -> int:
                         help=f"with --workspace: directory for the machine-local {LOCAL_FILE}")
     parser.add_argument("--hook-out", type=Path, metavar="DIR",
                         help=f"with --workspace: write the PreToolUse hook's {HOOK_TABLE} to DIR")
-    parser.add_argument("--install-hooks", action="store_true",
-                        help="with --workspace, the Owner's: write the hook table (to --hook-out, default "
-                             "~/.atc/enforcement) and the hook entries of ~/.claude/settings.json and "
-                             "~/.codex/hooks.json, replacing the retired guards' entries")
     parser.add_argument("--live-hook-table", type=Path, metavar="FILE",
                         help="with --check and --workspace: an installed hook table that must match")
     parser.add_argument("--live-claude-hooks", type=Path, metavar="FILE",
@@ -479,20 +476,19 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     native_live = args.live_claude or args.live_claude_local or args.live_codex or args.live_hook
     live_hooks = args.live_hook_table or args.live_claude_hooks or args.live_codex_hooks
-    hook_write = args.hook_out is not None or args.install_hooks
+    hook_write = args.hook_out is not None
     if (args.policies is None) != (args.out is None):
         parser.error("--policies and --out go together")
     if not args.check and (native_live or live_hooks):
         parser.error("the --live-* options require --check")
     if args.policies is None and not hook_write and not (args.check and live_hooks):
-        parser.error("--policies and --out are required unless --hook-out, --install-hooks or a --live-*-hooks "
-                     "check is given")
+        parser.error("--policies and --out are required unless --hook-out or a --live-*-hooks check is given")
     if args.policies is None and native_live:
         parser.error("--live-claude, --live-claude-local, --live-codex and --live-hook require --policies and --out")
     if args.check and hook_write:
-        parser.error("--hook-out and --install-hooks write; with --check use --live-hook-table")
+        parser.error("--hook-out writes; with --check use --live-hook-table")
     if (hook_write or live_hooks) and not args.workspace:
-        parser.error("--hook-out, --install-hooks and the --live-*-hooks checks require --workspace")
+        parser.error("--hook-out and the --live-*-hooks checks require --workspace")
     if args.local_out and not args.workspace:
         parser.error("--local-out requires --workspace")
     if args.local_out and args.out and args.local_out.resolve().is_relative_to(args.out.resolve()):
@@ -578,16 +574,6 @@ def main(argv: list[str] | None = None) -> int:
         table_target.parent.mkdir(parents=True, exist_ok=True)
         write_if_changed(table_target, table)
         lines.append(f"hook-table: {table_target}")
-    if args.install_hooks:
-        for harness, path in (("claude", Path.home() / ".claude" / "settings.json"),
-                              ("codex", Path.home() / ".codex" / "hooks.json")):
-            try:
-                install_hook(path, groups[harness])
-            except (OSError, ValueError) as exc:
-                return problem([f"install: {path}: {exc}"])
-            installed.append(str(path))
-            lines.append(f"installed: {path}")
-        lines.append("codex: review and trust the hook once in Codex's /hooks")
     return done("GENERATED", lines, 0, files=list(files), local=str(local_target) if local_target else None,
                 hook_table=str(table_target) if table_target else None, installed=installed)
 

@@ -18,7 +18,6 @@ from atc_testkit import locations, stages, workers as host_workers
 
 import checkout_guard
 import cli_conventions
-import friction
 import sync_project
 import validate_workspace as validator
 
@@ -143,10 +142,10 @@ def hook_check(workspace_file: Path, home: Path | None = None) -> Check:
     import generate_enforcement
     found = generate_enforcement.hook_drift(workspace_file, home)
     if found is None:
-        return Check("pretooluse hook", "NOT_INITIALIZED", "no hook table; the Owner runs atc enforce --install-hooks")
+        return Check("pretooluse hook", "NOT_INITIALIZED", "no hook table; the Owner runs atc guard --install")
     if found:
         return Check("pretooluse hook", "ERROR", f"differs from the policies: {'; '.join(found)}; "
-                                                  "the Owner runs atc enforce --install-hooks")
+                                                  "the Owner runs atc guard --install")
     return Check("pretooluse hook", "READY", "table and entries current")
 
 
@@ -234,7 +233,7 @@ def diagnose(root: Path = ROOT, environ: dict[str, str] | None = None, checkout:
                                 '; '.join(problems) if problems else 'version, artifact, hook and CI contract current'))
         try:
             plan = sync_project.build_plan(project_path, root,
-                                           tool_dirs=validator.load_skill_tools(workspace_file).get(name, validator.TOOL_DIRS))
+                                           tool_dirs=validator.load_skill_harnesses(workspace_file).get(name, validator.TOOL_DIRS))
         except ValueError as exc:
             checks.append(Check(f"projects.{name}.integration", "ERROR", str(exc)))
             continue
@@ -258,21 +257,17 @@ def diagnose(root: Path = ROOT, environ: dict[str, str] | None = None, checkout:
 
     if workspace_file.is_file() and not validator.FAILURES:
         checks.append(hook_check(workspace_file))
-
-    try:
-        incidents, resolutions = friction.project_state(friction.load_records(root / "state/workspace-friction/events.jsonl"))
-        open_count = sum(event_id not in resolutions for event_id in incidents)
-        checks.append(Check("open friction incidents", "READY", str(open_count)))
-    except ValueError as exc:
-        checks.append(Check("friction event log", "ERROR", str(exc)))
     return checks
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="atc doctor", allow_abbrev=False, **cli_conventions.form(
         "Diagnose local Agent Traffic Control runtime readiness; changes nothing.",
+        "Prints one verdict line and the checks that are not READY; -v prints every check and the host test\n"
+        "worker pool: the runs holding or waiting for workers.",
         exit="0 every check READY, WARN or NOT_INITIALIZED; 1 a check reports ERROR; 2 usage error",
         see="README.md § Commands"))
+    cli_conventions.add_verbose(parser)
     cli_conventions.add_json(parser)
     return parser
 
@@ -290,10 +285,21 @@ def main(argv: list[str] | None = None, root: Path = ROOT) -> int:
                           "worker_pool": worker_pool(dict(os.environ)),
                           "memory": memory(dict(os.environ))}, indent=2))
         return code
-    for check in checks:
-        print(f"{check.status:15} {check.name}: {check.detail}")
     warnings = sum(check.status == "WARN" for check in checks)
-    print(f"\nDoctor: {errors} error(s), {warnings} warning(s), {not_initialized} not initialized.")
+    print(f"{'NOT_READY' if errors else 'READY'} doctor: {errors} error(s), {warnings} warning(s), "
+          f"{not_initialized} not initialized")
+    for check in checks:
+        if args.verbose or check.status != "READY":
+            print(f"  {check.status:15} {check.name}: {check.detail}")
+    if args.verbose:
+        from atc_testkit import status as pool_status
+        print("  test workers:")
+        for line in pool_status.lines(pool_status.collect(dict(os.environ))):
+            print(f"    {line}")
+    if errors:
+        sys.stdout.flush()
+        print("STOP NOT_READY: each ERROR line names the check and what it found", file=sys.stderr)
+        print("hint: fix the ERROR checks, then run atc doctor again", file=sys.stderr)
     return code
 
 

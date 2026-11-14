@@ -15,6 +15,7 @@ dependencies = [
 
 [project.scripts]
 atc = "atc_cli:main"
+atc-maintain = "atc_cli.maintain:main"
 
 [dependency-groups]
 dev = [

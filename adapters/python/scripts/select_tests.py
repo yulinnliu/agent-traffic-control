@@ -400,7 +400,7 @@ def describe(selection: TestSelection, explain: bool = False) -> str:
 
 def direct(paths: Iterable[str], graph: Graph | None = None) -> list[str]:
     """The changed test files and the test files that import or name a changed module directly (one edge, not the
-    closure), relative to the adapter: ``atc test run --touched``'s fast subset."""
+    closure), relative to the adapter: ``atc test ID``'s related subset."""
     graph = graph or Graph()
     chosen: set[str] = set()
     for path in (path.replace("\\", "/") for path in paths):
