@@ -1,0 +1,23 @@
+task_id: ATC-0044
+repository: yulinnliu/agent-traffic-control
+base_sha: 4340b01a4b03808f79e0d0a2a9ac7d948ead3ac7
+scope: 'Every scratch under ~/.atc/tmp belongs to a task: commands that create one
+  require --task; close-out --check reports task-prefixed unregistered scratches for
+  Owner consent; atc test mutants runs against the scratch copy''s own environment,
+  not the caller''s .venv.'
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: 4340b01a4b03808f79e0d0a2a9ac7d948ead3ac7
+branch: worktree-claude+scratch-task
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
+decisions:
+  - "Owner 11-14: open after ATC-0043 integrated; one task for the three scratch issues below."
+  - "(a) Source: the ATC-0042 reviewer left ~/.atc/tmp/atc-0042-review (bt/, qdr/, tree/) unregistered, so close-out missed it and the Owner had to approve its deletion. `atc tmp checkout` already requires --task; `atc test run --scratch <name>` does not. Every command that creates or reuses a scratch under the tmp root (ATC_TMP or ~/.atc/tmp) must require --task and register it; no path creates an unowned scratch. Audit all such commands (test run, test mutants, test private, tmp checkout, verify candidates if applicable)."
+  - "(b) close-out --check also lists, as needing Owner consent, scratches under the tmp root whose name starts with the task ID (case-insensitive) but are not registered to it. close-out never deletes them automatically."
+  - "(c) Source: the ATC-0042 reviewer found `atc test mutants` run from a worktree .venv imported the worktree's atc_testkit instead of the scratch copy, so all 5 mutants survived and the import guard did not catch it; after `uv sync` inside the copy all were killed. Make mutants run in the scratch copy's own environment (or refuse with a clear error when the imported package is not from the scratch tree). Keep the import guard's intent and make it catch this case."
+  - "No version bump; the next release batches it."
