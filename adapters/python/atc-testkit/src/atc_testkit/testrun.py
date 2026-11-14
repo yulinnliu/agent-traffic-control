@@ -335,6 +335,57 @@ def _apply(tree: Path, mutant: Mapping, touched: set[str], originals: dict[Path,
         touched.add(edit["path"])
 
 
+MUTANTS_SHAPE = ('a JSON list of {"label": TEXT, "edits": [{"path": PATH, "old": TEXT, "new": TEXT}], '
+                 '"tests"?: [ARG], "kill_rule"?: "failure" | "assertion"}; edit paths and tests are relative to the '
+                 'repository root')
+
+
+def _relative(path: str) -> bool:
+    return not (PurePosixPath(path).is_absolute() or re.match(r"^[A-Za-z]:", path) or path.startswith("\\"))
+
+
+def mutants_problem(entries: object) -> str | None:
+    """The first way ``entries`` breaks the mutants file shape, or None."""
+    if not isinstance(entries, list) or not entries:
+        return "the top level is not a non-empty JSON list of mutants"
+    for index, mutant in enumerate(entries):
+        if not isinstance(mutant, dict):
+            return f"mutant {index} is not an object"
+        label = mutant.get("label")
+        if not isinstance(label, str) or not label.strip():
+            return f"mutant {index} has no label"
+        edits = mutant.get("edits")
+        if not isinstance(edits, list) or not edits:
+            return f"{label}: edits is not a non-empty list"
+        for edit in edits:
+            if not isinstance(edit, dict) or not all(isinstance(edit.get(key), str) for key in ("path", "old", "new")):
+                return f"{label}: an edit is not {{path, old, new}} as text"
+            if not _relative(edit["path"]):
+                return f"{label}: edit path {edit['path']} is not relative to the repository root"
+        tests = mutant.get("tests", [])
+        if not isinstance(tests, list) or not all(isinstance(test, str) for test in tests):
+            return f"{label}: tests is not a list of pytest arguments"
+        if mutant.get("kill_rule", KILL_FAILURE) not in (KILL_FAILURE, KILL_ASSERTION):
+            return f"{label}: kill_rule {mutant['kill_rule']!r} is not {KILL_FAILURE} or {KILL_ASSERTION}"
+    return None
+
+
+def read_mutants(path: str | os.PathLike[str]) -> list[dict]:
+    """The mutants of ``path``; Refusal ``MUTANTS_INVALID`` naming the first problem (§ ``MUTANTS_SHAPE``)."""
+    try:
+        text = Path(path).read_text(encoding="utf-8-sig")
+    except (OSError, UnicodeError) as exc:
+        raise Refusal("MUTANTS_INVALID", f"{path}: cannot be read ({getattr(exc, 'strerror', None) or exc})") from None
+    try:
+        entries = json.loads(text)
+    except ValueError as exc:
+        raise Refusal("MUTANTS_INVALID", f"{path}: not JSON ({exc})") from None
+    problem = mutants_problem(entries)
+    if problem:
+        raise Refusal("MUTANTS_INVALID", f"{path}: {problem}")
+    return entries
+
+
 def mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None = None) -> int:
     """``<scratch> <sha> <worktree> <mutants.json> --python <py> --tests <path>...``.
 
@@ -385,7 +436,7 @@ def _mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None,
     worktree = os.path.abspath(args.worktree)
     verify_commit(worktree, args.sha)
     python = resolve_python(args.python) if args.python else None
-    entries = json.loads(Path(args.mutants).read_text(encoding="utf-8-sig"))
+    entries = read_mutants(args.mutants)
     root, place = locate_scratch(args.scratch, environ)
     tree = resolve_tree(str(place / "tree"))
     python = python or copy_interpreter(root, place)

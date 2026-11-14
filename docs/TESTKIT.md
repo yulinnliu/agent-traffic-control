@@ -709,9 +709,12 @@ memory clamp.
   checkout stops the command with `COPY_IMPORT_MISMATCH` (exit 8).
 
 - A mutant is a label, a list of edits `{path, old, new}` and optional
-  `tests`, the pytest arguments that judge it in place of `--tests`. An
-  `old` that does not occur exactly once in its file aborts the run. Edits
-  follow the file's line endings.
+  `tests`, the pytest arguments that judge it in place of `--tests`, and
+  `kill_rule`; edit paths and tests are relative to the repository root. A
+  file that cannot be read, is not JSON or breaks that shape stops the
+  command with `STOP MUTANTS_INVALID` and a `hint:` showing the shape, before
+  the export or the scratch is touched. An `old` that does not occur exactly
+  once in its file aborts the run. Edits follow the file's line endings.
 - The tests run once unmutated first, `--tests` together with every
   mutant's own `tests`; a failing baseline prints `BASELINE-RED` and exits
   1 before any mutant is applied.

@@ -158,6 +158,10 @@ def related_tests(directory: Path, task: Task, name: str, environ: dict[str, str
 
 
 def run_mutants(task: Task, args: argparse.Namespace, tests: list[str], environ: dict[str, str]) -> int:
+    try:
+        testrun.read_mutants(args.mutants)
+    except locations.Refusal as refusal:
+        raise Refusal(refusal.token, refusal.detail, f"write {testrun.MUTANTS_SHAPE}") from None
     name, commit, directory = export(task, args.sha or task.tip(), environ)
     tree = directory
     while tree.name != checkout.TREE:

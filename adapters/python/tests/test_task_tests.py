@@ -244,3 +244,54 @@ def test_a_sha_that_names_no_commit_is_refused_before_any_run(workspace: Workspa
     err = capsys.readouterr().err
     assert err.startswith("STOP SHA_NOT_FOUND: ") and "hint: name a commit of the task's repository" in err
     assert calls["run"] == [] and calls["sync"] == []
+
+
+@pytest.mark.parametrize("content, problem", [
+    ("{not json", "not JSON"),
+    ("X = 2\n", "not JSON"),
+    ('{"label": "a"}', "the top level is not a non-empty JSON list of mutants"),
+    ("[]", "the top level is not a non-empty JSON list of mutants"),
+    ('["a"]', "mutant 0 is not an object"),
+    ('[{"edits": [{"path": "a", "old": "x", "new": "y"}]}]', "mutant 0 has no label"),
+    ('[{"label": "a", "edits": []}]', "a: edits is not a non-empty list"),
+    ('[{"label": "a", "edits": [{"path": "a", "old": "x"}]}]', "a: an edit is not {path, old, new} as text"),
+    ('[{"label": "a", "edits": [{"path": "C:/x/demo.py", "old": "x", "new": "y"}]}]',
+     "a: edit path C:/x/demo.py is not relative to the repository root"),
+    ('[{"label": "a", "edits": [{"path": "/x/demo.py", "old": "x", "new": "y"}]}]',
+     "a: edit path /x/demo.py is not relative to the repository root"),
+    ('[{"label": "a", "edits": [{"path": "a", "old": "x", "new": "y"}], "tests": "t.py"}]',
+     "a: tests is not a list of pytest arguments"),
+    ('[{"label": "a", "edits": [{"path": "a", "old": "x", "new": "y"}], "kill_rule": "any"}]',
+     "a: kill_rule 'any' is not failure or assertion"),
+], ids=["broken-json", "python-source", "object", "empty", "not-object", "no-label", "no-edits", "edit-shape",
+        "drive-path", "rooted-path", "tests-shape", "kill-rule"])
+def test_a_bad_mutants_file_stops_before_any_export_or_scratch(
+        workspace: Workspace, calls: dict[str, list], atc_tmp: Path, tmp_path: Path,
+        capsys: pytest.CaptureFixture[str], content: str, problem: str) -> None:
+    listing = tmp_path / "mutants.json"
+    listing.write_text(content, encoding="utf-8")
+    assert workspace.run(TASK, "--mutants", str(listing)) == 1
+    err = capsys.readouterr().err
+    assert err.startswith(f"STOP MUTANTS_INVALID: {listing}: {problem}")
+    assert 'hint: write a JSON list of {"label": TEXT, "edits": [{"path": PATH, "old": TEXT, "new": TEXT}]' in err
+    assert "relative to the repository root" in err
+    assert calls["mutants"] == [] and calls["sync"] == []
+    assert scratch.registered(atc_tmp) == [] and not list(atc_tmp.glob(f"{TASK}*"))
+
+
+def test_a_missing_mutants_file_stops_before_any_scratch(workspace: Workspace, calls: dict[str, list], atc_tmp: Path,
+                                                         tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    assert workspace.run(TASK, "--mutants", str(tmp_path / "absent.json")) == 1
+    assert capsys.readouterr().err.startswith(f"STOP MUTANTS_INVALID: {tmp_path / 'absent.json'}: cannot be read")
+    assert calls["sync"] == [] and scratch.registered(atc_tmp) == []
+
+
+def test_the_testkit_runner_reads_the_file_with_the_same_check(tmp_path: Path) -> None:
+    listing = tmp_path / "m.json"
+    listing.write_text('[{"label": "a", "edits": [{"path": "src/demo.py", "old": "x", "new": "y"}], '
+                       '"tests": ["tests/t.py"], "kill_rule": "assertion"}]', encoding="utf-8")
+    assert testrun.read_mutants(listing)[0]["label"] == "a"
+    listing.write_text("{", encoding="utf-8")
+    with pytest.raises(testrun.Refusal) as raised:
+        testrun.read_mutants(listing)
+    assert raised.value.token == "MUTANTS_INVALID"
