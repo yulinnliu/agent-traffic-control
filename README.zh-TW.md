@@ -19,17 +19,17 @@ Agent Traffic Control 就是做這件事的。它不是 gateway，也不是 orch
 
 - **`main` 只會移到審過、驗過的 SHA。** `atc integrate` 把 `main`
   fast-forward 到一個 candidate，這個 candidate 由指定為已審查的那個確切 SHA
-  建出來。沒有綁定這條 branch 的任務紀錄、沒有 Owner 的授權（寫在 `main` 上的
-  紀錄裡，或用 `--owner-words` 引述），或 integration verifier 沒有在這個
+  建出來。沒有綁定這條 branch 的任務紀錄、沒有 Owner 的授權（Owner 自己執行這個指令，
+  並隨整合一起記錄），或 integration verifier 沒有在這個
   candidate 上通過（只改任務紀錄的範圍改跑紀錄檢查），它都會拒絕。
-- **每個 worktree 都寫明是誰的。** `atc worktree` 把 owner、topic、session
-  寫進 worktree 的 git lock reason。別的 session 持有的 worktree，`resume`
+- **每個 worktree 都寫明是誰的。** `atc task create` 把 harness 和 task ID
+  寫進 worktree 的 git lock reason。別的 session 持有的 worktree，`atc task resume`
   會拒絕，除非明確重新綁定；有未提交變更、或還沒合進 `main` 的 worktree，
-  `clean` 會拒絕。
-- **hard deny 是 harness 的設定，不是文字。** `atc enforce` 從同一份
+  `atc task close` 會拒絕。
+- **hard deny 是 harness 的設定，不是文字。** maintainer 的產生器（`atc-maintain guard`）從同一份
   `hard-deny.yaml` 產生 Claude Code 的 `permissions.deny`、Codex 的 rules 區塊
-  和 git pre-commit hook，`--check` 會回報不一致。裝上之後，被禁止的動作由
-  harness 直接拒絕。
+  和 git pre-commit hook，`--check` 會回報不一致；`atc guard --install` 負責裝上 hook 表。
+  裝上之後，被禁止的動作由 harness 直接拒絕。
 
 ## 為什麼需要它
 
@@ -50,7 +50,7 @@ agent、哪種語言，git 都已經在那裡了。
 | 多個 writer 同時寫 | 每條 topic branch 同時只有一個 active writer；轉交 writer 要明確交接，而且轉交不附帶發布權限 |
 | 從舊狀態接手 | 每次交接都寫明 base SHA、target SHA 和驗證狀態；接手的一方在第一次修改前先重新核對 ref |
 | 文字蓋過 git | 依可信度排序：runtime 證據、git 與檔案、設計紀錄、交接筆記，最後才是工具自己的記憶 |
-| 沒人認領的 worktree | owner、topic、session 寫在 worktree 的 git lock reason 裡，任何工具都讀得到是誰的 |
+| 沒人認領的 worktree | harness 和 task ID 寫在 worktree 的 git lock reason 裡，任何工具都讀得到是誰的 |
 | 有能力就以為有權限 | 實際權限是任務授權、governance、專案 policy 三者的交集；hard deny、approval required、permission preset 都寫成資料，再產生成各 harness 自己的設定 |
 | 沒審過的程式碼進到 `main` | `atc integrate` 只會把 `main` fast-forward 到 reviewer 通過的那個確切 SHA；要有 Owner 針對這個 SHA 的同意、要有 `.atc/tasks/` 裡的任務紀錄，integration verifier 在 candidate 上也要通過 |
 
@@ -60,12 +60,12 @@ agent、哪種語言，git 都已經在那裡了。
 | --- | --- |
 | `shared/governance/` | 每個 agent 都依固定 revision 讀取的規則：`CORE.md`，加上 `INDEX.md` 依情況導向的各模組 |
 | `shared/policies/` | hard deny、approval required、permission preset、escalation gate 的 JSON Schema 和範例 |
-| `shared/skills/` | 跨工具、跨 repository 共用的 skill 正本；`.claude/`、`.agents/`、`.dsh/` 裡的是從正本 render 出來的受管副本 |
+| `shared/skills/` | 跨 harness、跨 repository 共用的 skill 正本；`.claude/`、`.agents/`、`.dsh/` 裡的是從正本 render 出來的受管副本 |
 | `shared/templates/` | sync 放進專案 `AGENTS.md` 的那行指標，以及寫進 `.atc/README.md` 的 bootloader |
 | `shared/conformance/` | 與語言無關的 fixture，每一種工具實作都要通過 |
 | `scripts/` | 不需要任何語言 runtime 的 POSIX sh 腳本：安裝與檢查 skill adapter |
 | `adapters/python/` | 這些工具的 Python 參考實作 |
-| `adapters/python/atc-testkit/` | `atc test`、`atc tmp` 背後的測試工具組，專案以 wheel 的形式 vendor 進去 |
+| `adapters/python/atc-testkit/` | `atc test` 背後的測試工具組，專案以 wheel 的形式 vendor 進去 |
 | `.atc/tasks/` | 這個 repository 自己的任務紀錄 |
 | `docs/` | 工具怎麼運作：`WORKFLOW.md` 從頭到尾走一遍任務流程；`LAYOUT.md`、`TASKS.md`、`TESTKIT.md`、`ENFORCEMENT.md`、`ATC_HOME.md` 是參考文件 |
 | `workspace.yaml.example` | 只存在本機的對照表，記錄每個專案的 repository、worktree 和 state 各在哪裡 |
@@ -76,11 +76,11 @@ git metadata。工具只是照著這些規則做事的實作，隨時可以換�
 
 ## atc-testkit
 
-atc-testkit 負責驗證規則裡和 pytest 有關的部分，也是 `atc test`、`atc tmp`
+atc-testkit 負責驗證規則裡和 pytest 有關的部分，也是 `atc test`
 背後的程式：
 
-- **測試跑在你指定的 tree 上。** `atc tmp checkout` 把確切的 commit 匯出到
-  scratch 目錄；`atc test run` 對這份副本或某個 worktree 跑 pytest，輸出存成
+- **測試跑在你指定的 tree 上。** `atc test ID --sha SHA` 把確切的 commit 匯出到
+  scratch 目錄並對這份副本跑 pytest；`atc test ID` 在任務的 worktree 裡跑。輸出存成
   log。受測程式碼如果是從別的地方 import 進來的，import 位置檢查會讓這次執行
   停下來。
 - **每次執行有自己的設定。** 執行時會拿掉主機上的 `HAMI_*` 變數，把專案的
@@ -88,7 +88,7 @@ atc-testkit 負責驗證規則裡和 pytest 有關的部分，也是 `atc test`�
   檔案與網路權限在跑。
 - **測試有分類，分階段執行。** 每個測試用 marker 標分類，先跑可平行的階段、
   再跑必須依序的階段；change-impact selection 會挑出一個變更可能影響的測試檔。
-- **guard 會被做 mutation。** `atc test mutants` 在匯出的 commit 上一次改一個
+- **guard 會被做 mutation。** `atc test ID --mutants FILE` 在匯出的 commit 上一次改一個
   guard，回報哪些 mutant 沒被測試抓到。
 - **專案拿到 gate 的骨架。** 專案的 pre-push gate 和 integration verifier
   從 testkit 的骨架建起來；專案 vendor 的是這個 repository 建出來的 wheel，
@@ -139,9 +139,9 @@ uv tool install -e atc/adapters/python
 git clone https://github.com/yulinnliu/agent-traffic-control.git atc
 uv tool install -e atc/adapters/python
 cd atc
-atc bootstrap init                          # 建立 workspace.yaml 和 projects/ worktrees/ state/
-atc bootstrap add --project my-project --url <url>    # clone、登記、建立 ATC 檔案、驗證
-atc bootstrap status                        # doctor 加上 atc sync --check
+atc init                                    # 建立 workspace.yaml 和 projects/ worktrees/ state/
+atc add my-project --url <url>              # clone、登記、建立 ATC 檔案、驗證
+atc doctor                                  # 主機與 workspace 檢查
 ```
 
 `add` 可以再加 `--skills atc-worktree,hami-writing-for-agents`，在 baseline
@@ -166,15 +166,14 @@ atc sync --revision <sha>                                              # 最新 
 
 render 出來的檔案都帶有 `managed-by: agent-traffic-control` 標記；沒有這個
 標記的檔案就是專案自己的，工具永遠不會碰。`atc sync` 也會刪掉正本已經不存在的
-受管副本。`workspace.yaml` 的 `skill_tools` 決定每個專案要在 `.claude/`、
-`.agents/`、`.dsh/` 哪幾個目錄放副本（見 `docs/LAYOUT.md`）；`atc onboard` 是
-`atc sync` 的舊名，保留到 atc 0.7.0 移除。
+受管副本。`workspace.yaml` 的 `skill_harnesses` 決定每個專案要在 `.claude/`、
+`.agents/`、`.dsh/` 哪幾個目錄放副本（見 `docs/LAYOUT.md`）。
 
 ## 指令
 
-`atc --help` 依群組列出所有指令，每個指令的參數用 `atc <command> --help` 查。
+`atc --help` 列出所有指令，每個指令的參數用 `atc <command> --help` 查。
 [`adapters/python/README.md` § Commands](adapters/python/README.md#commands)
-列出每個指令的用途和參考文件。Exit code、`--json`、命名、版本與棄用的寫法見
+列出每個指令的用途和參考文件。Exit code、`--json`、輸出與命名見
 `shared/conformance/CLI.md`。
 
 ## Skills

@@ -21,17 +21,18 @@ reading the rules:
 - **`main` moves only to a reviewed, verified SHA.** `atc integrate`
   fast-forwards `main` to a candidate built from the exact SHA named as
   reviewed. It refuses without a task record bound to that branch, without
-  the Owner's authority (granted in the record on `main`, or quoted with
-  `--owner-words`), and without a passing integration verifier run on that
+  the Owner's authority (the Owner's own run of the command, recorded with
+  the integration), and without a passing integration verifier run on that
   candidate (a range of task records alone gets the record check instead).
-- **Every worktree says whose it is.** `atc worktree` writes owner, topic and
-  session into the worktree's git lock reason. `resume` refuses a worktree
-  another session holds unless it is explicitly rebound, and `clean` refuses
-  one that is dirty or not merged into `main`.
-- **Hard denies are harness configuration, not prose.** `atc enforce`
-  generates Claude Code's `permissions.deny`, a Codex rules block and a git
-  pre-commit hook from one `hard-deny.yaml`, and `--check` reports drift.
-  Once installed, the harness refuses the denied action.
+- **Every worktree says whose it is.** `atc task create` writes harness and
+  task ID into the worktree's git lock reason. `atc task resume` refuses a
+  worktree another session holds unless it is explicitly rebound, and
+  `atc task close` refuses one that is dirty or not merged into `main`.
+- **Hard denies are harness configuration, not prose.** The maintainer
+  generator (`atc-maintain guard`) produces Claude Code's `permissions.deny`,
+  a Codex rules block and a git pre-commit hook from one `hard-deny.yaml`,
+  and `--check` reports drift. `atc guard --install` puts the hook table in
+  place; once installed, the harness refuses the denied action.
 
 ## Why
 
@@ -57,7 +58,7 @@ the one thing every agent and every language already has.
 | Concurrent writers | One active writer per topic branch; writer transfer is explicit and grants no publication authority |
 | Stale resumption | Every handoff names base SHA, target SHA and verification state; the receiver rechecks the ref before its first mutation |
 | Prose outranks git | Truth order: runtime evidence, then git and files, then design records, then handoff notes, then tool memory |
-| Orphan worktrees | Owner, topic and session live in the worktree's git lock reason; any tool can read who holds it |
+| Orphan worktrees | Harness and task ID live in the worktree's git lock reason; any tool can read who holds it |
 | Capability mistaken for authority | Effective authority is the intersection of task grant, governance and project policy; hard deny, approval required and permission presets are data, generated into each harness's own config |
 | Unreviewed code reaching `main` | `atc integrate` fast-forwards `main` only to the exact SHA a reviewer passed, on the Owner's word for that SHA, bound by the task record in `.atc/tasks/`, after the integration verifier passes on the candidate |
 
@@ -67,12 +68,12 @@ the one thing every agent and every language already has.
 | --- | --- |
 | `shared/governance/` | The rules every agent reads at a pinned revision: `CORE.md` plus modules routed by `INDEX.md` |
 | `shared/policies/` | JSON Schemas and examples for hard deny, approval required, permission presets and the escalation gate |
-| `shared/skills/` | Canonical skills shared across tools and repositories; `.claude/`, `.agents/` and `.dsh/` hold the managed copies rendered from them |
+| `shared/skills/` | Canonical skills shared across harnesses and repositories; `.claude/`, `.agents/` and `.dsh/` hold the managed copies rendered from them |
 | `shared/templates/` | The pointer line sync places in a project's `AGENTS.md` and the bootloader it writes to `.atc/README.md` |
 | `shared/conformance/` | Language-neutral fixtures every tool implementation must pass |
 | `scripts/` | POSIX sh entry points that need no language runtime: install and check skill adapters |
 | `adapters/python/` | The Python reference implementation of the tools |
-| `adapters/python/atc-testkit/` | The test kit behind `atc test` and `atc tmp`, which projects vendor as a wheel |
+| `adapters/python/atc-testkit/` | The test kit behind `atc test`, which projects vendor as a wheel |
 | `.atc/tasks/` | This repository's task records |
 | `docs/` | How the tools work: `WORKFLOW.md` walks one task; `LAYOUT.md`, `TASKS.md`, `TESTKIT.md`, `ENFORCEMENT.md` and `ATC_HOME.md` are the references |
 | `workspace.yaml.example` | The machine-local map from project name to repository, worktree and state roots |
@@ -84,11 +85,11 @@ the reference implementation, not a requirement.
 ## atc-testkit
 
 atc-testkit is the pytest side of the verification contract, and the code
-behind `atc test` and `atc tmp`:
+behind `atc test`:
 
-- **Tests run against the tree you name.** `atc tmp checkout` exports an
-  exact commit into a scratch directory; `atc test run` runs pytest against
-  that copy or a worktree and keeps the output in a log. An import-location
+- **Tests run against the tree you name.** `atc test ID --sha SHA` exports an
+  exact commit into a scratch directory and runs pytest against that copy;
+  `atc test ID` runs it in the task's worktree. The output stays in a log. An import-location
   guard stops the run when the code under test is imported from anywhere
   else.
 - **Each run gets its own settings.** The run drops the host's `HAMI_*`
@@ -98,7 +99,7 @@ behind `atc test` and `atc tmp`:
 - **Tests carry a category and run in stages.** Markers classify each test,
   stages run the parallel ones first and the serial ones after, and a
   change-impact selection picks the test files a change can affect.
-- **Guards get mutated.** `atc test mutants` changes one guard at a time on
+- **Guards get mutated.** `atc test ID --mutants FILE` changes one guard at a time on
   an exported commit and reports which mutants the tests failed to catch.
 - **Projects get the gate skeletons.** A project's pre-push gate and
   integration verifier are built from the testkit's skeletons, and the
@@ -150,9 +151,9 @@ This installs the distribution `agent-traffic-control`, whose command is
 git clone https://github.com/yulinnliu/agent-traffic-control.git atc
 uv tool install -e atc/adapters/python
 cd atc
-atc bootstrap init                          # workspace.yaml, projects/ worktrees/ state/
-atc bootstrap add --project my-project --url <url>    # clone, register, create its ATC files, validate
-atc bootstrap status                        # doctor plus atc sync --check
+atc init                                    # workspace.yaml, projects/ worktrees/ state/
+atc add my-project --url <url>              # clone, register, create its ATC files, validate
+atc doctor                                  # host and workspace checks
 ```
 
 `add` also takes `--skills atc-worktree,hami-writing-for-agents` to install
@@ -178,17 +179,15 @@ atc sync --revision <sha>                                              # a SHA o
 
 Every rendered file carries `managed-by: agent-traffic-control`; a file
 without it is project-owned and never touched. `atc sync` also deletes a managed
-copy whose canonical skill is gone. `skill_tools` in `workspace.yaml` picks
+copy whose canonical skill is gone. `skill_harnesses` in `workspace.yaml` picks
 which of `.claude/`, `.agents/` and `.dsh/` a project gets copies in
-(`docs/LAYOUT.md`); `atc onboard` is the deprecated spelling of `atc sync`
-until atc 0.7.0.
+(`docs/LAYOUT.md`).
 
 ## Commands
 
-`atc --help` lists the commands by group and `atc <command> --help` gives the
-flags. [`adapters/python/README.md` § Commands](adapters/python/README.md#commands)
+`atc --help` lists the commands and `atc <command> --help` gives the flags. [`adapters/python/README.md` § Commands](adapters/python/README.md#commands)
 lists every command with what it does and where its reference lives. Exit
-codes, `--json`, naming, versions and deprecated forms:
+codes, `--json`, output and naming:
 `shared/conformance/CLI.md`.
 
 ## Skills

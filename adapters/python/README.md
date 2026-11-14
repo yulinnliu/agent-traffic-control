@@ -35,34 +35,42 @@ uv tool install -e "<checkout>/adapters/python"
 
 ## Commands
 
-`atc --help` lists the commands by group and `atc <command> --help` gives the
-flags. Exit codes, `--json`, naming, versions and deprecated forms:
-`shared/conformance/CLI.md`.
+`atc --help` lists the commands and `atc <command> --help` gives the flags.
+Exit codes, `--json`, output and naming: `shared/conformance/CLI.md`.
 
 | `atc` command | Script | Does | Reference |
 | --- | --- | --- | --- |
-| `bootstrap` | `bootstrap.py` | `init`, `add --project NAME [--url URL] [--skills NAME,...]`, `status [--json]`: the quickstart path over the tools below | root `README.md` § Installation |
-| `validate` | `validate_workspace.py` | canonical skills versus rendered adapters, root contract, task records and their declaration, `--projects` for registered checkouts (adapters, the `AGENTS.md` pointer line, `.atc/` with its lock, task records, one prefix per repository), `--root DIR --adapters-only` for a fixture; `--json` (§ validate) | `docs/LAYOUT.md`, `docs/ENFORCEMENT.md` § Drift |
-| `sync` | `sync_project.py` | `[NAME] [--check]`: write and commit, or with `--check` only list, the managed files of project NAME or of every registered project, rendered from the latest `vMAJOR.MINOR.PATCH` tag on `main` or the SHA the Owner names with `--revision SHA`; a project locked ahead of that release is skipped; managed adapters with no canonical skill or in a tool directory the project's `skill_tools` does not select are deleted in the same commit; a project with no `AGENTS.md` gets a minimal one; `--root` re-renders this checkout's adapters and commits nothing; never touches project-owned files. `atc onboard` is the deprecated spelling, removed in atc 0.7.0. The sync commit's subject names the target with its release tag: `sync from <source> v0.4.0 (c91d318)` at a tagged revision, `<sha> (after v0.4.0)` past one, the bare SHA before any; the ledger's sync line adds `source_tag` and `source_after`, and `--json` a top-level `target`. The tags are the ATC checkout's local ones, so an unfetched newer tag is not seen | `docs/LAYOUT.md` |
-| `doctor` | `doctor.py` | local readiness: `READY`, `NOT_INITIALIZED`, `ERROR`, with the host worker pool's free tokens, holders and waiters; `--json` | `atc doctor --help` |
-| `policies` | `policies.py` | `check DIR`: schema-validate a policy directory and refuse contradictions | `shared/policies/schemas/` |
-| `enforce` | `generate_enforcement.py` | `--policies DIR --out DIR [--check]`: harness deny configs from hard deny, see `docs/ENFORCEMENT.md` | `docs/ENFORCEMENT.md` |
-| `classify` | `classify_change.py` | `--policy escalation.yaml --changed FILE [--severity]`: `LOW` or `HIGH` | `atc classify --help` |
-| `preflight` | `git_preflight.py` | `push` lists `origin/main..main` by integration with its task and authority, reading old and new `integrations.jsonl` lines; reads only | `docs/WORKFLOW.md` § 8 |
-| `integrate` | `git_integrate.py` | `--reviewed SHA --task TASK [--owner-words QUOTE | --owner-run] [--project NAME]`: `--task` is required; a record ID with a declared prefix names the repository and the branch (the record's `branch`) and takes its authority from the record on `main` (`FF` only) unless `--owner-words` quotes the Owner or the Owner runs it with `--owner-run` (the quote `Owner run: approve integration`); a range that changes only `.atc/tasks/` runs the record check in place of the verifier, `--task` naming one of its records; `docs/TASKS.md` § Authority on `main` states the checks. A task identity string needs `--project`. `--reviewed` and `--rebased` take the full SHA or a unique prefix of 12 or more characters, resolved once to the full SHA the record holds; an ambiguous prefix stops with `AMBIGUOUS_SHA`. A task identity string and a records-only range integrate the one local branch at the reviewed SHA; `--check` resolves, preflights and warns without a slot or candidate, and warns with the first problems of `git diff --check main...<reviewed>` (whitespace errors, conflict markers) without refusing; within the slot the latest passing `atc verify` record of the same candidate replaces the verifier run when every check of `shared/conformance/verification-evidence/README.md` § Integration reuse holds; human output prints project names and 12-character SHAs, `--json` the full values | `docs/WORKFLOW.md` § 6–7, governance `GIT_WORKFLOW.md` |
-| `verify` | `git_integrate.py` | runs the integration verifier on the candidate `atc integrate` would build, moving no ref, and records a PASS that `atc integrate` reuses | `docs/WORKFLOW.md` § 5 |
-| `close-out` | `close_out.py` | removes a task's worktree, scratches and reports | `docs/TASKS.md` § Close-out |
-| `task` | `task_records.py` | `new --scope TEXT`, `list [--all] [--status S] [--json]`, `check [DIR]` task records under `.atc/tasks/` (`docs/TASKS.md`); `--project NAME` as `worktree` takes it | `docs/TASKS.md` |
-| `worktree` | `managed_worktree.py` | `create`, `resume`, `audit`, `clean` per-topic worktrees with identity in git; `audit` says whether each worktree is removable (merged into `main` and clean); `--project root` for this checkout's own topics under `worktrees/root/`; human output names `<project>/<worktree>`, `--json` the path | skill `atc-worktree` |
-| `friction` | `friction.py` | append incident and resolution events; summaries | `atc friction --help` |
-| `test` | `atc-testkit` | `run --scratch NAME [--tree DIR] [-- PYTEST_ARG...]`: a test tree under a scratch of `~/.atc/tmp`; `mutants`: one guard mutant at a time on an exported commit; `private`: a command on a private desktop | `docs/TESTKIT.md` § Commands |
-| `tmp` | `atc-testkit` | `checkout`, `list`, `clean DIR...`, `prune`: the scratch registry and what is older than seven days | `docs/TESTKIT.md` § Commands, `docs/ATC_HOME.md` |
-| | `check_workspace.py` | runs the validator and records a failure as friction evidence | |
+| `task` | `task_records.py` | `create [TITLE] [--scope TEXT] [--tests none\|standard\|strict] [--file FILE]` opens a task: worktree, branch, lock reason and record in one commit; `update`, `list [-v]`, `resume`: task records under `.atc/tasks/` and their worktrees; `--project NAME` selects the repository, `root` this checkout's own topics under `worktrees/root/`; human output names `<project>/<worktree>`, `--json` the path | `docs/TASKS.md` |
+| `task close` | `close_out.py` | `ID [--check] [--abandon] [-v]`: after integration removes the task's worktree, branch, registered scratches and reports; consent items are listed, never deleted; `--abandon` closes an unintegrated task and keeps its tip as tag `archive/<ID>` | `docs/TASKS.md` § Close-out |
+| `test` | `task_tests.py` | `ID [--sha SHA] [--all] [-v] [-- PYTEST_ARG...]`: the related tests in the task's worktree, in an export of SHA, or the full suite; `ID --mutants FILE`: one guard mutant at a time; `ID --candidate`: the integration verifier on the candidate `atc integrate` would build, recorded for reuse; `ID --clean`, `--list [ID]`, `--private -- COMMAND` | `docs/TESTKIT.md` § Commands |
+| `integrate` | `git_integrate.py` | `ID [--sha SHA] [--check]`: Owner-run; fast-forwards `main` to the reviewed SHA (the newest PASS review report, or `--sha`) after the verifier passes on the candidate; a range that changes only `.atc/tasks/` runs the record check in place of the verifier; a passing `atc test ID --candidate` record of the same candidate replaces the verifier run when every check of `shared/conformance/verification-evidence/README.md` § Integration reuse holds; does not close the task | `docs/WORKFLOW.md`, governance `GIT_WORKFLOW.md` |
+| `push` | `push.py` | `NAME... \| --all [--check] [-v]`: Owner-run; pushes `main` when every commit in `origin/main..main` comes from a recorded integration or sync | `docs/WORKFLOW.md` |
+| `init` | `bootstrap.py` | `[--governance-source OWNER/REPO] [--force]`: writes `workspace.yaml` and `projects/`, `worktrees/`, `state/` | root `README.md` § Installation |
+| `add` | `bootstrap.py` | `NAME [--url URL] [--skills NAME,...] [-v]`: clone or adopt, register, create the project's ATC files, validate | root `README.md` § Installation |
+| `remove` | `bootstrap.py` | `NAME [--check]`: Owner-run; drops the project's `workspace.yaml` entry and its `skill_harnesses` entry, never its checkout | `docs/LAYOUT.md` |
+| `sync` | `sync_project.py` | `[NAME...] [--check] [--revision SHA] [-v]`: write and commit, or with `--check` only list and validate, the managed files of the named projects or of every registered project, rendered from the latest `vMAJOR.MINOR.PATCH` tag on `main` or the SHA the Owner names with `--revision`; a project locked ahead of that release is skipped; managed adapters with no canonical skill or in a harness directory the project's `skill_harnesses` does not select are deleted in the same commit; a project with no `AGENTS.md` gets a minimal one; never touches project-owned files. The sync commit's subject names the target with its release tag: `sync from <source> v0.4.0 (c91d318)` at a tagged revision, `<sha> (after v0.4.0)` past one, the bare SHA before any; the ledger's sync line adds `source_tag` and `source_after`, and `--json` a top-level `target`. The tags are the ATC checkout's local ones, so an unfetched newer tag is not seen | `docs/LAYOUT.md` |
+| `doctor` | `doctor.py` | `[-v]`: local readiness verdict `READY`, `NOT_INITIALIZED` or `ERROR` plus the non-READY checks; `-v` lists every check and the host test worker pool's free tokens, holders and waiters; `--json` | `docs/ATC_HOME.md` |
+| `guard` | `guard.py` | `[--install]`: checks, or for the Owner installs, the PreToolUse hook table `~/.atc/enforcement` and its entries in `~/.claude/settings.json` and `~/.codex/hooks.json` | `docs/ENFORCEMENT.md` |
 | | `integration_verify.py` | the verifier `atc integrate` runs in a candidate of this checkout (root `AGENTS.md` § Integration verification) | |
 | | `build_testkit_release.py` | builds the `atc-testkit` wheel and digest record for consuming projects | |
 | | `select_tests.py` | the test files a change can affect: a count and one reason per path, each file's cause with `--explain`, a JSON array with `--json` (§ Selected tests) | |
 
-`src/atc_cli/` is the dispatcher: it resolves `--root`, applies the
+### atc-maintain
+
+`uv run --locked atc-maintain <command>` from an ATC worktree's
+`adapters/python/` maintains this repository; it refuses in the canonical
+checkout and is not part of the installed `atc`.
+
+| `atc-maintain` command | Script | Does | Reference |
+| --- | --- | --- | --- |
+| `sync --root` | `sync_project.py` | `[--check] [-v] [--json]`: re-renders this checkout's adapters and commits nothing | `docs/LAYOUT.md` |
+| `validate` | `validate_workspace.py` | canonical skills versus rendered adapters, root contract, task records and their declaration; `--json` (§ validate) | `docs/LAYOUT.md`, `docs/ENFORCEMENT.md` § Drift |
+| `policies` | `policies.py` | `check DIR`: schema-validate a policy directory and refuse contradictions | `shared/policies/schemas/` |
+| `task check` | `task_records.py` | `[DIR]`: task records and their `## Task records` declaration | `docs/TASKS.md` |
+| `guard` | `generate_enforcement.py` | `--policies DIR --out DIR [--check]` and the `--live-*`, `--local-out`, `--hook-out` forms: harness deny configs from hard deny | `docs/ENFORCEMENT.md` |
+| | `select_tests.py` | the test files a change can affect: a count and one reason per path, each file's cause with `--explain`, a JSON array with `--json` (§ Selected tests) | |
+
+`src/atc_cli/` holds the dispatchers for `atc` and `atc-maintain`: they resolve `--root`, applies the
 canonical checkout guard and wraps every `--json` result in the envelope of
 `shared/conformance/CLI.md` § Output; `scripts/cli_conventions.py` holds the
 exit codes, the shared options and the help form. The scripts stay runnable
@@ -73,18 +81,18 @@ directly with `uv run python scripts/<name>.py`.
 `validate` checks what drifts silently: the shape of `workspace.yaml.example`
 and canonical skills against their managed adapters. An adapter is a managed
 copy rendered from its canonical skill (`render_adapter`): the same name and
-description, the canonical body, the tool's overlay, and the ownership fields
+description, the canonical body, the harness's overlay, and the ownership fields
 `managed-by` and `canonical`. A canonical skill depends on no environment
 variable naming this checkout, and no adapter is left behind when its
 canonical skill goes. It also checks the task records under `.atc/tasks/` and
 their `## Task records` declaration (`docs/TASKS.md`). By default it covers
 this checkout's own `.claude/skills/`, `.agents/skills/` and `.dsh/skills/`,
-the ones CI sees; `--projects` adds each project of the machine-local
+the ones CI sees; `atc sync --check` validates each project of the machine-local
 `workspace.yaml` that exists on disk (its adapters for every
 `adoption: baseline` skill, the `AGENTS.md` pointer line, a current `.atc/`,
-all tracked) and rejects user-level copies of a canonical skill under
-`~/.claude/skills`, `~/.agents/skills` or `~/.dsh/skills`, so it runs locally,
-never in CI. It needs PyYAML, and jsonschema for the record check, and prints
+all tracked, task records, one prefix per repository) and rejects user-level
+copies of a canonical skill under `~/.claude/skills`, `~/.agents/skills` or
+`~/.dsh/skills`, so it runs locally, never in CI. It needs PyYAML, and jsonschema for the record check, and prints
 every failure, not only the first.
 
 `atc-testkit/` is the pytest adapter of the verification contract: marker
@@ -96,8 +104,8 @@ runs in CI. This adapter depends on it by in-tree path.
 uv run --locked python -m atc_testkit.ci --stages       # suite through the testkit's stages, including shared/conformance
 uv run --locked python -m atc_testkit.ci --stages --workers 16   # the same with 16 workers in the parallel stage
 uv run --locked pytest tests/test_tooling.py -k name    # one test, one invocation
-uv run atc validate                                     # this checkout's contract
-uv run atc sync --root                                  # re-render .claude/ .agents/ .dsh/ after a canonical skill change (topic worktree only)
+uv run atc-maintain validate                            # this checkout's contract
+uv run atc-maintain sync --root                                  # re-render .claude/ .agents/ .dsh/ after a canonical skill change (topic worktree only)
 pwsh -File check.ps1 -Projects -Tests                   # one-shot with temporary files and caches under ~/.atc
 ```
 
@@ -156,7 +164,7 @@ README) select only the tests declared in `DIRECTORY_READERS` as reading
 them in this checkout; a file there other than Markdown also selects the
 tests whose reach names it. Guarded Markdown no declared test reads selects
 nothing; the guidance and skills have their own check,
-`uv run --locked atc validate`, run after touching them. Markdown under
+`uv run --locked atc-maintain validate`, run after touching them. Markdown under
 another `shared/<area>/` selects the tests that read that area.
 `tests/root_reads.py` records each test file's reads of the guarded paths,
 and counts a run of this checkout's `scripts/*.sh` as reading what

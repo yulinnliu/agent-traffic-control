@@ -7,7 +7,7 @@ project commits the output and its CI diffs it. If the generated file and the
 policy disagree, the policy wins and the file is regenerated.
 
 Reference implementation: `adapters/python/scripts/generate_enforcement.py`
-(`atc enforce`). Golden outputs: `shared/conformance/generate-enforcement/`.
+(`atc-maintain guard`). Golden outputs: `shared/conformance/generate-enforcement/`.
 
 ## Outputs
 
@@ -43,7 +43,7 @@ below.
 
 `--workspace <workspace.yaml>` adds a deny the policy cannot carry: every
 registered project's `state` root, resolved against `workspace_root` to an
-absolute path. `atc enforce` passes `--workspace` itself when the checkout
+absolute path. `atc-maintain guard` passes `--workspace` itself when the checkout
 root holds `workspace.yaml`. A project without `state`, or no map at all,
 leaves every output and check exactly as without the option.
 
@@ -129,7 +129,7 @@ standard library only, reading one composed table. The hook sees the text of
 a tool call, not what a program does once it runs; it turns a mistaken
 command into a refusal with a reason and is not a security boundary.
 
-**Table.** `atc enforce --workspace <map> --hook-out <dir>` writes
+**Table.** `atc-maintain guard --workspace <map> --hook-out <dir>` writes
 `<dir>/pretooluse.json` (LF, deterministic) from, in order:
 
 1. the workspace policy, `policies/hard-deny.yaml` of this repository; its
@@ -316,13 +316,13 @@ each command in the session's `cwd`.
 page; one that is not UTF-8, not JSON or not an object prints a deny naming
 that cause. Any other error of the engine (a missing or invalid table)
 prints a deny naming the error and the Owner's repair,
-`atc enforce --install-hooks`. The Claude Code entry also sets
+`atc guard --install`. The Claude Code entry also sets
 `"onFailure": "block"` (Claude Code 2.1.295 or later) and `"timeout": 10`,
 so a hook that cannot start, crashes or stalls blocks the call. Codex offers
 no such option: there a hook that cannot start lets the call run.
 
-**Installation.** `atc enforce --install-hooks`, run by the Owner, writes the
-table (to `--hook-out`, default `~/.atc/enforcement`) and replaces, in
+**Installation.** `atc guard --install`, run by the Owner, writes the
+table (to `~/.atc/enforcement`) and replaces, in
 `~/.claude/settings.json` and `~/.codex/hooks.json`, every PreToolUse entry
 running the engine or one of the retired guards (`worktree_cd_guard.py`, `write_scope_guard.py`) with:
 
@@ -333,8 +333,9 @@ running the engine or one of the retired guards (`worktree_cd_guard.py`, `write_
 
 A table outside the default directory adds `--table "<file>"`. Codex then
 asks the Owner to trust the entry once in `/hooks`. The workspace policy
-denies agents `atc enforce --hook-out` and `--install-hooks`, so both run
-from the Owner's terminal, which no hook sees.
+denies agents `atc guard --install`, so it runs from the Owner's terminal,
+which no hook sees. `atc guard` without `--install` checks the table and the
+entries and writes nothing.
 
 ## Drift
 
@@ -354,11 +355,11 @@ normalisation:
 | `--live-codex-hooks PATH` | the same for a Codex `hooks.json` |
 
 `--check` compares content only, never file modes. A consuming project runs
-it in CI against its committed copy, and `atc validate --projects` fails a
+it in CI against its committed copy, and `atc sync --check` fails a
 project whose `generated/enforcement/` differs from its
 `policies/hard-deny.yaml`, so the enforcement surface changes only through a
 reviewed diff of the policy. It also reports, without failing or writing, a
 project whose `.claude/settings.local.json` lacks the machine-local segment
 or holds one that differs from the map, and an installed hook table or entry
-that differs from a fresh compose; `atc doctor` lists the same as its
+that differs from a fresh compose; `atc guard` and `atc doctor` list the same as its
 `pretooluse hook` check.

@@ -27,7 +27,7 @@ execution commands, parallelism, platform initialization and diagnostics.
   keys listed in § What a project supplies. The selection policy and the
   static checks stay in the project's Python file.
 - A project keeps no script of its own for a targeted isolated run;
-  `atc test run` against the checkout is that run.
+  `atc test ID` against the task's worktree is that run.
 
 ## Markers
 
@@ -143,10 +143,10 @@ set) use no pool.
 - Each stage takes its tokens before it starts and gives them all back when
   it ends: the parallel stage its count, down to a floor of 2, or the whole
   count of a flag; the serial and interactive stages one each. `atc test
-  run` takes its pytest `-n K` (cut by the memory ceiling and the pool size
+  ID` takes its pytest `-n K` (cut by the memory ceiling and the pool size
   and rewritten when cut), one token for `-n 0`, and otherwise the default
   count down to 2 (§ Commands), its `-n` becoming the granted count;
-  `atc test mutants` takes one token for the whole command. Static checks
+  `atc test ID --mutants FILE` takes one token for the whole command. Static checks
   take none. A flag
   above the pool size runs the pool size, and its line names the pool,
   `workers: 2 (flag 8, host pool: 2)`; on CI, outside the pool, only the
@@ -162,27 +162,26 @@ set) use no pool.
   started with it set, a test's gate or verifier for example, takes no token
   and never waits, and its parallel stage takes one worker unless a flag
   names a count.
-- The wait is not part of any timeout: `atc test run --timeout` and the
+- The wait is not part of any timeout: the test timeout and the
   mutant timeout start once the tokens are held, and the verifier writes its
-  total wait to `ATC_WORKER_WAIT_FILE`, which `atc integrate` and `atc
-  verify` add to its clock, by at most the verifier timeout. The total wait
+  total wait to `ATC_WORKER_WAIT_FILE`, which `atc integrate` and `atc test
+  ID --candidate` add to its clock, by at most the verifier timeout. The total wait
   of a run has its own limit: `ATC_WORKER_MAX_WAIT` (which `atc integrate`
-  sets to the verifier timeout), else the run's own timeout (`atc test run
-  --timeout`, 900 seconds for `atc test mutants`), else
+  sets to the verifier timeout), else the run's own timeout (the test dir's `timeout`, 900 seconds for `atc test
+  ID --mutants`), else
   `test_worker_max_wait`, else 1800 seconds. A run past it stops with
   `WORKER_WAIT_TIMEOUT`, the time it waited, the runs it waited behind and
-  `next: atc doctor`: exit 124 from the gate, the CI runner, `atc test run`
-  and `atc test mutants`; the verifier refuses with it (§ Integration
+  `hint: atc doctor -v`: exit 124 from the gate, the CI runner, `atc test ID`
+  and `atc test ID --mutants`; the verifier refuses with it (§ Integration
   verifier), and `atc integrate` stops with it without judging the
   candidate.
 - Each process keeps one row in `~/.atc/run/workers/`, locked for its life:
   its label, stage, tokens and wait, and while a stage or run holds tokens
   its log and its `workers:` line. Only the locks decide who holds a
   token; a row nobody holds is stale, whatever process now has its PID, and
-  the next run that reads it removes it. `atc doctor` lists the pool's free
+  the next run that reads it removes it. `atc doctor -v` lists the pool's free
   tokens, the runs holding tokens and the runs waiting (`--json`: the
-  `worker_pool` field), and `atc test status` each run's progress
-  (§ Commands); neither removes anything.
+  `worker_pool` field); it removes nothing.
 - On Windows a stage's process tree is in a kill-on-close Job of the process
   holding its tokens, so the tree ends with that process, and what is left of
   it when the stage ends ends with it. Elsewhere a stage's process group
@@ -195,7 +194,7 @@ set) use no pool.
   the last 10 values; the memory ceiling counts a worker at their largest
   times 1.25, at least 128 MiB, unless the project declares
   `worker_memory_mib` (§ Stages).
-- On Windows `atc doctor` reports the physical memory available and the
+- On Windows `atc doctor -v` reports the physical memory available and the
   kernel nonpaged pool: `READY memory: 17.4 of 31.8 GiB available; kernel
   nonpaged pool 1.0 GiB`. A nonpaged pool above `max(4 GiB, physical
   memory / 8)`, or `nonpaged_pool_warn_gib` of the host file (`ATC_HOME.md`
@@ -210,7 +209,7 @@ A toolchain is how a tree's tests are prepared, selected and run. The stages,
 the isolation, the gate, the verifier, the CI runner and the commands go
 through it; `[tool.atc-testkit]` `toolchain` names it, and `python`, the one
 toolchain, is the default. Any other name stops the gate, the verifier and
-`atc tmp checkout` with `TOOLCHAIN_UNKNOWN` (exit 9).
+`atc test ID --sha SHA` with `TOOLCHAIN_UNKNOWN` (exit 9).
 
 | The toolchain supplies | `python` |
 | --- | --- |
@@ -220,10 +219,10 @@ toolchain, is the default. Any other name stops the gate, the verifier and
 | The lock check of the verifier | `uv lock --check` |
 | The repository-wide collection of the verifier | `python -m pytest -q -n 0 --collect-only` |
 | The variable pointed at the run's bytecode directory | `PYTHONPYCACHEPREFIX` |
-| The environment `atc tmp checkout` prepares, and its interpreter | `uv sync --locked` into `.venv` |
+| The environment `atc test ID --sha SHA` prepares in an export, and its interpreter | `uv sync --locked` into `.venv` |
 | The search path the verifier's import check uses, and the test paths that make a range a collection change | `pythonpath` and `testpaths` of `[tool.pytest.ini_options]` |
 | A stage's log name in the verifier's working directory | `pytest-<stage>.log` |
-| The `<tmp>/systmp` entries its runner expires itself, which `atc tmp prune` leaves | `pytest-of-*` |
+| The `<tmp>/systmp` entries its runner expires itself, which the scratch pruning leaves | `pytest-of-*` |
 
 A stage's marker is a category expression over the § Markers names with
 `and`, `or`, `not` and parentheses; the toolchain turns it into its runner's
@@ -271,7 +270,7 @@ the pre-push gate).
 `ATC_TEST_TIME_SLACK` is the seconds a project's timing tests may add to
 their limits on a slow host: a number from 0 to 30, 2 when unset or empty.
 Any other value stops the gate, the verifier, the CI runner and
-`atc test run` with `TIME_SLACK_INVALID` (exit 9) before any check or test.
+`atc test ID` with `TIME_SLACK_INVALID` (exit 9) before any check or test.
 
 - The isolation passes it to every stage; a project's own variable for the
   same purpose is a project setting the isolation removes with the rest.
@@ -411,7 +410,7 @@ working-directory rules bind it as they bind a project's verifier.
   `state/`, so the checks read the committed tree only, as CI does.
 - A pass writes the verification report, as a consumer's does
   (`shared/conformance/verification-evidence/README.md` § Report), so
-  `atc integrate` reuses the reviewer's `atc verify` record of the same
+  `atc integrate` reuses the reviewer's `atc test ID --candidate` record of the same
   candidate in place of running the verifier again (§ Integration reuse).
   Its `dependency_inputs` are the adapter toolchain's dependency files,
   named from the root (`adapters/python/uv.lock`,
@@ -523,13 +522,13 @@ Windows only; on other platforms a stage starts normally.
 - A test that needs the interactive desktop (native tray icons are the
   known case) carries `interactive_desktop` and runs in the
   `interactive` stage, which still shows windows.
-- `atc test run` and `atc test mutants` run on a private desktop and
+- `atc test ID` and `atc test ID --mutants` run on a private desktop and
   exclude `interactive_desktop` tests, saying so in one line:
   `NOTE private desktop: interactive_desktop tests are excluded; ATC_PRIVATE_DESKTOP=0 runs on the interactive desktop with them`.
   `ATC_PRIVATE_DESKTOP=0` runs on the interactive desktop with those tests
   included. Unset and `1` are private; any other value is refused with
   `PRIVATE_DESKTOP_INVALID` (exit 9) before any test runs.
-- `atc test private <command> [args...]` runs one command on a private
+- `atc test --private -- <command> [args...]` runs one command on a private
   desktop (§ Commands); `atc_testkit.desktop.run(command, cwd=, env=)` does
   the same for a Python caller. A project script that starts pytest itself
   goes through one of them.
@@ -542,7 +541,7 @@ Windows only; on other platforms a stage starts normally.
   - A Tk root created for a test not marked `interactive_desktop` is refused
     before Tcl creates the window: `tkinter.Tk()` with `useTk` true and
     `Tk.loadtk` raise `INTERACTIVE_DESKTOP_WINDOW` naming the test and the two
-    ways out, `atc test run` or the marker. The test's report is failed at
+    ways out, `atc test ID` or the marker. The test's report is failed at
     teardown as well, so code that catches the exception does not hide it.
   - A fixture's setup and teardown count as part of the test being set up or
     torn down, so a module- or session-scoped Tk fixture set up for a marked
@@ -565,82 +564,71 @@ calls before pytest starts, for preparation only that project needs.
 
 ## Commands
 
-The test tools a review or a developer runs are subcommands of `atc`, one
+The test commands a review or a developer runs are forms of `atc test`, one
 implementation on every platform. A machine that runs them has `atc`
 installed (`uv tool install -e adapters/python`), as integration already
 requires. Every variable ATC itself defines starts with `ATC_`.
 
 No run has confirmed this on a cloud writer host, a clone with no
 `workspace.yaml`: installing `atc` from a clone there and running
-`atc test run` against a project clone is untried, and what such a host runs
+`atc test ID` against a project clone is untried, and what such a host runs
 when it has no `atc` is not decided.
 
-`atc test` and `atc tmp` are implemented in `atc-testkit`. The adapter
-depends on the package by its path in the tree, and `atc` dispatches to it;
-`atc integrate` takes the location rule from the same package.
+`atc test` is implemented in `atc-testkit`. The adapter depends on the
+package by its path in the tree, and `atc` dispatches to it; `atc integrate`
+takes the location rule from the same package.
 
 `atc <command> [<subcommand>] --help` prints a usage line that starts with
 `usage: atc <command> [<subcommand>]` and exits 0; output the console cannot
 encode is written as backslash escapes. A wrong form prints the usage on
-stderr and exits 2, and no option is matched by an abbreviation; an argument
-error that argparse finds adds its error line and
-`next: atc <command> [<subcommand>] --help`. A command
+stderr and exits 2, and no option is matched by an abbreviation. A command
 that imports a module the installed `atc` lacks stops with
 `ERROR MISSING_DEPENDENCY` (exit 2) naming the module and the reinstall
 command of the root's `AGENTS.md`.
 
-### `atc test run --scratch <name> --task <ID> [--tree <tree>] [--python <py>] [--select <base> [--wide | --touched]] [--label <label>] [--timeout <s>] [--progress] [-- <pytest args>]`
+### `atc test ID [--sha SHA] [--all] [-v] [-- PYTEST_ARG...]`
 
-One isolated pytest run inside a tree, a worktree or an exported copy, in
-the scratch `<name>` (`ATC_HOME.md` § Test scratch), its output kept in a
-log. In order:
+One isolated pytest run for the task `ID`, its output kept in a log. By
+default it runs the related tests, the test files changed since the record's
+`base_sha` and the test files that import a changed module directly, one edge
+and no closure, in the task's worktree, in the scratch `<ID>`
+(`ATC_HOME.md` § Test scratch). `--sha SHA` runs them in an export of `SHA`,
+in the scratch `<ID>-<sha7>`, whose environment is built once; `--all` runs
+the full suite. The test directory is the shallowest directory, at most two
+levels below the repository root, whose `pyproject.toml` has
+`[tool.atc-testkit]`; the run's timeout is that table's `timeout`. A project
+with no such directory refuses with `NO_TESTKIT`, and its tasks use
+`tests: none`. `-v` streams pytest's output. Every run first prunes stale
+scratch entries. In order:
 
-1. Before the run, each refusal exits 9 and runs no test. `--task` is
-   required (usage error, exit 2) and has the task form `ATC-0008`; another
-   form stops with `TASK_INVALID`. Check the scratch without creating it:
-   `SCRATCH_OUTSIDE_TMP`, `SCRATCH_PATH_TOO_LONG`, `SCRATCH_NOT_RESOLVED`,
-   and `SCRATCH_NOT_CREATED` for a path that holds a file. Resolve `--tree` and a
-   path-form `--python` against the caller's directory:
-   `TREE_NOT_FOUND`, `PYTHON_NOT_FOUND`. `--tree` defaults to the tree the
-   scratch's registry line names, as `atc tmp checkout` records it; without
-   either, `TREE_NOT_FOUND`. `--python` defaults to the interpreter of the
-   tree's environment (§ Toolchain); without one, `VENV_MISSING`, which
-   names `atc tmp checkout` and the project's `AGENTS.md` preparation, and
-   never another Python. Only then does the scratch get its registry line
-   (`ATC_HOME.md` § Scratch registry) with the task `--task` names, and
-   after that its directory and `qdr`; a scratch whose line names another
-   task stops with `SCRATCH_TASK_MISMATCH`, and one that cannot be made
-   with `SCRATCH_NOT_CREATED`. So a refusal before the line leaves no
-   directory, and a later one leaves the scratch registered.
-2. `--select <base>` runs the tree's `[tool.atc-testkit]` `selector`, a
-   list of strings: the argv of a command that takes changed paths as
-   arguments and prints the test paths to run as a JSON array on its last
-   line. It runs with the run's Python and the tree as its working
-   directory. The changed paths are `git diff --name-only <base>` and the
-   untracked files of the tree's working tree, relative to its top; for a
-   tree outside a working tree, the diff from `<base>` to the commit of
-   the scratch's registry line in its source worktree. A tree without the
-   key stops with `SELECTION_UNDECLARED`, a base Git cannot resolve with
-   `SELECTION_BASE_UNKNOWN`, an export whose scratch names no source with
-   `SELECTION_SOURCE_UNKNOWN`, a selector that fails or prints no JSON
-   array of strings with `SELECTOR_FAILED`. The line
-   `SELECT <base>: <n> changed paths, <k> test paths` follows; with none
-   selected, `NO_TESTS no test selected` ends the command with exit 0. The
-   selected paths come before the pytest arguments.
-   A selection that holds at least `select_full_fraction` of the tree's
-   tests (§ What a project supplies), counted as collected items of the
-   selected paths and of the whole tree, is the reviewer's verify run, and
-   the command runs none of it: it ends the `SELECT` line with
-   `, <a> of <b> tests (<pct>%) >= select_full_fraction <f>`, prints
-   `SKIPPED_WIDE the reviewer's atc verify runs these; run them here with --wide, or the touched files with --touched`
-   and exits 0. A step report states that line as it is, never as a pass.
-   `--wide` runs the whole selection. `--touched` runs, whatever its share,
-   the changed test files and the test files that import a changed module
-   directly, one edge and no closure: the selector's argv with the changed
-   paths and `--direct`, which prints them as a JSON array; a selector that
-   fails with it gives the changed test files of the tree. Its line is
-   `SELECT <base> --touched: ...`. Each of the two takes `--select`, and
-   they exclude each other (usage error, exit 2).
+1. Before the run, each refusal exits 9 and runs no test. `ID` has the task
+   form `ATC-0008`; another form stops with `TASK_INVALID`. The scratch is
+   checked without creating it: `SCRATCH_OUTSIDE_TMP`,
+   `SCRATCH_PATH_TOO_LONG`, `SCRATCH_NOT_RESOLVED`, and
+   `SCRATCH_NOT_CREATED` for a path that holds a file. The tree is the
+   task's worktree or the export: `TREE_NOT_FOUND`. The interpreter is that
+   of the tree's environment (§ Toolchain); without one, `VENV_MISSING`,
+   which names the project's `AGENTS.md` preparation, and never another
+   Python. Only then does the scratch get its registry line
+   (`ATC_HOME.md` § Scratch registry) with the task, and after that its
+   directory and `qdr`; a scratch whose line names another task stops with
+   `SCRATCH_TASK_MISMATCH`, and one that cannot be made with
+   `SCRATCH_NOT_CREATED`. So a refusal before the line leaves no directory,
+   and a later one leaves the scratch registered.
+2. Unless `--all` is given, the related tests come from the tree's
+   `[tool.atc-testkit]` `selector`, a list of strings: the argv of a command
+   that takes changed paths as arguments and, with `--direct` after them,
+   prints the changed test files and the test files one import from a changed
+   module as a JSON array on its last line. It runs with the run's Python and
+   the tree as its working directory. The changed paths are
+   `git diff --name-only <base_sha>` and the untracked files of the tree's
+   working tree, relative to its top; for an export, the diff from
+   `<base_sha>` to the exported commit. A selector that fails with `--direct`
+   gives the changed test files of the tree. The line
+   `SELECT <base> --touched: <n> changed paths, <k> test paths` follows; with
+   none selected, `NO_TESTS no test selected` ends the command with exit 0.
+   The selected paths come before the pytest arguments.
+
 3. Remove every `HAMI_*` variable. Point each data-root variable the tree's
    `[tool.atc-testkit]` names, and `QUANT_DATA_ROOT` when it names none, at
    `<scratch>/qdr`. Point the toolchain's bytecode variable,
@@ -675,63 +663,51 @@ log. In order:
    budget). A project's own `-n` in `addopts` comes before the run's option,
    so the run's option wins. The console shows `LOG <path>` first, then the
    private desktop's exclusion line (§ Private desktop), the `workers:` line
-   of a parallel run (§ Stages), and, with `--progress`, the output too.
+   of a parallel run (§ Stages), and, with `-v`, the output too.
    A run of a registered project that used to be serial without `-n` is
    parallel once it upgrades to this testkit; `-n 0` keeps it serial.
 7. One summary line ends the command: `PASS`, `FAIL`, `NO_TESTS`,
    `INTERRUPTED` or `ERROR exit <code>`, pytest's counts, the failed and
-   errored tests by node ID, and the log path. A run that `--timeout` ends
+   errored tests by node ID, and the log path. A run that the timeout ends
    prints the log's last fifteen lines and `TIMEOUT` (exit 124); one the
    caller interrupts prints them and `INTERRUPTED` (exit 130). Neither ever
    reports a pass. Otherwise the exit code is pytest's.
 
-Before step 6 the run takes its host worker tokens, and `--timeout` counts
+Before step 6 the run takes its host worker tokens, and the timeout counts
 from then; a wait past its limit stops it with `WORKER_WAIT_TIMEOUT` (exit
 124) before pytest starts, and an interrupt during the wait stops it with
 `INTERRUPTED` (exit 130) before pytest starts (§ Host worker budget).
 
-### `atc test status [--json]`
+### `atc test ID --mutants FILE [--sha SHA] [-- TEST...]`
 
-The host's test runs, read from the pool's rows (§ Host worker budget); it
-removes no row and holds no token. Each run holding tokens is one line,
-`RUN <label> pid <pid> <stage> <tokens>/<want> workers held <time> progress <pct>% log <path>`,
-followed by its `workers:` line indented; progress is the last `[ NN%]` in
-the last 8 KiB of its log, `-` when there is none. A waiting run is
-`WAIT <label> pid <pid> <stage> waiting <time> for <floor>`. The first line
-is `worker pool: <free> of <size> free`; with no run it is the only one,
-`IDLE worker pool: <free> of <size> free`. With `CI` set or
-`test_worker_pool = 0` it prints `CI ...` or `OFF ...`. `--json` prints the
-same as an object with `state`, `size`, `free`, `runs` and `waiters`. It
-exits 0.
-
-### `atc test mutants <scratch> <sha> <worktree> <mutants.json> --task <ID> [--python <py>] [--kill-rule failure|assertion] --tests <path>...`
-
-Applies each mutant alone to `<scratch>/tree`, the export of `<sha>`, through
-the isolation of `atc test run`. Each run is pytest with `-x` and a
+Applies each mutant of `FILE` alone to the export of `SHA` (the branch tip
+when `--sha` is absent) in the scratch `<ID>-<sha7>`, through the isolation of
+`atc test ID`. The judging tests are the `TEST...` after `--`, else the
+related tests; with neither, `NO_TESTS`. Each run is pytest with `-x` and a
 900-second timeout. The command holds one host worker token from before the
 baseline to its end; a wait for it past 900 seconds stops the command with
 `WORKER_WAIT_TIMEOUT` (exit 124) before the baseline, and an interrupt
 during the wait stops it with `INTERRUPTED` (exit 130) (§ Host worker
 budget). That one token covers every run of the command: an `-n K` among
-the `--tests` arguments runs K workers on it, outside the pool and its
+the tests arguments runs K workers on it, outside the pool and its
 memory clamp.
 
-- `--task` is required (usage error, exit 2) and checked as `atc test run`
-  checks it: `TASK_INVALID`. `<sha>` must name a commit in `<worktree>`
-  (`git rev-parse --verify`): `SHA_NOT_FOUND` (exit 9) before the scratch is
-  touched, then `PYTHON_NOT_FOUND`, the scratch refusals of `atc test run`,
-  `VENV_MISSING`, `TREE_NOT_FOUND`, `SCRATCH_TASK_MISMATCH`,
-  `TIME_SLACK_INVALID` and `PRIVATE_DESKTOP_INVALID` (exit 9). The private
-  desktop's exclusion line comes first when the runs are private.
-- The runs use the copy's own environment: `--python` defaults to the
-  `.venv` interpreter of the directory the scratch's registry line names
-  inside the scratch, as `atc tmp checkout --lock-dir` records it, else of
+- `ID` is checked as `atc test ID` checks it: `TASK_INVALID`. `SHA` must name
+  a commit in the task's worktree (`git rev-parse --verify`): `SHA_NOT_FOUND`
+  (exit 9) before the scratch is touched, then `PYTHON_NOT_FOUND`, the
+  scratch refusals of `atc test ID`, `VENV_MISSING`, `TREE_NOT_FOUND`,
+  `SCRATCH_TASK_MISMATCH`, `TIME_SLACK_INVALID` and `PRIVATE_DESKTOP_INVALID`
+  (exit 9). The private desktop's exclusion line comes first when the runs
+  are private.
+- The runs use the copy's own environment, the `.venv` interpreter of the
+  directory the scratch's registry line names inside the scratch, else of
   `<scratch>/tree`; without one, `VENV_MISSING`. After every refusal of
   this list but `SCRATCH_NOT_CREATED` has passed, the scratch gets its
-  registry line with `--task`, before anything is created in it. The import guard of
-  `atc test run` runs before each run on `<scratch>/tree`, so an interpreter
-  whose environment installs the tree's packages from another checkout
-  stops the command with `COPY_IMPORT_MISMATCH` (exit 8).
+  registry line with the task, before anything is created in it. The import
+  guard of `atc test ID` runs before each run on `<scratch>/tree`, so an
+  interpreter whose environment installs the tree's packages from another
+  checkout stops the command with `COPY_IMPORT_MISMATCH` (exit 8).
+
 - A mutant is a label, a list of edits `{path, old, new}` and optional
   `tests`, the pytest arguments that judge it in place of `--tests`. An
   `old` that does not occur exactly once in its file aborts the run. Edits
@@ -765,19 +741,30 @@ memory clamp.
   last mutant, where `N` counts the mutants that printed a `KILLED`,
   `SURVIVED` or `INCONCLUSIVE` line. Survivors alone leave the exit code 0.
 
-### `atc test private [--] <command> [args...]`
+### `atc test ID --candidate [--sha SHA]`
 
-Runs `<command>` on a private desktop from the current directory with the
+Runs the integration verifier on the candidate `atc integrate ID` would
+build, from the reviewed SHA (the newest PASS review report, or `--sha`),
+moving no ref. It writes the candidate record that `atc integrate` reuses
+(`shared/conformance/verification-evidence/README.md` § Candidate record). The
+last line is `PASS candidate <sha> FF|NO_FF`, or the verifier's refusal token.
+
+### `atc test ID --clean`, `atc test --list [ID]`
+
+`--clean` deletes the task's scratches, after the registry's safety checks;
+`--list` lists the registered scratches, those of `ID` when given
+(`ATC_HOME.md` § Checkout, § Scratch registry, § Deleting).
+
+### `atc test --private -- COMMAND [ARG...]`
+
+Runs `COMMAND` on a private desktop from the current directory with the
 current environment. It prints `desktop: private`, or `desktop: interactive`
 with the line § Private desktop names when no desktop can be created, then
 streams the command's merged output, and exits with its code. Without a
 command it prints its usage (exit 2).
 
-### `atc tmp checkout`, `atc tmp list`, `atc tmp clean`, `atc tmp prune`
-
-A commit exported into a scratch with its environment built, the scratch
-registry and deletion (`ATC_HOME.md` § Checkout, § Scratch registry,
-§ Deleting).
+`atc doctor -v` lists the host's worker pool, as § Host worker budget
+describes.
 
 ## What a project supplies
 
@@ -807,8 +794,8 @@ In `[tool.atc-testkit]`; the first seven keys are required:
 | `ci_platforms` | the CI platform matrix |
 | `ci_init` | the CI runner's initialization function, as `module:function` |
 | `ignore` | `--ignore` paths appended to a stage, under `nt` and `posix` |
-| `selector` | the argv of the command `atc test run --select` runs; with `--direct` after the changed paths it prints only the changed test files and the test files one import from a changed module, which `--touched` runs (§ Commands) |
-| `select_full_fraction` | the share of the tree's tests, a number from 0 to 1, at which `atc test run --select` skips the selection with `SKIPPED_WIDE`; 0.5 when absent, 1 turns the skip off (§ Commands); any other value stops the run with `ATC_CONFIG_INVALID` (exit 9) |
+| `selector` | the argv of the command the related-test selection of `atc test ID` runs; with `--direct` after the changed paths it prints only the changed test files and the test files one import from a changed module, which `atc test ID` runs (§ Commands) |
+| `select_full_fraction` | the share of the tree's tests, a number from 0 to 1, at which a `--select` run of the testkit's runner skips the selection with `SKIPPED_WIDE`; 0.5 when absent, 1 turns the skip off; any other value stops the run with `ATC_CONFIG_INVALID` (exit 9) |
 | `toolchain` | the toolchain's name, `python` when absent (§ Toolchain) |
 | `worker_memory_mib` | the memory one test worker is counted to need, an integer from 1 to 65536; when absent, the project's recorded cost on a host, else 256 (§ Stages); any other value stops a run with `ATC_CONFIG_INVALID` (exit 9) |
 

@@ -98,8 +98,8 @@ Operational description of the tree; governance semantics live under
   release or a named `--revision`. `scripts/link-skills.sh` installs the
   checkout it runs from, at its `HEAD`; it reads the lock without parsing
   it, so it also rewrites a lock with an empty `revision`, and checks the
-  recorded revision against that `HEAD`. On `main`, `atc validate
-  --projects` checks that this revision is in `main`'s history and compares
+  recorded revision against that `HEAD`. On `main`, `atc sync
+  --check` checks that this revision is in `main`'s history and compares
   the synced files with that revision's tree. The files sync writes carry no
   format version of their own: they are current when they equal what the
   locked revision renders, and sync replaces them otherwise.
@@ -108,9 +108,9 @@ Operational description of the tree; governance semantics live under
 - `.claude/skills/<name>/`, `.agents/skills/<name>/`, `.dsh/skills/<name>/` —
   the rendered skill copies: every baseline skill, and every opt-in skill the
   project adopted, as a complete copy (the canonical body plus that tool's
-  overlay) in each tool directory the project's `skill_tools` selects. DSH
+  overlay) in each harness directory the project's `skill_harnesses` selects. DSH
   also reads `.agents/skills/` and prefers `.dsh/skills/`. Sync deletes a
-  managed copy whose canonical skill is gone and every managed copy in a tool
+  managed copy whose canonical skill is gone and every managed copy in a harness
   directory the project no longer selects. These directories also hold the
   project's own skills, so each rendered copy carries `managed-by`.
 - One marked pointer line in `AGENTS.md`, placed before its first section, or
@@ -132,18 +132,18 @@ argv file exist (`GIT_WORKFLOW.md` § Lock advancement).
 ## Machine-local, never committed
 
 - `workspace.yaml` — absolute paths for this machine; one copy per clone.
-  Its optional top-level `skill_tools` maps a project name to the tools whose
+  Its optional top-level `skill_harnesses` maps a project name to the harnesses whose
   skill directories it gets copies in: `claude` (`.claude/skills/`), `codex`
   (`.agents/skills/`), `dsh` (`.dsh/skills/`), or `all`. A project it does
-  not name, and this checkout, get `all`: every tool the running `atc`
-  supports, so a tool supported in a later release joins `all` there. The
+  not name, and this checkout, get `all`: every harness the running `atc`
+  supports, so a harness supported in a later release joins `all` there. The
   map stays top-level; a `projects.<name>` entry holds exactly `repo`,
   `worktrees` and `state`.
 - `projects/<name>/` — independent repositories brought in by the owner. This
   repository never tracks their content.
-- `worktrees/<name>/<owner>+<topic>/` — disposable per-topic worktrees whose
+- `worktrees/<name>/<harness>+<ID>/` — disposable per-topic worktrees whose
   identity is in git metadata.
-- `worktrees/root/<owner>+<topic>/` — the same for this repository's own
+- `worktrees/root/<harness>+<ID>/` — the same for this repository's own
   topics; `root` is therefore reserved and names no registered project.
 - `state/<name>-data/` — a project's persistent, hard-to-regenerate data.
   Protected by the mutation policy in `AGENTS.md`, not by `.gitignore`.

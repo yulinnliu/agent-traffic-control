@@ -14,18 +14,18 @@ Then read `shared/governance/INDEX.md` and `CORE.md` from that exact same revisi
 
 - Normative governance lives only under `shared/governance/`. Changing it routes through `GOVERNANCE_CHANGES.md`.
 - Policy shapes live in `shared/policies/schemas/`; `shared/policies/examples/` are illustrations, never a project's real policy.
-- A shared skill's single source is `shared/skills/<name>/SKILL.md` plus optional per-tool overlays in `adapters/<tool>.md`; `.claude/`, `.agents/` and `.dsh/` hold managed copies rendered from them by `atc sync --root`, never edited by hand. A canonical skill never names this checkout by path or environment variable.
+- A shared skill's single source is `shared/skills/<name>/SKILL.md` plus optional per-tool overlays in `adapters/<tool>.md`; `.claude/`, `.agents/` and `.dsh/` hold managed copies rendered from them by `atc-maintain sync --root`, never edited by hand. A canonical skill never names this checkout by path or environment variable.
 - `CLAUDE.md` here is what sync copies verbatim into every registered project, so it stays the `@AGENTS.md` import with one sentence, which reads correctly from any repo. Guidance belongs in this file or `docs/`.
 - `scripts/` holds POSIX sh entry points that need no runtime (install and check adapters); tool implementations live under `adapters/<language>/`; the contract they implement is `shared/conformance/`, not their own tests.
 
 ## Changing this repo
 
 - Read by default; editing this repo requires explicit task authority.
-- The installed `atc` runs this canonical checkout's code, so the checkout stays on `main` with no tracked modification: off `main` every `atc` command but `doctor` refuses, and `sync --root` refuses to render here.
-- Authorized changes use a managed worktree under `worktrees/root/` from `atc worktree create --project root`; `atc integrate --task <ID>` fast-forwards `main` here.
+- The installed `atc` runs this canonical checkout's code, so the checkout stays on `main` with no tracked modification: off `main` every `atc` command but `doctor` refuses, and `atc-maintain` refuses to run here.
+- Authorized changes use a managed worktree under `worktrees/root/` from `atc task create --project root`; the Owner's `atc integrate <ID>` fast-forwards `main` here (`docs/WORKFLOW.md`).
 - Integration, publication and deployment are separately governed actions.
 - Never aim destructive project/worktree tooling at this checkout itself. Do not run `git clean -fdx` here or recursively delete `projects/`, `worktrees/`, or `state/` from above.
-- Read back changes, then validate from the topic worktree's `adapters/python/`, entered in a subshell `( cd <worktree>/adapters/python && ... )` and through `uv run --locked atc` (bare `atc` runs this checkout's code): `sync --root` followed by `validate` after touching a shared skill or overlay, `policies check ../../shared/policies/examples` after touching a schema or example, and `uv run --locked pytest` (reads `shared/conformance/`) after touching a tool or fixture.
+- Read back changes, then validate from the topic worktree's `adapters/python/`, entered in a subshell `( cd <worktree>/adapters/python && ... )`, with the maintainer commands `uv run --locked atc-maintain`, which run only in a worktree (bare `atc` runs this checkout's code): `sync --root` followed by `validate` after touching a shared skill or overlay, `policies check ../../shared/policies/examples` after touching a schema or example, and `uv run --locked pytest` (reads `shared/conformance/`) after touching a tool or fixture.
 
 ## Task records
 

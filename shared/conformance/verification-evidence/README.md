@@ -107,7 +107,7 @@ prints the verdict.
 
 ## Candidate record
 
-`atc verify` builds the candidate `atc integrate` would build and runs the
+`atc test ID --candidate` builds the candidate `atc integrate ID` would build and runs the
 same verifier. It writes the outcome to
 `<git-common-dir>/atc/verification-evidence/verify/<verdict>-<expected_main>-<reviewed>.json`.
 The key holds the first 12 characters of each SHA. It names the base, the
@@ -126,15 +126,15 @@ A `PASS` record holds the report. A `FAIL` record, written on
 `report: null` and `clean: false` and replaces the record under the same key,
 so only a latest `PASS` counts. A fresh `atc integrate` whose verifier fails
 writes the same `FAIL` record. No candidate record is written when a passing
-run leaves no valid report, nor for a records-only range. `atc verify` takes
-the integrate command's target arguments, `--task` included. `--task` only
+run leaves no valid report, nor for a records-only range. `atc test ID --candidate` takes
+the integrate command's target arguments, `--sha` included. It only
 resolves the target and checks no authority, so the record names `task` and
 `tasks` for audit and no check compares them. Writes are atomic, and the
 14-day cutoff covers this directory too. The pre-push gate never reads it.
 
 ## Integration reuse
 
-Within the active slot, after preflight, authority and the main read-back,
+Within the active slot, after the pre-checks, authority and the main read-back,
 `atc integrate` reads the candidate record under its own key. It reuses the
 record in place of running the verifier only when every row holds, checked in
 this order. The first row that fails gives the reason, and the verifier runs.

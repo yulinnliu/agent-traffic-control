@@ -7,7 +7,7 @@ the pytest plugin and marker contract, policy-driven test selection, Git gate
 helpers, verification evidence reuse, temporary locations, stages and their
 logging, the isolated environment, the pre-push gate and integration verifier
 skeletons, child processes, the private desktop, the CI runner and the
-`atc test` and `atc tmp` commands. Production packages have no dependency on it.
+`atc test` command. Production packages have no dependency on it.
 
 `docs/TESTKIT.md` and `docs/ATC_HOME.md` specify the execution behaviour and the
 locations; this document defines the category meanings, the marker rules and the
@@ -104,15 +104,17 @@ diagnostics. A project supplies data.
 - `ci` is the runner a CI job calls: `python -m atc_testkit.ci --stages` runs the
   stages, `--slow` the slow tests, and any other arguments go to pytest. A project
   adds failure context, hints and initialization through `ci.main`.
-- `atc test run`, `atc test mutants`, `atc test private`, `atc test status` and
-  `atc tmp checkout|list|clean|prune` run a test tree under a scratch directory on
-  a private desktop, kill mutants of a committed tree, run one command on a
-  private desktop, show the host's test runs, and export commits into and manage
-  the scratch registry; `python -m atc_testkit.commands` is the same entry point.
-  `-h` after a subcommand prints its help and exits 0. A refusal token goes to stderr; the per-directory lines `DELETED`, `SKIPPED`,
-  `REFUSED`, `ANOMALY` and `LEFT` are the normal output of `atc tmp` on stdout.
-- `atc test mutants` counts `KILLED` only for pytest exit 1 with a `FAILED` line;
-  `--kill-rule assertion` also requires every failure to be an assertion, read
+- `atc test ID`, `atc test ID --sha SHA`, `atc test ID --all`,
+  `atc test ID --mutants FILE`, `atc test ID --candidate`, `atc test ID --clean`,
+  `atc test --list` and `atc test --private -- COMMAND` run a test tree under a
+  scratch directory on a private desktop, in the task's worktree or an export of
+  a commit, kill mutants of a committed tree, run the integration verifier on the
+  candidate, manage the scratch registry, and run one command on a private
+  desktop. `-h` prints the help and exits 0. A refusal token goes to stderr; the
+  per-scratch lines `DELETED`, `SKIPPED`, `REFUSED`, `ANOMALY` and `LEFT` are the
+  normal output of `atc test ID --clean` on stdout.
+- `atc test ID --mutants FILE` counts `KILLED` only for pytest exit 1 with a `FAILED` line;
+  a mutant's `kill_rule: assertion` also requires every failure to be an assertion, read
   from a junit report. Every other ending of a mutated run (a setup `ERROR`
   alone, exits 2 to 5, a timeout, a failure the kill rule does not count)
   prints `INCONCLUSIVE` with the reason, ends the run with exit 1 after
@@ -174,7 +176,7 @@ The rows down to `product_module_prefixes` are required; the others are optional
 | `ci_platforms` | the platforms the CI job covers |
 | `ci_init` | the `module:function` the CI runner calls first |
 | `ignore` | the test paths each stage ignores, under `nt` and `posix` |
-| `selector` | the command `atc test run --select` runs to pick test paths |
+| `selector` | the command `atc test ID` runs to pick the related test paths |
 | `select_full_fraction` | the share of the tests at which `--select` skips with `SKIPPED_WIDE` |
 | `toolchain` | the toolchain's name, `python` when absent |
 

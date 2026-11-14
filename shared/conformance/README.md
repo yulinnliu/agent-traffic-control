@@ -1,8 +1,8 @@
 # Conformance fixtures
 
 Language-neutral test cases for every tool in the contract. The conventions
-every `atc` command follows (help, exit codes, `--json`, naming, versions and
-deprecations) are in `CLI.md`. A conforming
+every `atc` command follows (help, exit codes, output, `--json`, naming and
+versions) are in `CLI.md`. A conforming
 implementation, in any language, passes all of them; the Python reference
 implementation under `adapters/python/` runs them as its own test suite
 (`tests/test_conformance.py`).
@@ -34,14 +34,13 @@ access.
 | policy loading | `load-policies/` | `ok: <kinds>`, `schema-violation`, `preset-regrants-hard-deny`, `approval-overlaps-hard-deny`, `duplicate-glob` |
 | enforcement generation | `generate-enforcement/` | `generated:`, `ok: enforcement configs are current`, `drift:` (files and `live-claude`/`live-codex`/`live-hook`), `unresolved-token`, plus golden files per harness |
 | PreToolUse hook | `pretooluse-hook/` | a deny decision (`"permissionDecision": "deny"`) naming the rule, the refused path, the write target `the hook cannot resolve`, or `the PreToolUse hook could not decide`; the payload is `input/payload.json`, passed as `--payload` |
-| escalation gate | `classify-change/` | `LOW: <reason>`, `HIGH: <reason>` |
 | task record check | `task-records/` | `ok: <dir>`, `invalid-yaml`, `schema-violation`, `id-mismatch`, `no-declaration`, `no-prefix-line`, `invalid-prefix` |
 
-Merge preflight (`FF`, `NO_FF`, `STOP`), push preflight (`PUSH`, `STOP`) and
+Merge preflight (`FF`, `NO_FF`, `STOP`), push check (`PUSH`, `STOP`) and
 worktree identity (`CREATED`, `RESUMED`, `IDENTITY_MISMATCH`,
 `IDENTITY_AMBIGUOUS`, `ALREADY_EXISTS`, `REMOVABLE`) and task records
-(`atc task new` and `list`) need live git
-repositories, and so does `atc sync` (prune by default, `skill_tools`, the
+(`atc task create` and `list`) need live git
+repositories, and so does `atc sync` (prune by default, `skill_harnesses`, the
 minimal `AGENTS.md`, the sync commit), whose cases are `tests/test_sync_prune.py`
 and `tests/test_sync_commit.py`. Their cases are the Python suites `tests/test_git_preflight.py`,
 `tests/test_integrate_moving_main.py`, `tests/test_managed_worktree.py` and

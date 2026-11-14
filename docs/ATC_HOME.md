@@ -54,7 +54,7 @@ whole directory loses nothing. Persistent state lives elsewhere
       qdr/                      data root
     systmp/                     stand-in for the system temporary directory
       pytest-of-<user>/         pytest runs started without a scratch
-    candidates/                 candidate trees, verifier reports and logs of `atc integrate` and `atc verify`
+    candidates/                 candidate trees, verifier reports and logs of `atc integrate` and `atc test ID --candidate`
   run/                          the host worker pool (`TESTKIT.md` § Host worker budget); never deleted
     workers.lock                the pool's tokens, one locked byte each
     workers/                    one row per process using the pool, locked for its life
@@ -99,7 +99,7 @@ One rule gives `<tmp>` and `<tmp>/systmp`, and every entry point applies it:
 
   | Entry point | Temporary directory | Owner |
   | --- | --- | --- |
-  | `atc test run`, `atc test mutants` | the scratch, `<tmp>/<scratch>` | ATC |
+  | `atc test ID`, `atc test ID --mutants FILE` | the scratch, `<tmp>/<scratch>` | ATC |
   | `atc integrate`, `build_testkit_release.py` | `<tmp>/systmp` | ATC |
   | `check.ps1` | `<tmp>/systmp`, applying the same rule in shell | ATC |
   | the integration verifier named by a project's verifier argv file | `<tmp>/systmp`, or a working directory it creates there | the project |
@@ -120,9 +120,9 @@ One rule gives `<tmp>` and `<tmp>/systmp`, and every entry point applies it:
 ## Test scratch
 
 A scratch is the working directory of one isolated test run made through
-`atc test run` (`TESTKIT.md` § Commands).
+`atc test ID` (`TESTKIT.md` § Commands).
 
-- `<scratch>` is a name matching `[A-Za-z0-9._-]+`, resolved to
+- `<scratch>` is a name matching `[A-Za-z0-9._-]+`, the task ID or `<ID>-<sha7>`, resolved to
   `<tmp>/<scratch>`. A path is accepted only when it resolves to a direct
   child of `<tmp>`; anything else is refused with `SCRATCH_OUTSIDE_TMP`
   (exit 9) before anything is created. `systmp` and
@@ -134,30 +134,28 @@ A scratch is the working directory of one isolated test run made through
   temporary directory, which product code that requires isolated state
   checks. `qdr` inside it is the data root.
 - An exported copy of a tree (`git archive <sha>`) that a review runs against
-  is placed at `<tmp>/<scratch>/tree`; `atc tmp checkout` makes one
+  is placed at `<tmp>/<scratch>/tree`; `atc test ID --sha SHA` makes one
   (§ Checkout).
 
 ## Checkout
 
-`atc tmp checkout <sha> --task <ID> [--worktree <path>] [--scratch <name>]
-[--lock-dir <dir>]` prepares a scratch for a review or a run of one commit.
+`atc test ID --sha SHA` prepares a scratch for a review or a run of one commit
+of the task `ID`.
 
-1. `<sha>`, a full SHA or a unique prefix, is resolved in the Git working
-   tree that holds `--worktree` (default: the working directory); a commit
-   it does not name stops with `SHA_NOT_FOUND`, a directory outside any
-   working tree with `NOT_IN_REPOSITORY`. `<ID>` has the task form
-   `ATC-0008`; another form stops with `TASK_INVALID`.
-2. The scratch is `--scratch`, by default `<ID>-<first seven characters of
-   the commit>`, resolved as § Test scratch says. A `tree` already in it
-   stops with `SCRATCH_TREE_EXISTS`, which names `atc tmp clean`.
+1. `SHA`, a full SHA or a unique prefix, is resolved in the task's
+   worktree; a commit it does not name stops with `SHA_NOT_FOUND`, a
+   directory outside any working tree with `NOT_IN_REPOSITORY`. `ID` has the
+   task form `ATC-0008`; another form stops with `TASK_INVALID`.
+2. The scratch is `<ID>-<first seven characters of the commit>`, resolved as
+   § Test scratch says. A `tree` already in it is reused, its environment
+   built once.
 3. The scratch gets its registry line with its task, the source worktree
    and the full commit, its `project` read from the commit's
-   `--lock-dir/pyproject.toml`, and as its `tree` the `--lock-dir`
-   directory, where `atc test run --scratch` runs. Then `git archive` of
+   test directory's `pyproject.toml`, and as its `tree` that test directory
+   (`TESTKIT.md` § Commands), where `atc test ID --sha SHA` runs. Then `git archive` of
    the commit is unpacked into `<tmp>/<scratch>/tree`; the line prints as
    `CHECKOUT <scratch> <tree> <commit>`.
-4. `uv sync --locked` runs in `--lock-dir` (a directory under the tree,
-   default the tree itself) without `VIRTUAL_ENV` and
+4. `uv sync --locked` runs in the test directory without `VIRTUAL_ENV` and
    `UV_PROJECT_ENVIRONMENT`, and `SYNCED <environment>` names the `.venv`
    it built. A directory without `uv.lock` stops with `LOCK_MISSING`,
    which names the project's `AGENTS.md` preparation; a failed sync stops
@@ -165,7 +163,7 @@ A scratch is the working directory of one isolated test run made through
 
 Refusals exit 9 unless stated. A refusal before step 3 creates nothing; one
 from step 3 on, `EXPORT_FAILED` among them, leaves the scratch registered,
-so `atc tmp clean <scratch>` and close-out remove it.
+so `atc test ID --clean` and `atc task close` remove it.
 
 ## Scratch registry
 
@@ -174,34 +172,32 @@ so `atc tmp clean <scratch>` and close-out remove it.
 - Encoding UTF-8 without BOM, LF line ends, tab-separated, first line the
   header `project	scratch	tree	created_utc	task	source	commit`.
 - `project`: `[project].name` from `<tree>/pyproject.toml`, or from the
-  `--lock-dir` of `atc tmp checkout`; the directory's name when that file
+  test directory of an export; the directory's name when that file
   or key is absent.
 - `scratch`, `tree`: absolute native paths. `created_utc`: `YYYY-MM-DDTHH:MM:SSZ`.
-- `task`: the task the scratch belongs to, which `atc close-out` reads
-  (`TASKS.md` § Close-out). `atc tmp checkout` writes its `--task`;
-  `atc test run` and `atc test mutants` write their required `--task`. Only
-  a line of an older version has none.
+- `task`: the task the scratch belongs to, which `atc task close` reads
+  (`TASKS.md` § Close-out). `atc test ID` writes its `ID`, as do its
+  `--sha` and `--mutants` forms.
 - `source`, `commit`: the source worktree and the full commit of a scratch
-  `atc tmp checkout` made; empty for other scratches.
+  `atc test ID --sha SHA` made; empty for other scratches.
   A line of the four-column format reads with the three empty, and a change
   to the file keeps it as it is.
-- `atc test run` and `atc test mutants` add the line at the start of a run
+- `atc test ID` and `atc test ID --mutants FILE` add the line at the start of a run
   whenever the scratch has none, whether or not the directory already
   exists. An empty task of an existing line is filled; a line that names
   another task refuses the run with `SCRATCH_TASK_MISMATCH` (exit 9), so no
   scratch changes task.
 - Every change to the file is made under `<tmp>/scratch-dirs.lock` and
   replaces the file in one step.
-- `atc tmp list` prints one line per scratch and deletes nothing: its name,
+- `atc test --list` prints one line per scratch and deletes nothing: its name,
   its tree relative to the scratch (the full path when the tree lies outside
   it), its age, `missing` when the directory is gone, and its task when the
-  row has one. A line after them counts the missing scratches and gives
-  the `atc tmp clean` command that drops their rows; `atc tmp clean` takes
-  the name as printed. Each leftover candidate (§ Candidates) then prints
-  `candidates/<id>`, its age, `leftover`, its owner's command, task and PID
-  (or `no owner marker`) and its repository (or `repository gone`), and a
-  last line counts them and names `atc tmp prune`.
-  `atc tmp list --json` prints the envelope of `shared/conformance/CLI.md`
+  row has one; `atc test --list ID` prints the scratches of one task. A line
+  after them counts the missing scratches. Each leftover candidate
+  (§ Candidates) then prints `candidates/<id>`, its age, `leftover`, its
+  owner's command, task and PID (or `no owner marker`) and its repository (or
+  `repository gone`), and a last line counts them.
+  `atc test --list --json` prints the envelope of `shared/conformance/CLI.md`
   § Output with every row under `scratches`, all its columns plus `size` in
   bytes (`null` when the directory is missing).
 
@@ -210,7 +206,7 @@ so classification costs no path length.
 
 ## Candidates
 
-`atc integrate` and `atc verify` write `<tmp>/candidates/<id>.owner.json`
+`atc integrate` and `atc test ID --candidate` write `<tmp>/candidates/<id>.owner.json`
 before they add the candidate worktree `<tmp>/candidates/<id>`, and remove
 both when they finish: `pid`, `created` (the process's creation time),
 `command`, `repo`, `task` and `started_at`. The candidate is removed with
@@ -226,10 +222,10 @@ running. It is left over when that process is gone, or, without a marker,
 when the directory was last modified more than an hour ago; a younger
 candidate without a marker is neither. An owner counted as running only
 because its creation time cannot be read is not confirmed: the seven-day
-rule of § Deleting still removes its candidate. `atc tmp list` names the leftovers,
-`atc worktree audit` reports a candidate Git still lists as
-`CANDIDATE_LEFTOVER` or `CANDIDATE_IN_USE`, and only `atc tmp prune`, run
-by hand, removes them (§ Deleting).
+rule of § Deleting still removes its candidate. `atc test --list` names the leftovers,
+`atc task list -v` reports a candidate Git still lists as
+`CANDIDATE_LEFTOVER` or `CANDIDATE_IN_USE`, and only the prune that starts
+every `atc test` run removes them (§ Deleting).
 
 ## Deleting
 
@@ -239,7 +235,8 @@ pool. A stale row in `run/workers/` is removed by the next run that reads it.
 `run/memory/` is a measurement the next runs rebuild; deleting it by hand
 only returns the projects to the default worker memory until they run.
 
-`atc tmp clean <dir>...` deletes scratches. Every directory passes through
+`atc test ID --clean` deletes the scratches registered to the task `ID`,
+together with their dependent runs. Every scratch directory passes through
 the same checks, and the single recursive delete in ATC's temporary tooling runs only at the end of them.
 
 1. Each `<dir>` is resolved first. One that is not a direct child of `<tmp>`
@@ -268,10 +265,10 @@ also prints `STOP SCRATCH_REFUSED: <count> refused; ...` on stderr
 A scratch's dependent runs are the other registered scratches whose `tree`
 lies inside it, such as the mutant and test runs made on its export. After
 step 1 each one prints `DEPENDENT <run>` and is left. With `--with-runs`
-(`atc tmp clean --with-runs <dir>...`) each goes through steps 2 to 6
+(always in `atc test ID --clean`) each goes through steps 2 to 6
 itself, before the scratch it depends on.
 
-`atc tmp prune` deletes entries whose last modification is older than seven
+The prune that starts every `atc test` run deletes entries whose last modification is older than seven
 days. An entry that is a link prints `REFUSED` and is left. A plain file is
 deleted as a file. A directory goes through steps 4 and 5 with no link
 expected, except a working directory of the verifier or of the gate.
@@ -302,7 +299,7 @@ It reports registered scratches older than seven days and deletes none.
 
 ## Integration and the pre-push gate
 
-- `atc integrate` and `atc verify` create each candidate tree at
+- `atc integrate` and `atc test ID --candidate` create each candidate tree at
   `<tmp>/candidates/<id>` and name the verifier's report file
   `<tmp>/candidates/<id>.report.json` through
   `ATC_VERIFICATION_REPORT`. `<id>` is twelve random lowercase hexadecimal
@@ -310,7 +307,7 @@ It reports registered scratches older than seven days and deletes none.
   a scratch. They remove both when the run ends. The files that
   capture the verifier's output are under `<tmp>/systmp`; its stdout and
   stderr are then written to `<tmp>/candidates/<id>.verify.log`, which the
-  run names and `atc tmp prune` deletes after seven days.
+  run names and the prune deletes after seven days.
 - A project's integration verifier keeps its logs and per-stage data in a
   working directory under `<tmp>/systmp`. It removes the directory after a
   passing run and leaves it, with the path printed, after a failing one.
@@ -335,7 +332,7 @@ the newest three at each run's start and exit and leaves a run with a live
 same rule and pass no `--basetemp` of their own.
 
 This base carries the user name and has no length bound of its own. A suite
-whose paths need the shorter base runs through `atc test run`, the gate or
+whose paths need the shorter base runs through `atc test ID`, the gate or
 the verifier.
 
 ## Cache
@@ -353,7 +350,6 @@ the verifier.
 | What | Where | Why |
 | --- | --- | --- |
 | Workspace map, project checkouts, worktrees, project data | `workspace.yaml`, `projects/`, `worktrees/`, `state/<name>-data/` | bound to one workspace checkout (`LAYOUT.md`) |
-| ATC friction records | `state/workspace-friction/` | persistent, bound to one workspace checkout |
 | Verification evidence records, integration slot lock | the repository's git common directory | bound to one repository |
 | The latest pre-push gate logs | the checkout's ignored `.tmp/` directory | read next to the checkout after a refused push |
 | Built testkit wheels | `.tooling/testkit-dist/` | release output of `build_testkit_release.py` |

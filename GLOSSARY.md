@@ -36,9 +36,9 @@ first mutation and reported in delivery.
 a time; transfer is explicit and carries no publication, integration or
 deployment authority. One aircraft per runway.
 
-**Worktree identity.** `<owner>+<topic>` as directory and branch name, plus
-`<owner>:<topic>:<session>` as the git worktree lock reason. Any tool reads
-it from git; a mismatch stops the resume.
+**Worktree identity.** `<harness>+<ID>` as directory and branch name, plus
+`<harness>:<ID>` as the git worktree lock reason. Any tool reads it from
+git; a mismatch stops the resume.
 
 **Owner.** The tool identity holding a worktree, for example `claude` or
 `codex`. **Topic.** The short slug naming the work. **Session.** The
