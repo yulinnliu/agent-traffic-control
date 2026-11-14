@@ -269,7 +269,7 @@ def test_a_wait_past_its_limit_names_what_it_waited_behind(tmp_path: Path, pool_
             budget.acquire("parallel", 2, 2)
         assert refused.value.token == workers.WAIT_TIMEOUT and refused.value.code == 124
         assert "behind: atc integrate demo pid" in refused.value.detail
-        assert refused.value.detail.endswith("\nnext: atc doctor")
+        assert refused.value.detail.endswith("\nhint: atc doctor")
     finally:
         holder.kill()
         holder.wait()
@@ -421,7 +421,7 @@ def test_a_cli_run_past_its_wait_limit_exits_124_with_the_token(tmp_path: Path, 
                              stdin=subprocess.DEVNULL, timeout=SETTLE * 3)
         assert run.returncode == 124, run.stdout + run.stderr
         assert run.stderr.startswith(f"{workers.WAIT_TIMEOUT} "), run.stderr
-        assert "next: atc doctor" in run.stderr and "PASS" not in run.stdout
+        assert "hint: atc doctor" in run.stderr and "PASS" not in run.stdout
     finally:
         head.kill()
         head.wait()

@@ -614,7 +614,7 @@ class Budget:
         status, now = self.pool.status(own), time.time()
         ahead = [row.describe(now) for row in (*status.runs, *status.waiters)]
         return (f"waited {self.waited + waited:.0f}s for {floor} host workers ({stage}), the limit is "
-                f"{self.max_wait:g}s; behind: {', '.join(ahead) or 'no live run'}\nnext: atc doctor")
+                f"{self.max_wait:g}s; behind: {', '.join(ahead) or 'no live run'}\nhint: atc doctor")
 
 
 def wait_total(path: Path) -> float:

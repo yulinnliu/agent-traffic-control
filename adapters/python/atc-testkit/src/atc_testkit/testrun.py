@@ -87,7 +87,7 @@ for srcs, flag in ((listed, True), (others, False)):
 print("\n".join(bad))
 sys.exit(1 if bad else 0)
 """
-GUARD_NEXT = ("next: run with the copy's own environment, built by `atc test ID --sha` or the project's AGENTS.md "
+GUARD_NEXT = ("hint: run with the copy's own environment, built by `atc test ID --sha` or the project's AGENTS.md "
               "preparation in the copy, and its interpreter")
 
 
