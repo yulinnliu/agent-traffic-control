@@ -161,3 +161,24 @@ def test_no_origin_main_refuses_the_first_publication(ws: Path, capsys: pytest.C
     assert "NO_ORIGIN_MAIN" in out
     assert origin_main(ws) == ""
     assert main_tip(ws) == base
+
+
+@pytest.mark.parametrize("argv", [["root", "--check"], ["--all", "--check"], ["root", "--check", "--json"]])
+def test_check_with_names_or_all_lists_and_never_pushes(ws: Path, argv: list[str],
+                                                        capsys: pytest.CaptureFixture[str]) -> None:
+    """The agents' allowed form: `--check` beside a name or `--all` only lists, asks nothing and pushes nothing."""
+    publish(ws, "main")
+    base = main_tip(ws)
+    integrated = commit(ws, "a.txt", "integrated\n")
+    ledger(ws, integrated, base=base)
+
+    def never(prompt: str) -> str:
+        raise AssertionError(f"--check asked {prompt!r}")
+
+    assert push.main(argv, root=ws, answer=never) == 0
+    out = capsys.readouterr().out
+    if "--json" in argv:
+        assert json.loads(out)["repositories"][0]["verdict"] == "CHECK"
+    else:
+        assert out.splitlines()[0].startswith("CHECK root") and f"integration {integrated[:12]}" in out
+    assert origin_main(ws) == base
