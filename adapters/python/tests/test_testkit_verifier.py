@@ -231,14 +231,15 @@ def test_the_checks_and_each_stage_print_and_record_their_elapsed_time(
     pool = stages.pool_directory({})
     before = len(elapsed.records(pool))
     assert verifier.main(consumer(candidate.root), candidate.env(ATC_TASK="ATC-0009"), Recorder()) == 0
-    shown = [line for line in capsys.readouterr().out.splitlines() if line.startswith("ELAPSED ")]
+    out = capsys.readouterr().out
+    shown = [line for line in out.splitlines() if line.startswith("ELAPSED ")]
+    granted = next(int(line.split()[1]) for line in out.splitlines() if line.startswith("workers: "))
     assert [line.split()[1] for line in shown] == ["checks", "parallel", "serial", "interactive"], shown
     assert all(re.fullmatch(r"ELAPSED \w+ \d+\.\d+s workers \d+ PASS", line) for line in shown), shown
     added = elapsed.records(pool)[before:]
     assert [(r["task"], r["sha"], r["command"], r["stage"]) for r in added] == [
         ("ATC-0009", sha, "verify", stage) for stage in ("checks", "parallel", "serial", "interactive")]
-    assert added[0]["workers"] == 1 and added[1]["workers"] >= 1 and [r["workers"] for r in added[2:]] == [1, 1]
-    assert f"workers {added[1]['workers']} " in shown[1]
+    assert granted > 1 and [r["workers"] for r in added] == [1, granted, 1, 1] and f"workers {granted} " in shown[1]
 
 
 @pytest.mark.integration
