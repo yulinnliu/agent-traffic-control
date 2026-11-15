@@ -254,9 +254,12 @@ the same checks, and the single recursive delete in ATC's temporary tooling runs
 4. Links found in the tree are sorted. Expected ones are `<dir>\.venv`,
    `<dir>\tree\.venv`, a `.venv` below `<dir>\tree` whose directory holds a
    `pyproject.toml` that is a regular file, such as a whole repository's
-   `tree\adapters\python\.venv`, and any link inside `<dir>\bt`; they are
-   removed as links and never entered, also when their target is gone. Any other link prints `ANOMALY` with its path,
-   the `<dir>` prints `REFUSED` and is left as it is.
+   `tree\adapters\python\.venv`, any link inside `<dir>\bt`, and any link
+   whose target, resolved through every link on its way, lies inside `<dir>`,
+   such as the junctions a test fixture leaves. They are removed as links,
+   deepest first, and never entered, also when their target is gone. Any other
+   link prints `ANOMALY` with its path, the `<dir>` prints `REFUSED` and is
+   left as it is, every link in it untouched.
 5. The tree is scanned again and deleted recursively only when the scan finds
    no link. A link that remains prints `LEFT` and the `<dir>` prints
    `REFUSED`.

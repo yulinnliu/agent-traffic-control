@@ -219,7 +219,7 @@ def remove_tree(directory: str | os.PathLike[str], expected: Callable[[str], boo
         for link in anomalies:
             say(f"ANOMALY {link}")
         return f"{len(anomalies)} unexpected links"
-    for link in links:
+    for link in sorted(links, key=lambda path: path.count(os.sep), reverse=True):
         _remove_link(link)
     left = _links(directory)
     if left:
@@ -232,7 +232,8 @@ def remove_tree(directory: str | os.PathLike[str], expected: Callable[[str], boo
 
 def scratch_links(directory: str) -> Callable[[str], bool]:
     """The links a scratch may hold: a toolchain's environment directory (``.venv`` for Python) in the scratch, in
-    ``tree`` or beside a ``pyproject.toml`` below ``tree``, and any inside ``bt``."""
+    ``tree`` or beside a ``pyproject.toml`` below ``tree``, any inside ``bt``, and any whose target resolves inside
+    the scratch, such as a test fixture's junction."""
     names = {os.path.normcase(name) for name in toolchain.environment_directories()}
     tree = os.path.normcase(os.path.join(directory, "tree"))
     tops = {os.path.normcase(os.path.join(place, name)) for place in (directory, tree) for name in names}
@@ -242,7 +243,8 @@ def scratch_links(directory: str) -> Callable[[str], bool]:
         name = os.path.normcase(link)
         return (name in tops or name.startswith(bt)
                 or (name.startswith(tree + os.sep) and os.path.basename(name) in names
-                    and _project_file(os.path.join(os.path.dirname(link), "pyproject.toml"))))
+                    and _project_file(os.path.join(os.path.dirname(link), "pyproject.toml")))
+                or _within(link, directory))
     return expected
 
 

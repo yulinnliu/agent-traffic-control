@@ -435,6 +435,80 @@ def test_a_scratch_whose_tree_lies_in_the_worktree_is_removed(done, atc_tmp: Pat
     assert outcomes(payload)[str(atc_tmp / "writer")][0] == "DELETED" and (atc_tmp / "theirs").is_dir()
 
 
+def _make_link(kind: str, link: Path, target: Path) -> None:
+    """A junction (Windows only) or a directory symbolic link; a host that cannot make the kind skips the test."""
+    link.parent.mkdir(parents=True, exist_ok=True)
+    if kind == "junction":
+        if os.name != "nt":
+            pytest.skip("junctions exist only on Windows")
+        _link(link, target)
+        return
+    try:
+        link.symlink_to(target, target_is_directory=True)
+    except OSError as error:
+        pytest.skip(f"no symbolic links on this host: {error}")
+
+
+def _fixture_links(kind: str, scratch_dir: Path) -> Path:
+    """Links a test fixture leaves in a scratch, each pointing inside it, one level below another; the data they
+    point at."""
+    data = scratch_dir / "tree" / "fixture" / "data"
+    data.mkdir(parents=True)
+    (data / "keep.txt").write_text("inner", encoding="utf-8")
+    _make_link(kind, scratch_dir / "tree" / "alias", scratch_dir / "tree" / "fixture")
+    _make_link(kind, scratch_dir / "tree" / "fixture" / "deep" / "back", data)
+    return data
+
+
+@pytest.mark.parametrize("kind", ["junction", "symlink"])
+def test_a_scratch_whose_links_all_point_inside_it_is_deleted_and_targets_outside_survive(
+        done, atc_tmp: Path, tmp_path: Path, kind: str, capsys: pytest.CaptureFixture[str]) -> None:
+    ws, _topic, environ = done
+    mine = atc_tmp / "mine"
+    _fixture_links(kind, mine)
+    outside = tmp_path / "venv-target"
+    outside.mkdir()
+    (outside / "keep.txt").write_text("outside", encoding="utf-8")
+    _make_link(kind, mine / ".venv", outside)
+    code, payload, err = close(ws, environ, capsys, ws.root)
+    assert code == 0, (payload, err)
+    assert outcomes(payload)[str(mine)][0] == "DELETED" and not mine.exists()
+    assert (outside / "keep.txt").read_text(encoding="utf-8") == "outside"
+
+
+@pytest.mark.parametrize("kind", ["junction", "symlink"])
+def test_a_scratch_with_a_link_out_of_it_is_refused_naming_that_link_and_nothing_is_touched(
+        done, atc_tmp: Path, kind: str, capsys: pytest.CaptureFixture[str]) -> None:
+    ws, _topic, environ = done
+    mine = atc_tmp / "mine"
+    data = _fixture_links(kind, mine)
+    neighbour = atc_tmp / "mine2"
+    neighbour.mkdir()
+    (neighbour / "keep.txt").write_text("neighbour", encoding="utf-8")
+    out = mine / "tree" / "out"
+    _make_link(kind, out, neighbour)
+    code, payload, err = close(ws, environ, capsys, ws.root)
+    found = outcomes(payload)
+    assert code == 3 and found[str(mine)] == ("REFUSED", "1 unexpected links"), (payload, err)
+    assert found[str(out)][0] == "ANOMALY"
+    assert [path for path, (outcome, _why) in found.items() if outcome == "ANOMALY"] == [str(out)]
+    assert (neighbour / "keep.txt").read_text(encoding="utf-8") == "neighbour"
+    assert (out / "keep.txt").is_file() and (mine / "tree" / "alias" / "data" / "keep.txt").is_file()
+    assert (mine / "tree" / "fixture" / "deep" / "back" / "keep.txt").is_file()
+    assert (data / "keep.txt").read_text(encoding="utf-8") == "inner"
+
+
+def test_check_with_inner_links_lists_the_scratch_and_deletes_nothing(
+        done, atc_tmp: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    ws, _topic, environ = done
+    mine = atc_tmp / "mine"
+    data = _fixture_links("junction" if os.name == "nt" else "symlink", mine)
+    code, payload, err = close(ws, environ, capsys, ws.root, "--check")
+    assert code == 0 and outcomes(payload)[str(mine)][0] == "DELETE", (payload, err)
+    assert (mine / "tree" / "alias" / "data" / "keep.txt").is_file() and (data / "keep.txt").is_file()
+    assert (mine / "tree" / "fixture" / "deep" / "back").exists()
+
+
 def ledger_reports(ws: Workspace) -> list[dict]:
     path = ws.repo / ".git" / "atc" / "integrations.jsonl"
     return [entry for entry in map(json.loads, path.read_text(encoding="utf-8").splitlines())
