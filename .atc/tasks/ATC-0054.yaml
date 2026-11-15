@@ -21,3 +21,6 @@ decisions:
 - 'Owner 11-16 「改，併進 0053」: strict mutants are written and run by the reviewer only; the writer lists the guards it changed (file:line and what each refuses). This task follows that rule though ATC-0053 carries its text.'
 - 'Design first: the design (coverage of child processes, the fallback, the verdict word, the overhead on the baseline) is reviewed before implementation.'
 - No version bump; no governance change.
+- 'Owner 11-16 「檔案/目錄縮小」: file and directory entries of a mutant''s own tests are narrowed by the line record; nodeids and options are kept as given.'
+- 'Owner 11-16 「testkit 自帶」: the line recorder is the testkit''s own sys.monitoring recorder, not coverage.py.'
+- 'Owner 11-16 「writer 跑」: the writer runs the measurement replay (ATC-0052''s mutants, old selection against new) and writes the results into the design § 6; it is a performance measurement, not a check of this task''s guards.'
