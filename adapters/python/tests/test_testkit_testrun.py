@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from atc_testkit import elapsed, isolation, locations, python_toolchain, scratch, testrun, workers
+from atc_testkit import elapsed, isolation, lines, locations, python_toolchain, scratch, testrun, workers
 from atc_testkit.locations import Refusal
 
 TASK = "ATC-0044"
@@ -499,6 +499,7 @@ BY_LINES = [
     {"label": "K value", "edits": [{"path": "src/fixture_pkg/__init__.py", "old": "return 1", "new": "return 2"}]},
     {"label": "U unused", "edits": [{"path": "src/fixture_pkg/__init__.py", "old": "return 5", "new": "return 6"}]},
     {"label": "C child", "edits": [{"path": "src/fixture_pkg/__init__.py", "old": "return 7", "new": "return 8"}]},
+    {"label": "S value", "edits": [{"path": "src/fixture_pkg/__init__.py", "old": "return 1", "new": "return 1 + 0"}]},
 ]
 
 
@@ -526,14 +527,16 @@ def test_with_lines_each_mutant_runs_only_the_tests_that_ran_its_lines_also_in_c
     assert lines[1].startswith("KILLED   K value -> FAILED tests/test_value.py::test_value")
     assert lines[2] == "NOT_COVERED U unused -> no baseline test runs src/fixture_pkg/__init__.py:6"
     assert lines[3].startswith("KILLED   C child -> FAILED tests/test_child.py::test_child")
-    assert lines[-1] == "done: 3 mutants, 1 survived U unused"
+    assert lines[4].startswith("SURVIVED S value -> 1 passed in ")
+    assert lines[-1] == "done: 4 mutants, 2 survived U unused S value"  # the survivor ran its one narrowed test
     covered = json.loads((lines_export.place / "mutants-covered.json").read_text(encoding="utf-8"))
     assert [(entry["label"], entry["judged_by"], entry["tests"]) for entry in covered] == [
         ("K value", "lines", ["tests/test_value.py::test_value"]),
         ("U unused", "not covered", []),
         ("C child", "lines", ["tests/test_child.py::test_child"]),  # recorded in the child the test started
+        ("S value", "lines", ["tests/test_value.py::test_value"]),
     ]
-    assert [line.split()[1] for line in elapsed_lines(run.stdout)] == ["baseline", "mutant:K", "mutant:C"]
+    assert [line.split()[1] for line in elapsed_lines(run.stdout)] == ["baseline", "mutant:K", "mutant:C", "mutant:S"]
     assert b"return 5" in lines_export.file.read_bytes()
 
 
@@ -545,6 +548,21 @@ def test_with_lines_a_file_without_a_record_runs_its_file_level_tests(lines_expo
     assert lines[1] == ("NOTE F toml: pyproject.toml is not a Python file; "
                         "judged by its file-level tests"), run.stdout + run.stderr
     assert lines[2].startswith("SURVIVED F toml -> 3 passed")
+
+
+@pytest.mark.integration
+def test_a_nested_run_keeps_the_recorders_hook_first_on_its_pythonpath(tree: Path, atc_tmp: Path,
+                                                                      monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(atc_tmp)
+    hook, data = atc_tmp / "outer" / "hook", atc_tmp / "outer" / "data"
+    environ = {**os.environ, lines.HOOK_VARIABLE: str(hook), lines.DIR_VARIABLE: str(data)}
+    place = atc_tmp / "nested"
+    place.mkdir()
+    testrun.isolate(tree, place, sys.executable, environ)
+    assert environ["PYTHONPATH"].split(os.pathsep) == [str(hook), str(tree / "src")]
+    plain = {key: value for key, value in os.environ.items() if not key.startswith("ATC_LINES_")}
+    testrun.isolate(tree, place, sys.executable, plain)
+    assert plain["PYTHONPATH"] == str(tree / "src")
 
 
 def junit_report(tmp_path: Path, body: str) -> Path:

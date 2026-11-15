@@ -778,7 +778,9 @@ memory clamp.
   the baseline records. The tests of a mutant are then, in baseline order,
   the tests that executed a line it changes: the lines where `old` and `new`
   differ, each widened to its innermost statement, a compound statement by
-  its header alone. A file or directory among its file-level tests narrows
+  its header alone; a line of a compound statement in none of its children
+  (an `else:` or `finally:`, which runs no line event) also stands for the
+  first statement of its clause. A file or directory among its file-level tests narrows
   to those tests; a node ID, an option and a path right after an option stay
   as given. `<scratch>/mutants-covered.json` lists each mutant's lines,
   tests and how it is judged.
@@ -797,8 +799,7 @@ memory clamp.
   reads the source instead of executing it are not recorded, so a mutant
   only they would kill shows as `SURVIVED` or `NOT_COVERED`.
 - Each mutant prints one verdict line, preceded by its stage-time line
-  (none for `NOT_COVERED`, which runs nothing)
-  (§ Stage times). Its files are restored whether or not the run completes. Every edit and restore moves the file's modification time
+  (§ Stage times; none for `NOT_COVERED`, which runs nothing). Its files are restored whether or not the run completes. Every edit and restore moves the file's modification time
   to a later whole second than its last, so a bytecode cache, which records
   that second and the size, never stands in for the source the run is meant
   to see. A run that exits 0 prints `SURVIVED` with the summary.

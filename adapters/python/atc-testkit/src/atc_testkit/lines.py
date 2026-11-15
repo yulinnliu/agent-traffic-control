@@ -11,7 +11,9 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 import os
 from pathlib import Path
-import shutil
+
+from . import scratch
+from .locations import Refusal
 
 DIRECTORY = "lines"
 DATA, HOOK = "data", "hook"
@@ -206,7 +208,10 @@ class Prepared:
 def prepare(place: Path, tree: Path, entries: Sequence[Mapping]) -> Prepared:
     """A fresh ``<scratch>/lines`` with the recorder's files, and the pristine text of every edited ``.py`` file."""
     root = place / DIRECTORY
-    shutil.rmtree(root, ignore_errors=True)
+    if os.path.lexists(root):
+        why = scratch.remove_tree(root, lambda _link: False, say=lambda _line: None)
+        if why is not None:
+            raise Refusal("LINES_NOT_CLEARED", f"{root}: {why}")
     (root / DATA).mkdir(parents=True)
     (root / HOOK).mkdir()
     for name, source in HOOK_FILES.items():
@@ -291,8 +296,9 @@ def _start(node: ast.AST) -> int:
         node.pattern.lineno
 
 
-def _nodes(module: ast.Module) -> list[tuple[int, int, int | None]]:
-    """Every statement, handler and case: (start, end, end of its header, ``None`` for a simple statement)."""
+def _nodes(module: ast.Module) -> list[tuple[int, int, int | None, tuple[int, ...]]]:
+    """Every statement, handler and case: (start, end, end of its header, ``None`` for a simple statement, the starts
+    of its child statements)."""
     found = []
     for node in ast.walk(module):
         if not isinstance(node, (ast.stmt, ast.excepthandler, ast.match_case)):
@@ -300,32 +306,40 @@ def _nodes(module: ast.Module) -> list[tuple[int, int, int | None]]:
         start = _start(node)
         end = getattr(node, "end_lineno", None) or max(
             (getattr(child, "end_lineno", start) for child in _children(node)), default=start)
-        children = _children(node)
-        header = max(start, min(_start(child) for child in children) - 1) if children else None
-        found.append((start, end, header))
+        children = tuple(sorted(_start(child) for child in _children(node)))
+        header = max(start, children[0] - 1) if children else None
+        found.append((start, end, header, children))
     return found
 
 
 def statement_lines(text: str, first: int, last: int) -> set[int]:
     """Lines ``first`` to ``last`` widened to their statements: the innermost statement holding each line, a compound
-    statement by its header alone; a line in no statement stays itself."""
+    statement by its header alone. A line of a compound statement in none of its children (an ``else:`` or
+    ``finally:``, which run no line event, or a comment) also stands for the next child statement, the first of its
+    clause; a line in no statement stays itself."""
     try:
         nodes = _nodes(ast.parse(text))
     except (SyntaxError, ValueError):
         nodes = []
     lines: set[int] = set()
-    for line in range(first, last + 1):
+
+    def widen(line: int) -> None:
         holding = [node for node in nodes if node[0] <= line <= node[1]]
+        lines.add(line)
         if not holding:
-            lines.add(line)
-            continue
-        start, end, header = min(holding, key=lambda node: node[1] - node[0])
+            return
+        start, end, header, children = min(holding, key=lambda node: node[1] - node[0])
         if header is None:
             lines.update(range(start, end + 1))
         elif line <= header:
             lines.update(range(start, header + 1))
         else:
-            lines.add(line)
+            following = [child for child in children if child > line]
+            if following:
+                widen(following[0])
+
+    for line in range(first, last + 1):
+        widen(line)
     return lines
 
 
