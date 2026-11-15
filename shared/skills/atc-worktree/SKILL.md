@@ -30,11 +30,11 @@ with `HARNESS_UNKNOWN`. Never set those variables yourself.
 
 ## Running the CLI
 
-The CLI is the `atc` command on PATH. It finds the workspace map itself (the
-nearest `workspace.yaml` above the working directory, or the checkout its
-release was installed from). If `workspace.yaml` exists but `atc` is not on
-PATH, ask the user to install a release from their Agent Traffic Control
-checkout with `uv run --directory <checkout>/adapters/python atc install <tag>`. If no `workspace.yaml`
+The CLI is the `atc` command on PATH. It finds the workspace map itself:
+`--root`, `ATC_ROOT`, or the nearest `workspace.yaml` above the working
+directory. If `workspace.yaml` exists but `atc` is not on PATH, ask the user
+to install a release tag with `uv tool install` (`docs/WORKFLOW.md`
+§ Installing a release in their Agent Traffic Control checkout). If no `workspace.yaml`
 exists in the current directory or any parent and `atc` is not on PATH, this
 is an independent clone: the managed-worktree lifecycle does not apply. Use
 the `GIT_WORKFLOW.md` topic-branch procedure in this clone, and report the

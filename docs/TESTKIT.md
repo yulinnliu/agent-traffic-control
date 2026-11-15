@@ -566,7 +566,7 @@ calls before pytest starts, for preparation only that project needs.
 
 The test commands a review or a developer runs are forms of `atc test`, one
 implementation on every platform. A machine that runs them has `atc`
-installed (`atc install <tag>`, `WORKFLOW.md` § Installing a release), as
+installed (`uv tool install` of a tag, `WORKFLOW.md` § Installing a release), as
 integration already requires. Every variable ATC itself defines starts with `ATC_`.
 
 No run has confirmed this on a cloud writer host, a clone with no

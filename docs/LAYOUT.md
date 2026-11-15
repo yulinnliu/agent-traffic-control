@@ -134,7 +134,8 @@ elsewhere it renders the `workspace` items.
   sync and a failure for validation. `atc sync` renders and locks the
   sync target: the SHA on `main` the Owner names with `--revision`
   (governance `CORE.md` § Effective authority and revocation); else, when
-  `atc` runs from a release copy, the installed release's commit, which
+  `atc` records the commit it was installed from (`direct_url.json`), that
+  installed release's commit, which
   must be in the history of ATC `main` (`STOP RELEASE_NOT_ON_MAIN`), so a
   project never moves ahead of the tool; else the highest
   `vMAJOR.MINOR.PATCH` tag in the history of ATC `main`. `main`, its history

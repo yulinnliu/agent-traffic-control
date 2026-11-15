@@ -186,63 +186,57 @@ registry line.
 
 ## Installing a release
 
-The installed `atc` runs a release copy, never `main`: integrating a root
-task, even one that changes the CLI, changes nothing a host runs, and every
-step of the flow runs the commands of the installed release. A release
-reaches a host when the Owner, after tagging it on `main`, runs from their
-own terminal:
+The installed `atc` is the Owner's `uv tool install` of a release tag, never
+`main` and never a working tree: integrating a root task, even one that
+changes the CLI, changes nothing a host runs, and every step of the flow runs
+the commands of the installed release. Installing is the Owner's act, run
+from their own terminal after the release is tagged on `main`; agents never
+install `atc`. On the host whose workspace directory is the ATC checkout, the
+source is that checkout:
 
 ```text
-atc install <tag> --check
-atc install <tag>
+uv tool install --force "git+file:///<checkout>@<tag>#subdirectory=adapters/python"
 atc guard --install
 ```
 
+Every other host installs the same tag from GitHub:
+
+```text
+uv tool install --force "git+https://github.com/<owner>/<repo>@<tag>#subdirectory=adapters/python"
+atc guard --install
+```
+
+The `<checkout>` URL uses forward slashes and `%20` for a space. uv builds
+the wheel at the tag, keeps it in its own tool environment and records the
+installed commit and the requested tag in the distribution's
+`direct_url.json` (PEP 610); `atc doctor` reports the version, commit, tag
+and source from it. `atc guard --install` writes the hook entry `atc hook`,
+which runs the engine of whatever `atc` is installed, so a later install
+needs no new entry; it protects uv's tool environment of `atc` from agent
+writes. A rollback is the same command with an earlier tag. On Windows, uv
+cannot replace `atc.exe` while it runs: the Owner installs when no session
+runs, and reruns the command after a `WinError 32`.
+
 On a host whose workspace directory is itself the ATC checkout, its
-`workspace.yaml` names it with `governance_checkout: .` before a release
-from 0.7.0 on is installed. Without that line such a release stops `atc
-sync` and `atc add` with `GOVERNANCE_CHECKOUT_UNSET`; releases before 0.7.0
-ignore the key, so the Owner adds it first.
-
-`atc install` creates `~/.atc/releases/<tag>` (`ATC_HOME.md` § Layout), a
-detached worktree of the workspace root repository at the tag, locked so no
-worktree cleanup removes it, unless it already exists clean at that tag. It
-then runs `uv tool install -e <copy>/adapters/python --force` and prints the
-installed version and copy and the ones before them. `--check` reports the
-same and changes nothing; agents run only `--check` (hard-deny rule
-`atc-install`). `atc guard --install` points the PreToolUse hook at the new
-copy's engine; until then the hook runs the previous copy and `atc guard`
-reports the drift. `atc doctor` names the installed version and the copy it
-runs from.
-
-An unknown tag (fetch the tags first), a tag not on `main` and an existing
-copy that is not a clean detached worktree at the tag stop the command. On
-Windows, `atc install` renames the running `atc.exe` aside so uv can write
-the new one; when uv still fails, the hint names the uv command to run from a
-terminal where no `atc` runs. Earlier copies stay: a rollback is
-`atc install <earlier tag>`, and the Owner removes a copy no longer installed
-with `git worktree remove --force --force <copy>`.
+`workspace.yaml` names it with `governance_checkout: .`. Without that line
+`atc sync` and `atc add` stop with `GOVERNANCE_CHECKOUT_UNSET`.
 
 A release acts only on projects whose `.atc/atc.lock` pins it. While a
 project pins another revision, or none, the commands that run the task flow
 under its contract stop with `STOP RELEASE_MISMATCH` and a hint. A project
 behind the installed release, or with no lock, takes `atc sync <project>`:
-run from a release copy, sync with no `--revision` targets the installed
-release, not the latest tag. A project ahead of it, which sync never moves
-back without `--revision`, takes the Owner's `atc install` of the release
-it pins. These are `task create`, `update`, `resume` and `close`,
-`test ID` (but `--clean`, `--list` and `--private`), `integrate` and `push`,
-their `--check` rehearsals included, since a rehearsal answers whether the
-command would pass. `doctor`, `guard` and `task list` read and stay usable;
-`sync` and `install` are the fix; `init`, `add` and `remove` manage the map.
-The workspace root is never compared: its `main` is the governance itself.
-An `atc` that does not run from a release copy (`uv run atc` in a topic
-worktree, or one still installed from the canonical checkout) has no
-installed release, so nothing is compared. `atc doctor` lists each project's
-pin against the installed release, and reports a release copy that has
-tracked modifications or whose HEAD is not its tag's commit; commands do not
-refuse for that, since the hook write-protects the copy and only the Owner's
-own hand changes it.
+sync with no `--revision` targets the installed release, not the latest tag.
+A project ahead of it, which sync never moves back without `--revision`,
+takes the Owner's `uv tool install` of the release it pins. These are
+`task create`, `update`, `resume` and `close`, `test ID` (but `--clean`,
+`--list` and `--private`), `integrate` and `push`, their `--check`
+rehearsals included, since a rehearsal answers whether the command would
+pass. `doctor`, `guard` and `task list` read and stay usable; `sync` is the
+fix; `init`, `add` and `remove` manage the map. The workspace root is never
+compared: its `main` is the governance itself. An `atc` that records no
+installed commit (`uv run atc` in a topic worktree, an editable or local
+install) has no installed release, so nothing is compared. `atc doctor`
+lists each project's pin against the installed release.
 
 The canonical checkout stays the workspace that `atc` and every session
 read: task records, policies, governance and skills. Off `main` every `atc`

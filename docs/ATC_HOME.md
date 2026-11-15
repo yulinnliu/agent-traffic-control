@@ -2,8 +2,8 @@
 
 The per-user directory where ATC's shared tools keep what they generate on a
 machine. Everything in it is either disposable or regenerable: deleting the
-whole directory loses nothing that `atc install` cannot recreate, though the
-installed `atc` stops working until it does. Persistent state lives elsewhere
+whole directory loses nothing that a tool cannot recreate; the installed
+`atc` lives in uv's tool environment, outside it. Persistent state lives elsewhere
 (§ Outside the ATC home).
 
 ## Location
@@ -56,8 +56,6 @@ installed `atc` stops working until it does. Persistent state lives elsewhere
     systmp/                     stand-in for the system temporary directory
       pytest-of-<user>/         pytest runs started without a scratch
     candidates/                 candidate trees, verifier reports and logs of `atc integrate` and `atc test ID --candidate`
-  releases/                     never deleted by a shared tool
-    <tag>/                      release copy the installed `atc` runs: a detached, locked worktree of the workspace root repository (`WORKFLOW.md` § Installing a release)
   run/                          the host worker pool (`TESTKIT.md` § Host worker budget); never deleted
     workers.lock                the pool's tokens, one locked byte each
     workers/                    one row per process using the pool, locked for its life
@@ -358,5 +356,5 @@ the verifier.
 | Verification evidence records, integration slot lock | the repository's git common directory | bound to one repository |
 | The latest pre-push gate logs | the checkout's ignored `.tmp/` directory | read next to the checkout after a refused push |
 | Built testkit wheels | `.tooling/testkit-dist/` | release output of `build_testkit_release.py` |
-| Installed `atc` command | uv's tool bin directory (`~/.local/bin`), an editable install of a release copy's `adapters/python` | installer convention; it runs the release copy `~/.atc/releases/<tag>` (`WORKFLOW.md` § Installing a release) |
+| Installed `atc` command | uv's tool bin directory (`~/.local/bin`), and its environment `<uv tool dir>/agent-traffic-control` | installer convention; the Owner's `uv tool install` of a release tag (`WORKFLOW.md` § Installing a release) |
 | A product's runtime files | the product's own locations (`PROJECT_RUNTIME.md`) | product state, not ATC's |

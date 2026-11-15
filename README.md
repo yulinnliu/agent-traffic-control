@@ -138,12 +138,11 @@ Skills that run a tool (`atc-worktree`, `atc-review`, `atc-coordinator`,
 machine:
 
 ```sh
-uv run --directory atc/adapters/python atc install vX.Y.Z
+uv tool install --force "git+https://github.com/yulinnliu/agent-traffic-control@vX.Y.Z#subdirectory=adapters/python"
 ```
 
-This creates the release copy `~/.atc/releases/vX.Y.Z` and installs the
-distribution `agent-traffic-control` from it, whose command is `atc`
-(`docs/WORKFLOW.md` § Installing a release). A machine with `atc` installed under the earlier name
+uv installs the distribution `agent-traffic-control`, whose command is `atc`,
+in its own tool environment (`docs/WORKFLOW.md` § Installing a release). A machine with `atc` installed under the earlier name
 `atc-python-adapter` runs `uv tool uninstall atc-python-adapter` first
 (`adapters/python/README.md`).
 
@@ -151,7 +150,7 @@ distribution `agent-traffic-control` from it, whose command is `atc`
 
 ```sh
 git clone https://github.com/yulinnliu/agent-traffic-control.git atc
-uv run --directory atc/adapters/python atc install vX.Y.Z
+uv tool install --force "git+file:///<absolute path of atc>@vX.Y.Z#subdirectory=adapters/python"
 cd atc
 atc init                                    # workspace.yaml, projects/ worktrees/ state/
 atc add my-project --url <url>              # clone, register, create its ATC files, validate

@@ -9,21 +9,20 @@ directory.
 One command fronts the scripts: `uv run atc <command>` here, or the
 installed `atc` on PATH, which is how the skills call it. The distribution is
 `agent-traffic-control`; its console script is `atc`.
-`atc` resolves the checkout from `--root`, `ATC_ROOT`,
-the nearest `workspace.yaml` above the working directory, or the main
-worktree of the repository its own code lives in, in that order; for a
-release copy that is the workspace root's canonical checkout.
+`atc` resolves the workspace from `--root`, `ATC_ROOT` or the nearest
+`workspace.yaml` above the working directory, in that order, and stops with
+`WORKSPACE_NOT_FOUND` without one.
 
-The installed `atc` runs a release. `atc install vX.Y.Z`, run by the Owner,
-creates the release copy `~/.atc/releases/vX.Y.Z`, a detached and locked
-worktree of the workspace root repository at the tag, and makes `atc` an
-editable install of its `adapters/python` with that release's dependencies.
-Integrating into `main` changes nothing a host runs until the Owner installs
-the next tag (`docs/WORKFLOW.md` § Installing a release). A host with no
-`atc` yet installs the first release from a clone or the workspace root:
+The installed `atc` is the Owner's `uv tool install` of a release tag: uv
+builds the wheel at the tag into its own tool environment and records the
+commit in `direct_url.json`. Integrating into `main` changes nothing a host
+runs until the Owner installs the next tag (`docs/WORKFLOW.md` § Installing a
+release). The host whose workspace is the ATC checkout installs from it, any
+other host from GitHub:
 
 ```sh
-uv run --directory adapters/python atc install vX.Y.Z
+uv tool install --force "git+file:///<checkout>@vX.Y.Z#subdirectory=adapters/python"
+uv tool install --force "git+https://github.com/yulinnliu/agent-traffic-control@vX.Y.Z#subdirectory=adapters/python"
 ```
 
 A host whose `atc` is installed under the earlier distribution name
@@ -46,10 +45,9 @@ Exit codes, `--json`, output and naming: `shared/conformance/CLI.md`.
 | `init` | `bootstrap.py` | `[--governance-source OWNER/REPO] [--force]`: writes `workspace.yaml` and `projects/`, `worktrees/`, `state/` | root `README.md` § Installation |
 | `add` | `bootstrap.py` | `NAME [--url URL] [--skills NAME,...] [-v]`: clone or adopt, register, create the project's ATC files, validate | root `README.md` § Installation |
 | `remove` | `bootstrap.py` | `NAME [--check]`: Owner-run; drops the project's `workspace.yaml` entry and its `skill_harnesses` entry, never its checkout | `docs/LAYOUT.md` |
-| `sync` | `sync_project.py` | `[NAME...] [--check] [--revision SHA] [-v]`: write and commit, or with `--check` only list and validate, the managed files of the named projects or of every registered project, rendered from the SHA the Owner names with `--revision`, else the installed release when `atc` runs from a release copy (`STOP RELEASE_NOT_ON_MAIN` when it is not on `main`), else the latest `vMAJOR.MINOR.PATCH` tag on `main`; a project locked ahead of that release is skipped; managed adapters with no canonical skill or in a harness directory the project's `skill_harnesses` does not select are deleted in the same commit; a project with no `AGENTS.md` gets a minimal one; never touches project-owned files. The sync commit's subject names the target with its release tag: `sync from <source> v0.4.0 (c91d318)` at a tagged revision, `<sha> (after v0.4.0)` past one, the bare SHA before any; the ledger's sync line adds `source_tag` and `source_after`, and `--json` a top-level `target`. The tags are the ATC checkout's local ones, so an unfetched newer tag is not seen | `docs/LAYOUT.md` |
+| `sync` | `sync_project.py` | `[NAME...] [--check] [--revision SHA] [-v]`: write and commit, or with `--check` only list and validate, the managed files of the named projects or of every registered project, rendered from the SHA the Owner names with `--revision`, else the installed release when `atc` records one (`direct_url.json`; `STOP RELEASE_NOT_ON_MAIN` when it is not on `main`), else the latest `vMAJOR.MINOR.PATCH` tag on `main`; a project locked ahead of that release is skipped; managed adapters with no canonical skill or in a harness directory the project's `skill_harnesses` does not select are deleted in the same commit; a project with no `AGENTS.md` gets a minimal one; never touches project-owned files. The sync commit's subject names the target with its release tag: `sync from <source> v0.4.0 (c91d318)` at a tagged revision, `<sha> (after v0.4.0)` past one, the bare SHA before any; the ledger's sync line adds `source_tag` and `source_after`, and `--json` a top-level `target`. The tags are the ATC checkout's local ones, so an unfetched newer tag is not seen | `docs/LAYOUT.md` |
 | `doctor` | `doctor.py` | `[-v]`: local readiness verdict `READY`, `NOT_INITIALIZED` or `ERROR` plus the non-READY checks, among them the installed release, its copy clean at its tag, and each project's pin against it; `-v` lists every check and the host test worker pool's free tokens, holders and waiters; `--json` | `docs/ATC_HOME.md` |
 | `guard` | `guard.py` | `[--install]`: checks, or for the Owner installs, the PreToolUse hook table `~/.atc/enforcement` and its entries in `~/.claude/settings.json` and `~/.codex/hooks.json`; the entries run the engine of the `atc` that installs them | `docs/ENFORCEMENT.md` |
-| `install` | `release_install.py` | `TAG [--check]`: Owner-run; creates the release copy `~/.atc/releases/TAG` (a detached, locked worktree of the root repository at a `vMAJOR.MINOR.PATCH` tag on `main`) unless it exists clean at the tag, runs `uv tool install -e <copy>/adapters/python --force` and prints the old and new version; `--check` changes nothing | `docs/WORKFLOW.md` § Installing a release |
 | | `integration_verify.py` | the verifier `atc integrate` runs in a candidate of this checkout (root `AGENTS.md` § Integration verification) | |
 | | `build_testkit_release.py` | builds the `atc-testkit` wheel and digest record for consuming projects | |
 | | `select_tests.py` | the test files a change can affect: a count and one reason per path, each file's cause with `--explain`, a JSON array with `--json` (§ Selected tests) | |
@@ -57,8 +55,9 @@ Exit codes, `--json`, output and naming: `shared/conformance/CLI.md`.
 ### atc-maintain
 
 `uv run --locked atc-maintain <command>` from an ATC worktree's
-`adapters/python/` maintains this repository; it refuses in the canonical
-checkout and in a release copy, and is not part of the installed `atc`.
+`adapters/python/` maintains this repository; it runs only as an editable
+install of an ATC checkout, refuses in the canonical checkout, and is not
+part of the installed `atc`.
 
 | `atc-maintain` command | Script | Does | Reference |
 | --- | --- | --- | --- |

@@ -21,7 +21,7 @@ Then read `shared/governance/INDEX.md` and `CORE.md` from that exact same revisi
 ## Changing this repo
 
 - Read by default; editing this repo requires explicit task authority.
-- The installed `atc` runs a release copy under `~/.atc/releases/`, which the Owner installs with `atc install <tag>`, never this checkout's `main`. This checkout is still what `atc` and every session read as the workspace (records, policies, governance, skills), so it stays on `main` with no tracked modification: off `main` every `atc` command but `doctor` refuses, and `atc-maintain` refuses to run here or in a release copy.
+- The installed `atc` is the Owner's `uv tool install` of a release tag (`docs/WORKFLOW.md` § Installing a release), never this checkout's working tree. This checkout is still what `atc` and every session read as the workspace (records, policies, governance, skills), so it stays on `main` with no tracked modification: off `main` every `atc` command but `doctor` refuses, and `atc-maintain` refuses to run here.
 - Authorized changes use a managed worktree under `worktrees/root/` from `atc task create --project root`; the Owner's `atc integrate <ID>` fast-forwards `main` here (`docs/WORKFLOW.md`).
 - Integration, publication and deployment are separately governed actions.
 - Never aim destructive project/worktree tooling at this checkout itself. Do not run `git clean -fdx` here or recursively delete `projects/`, `worktrees/`, or `state/` from above.
@@ -46,5 +46,5 @@ Tasks here are identified by record (governance `CORE.md` § Task identity).
 What the verifier checks, which ranges it treats as documentation-only and
 where the full suite runs: `docs/TESTKIT.md` § The workspace root's verifier.
 Integrating changes nothing a host runs: the Owner tags a release and installs
-it on each host with `atc install <tag>` (`docs/WORKFLOW.md` § Installing a
-release).
+it on each host with `uv tool install` from that tag (`docs/WORKFLOW.md`
+§ Installing a release).

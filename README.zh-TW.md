@@ -126,11 +126,11 @@ adapter。Windows 上請用 Git Bash 執行。
 skill 會呼叫 `atc` 指令，所以每台機器要先安裝一次 release，讓它在 PATH 上：
 
 ```sh
-uv run --directory atc/adapters/python atc install vX.Y.Z
+uv tool install --force "git+https://github.com/yulinnliu/agent-traffic-control@vX.Y.Z#subdirectory=adapters/python"
 ```
 
-這會建立 release copy `~/.atc/releases/vX.Y.Z`，並從它安裝 distribution
-`agent-traffic-control`，指令名稱是 `atc`（見 `docs/WORKFLOW.md` § Installing a release）。機器上如果
+uv 會把 distribution `agent-traffic-control` 裝進它自己的 tool 環境，指令名稱是
+`atc`（見 `docs/WORKFLOW.md` § Installing a release）。機器上如果
 已經用舊名稱 `atc-python-adapter` 裝過 `atc`，要先跑
 `uv tool uninstall atc-python-adapter`（見 `adapters/python/README.md`）。
 
@@ -138,7 +138,7 @@ uv run --directory atc/adapters/python atc install vX.Y.Z
 
 ```sh
 git clone https://github.com/yulinnliu/agent-traffic-control.git atc
-uv run --directory atc/adapters/python atc install vX.Y.Z
+uv tool install --force "git+file:///<atc 的絕對路徑>@vX.Y.Z#subdirectory=adapters/python"
 cd atc
 atc init                                    # 建立 workspace.yaml 和 projects/ worktrees/ state/
 atc add my-project --url <url>              # clone、登記、建立 ATC 檔案、驗證
