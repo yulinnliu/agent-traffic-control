@@ -74,7 +74,9 @@ def test_a_run_prints_its_log_and_one_summary_line(tree: Path, atc_tmp: Path) ->
     log = Path(first.removeprefix("LOG "))
     assert log.parent == atc_tmp / "f1" / testrun.RUNS and log.name.endswith("-my_run.log")
     assert last == f"PASS 1 passed; log: {log}"
-    assert len(run.stdout.splitlines()) == 3 and run.stdout.splitlines()[1].startswith("workers: ")
+    lines = run.stdout.splitlines()
+    assert len(lines) == 4 and lines[1].startswith("workers: ") and lines[2].startswith("ELAPSED ") \
+        and lines[2].endswith(" PASS")
     text = log.read_text(encoding="utf-8")
     assert "desktop: " in text and "1 passed" in text
     assert bytecode(tree) == []
