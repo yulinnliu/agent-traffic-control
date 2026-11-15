@@ -15,7 +15,8 @@ import sys
 import time
 import tomllib
 
-from . import config as project_config, desktop, locations, timing, toolchain as toolchains, workers as host_workers
+from . import config as project_config, desktop, elapsed, locations, timing, toolchain as toolchains, \
+    workers as host_workers
 from .evidence import Stage
 from .toolchain import Toolchain
 
@@ -457,6 +458,13 @@ def failure_lines(log: Path) -> list[str]:
     return ([line for line in lines if FAILURE_LINE.match(line)] or lines)[-REPORTED_LINES:]
 
 
+def stage_result(code: int | None, no_tests_exit: int) -> str:
+    """A stage's result word for its elapsed record: ``PASS``, ``NO_TESTS``, ``TIMEOUT`` or ``FAIL``."""
+    if code is None:
+        return "TIMEOUT"
+    return {0: "PASS", no_tests_exit: "NO_TESTS"}.get(code, "FAIL")
+
+
 @dataclass(frozen=True)
 class Outcome:
     """A refused run: its token, the stage and exit code, and the log; ``token`` is ``None`` for a pass."""
@@ -471,7 +479,8 @@ def run_stages(runner: Sequence[str], paths: Sequence[str], *, cwd: Path | str, 
                log_for: Callable[[Stage], Path], workers: Workers | int | None = None,
                run: Run = run_logged, toolchain: Toolchain | None = None,
                budget: host_workers.Budget | None = None,
-               count: Callable[[Sequence[str], Path | str, Mapping[str, str]], int | None] | None = None) -> Outcome:
+               count: Callable[[Sequence[str], Path | str, Mapping[str, str]], int | None] | None = None,
+               clock: elapsed.Clock | None = None) -> Outcome:
     """Run each stage in order until one fails; a stage that collects no test passes, a run of only those is refused.
 
     ``workers`` is the caller's resolved count, an explicit integer, or ``None`` for ``resolve_workers()``; the
@@ -479,7 +488,8 @@ def run_stages(runner: Sequence[str], paths: Sequence[str], *, cwd: Path | str, 
     command, the Python one by default. ``budget`` takes each stage's tokens from the host pool before it starts and
     gives them back when it ends: the parallel stage's count, down to ``Workers.floor()``; one for every other
     stage. ``WaitTimeout`` passes through. ``count`` (``collected_items``) collects a pooled parallel stage of the
-    Python toolchain first, so a default count asks for no more than ``Workers.capped`` allows.
+    Python toolchain first, so a default count asks for no more than ``Workers.capped`` allows. ``clock`` reports each
+    stage's elapsed time from its tokens held to its end (docs/TESTKIT.md § Stage times).
     """
     toolchain = toolchains.resolve() if toolchain is None else toolchain
     if not isinstance(workers, Workers):
@@ -507,7 +517,11 @@ def run_stages(runner: Sequence[str], paths: Sequence[str], *, cwd: Path | str, 
                 print(granted.line(), slack_line(env), sep="\n", flush=True)
             command = toolchain.stage_command(runner, stage, stage_workers(stage, granted.count), options_for(stage),
                                               paths)
+            started = time.monotonic()
             code = run(command, cwd=cwd, env=env, log=log, private=private_desktop(stage))
+            if clock is not None:
+                clock.stage(stage.name, time.monotonic() - started, granted.count if parallel else 1,
+                            stage_result(code, toolchain.no_tests_exit))
         finally:
             budget.release(grant)
         if code not in (0, toolchain.no_tests_exit):

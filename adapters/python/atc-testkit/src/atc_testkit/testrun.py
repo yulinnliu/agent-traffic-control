@@ -17,7 +17,7 @@ import threading
 import time
 import xml.etree.ElementTree as ElementTree
 
-from . import config, desktop, locations, python_toolchain, scratch, stages, timing, toolchain as toolchains
+from . import config, desktop, elapsed, locations, python_toolchain, scratch, stages, timing, toolchain as toolchains
 from . import workers as host_workers
 from .git import git_env
 from .isolation import drop_hami_variables
@@ -33,6 +33,7 @@ INTERACTIVE_EXCLUSION = "not interactive_desktop"
 EXCLUSION_NOTE = (f"NOTE private desktop: interactive_desktop tests are excluded; {PRIVATE_DESKTOP_VARIABLE}=0 "
                   "runs on the interactive desktop with them")
 KILLED, SURVIVED, INCONCLUSIVE = "KILLED", "SURVIVED", "INCONCLUSIVE"
+BASELINE_STAGE, MUTANT_STAGE = "baseline", "mutant:"
 KILL_FAILURE, KILL_ASSERTION = "failure", "assertion"
 # The start of a junit failure message that kills a mutant under the assertion rule.
 ASSERTION_FAILURE = re.compile(r"(?:AssertionError|assert |Failed: DID NOT RAISE)")
@@ -458,8 +459,10 @@ def _mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None,
     baseline_tests = list(dict.fromkeys([*args.tests, *(test for entry in entries for test in entry.get("tests", ()))]))
     reports = place / JUNIT
     attempts = 0
+    clock = elapsed.Clock(args.task, args.sha, MUTANTS_COMMAND, stages.pool_directory(environ))
 
-    def attempt(label: str, tests: Sequence[str], rule: str = KILL_FAILURE) -> tuple[str, str]:
+    def attempt(label: str, tests: Sequence[str], rule: str = KILL_FAILURE, stage: str = BASELINE_STAGE
+                ) -> tuple[str, str]:
         nonlocal attempts
         junit = None
         if rule == KILL_ASSERTION:
@@ -467,9 +470,13 @@ def _mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None,
             junit = reports / f"{attempts:03d}-{LABEL_CHARACTERS.sub('_', label)[:40]}.xml"
             junit.unlink(missing_ok=True)
         attempts += 1
+        started = time.monotonic()
         result = execute(str(tree), str(place), python, ["-x", *tests], environ, task=args.task,
                          timeout=MUTANT_SECONDS, junit=junit)
-        return _verdict(result, junit)
+        verdict = _verdict(result, junit)
+        word = verdict[0] if stage != BASELINE_STAGE else ("PASS" if verdict[0] == SURVIVED else "FAIL")
+        clock.stage(stage, time.monotonic() - started, _run_workers(tests), word)
+        return verdict
 
     verdict, summary = attempt("baseline", baseline_tests)
     passed = verdict == SURVIVED
@@ -489,7 +496,8 @@ def _mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None,
                 if rule not in (KILL_FAILURE, KILL_ASSERTION):
                     raise Refusal("MUTANT_INVALID", f"{mutant['label']}: kill_rule {rule!r} is not "
                                                     f"{KILL_FAILURE} or {KILL_ASSERTION}")
-                verdict, summary = attempt(mutant["label"], mutant.get("tests") or args.tests, rule)
+                verdict, summary = attempt(mutant["label"], mutant.get("tests") or args.tests, rule,
+                                           f"{MUTANT_STAGE}{mutant['label']}")
                 print(f"{verdict:<8} {mutant['label']} -> {summary}", flush=True)
                 finished += 1
                 if verdict == SURVIVED:
@@ -791,10 +799,12 @@ def run(argv: Sequence[str], environ: MutableMapping[str, str] | None = None) ->
             environ[stages.WORKERS_LINE] = workers_line
         budget.annotate(log=str(log), limit=workers_line)
         command = _pytest_command(python, tree, place, environ, private, pytest_arguments, xdist=xdist)
+        started = time.monotonic()
         try:
             result: Result | None = _logged(command, tree, environ, private, args.timeout, log, args.progress)
         except KeyboardInterrupt:
             result = None
+        seconds = time.monotonic() - started
     finally:
         budget.release(grant)
     if result is None or result.code is None or result.code == PYTEST_INTERRUPTED:
@@ -802,5 +812,25 @@ def run(argv: Sequence[str], environ: MutableMapping[str, str] | None = None) ->
         for line in lines[-TAIL_LINES:]:
             print(line, flush=True)
     line, code = summary(result, log)
+    if result is not None:
+        clock = elapsed.Clock(args.task, tree_commit(tree, row), RUN_COMMAND, stages.pool_directory(environ))
+        clock.stage(label, seconds, _run_workers(pytest_arguments), line.split(" ", 1)[0].rstrip(";"))
     print(line, flush=True)
     return code
+
+
+RUN_COMMAND = "test"
+MUTANTS_COMMAND = "mutants"
+
+
+def tree_commit(tree: Path, row: scratch.Row | None) -> str:
+    """The commit a run tests: the export's source commit, else the tree's ``HEAD``; empty when neither is known."""
+    if row is not None and row.commit and _git_lines(tree, "rev-parse", "--show-toplevel") is None:
+        return row.commit
+    return (_git_lines(tree, "rev-parse", "HEAD") or [row.commit if row is not None and row.commit else ""])[0]
+
+
+def _run_workers(arguments: Sequence[str]) -> int:
+    """The worker processes a pytest command line runs: its last ``-n K``, else 1 for an in-process run."""
+    option = _worker_option(arguments)
+    return int(option[2]) if option is not None and option[2].isdigit() and int(option[2]) > 0 else 1

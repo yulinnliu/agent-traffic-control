@@ -3,13 +3,15 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
+import types
 from pathlib import Path
 
 import pytest
 
-from atc_testkit import python_toolchain, scratch, testrun
+from atc_testkit import elapsed, python_toolchain, scratch, testrun, workers
 from atc_testkit.locations import Refusal
 
 TASK = "ATC-0044"
@@ -91,6 +93,58 @@ def test_a_run_isolates_the_temporary_and_data_directories(tree: Path, atc_tmp: 
 def test_the_exit_code_is_pytests(tree: Path, atc_tmp: Path) -> None:
     (tree / "tests/test_bad.py").write_text("def test_bad(): assert False\n", encoding="utf-8")
     assert run_tests(str(tree), "s", sys.executable, "tests").returncode == 1
+
+
+@pytest.mark.integration
+def test_a_run_prints_and_records_its_elapsed_time_before_its_summary(tree: Path, atc_tmp: Path) -> None:
+    (tree / "tests/test_bad.py").write_text("def test_bad(): assert False\n", encoding="utf-8")
+    before = len(pool_records())
+    run = run_command("run", "--scratch", "s", "--task", TASK, "--tree", str(tree), "--python", sys.executable,
+                      "--label", "related", "--", "-n", "0", "tests")
+    lines = run.stdout.splitlines()
+    assert run.returncode == 1 and lines[-1].startswith("FAIL "), run.stdout + run.stderr
+    assert re.fullmatch(r"ELAPSED related \d+\.\d+s workers 1 FAIL", lines[-2]), lines
+    added = pool_records()[before:]
+    assert [(r["task"], r["command"], r["stage"], r["workers"], r["result"]) for r in added] == [
+        (TASK, "test", "related", 1, "FAIL")]
+    assert added[0]["sha"] == "" and added[0]["seconds"] >= 0
+
+
+@pytest.mark.unit
+def test_stage_records_append_one_line_each_and_a_reader_skips_what_is_no_object(tmp_path: Path,
+                                                                                 capsys: pytest.CaptureFixture[str]) -> None:
+    clock = elapsed.Clock("ATC-0001", "a" * 40, "test", tmp_path / "run")
+    assert clock.stage("all", 12.34, 4, "PASS") == "ELAPSED all 12.3s workers 4 PASS"
+    assert capsys.readouterr().out == "ELAPSED all 12.3s workers 4 PASS\n"
+    with (tmp_path / "run" / elapsed.FILE).open("a", encoding="utf-8") as handle:
+        handle.write("not json\n[1]\n")
+    elapsed.Clock("", "", "verify", tmp_path / "run").stage("checks", 0.04, 1, "FAIL")
+    assert [(r["task"], r["sha"], r["command"], r["stage"], r["seconds"], r["workers"], r["result"])
+            for r in elapsed.records(tmp_path / "run")] == [
+        ("ATC-0001", "a" * 40, "test", "all", 12.3, 4, "PASS"), ("", "", "verify", "checks", 0.0, 1, "FAIL")]
+    assert elapsed.records(tmp_path / "absent") == []
+    elapsed.Clock("x", "y", "test", None).stage("all", 1, 1, "PASS")
+    assert not (tmp_path / "None").exists()
+
+
+@pytest.mark.integration
+def test_a_runs_commit_is_its_export_source_else_its_trees_head(tree: Path) -> None:
+    exported = types.SimpleNamespace(commit="c" * 40)
+    assert testrun.tree_commit(tree, exported) == "c" * 40
+    assert testrun.tree_commit(tree, None) == ""
+    env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    for args in (("init", "-q"), ("add", "."), ("commit", "-q", "-m", "x")):
+        subprocess.run(["git", *GIT_IDENTITY, *args], cwd=tree, env=env, check=True, capture_output=True)
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=tree, env=env, check=True, capture_output=True,
+                          text=True).stdout.strip()
+    assert testrun.tree_commit(tree / "tests", exported) == head
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(("arguments", "count"), [
+    ([], 1), (["-n", "0"], 1), (["-n", "6"], 6), (["-n6"], 6), (["--numprocesses=3", "x"], 3), (["-n", "auto"], 1)])
+def test_a_runs_recorded_workers_are_its_last_worker_option(arguments: list[str], count: int) -> None:
+    assert testrun._run_workers(arguments) == count
 
 
 def test_the_tree_names_its_data_roots(tree: Path, atc_tmp: Path) -> None:
@@ -306,7 +360,7 @@ SURVIVING = {"label": "S two", "edits": [{"path": "src/fixture_pkg/__init__.py",
 
 def test_mutants_are_killed_or_survive_and_files_are_restored(export: Export, tmp_path: Path) -> None:
     run = export.run(tmp_path, [KILLED, SURVIVING])
-    lines = [line for line in run.stdout.splitlines() if line != testrun.EXCLUSION_NOTE]
+    lines = mutant_lines(run)
     assert run.returncode == 1, run.stdout + run.stderr  # a survivor exits 1
     assert lines[0].startswith("BASELINE-OK")
     assert lines[1].startswith("KILLED") and "K one" in lines[1] and "FAILED" in lines[1]
@@ -319,8 +373,37 @@ def test_mutants_are_killed_or_survive_and_files_are_restored(export: Export, tm
 ERRORING = {"label": "E three", "edits": [{"path": "src/fixture_pkg/__init__.py", "old": "return 1", "new": "return 1 / 0"}]}
 
 
-def mutant_lines(run: subprocess.CompletedProcess[str]) -> list[str]:
-    return [line for line in run.stdout.splitlines() if line != testrun.EXCLUSION_NOTE]
+def mutant_lines(run: subprocess.CompletedProcess[str] | str) -> list[str]:
+    """The command's lines without the private-desktop note and the stage times."""
+    out = run if isinstance(run, str) else run.stdout
+    return [line for line in out.splitlines()
+            if line != testrun.EXCLUSION_NOTE and not line.startswith(f"{elapsed.PREFIX} ")]
+
+
+def elapsed_lines(out: str) -> list[str]:
+    return [line for line in out.splitlines() if line.startswith(f"{elapsed.PREFIX} ")]
+
+
+def pool_records() -> list[dict]:
+    """The stage-time records of the session's worker pool directory, where the conftest points every run."""
+    return elapsed.records(Path(os.environ[workers.POOL_DIRECTORY]))
+
+
+@pytest.mark.integration
+def test_each_mutant_and_the_baseline_print_and_record_their_elapsed_time(export: Export, tmp_path: Path) -> None:
+    before = len(pool_records())
+    run = export.run(tmp_path, [KILLED, SURVIVING])
+    shown = elapsed_lines(run.stdout)
+    assert [line.split()[1] for line in shown] == ["baseline", "mutant:K", "mutant:S"], run.stdout
+    assert [line.split()[-1] for line in shown] == ["PASS", "KILLED", "SURVIVED"]
+    assert all(re.fullmatch(r"ELAPSED \S+(?: \S+)? \d+\.\d+s workers 1 \S+", line) for line in shown), shown
+    added = pool_records()[before:]
+    assert [(r["task"], r["sha"], r["command"], r["stage"], r["workers"], r["result"]) for r in added] == [
+        (TASK, export.sha, "mutants", "baseline", 1, "PASS"),
+        (TASK, export.sha, "mutants", "mutant:K one", 1, "KILLED"),
+        (TASK, export.sha, "mutants", "mutant:S two", 1, "SURVIVED"),
+    ]
+    assert all(isinstance(r["seconds"], float) and r["seconds"] >= 0 for r in added)
 
 
 @pytest.mark.integration
@@ -379,8 +462,10 @@ def test_a_red_baseline_applies_no_mutant(export: Export, tmp_path: Path) -> Non
     export.file.write_text("def value():\n    return 9\n", encoding="utf-8")
     applicable = {"label": "K one", "edits": [{"path": "src/fixture_pkg/__init__.py", "old": "return 9", "new": "return 1"}]}
     run = export.run(tmp_path, [applicable])
-    lines = [line for line in run.stdout.splitlines() if line != testrun.EXCLUSION_NOTE]
+    lines = mutant_lines(run)
     assert run.returncode == 1 and lines[0].startswith("BASELINE-RED") and "K one" not in run.stdout + run.stderr
+    assert [line.split()[1] for line in elapsed_lines(run.stdout)] == ["baseline"]
+    assert elapsed_lines(run.stdout)[0].endswith(" FAIL")
 
 
 @pytest.mark.parametrize("old", ["absent text", "\n"])
@@ -421,7 +506,7 @@ def test_a_same_size_write_in_the_files_last_second_reaches_the_run(export: Expo
         held_writes.chdir(tmp_path)
         code = testrun.mutants([export.place.name, export.sha, str(export.worktree), str(listing), "--task", TASK, "--python",
                                 sys.executable, "--tests", "tests"], bytecode_written)
-    lines = [line for line in capsys.readouterr().out.splitlines() if line != testrun.EXCLUSION_NOTE]
+    lines = mutant_lines(capsys.readouterr().out)
     assert code == 1, lines  # the survivor
     assert lines[1].startswith("KILLED") and "K one" in lines[1]
     assert lines[2].startswith("SURVIVED") and "other file" in lines[2]

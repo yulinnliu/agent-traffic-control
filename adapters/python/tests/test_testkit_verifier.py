@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 import git_integrate as gi
-from atc_testkit import selection, stages, verifier
+from atc_testkit import elapsed, selection, stages, verifier
 from atc_testkit.project import Project, StaticCheck
 
 PYPROJECT = """[tool.pytest.ini_options]
@@ -222,6 +222,33 @@ def test_the_checks_run_in_the_order_of_the_table(candidate: Candidate, atc_tmp:
     assert [call[0] for call in recorder.calls][1] == ["uv", "lock", "--check"]
     assert recorder.calls[4][0][-3:] == ["ruff", "check", "src"]
     assert recorder.calls[3][0][-3:] == ["-m", "atc_testkit.check", "--installed"]
+
+
+@pytest.mark.integration
+def test_the_checks_and_each_stage_print_and_record_their_elapsed_time(
+        candidate: Candidate, capsys: pytest.CaptureFixture[str]) -> None:
+    sha = candidate.advance()
+    pool = stages.pool_directory({})
+    before = len(elapsed.records(pool))
+    assert verifier.main(consumer(candidate.root), candidate.env(ATC_TASK="ATC-0009"), Recorder()) == 0
+    shown = [line for line in capsys.readouterr().out.splitlines() if line.startswith("ELAPSED ")]
+    assert [line.split()[1] for line in shown] == ["checks", "parallel", "serial", "interactive"], shown
+    assert all(re.fullmatch(r"ELAPSED \w+ \d+\.\d+s workers \d+ PASS", line) for line in shown), shown
+    added = elapsed.records(pool)[before:]
+    assert [(r["task"], r["sha"], r["command"], r["stage"]) for r in added] == [
+        ("ATC-0009", sha, "verify", stage) for stage in ("checks", "parallel", "serial", "interactive")]
+    assert added[0]["workers"] == 1 and added[1]["workers"] >= 1 and [r["workers"] for r in added[2:]] == [1, 1]
+    assert f"workers {added[1]['workers']} " in shown[1]
+
+
+@pytest.mark.integration
+def test_a_failed_check_records_the_checks_as_failed(candidate: Candidate, capsys: pytest.CaptureFixture[str]) -> None:
+    candidate.advance()
+    pool = stages.pool_directory({})
+    before = len(elapsed.records(pool))
+    assert refused(consumer(candidate.root), candidate.env(), capsys, Recorder(diff_check_failed=1))[0] == "DIFF_CHECK_FAILED"
+    added = elapsed.records(pool)[before:]
+    assert [(r["task"], r["stage"], r["result"]) for r in added] == [("", "checks", "FAIL")]
 
 
 def test_collection_runs_only_when_the_range_changes_a_test_input(candidate: Candidate) -> None:
@@ -692,12 +719,21 @@ def test_atc_verify_runs_the_verifier_on_the_candidate_without_the_slot_or_a_ref
     from integration_slot import IntegrationSlot
     before = git(integration_repo, "rev-parse", "main")
     refs = git(integration_repo, "for-each-ref")
+    pool = stages.pool_directory(os.environ)
+    recorded = len(elapsed.records(pool))
     with IntegrationSlot(integration_repo):
         code = verify(integration_repo)
     captured = capsys.readouterr()
     assert code == 0, captured
-    last = captured.out.splitlines()[-1]
+    lines = captured.out.splitlines()
+    last = lines[-1]
     assert last.startswith("PASS candidate ") and " FF log " in last
+    shown = [line.split()[1] for line in lines[:-1] if line.startswith("ELAPSED ")]
+    assert shown == ["checks", "parallel", "serial", "interactive"], captured.out
+    tip = (integration_repo / ".git/atc-test-tip").read_text(encoding="utf-8")
+    added = elapsed.records(pool)[recorded:]
+    assert [(r["task"], r["sha"], r["command"], r["stage"]) for r in added] == [
+        (TASK, tip, "verify", stage) for stage in shown]
     assert git(integration_repo, "rev-parse", "main") == before and git(integration_repo, "for-each-ref") == refs
     assert git(integration_repo, "worktree", "list", "--porcelain").count("worktree ") == 1
     assert [path.suffix for path in (atc_tmp / "candidates").iterdir()] == [".log"]

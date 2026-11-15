@@ -298,6 +298,42 @@ The output rule every `atc` command follows is governance `GIT_WORKFLOW.md`
 - A failure names the log and repeats its last twenty `FAILED` or `ERROR`
   lines.
 
+## Stage times
+
+`atc test ID`, each run of `atc test ID --mutants` and the integration
+verifier time each stage they run and report it in one place.
+
+- A stage is timed from its host worker tokens held to its end, so a wait
+  for tokens is not part of it. Its line is
+  `ELAPSED <stage> <seconds>s workers <n> <result>`, with one decimal.
+- The stages:
+
+  | Command | Stage | Workers | Result |
+  | --- | --- | --- | --- |
+  | `atc test ID` | its log label, `related` or `all` | the pytest `-n` it ran, 1 in process | the summary line's first word |
+  | `atc test ID --mutants` | `baseline`, then `mutant:<label>` per mutant | the `-n` among its tests, else 1 | `PASS` or `FAIL` for the baseline, the mutant's verdict |
+  | the verifier, through `atc test ID --candidate` and `atc integrate` | `checks` (every static check before the stages, or up to the first that fails), then each stage of § Stages | 1 for `checks`, the granted count for `parallel`, 1 for the others | `PASS`, `FAIL`, `NO_TESTS` or `TIMEOUT` |
+
+- `atc test ID` prints its line just before the summary line. A mutant run
+  prints its line just before the verdict line. The verifier prints its
+  lines into its log, and `atc test ID --candidate` repeats them before
+  its `PASS candidate` line.
+- Each line is also one JSON record appended to `timings.jsonl` in the host
+  pool directory (`ATC_HOME.md` § Layout). A record has the fields `time` (UTC),
+  `task`, `sha`, `command` (`test`, `mutants` or `verify`), `stage`,
+  `seconds`, `workers` and `result`.
+  - `sha` is the commit tested: for `atc test ID`, the export's commit, else
+    the tree's `HEAD`.
+  - The verifier takes `task` from the optional input `ATC_TASK`, which
+    `atc integrate` and `atc test ID --candidate` set for a candidate of one
+    task.
+  - An empty string is a value no input gave.
+  - A record that cannot be written is skipped. A reader skips a line that is
+    not a JSON object. Nothing deletes the file or reads it to decide
+    anything.
+- No evidence record or report carries a time, so evidence written before
+  and after this section compares the same.
+
 ## Pre-push gate
 
 `<gate> --run` reads the pushed refs from stdin; `<gate> --paths <path>...`
@@ -355,6 +391,8 @@ this order:
 
 - A project static check keeps its own condition on the changed paths and
   says whether it runs before the shared checks.
+- The optional input `ATC_TASK` names the task the stage-time records
+  carry (§ Stage times). The verifier needs only the four other inputs.
 - A range is documentation-only when the selection names no test and every
   changed path is either Markdown that is not automation Markdown
   (`AGENTS.md`, `CLAUDE.md`, or a file under a prefix the project names) or a
@@ -666,7 +704,7 @@ scratch entries. In order:
    of a parallel run (§ Stages), and, with `-v`, the output too.
    A run of a registered project that used to be serial without `-n` is
    parallel once it upgrades to this testkit; `-n 0` keeps it serial.
-7. One summary line ends the command: `PASS`, `FAIL`, `NO_TESTS`,
+7. The run's stage-time line (§ Stage times; none after an interrupt), then one summary line, ends the command: `PASS`, `FAIL`, `NO_TESTS`,
    `INTERRUPTED` or `ERROR exit <code>`, pytest's counts, the failed and
    errored tests by node ID, and the log path. A run that the timeout ends
    prints the log's last fifteen lines and `TIMEOUT` (exit 124); one the
@@ -718,8 +756,8 @@ memory clamp.
 - The tests run once unmutated first, `--tests` together with every
   mutant's own `tests`; a failing baseline prints `BASELINE-RED` and exits
   1 before any mutant is applied.
-- Each mutant prints one line, and its files are restored whether or not the
-  run completes. Every edit and restore moves the file's modification time
+- Each mutant prints one verdict line, preceded by its stage-time line
+  (§ Stage times). Its files are restored whether or not the run completes. Every edit and restore moves the file's modification time
   to a later whole second than its last, so a bytecode cache, which records
   that second and the size, never stands in for the source the run is meant
   to see. A run that exits 0 prints `SURVIVED` with the summary.

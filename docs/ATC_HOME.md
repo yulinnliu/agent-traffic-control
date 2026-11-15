@@ -60,6 +60,7 @@ whole directory loses nothing that a tool cannot recreate; the installed
     workers.lock                the pool's tokens, one locked byte each
     workers/                    one row per process using the pool, locked for its life
     memory/                     per-project worker memory of recent runs, `<project>.json`
+    timings.jsonl               one record per timed stage (`TESTKIT.md` § Stage times)
   content/                      regenerable
     <owner>/<repo>.git          bare cache of governance_source, the content repository of a workspace without governance_checkout (`LAYOUT.md` § The manifest)
   cache/                        regenerable
@@ -237,6 +238,8 @@ every `atc test` run removes them (§ Deleting).
 pool. A stale row in `run/workers/` is removed by the next run that reads it.
 `run/memory/` is a measurement the next runs rebuild; deleting it by hand
 only returns the projects to the default worker memory until they run.
+`run/timings.jsonl` only grows; no ATC command reads it to decide anything,
+so deleting it by hand loses only the history of stage times.
 
 `atc test ID --clean` deletes the scratches registered to the task `ID`,
 together with their dependent runs. Every scratch directory passes through

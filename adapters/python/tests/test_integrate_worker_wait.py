@@ -49,6 +49,28 @@ def test_a_verifier_that_waited_past_its_limit_is_not_a_failed_candidate(tmp_pat
     assert not list(tmp_path.glob("verify-wait-*"))
 
 
+@pytest.mark.parametrize(("task", "seen"), [("ATC-0007", "ATC-0007"), (None, "<none>")])
+def test_the_verifier_learns_the_task_only_from_its_caller(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                           task: str | None, seen: str) -> None:
+    """docs/TESTKIT.md § Stage times: ``ATC_TASK`` names the candidate's one task, never one the caller inherited."""
+    monkeypatch.setenv("ATC_TASK", "ATC-9999")
+    candidate = tmp_path / "candidate"
+    candidate.mkdir()
+    argv = verifier(tmp_path, "print('TASK', os.environ.get('ATC_TASK', '<none>'))\nsys.exit(1)\n")
+    with pytest.raises(gi.Refused) as refused:
+        gi._verify_candidate(argv, candidate, "a" * 40, "b" * 40, "c" * 40, 60, tmp_path, tmp_path / "report.json",
+                             task)
+    assert refused.value.token == "VERIFICATION_FAILED" and refused.value.detail.endswith(f"TASK {seen}")
+
+
+def test_the_candidate_repeats_the_verifiers_elapsed_lines(tmp_path: Path) -> None:
+    log = tmp_path / "x.verify.log"
+    log.write_text("--- stdout ---\nELAPSED checks 1.0s workers 1 PASS\nnoise ELAPSED x\n"
+                   "ELAPSED parallel 9.5s workers 4 PASS\n", encoding="utf-8")
+    assert gi._elapsed_lines(str(log)) == ["ELAPSED checks 1.0s workers 1 PASS", "ELAPSED parallel 9.5s workers 4 PASS"]
+    assert gi._elapsed_lines(None) == [] and gi._elapsed_lines(str(tmp_path / "absent.log")) == []
+
+
 def test_doctor_lists_the_runs_holding_and_leaves_no_lock(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     pool = tmp_path / "run"
     environ = {workers.POOL_DIRECTORY: str(pool)}

@@ -11,13 +11,16 @@ import pkgutil
 import re
 import subprocess
 import sys
+import time
 
-from . import evidence, isolation, locations, scratch, stages, timing, workers as workers_module
+from . import elapsed, evidence, isolation, locations, scratch, stages, timing, workers as workers_module
 from .git import SelectionError, baseline_deltas, changed_paths, git_env
 from .project import Project, StaticCheck
 from .selection import Selection, describe
 
 REQUIRED_ENV = ("ATC_EXPECTED_MAIN_SHA", "ATC_INTEGRATION_SHA", "ATC_CANDIDATE_DIR", "ATC_REVIEWED_SOURCE_SHA")
+CLOCK_COMMAND = "verify"
+CHECKS_STAGE = "checks"
 FULL_OBJECT_ID = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
 AUTOMATION_MARKDOWN = frozenset({"agents.md", "claude.md"})
 MARKDOWN_SUFFIXES = (".md", ".markdown")
@@ -232,16 +235,28 @@ class _Checks:
     """Runs one check or the stages of a run, refusing with the row's token."""
 
     def __init__(self, project: Project, work: Path, isolated: isolation.IsolatedRun, run: stages.Run,
-                 workers: stages.Workers | None = None, budget: workers_module.Budget | None = None):
+                 workers: stages.Workers | None = None, budget: workers_module.Budget | None = None,
+                 clock: elapsed.Clock | None = None):
         self.project, self.work, self.isolated, self.run_logged = project, work, isolated, run
-        self.workers, self.budget = workers, budget
+        self.workers, self.budget, self.clock = workers, budget, clock
+        self.check_seconds, self.checks_run = 0.0, 0
 
     def row(self, row: _Row | StaticCheck, name: str | None = None) -> None:
         log = self.work / f"{(name or row.token).lower()}.log"
+        started = time.monotonic()
         code = self.run_logged(list(row.argv), cwd=self.project.root / row.cwd,
                                env=self.isolated.environment("static"), log=log)
+        self.check_seconds += time.monotonic() - started
+        self.checks_run += 1
         if code:
+            self.report_checks("FAIL")
             raise VerifyError(row.token, f"{' '.join(row.argv)} exited {code}; log {log}", *stages.failure_lines(log))
+
+    def report_checks(self, result: str = "PASS") -> None:
+        """The static checks run since the last report, as one ``checks`` stage of the clock."""
+        if self.clock is not None and self.checks_run:
+            self.clock.stage(CHECKS_STAGE, self.check_seconds, 1, result)
+        self.check_seconds, self.checks_run = 0.0, 0
 
     def static(self, checks: Iterable[StaticCheck], paths: Sequence[str]) -> None:
         for check in checks:
@@ -254,6 +269,7 @@ class _Checks:
 
     def stages(self, pytest_paths: list[str], cwd: Path | None = None) -> None:
         project = self.project
+        self.report_checks()
         try:
             outcome = stages.run_stages(
                 project.stage_entry(), pytest_paths, cwd=project.root if cwd is None else cwd,
@@ -261,7 +277,7 @@ class _Checks:
                 options_for=lambda stage: self.isolated.run_options(stage.name),
                 log_for=lambda stage: self.work / self.isolated.toolchain.stage_log(stage.name), workers=self.workers,
                 run=self.run_logged, toolchain=self.isolated.toolchain, budget=self.budget,
-                count=stages.collected_items if self.run_logged is stages.run_logged else None)
+                count=stages.collected_items if self.run_logged is stages.run_logged else None, clock=self.clock)
         except workers_module.WaitTimeout as refusal:
             raise VerifyError(refusal.token, *refusal.detail.splitlines()) from refusal
         if outcome.token == stages.NO_TESTS_COLLECTED:
@@ -370,15 +386,15 @@ def main(project: Project, environ: Mapping[str, str] | None = None, run: stages
         locations.enter(work)
         isolated = isolation.IsolatedRun(work, credentials=project.credential_variables,
                                          data_roots=project.data_root_variables, toolchain=toolchain)
-        checks = _Checks(project, work, isolated, run, workers, budget)
+        clock = elapsed.Clock(elapsed.task_of(environ), sha, CLOCK_COMMAND, stages.pool_directory(environ))
+        checks = _Checks(project, work, isolated, run, workers, budget, clock)
         if project.select is None:
             doc_only, pytest_paths = _root_checks(project, checks, base, sha, paths)
-            check_final_state(project.root, sha)
-            _write_report(environ, project, pytest_paths, doc_only)
         else:
             doc_only = _consumer_checks(project, checks, base, sha, paths, chosen)
-            check_final_state(project.root, sha)
-            _write_report(environ, project, pytest_paths, doc_only)
+        checks.report_checks()
+        check_final_state(project.root, sha)
+        _write_report(environ, project, pytest_paths, doc_only)
     except locations.Refusal as refusal:
         print(refusal.token, file=sys.stderr)
         print(refusal.detail, file=sys.stderr)

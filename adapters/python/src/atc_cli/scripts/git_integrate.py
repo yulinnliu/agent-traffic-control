@@ -25,7 +25,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
-from atc_testkit import locations, owner, scratch, stages, timing, workers as host_workers
+from atc_testkit import elapsed, locations, owner, scratch, stages, timing, workers as host_workers
 import git_preflight as gp
 import cli_conventions
 import managed_worktree as hw
@@ -635,10 +635,14 @@ def reuse_check(t: "Target", verdict: str, expected_main: str) -> tuple[dict | N
 
 def _verify_candidate(
     argv: list[str], candidate_dir: Path, candidate_sha: str, expected_main: str, reviewed: str,
-    timeout: float, captures: Path, report_path: Path,
+    timeout: float, captures: Path, report_path: Path, task: str | None = None,
 ) -> tuple[str | None, Path | None]:
-    """Run the verifier in the candidate; return the isolation warning, if any, and the log written."""
+    """Run the verifier in the candidate; return the isolation warning, if any, and the log written. ``task`` names
+    the verifier's stage-time records (docs/TESTKIT.md § Stage times)."""
     env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    env.pop(elapsed.TASK_VARIABLE, None)
+    if task:
+        env[elapsed.TASK_VARIABLE] = task
     env.update({
         "ATC_INTEGRATION_SHA": candidate_sha,
         "ATC_CANDIDATE_DIR": str(candidate_dir),
@@ -1277,7 +1281,7 @@ def build_and_verify(
                 print(f"verify: candidate {candidate_sha}{evidence} timeout {timeout:g}s ({timeout_source})",
                       file=sys.stderr)
             warning, log = _verify_candidate(
-                argv, candidate_dir, candidate_sha, main_before, reviewed, timeout, places.systmp, report_path,
+                argv, candidate_dir, candidate_sha, main_before, reviewed, timeout, places.systmp, report_path, task,
             )
             built.warning = warning
             built.log = None if log is None else str(log)
@@ -1854,8 +1858,19 @@ def verify(t: Target, as_json: bool) -> int:
         return 0
     if built.warning:
         print(f"WARNING {built.warning}", file=sys.stderr)
+    for line in _elapsed_lines(log):
+        print(line)
     print(f"PASS candidate {built.candidate_sha} {report.verdict}" + (f" log {log}" if log else ""))
     return 0
+
+
+def _elapsed_lines(log: str | None) -> list[str]:
+    """The verifier's ``ELAPSED`` lines in its log, one per stage (docs/TESTKIT.md § Stage times)."""
+    try:
+        text = Path(log).read_text(encoding="utf-8", errors="replace") if log else ""
+    except OSError:
+        return []
+    return [line.strip() for line in text.splitlines() if line.strip().startswith(f"{elapsed.PREFIX} ")]
 
 
 def run_candidate(task: str, sha: str | None, root: Path = hw.ROOT, cwd: str | None = None,
