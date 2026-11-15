@@ -25,7 +25,8 @@ that root's `workspace.yaml`; `root` names the governance repository: its
 ## Canonical checkout guard
 
 When the workspace directory a command acts on is itself the governance
-checkout (`workspace.yaml` names `governance_checkout: .`) and a canonical
+checkout (`workspace.yaml` names `governance_checkout: .`, or the directory
+is a Git top level holding `atc-manifest.yaml`) and a canonical
 checkout (no linked worktree), every command but `doctor`,
 `--help` and `--version` stops with `ERROR CHECKOUT_NOT_MAIN` while that
 checkout is off `main`, stops with `ERROR CHECKOUT_UNREADABLE` when its Git

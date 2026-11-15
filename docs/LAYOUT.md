@@ -192,8 +192,10 @@ argv file exist (`GIT_WORKFLOW.md` § Lock advancement).
   relative to the workspace directory, of a checkout of `governance_source`:
   the content repository (§ The manifest) and the repository the reserved
   project `root` names. Only a host that develops ATC sets it; `.` makes the
-  workspace directory that checkout, and only then does the canonical checkout
-  guard apply (`shared/conformance/CLI.md` § Canonical checkout guard). A
+  workspace directory that checkout. The canonical checkout guard applies to
+  that checkout, and to a workspace directory that is a Git top level holding
+  `atc-manifest.yaml` without the line (`shared/conformance/CLI.md`
+  § Canonical checkout guard). A
   workspace directory is any directory holding `workspace.yaml`.
 - `projects/<name>/` — independent repositories brought in by the owner. This
   repository never tracks their content.

@@ -67,9 +67,10 @@ def root_adapter_check(root: Path) -> Check:
 
 def checkout_check(checkout: Path) -> Check:
     """The canonical checkout guard's conditions (`checkout_guard`), as a problem doctor lists; the guard applies only
-    when the workspace directory is the governance checkout (`governance_checkout: .`)."""
+    when the workspace directory is the governance checkout (`governance_checkout: .`, or a Git top level holding
+    `atc-manifest.yaml`)."""
     import content
-    if not content.is_workspace_checkout(checkout):
+    if not (content.is_workspace_checkout(checkout) or content.holds_governance(checkout)):
         return Check("canonical checkout", "READY", f"{checkout} is not the governance checkout; no guard applies")
     current = checkout_guard.state(checkout)
     if not current.canonical:

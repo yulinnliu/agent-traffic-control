@@ -232,6 +232,22 @@ def test_the_guard_applies_only_when_the_workspace_directory_is_the_governance_c
     assert atc_cli._guard("sync", [], canonical) == 2
 
 
+def test_the_guard_applies_to_a_governance_checkout_whose_workspace_yaml_does_not_say_so(
+        canonical: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """A Git top level holding atc-manifest.yaml is the governance checkout without governance_checkout too."""
+    import doctor
+    (canonical / "workspace.yaml").write_text("version: 1\n", encoding="utf-8")
+    (canonical / "atc-manifest.yaml").write_text("manifest: 1\n", encoding="utf-8")
+    git(canonical, "add", "atc-manifest.yaml")
+    git(canonical, "commit", "-q", "-m", "manifest")
+    assert atc_cli._guard("task", ["list"], canonical) is None
+    git(canonical, "switch", "-q", "-c", "topic")
+    for command in ("task", "test", "integrate", "push"):
+        assert atc_cli._guard(command, [], canonical) == 2
+    assert "CHECKOUT_NOT_MAIN" in capsys.readouterr().err
+    assert doctor.checkout_check(canonical).status == "ERROR"
+
+
 def test_a_canonical_checkout_off_main_refuses_every_command_but_doctor_and_help(
     canonical: Path, capsys: pytest.CaptureFixture[str],
 ) -> None:

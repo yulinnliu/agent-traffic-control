@@ -113,13 +113,14 @@ def scripts_on_path() -> None:
 
 def _guard(command: str, rest: list[str], checkout: Path) -> int | None:
     """Exit 2 when the canonical checkout `atc` acts on is off `main`; warn when it is dirty. Applies only when that
-    workspace directory is itself the governance checkout (`governance_checkout: .`)."""
+    workspace directory is itself the governance checkout: `governance_checkout: .`, or a Git top level holding
+    `atc-manifest.yaml` whether or not `workspace.yaml` says so."""
     if command in GUARD_EXEMPT or any(arg in ("-h", "--help") for arg in rest):
         return None
     scripts_on_path()
     import checkout_guard
     import content
-    if not content.is_workspace_checkout(checkout):
+    if not (content.is_workspace_checkout(checkout) or content.holds_governance(checkout)):
         return None
     current = checkout_guard.state(checkout)
     if current.unreadable:
