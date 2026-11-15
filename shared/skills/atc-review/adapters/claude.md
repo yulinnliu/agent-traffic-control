@@ -9,6 +9,9 @@
   `<task id lowercased>-<topic>` ([a-z0-9-], at most 24 characters). The
   coordinator gets the ID from `atc task create` before it starts the
   session, and never uses a placeholder.
+- A task whose deliverable is a report (a measurement, an investigation)
+  commits it as `docs/design/<task ID>.md` or sets `keep: reports` in its
+  record; otherwise close-out deletes it from `~/.atc/reports`.
 - On Windows every command that spawns tests (`atc test`,
   `atc integrate --check`) runs through the PowerShell tool, never the Bash
   tool: Bash-tool child processes leave nonpaged pool allocations behind on
