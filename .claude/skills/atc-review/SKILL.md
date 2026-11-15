@@ -301,6 +301,10 @@ seven days after its last change.
   repository's `AGENTS.md` prescribes: its own worktree for a registered
   project, and for the workspace root whatever the root's `AGENTS.md`
   § Changing this repo states.
+- A session started for a role is titled `[<task ID>] <topic>` and named
+  `<task id lowercased>-<topic>` ([a-z0-9-], at most 24 characters). The
+  coordinator gets the ID from `atc task create` before it starts the
+  session, and never uses a placeholder.
 - On Windows every command that spawns tests (`atc test`,
   `atc integrate --check`) runs through the PowerShell tool, never the Bash
   tool: Bash-tool child processes leave nonpaged pool allocations behind on
