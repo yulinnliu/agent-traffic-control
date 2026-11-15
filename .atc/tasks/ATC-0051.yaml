@@ -1,0 +1,22 @@
+task_id: ATC-0051
+title: Measure where test time goes
+repository: yulinnliu/agent-traffic-control
+base_sha: c0cd5f6914dcec4215c9c8a405bd85fef1424109
+scope: 'Measure where time goes in writing and running tests in the workspace root (ATC); change no code. Produce a report with numbers and a ranked list of proposals for the Owner. Measure: 1. Per-stage wall time per task for recent root tasks (at least ATC-0045 to ATC-0050 and ATC-0049''s runs on 11-15): the writer''s `atc test` related and candidate runs, mutant runs (baseline and each mutant), and the reviewer''s candidate verify (`~/.atc/tmp/candidates/*.verify.log`, `~/.atc/tmp/<task>-*/runs/`, reports under `~/.atc/reports/`). Count how many times the same SHA or near-same code was run in full. 2. How often `select_tests` classified a change as the full suite, and which paths forced it (the verify logs print each path''s reason, e.g. "loaded by conftest.py or the pytest plugin in every test -> full suite"). Name the modules conftest or the plugin load that make every test depend on them, and what decoupling them would take. 3. The slowest tests: one full-suite run with `--durations=50`
+  (or the testkit''s equivalent) on main, grouped by cause (git subprocesses, repo fixtures, uv, sleeps or timeouts, process spawns). Estimate what share of total time each group takes. 4. Test count and growth per task, and how many tests each guard or mutant added.'
+tests: none
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: c0cd5f6914dcec4215c9c8a405bd85fef1424109
+branch: claude+ATC-0051
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
+decisions:
+- 'Owner 11-15 「先量測，開個 task」: measure first; proposals come back to the Owner before any change.'
+- 'Owner 11-15 observation: development efficiency is stuck on writing and running tests.'
+- 'Coordinator''s starting hypotheses, which the measurement may confirm or refute: impact selection degenerates to the full suite because conftest loads frequently changed modules; full runs repeat across writer, reviewer and fix-only re-review; mutant baselines are costly; slow tests are mostly git, uv and process fixtures; strict-level per-guard tests and mutants are heavy for a single-user tool.'
+- No code, test, policy or governance change in this task; the deliverable is the report. Any follow-up is a separate decision.
