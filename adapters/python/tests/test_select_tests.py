@@ -73,6 +73,48 @@ def test_the_selector_and_its_guard_select_the_full_suite(graph):
         assert chosen(graph, path) == [], path
 
 
+def small_graph(tmp_path, monkeypatch, files: dict[str, str]) -> select_tests.Graph:
+    """A graph of a workspace holding only ``files``, given relative to the adapter."""
+    monkeypatch.setattr(select_tests, "DIRECTORY_READERS", {})
+    for rel, text in {"atc-testkit/src/atc_testkit/plugin.py": "", **files}.items():
+        (tmp_path / ADAPTER / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / ADAPTER / rel).write_text(text, encoding="utf-8")
+    return select_tests.Graph(tmp_path)
+
+
+def test_an_import_inside_a_function_reaches_for_the_tests_that_reach_its_module(tmp_path, monkeypatch):
+    graph = small_graph(tmp_path, monkeypatch, {
+        "tests/conftest.py": "", "scripts/caller.py": "def run():\n    import callee\n", "scripts/callee.py": "",
+        "tests/test_caller.py": "import caller\n", "tests/test_other.py": "",
+    })
+    assert chosen(graph, f"{ADAPTER}/scripts/callee.py") == ["tests/test_caller.py"]
+
+
+def test_what_conftest_or_a_module_it_loads_imports_inside_a_function_selects_the_full_suite(tmp_path, monkeypatch):
+    graph = small_graph(tmp_path, monkeypatch, {
+        "tests/conftest.py": "import loaded\n\ndef fixture():\n    import direct\n",
+        "scripts/loaded.py": "def hook():\n    import deep\n", "scripts/direct.py": "", "scripts/deep.py": "",
+        "tests/test_deep.py": "import deep\n", "tests/test_other.py": "",
+    })
+    for module in ("loaded", "direct", "deep"):
+        assert chosen(graph, f"{ADAPTER}/scripts/{module}.py") == [], module
+
+
+def test_a_conftest_patch_of_a_module_it_does_not_import_selects_the_tests_that_reach_it(tmp_path, monkeypatch):
+    graph = small_graph(tmp_path, monkeypatch, {
+        "tests/conftest.py": "import sys\n\ndef fixture():\n    module = sys.modules.get('patched')\n",
+        "scripts/patched.py": "", "tests/test_patched.py": "import patched\n", "tests/test_other.py": "",
+    })
+    assert chosen(graph, f"{ADAPTER}/scripts/patched.py") == ["tests/test_patched.py"]
+
+
+def test_the_cli_selects_the_tests_that_reach_it_not_the_full_suite(graph):
+    """`conftest.py` patches `atc_cli` only once a test file loaded it, so it loads `atc_cli` in no test."""
+    selected = chosen(graph, f"{ADAPTER}/src/atc_cli/__init__.py")
+    assert {"tests/test_atc_cli.py", "tests/test_git_integrate.py", "tests/test_build_checkout.py"} <= set(selected)
+    assert len(selected) < len(graph.tests)
+
+
 @pytest.mark.parametrize(("path", "readers"), [
     ("shared/governance/VERIFICATION.md", ["tests/test_shell_install.py"]),
     ("shared/skills/atc-review/SKILL.md", ["tests/test_shell_install.py", "tests/test_tooling.py"]),
@@ -194,7 +236,6 @@ def test_a_guarded_path_no_declared_test_reads_selects_by_kind(graph, monkeypatc
     f"{ADAPTER}/tests/unmarked_baseline.txt",
     f"{ADAPTER}/atc-testkit/src/atc_testkit/plugin.py",
     f"{ADAPTER}/atc-testkit/src/atc_testkit/markers.py",
-    f"{ADAPTER}/src/atc_cli/__init__.py",
 ])
 def test_a_full_trigger_selects_the_full_suite(graph, path):
     assert chosen(graph, path) == []

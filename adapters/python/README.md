@@ -151,8 +151,8 @@ uv run --locked python scripts/select_tests.py --base REF --run -- -x   # anothe
 The changed paths run from the merge base of `main` and `HEAD` to the working
 tree, untracked files included. The output lists each selected test file with
 the paths that select it, then every path with its rule; the rules are in the
-script's docstring. `conftest.py`, the pytest plugin and what they load,
-`pyproject.toml`, `uv.lock`, the unmarked baseline and every path no rule
+script's docstring. `conftest.py`, the pytest plugin and everything they
+import, inside a function too, `pyproject.toml`, `uv.lock`, the unmarked baseline and every path no rule
 maps select the full suite.
 
 The selection sees imports and names written in strings, not globs: a test

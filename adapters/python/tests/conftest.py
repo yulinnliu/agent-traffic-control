@@ -68,9 +68,13 @@ def _no_host_worker_pool(monkeypatch: pytest.MonkeyPatch, _test_worker_pool: Pat
 
 @pytest.fixture(autouse=True)
 def _guard_checks_no_live_checkout(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`atc_cli.main` guards a checkout holding no workspace.yaml unless a test names one, whatever branch runs the suite."""
-    import atc_cli
-    monkeypatch.setattr(atc_cli, "GUARDED_CHECKOUT", SCRIPTS)
+    """`atc_cli.main` guards a checkout holding no workspace.yaml unless a test names one, whatever branch runs the suite.
+
+    A test file that runs `atc_cli.main` in process imports `atc_cli` when it loads; this fixture imports nothing, so a
+    change to `atc_cli` selects only the test files that reach it (`scripts/select_tests.py`)."""
+    cli = sys.modules.get("atc_cli")
+    if cli is not None:
+        monkeypatch.setattr(cli, "GUARDED_CHECKOUT", SCRIPTS)
 
 
 def _writable_retry(function, target, _error) -> None:

@@ -18,9 +18,14 @@ root. Selection is by test file and reads the static structure of the code:
   and so does a directory; a file of another kind adds the test files whose
   reach names its file name. With no test file, Markdown selects nothing and
   another file the full suite.
-- `conftest.py`, the pytest plugin and everything they import at load time
-  (the reader guard `tests/root_reads.py` and this script among them),
-  `pyproject.toml`, `uv.lock` and the unmarked baseline select the full suite.
+- An import inside a function counts like one at load time: it reaches for the
+  test files that reach its module, and nothing more.
+- `conftest.py`, the pytest plugin and everything they import, at load time or
+  inside a function, transitively (the reader guard `tests/root_reads.py` and
+  this script among them), `pyproject.toml`, `uv.lock` and the unmarked
+  baseline select the full suite. A fixture of `conftest.py` that patches a
+  module every test does not reach imports nothing: it patches the module only
+  when a test file has loaded it.
 - A path under `shared/<area>/` selects the test files whose reach names
   `<area>` or `shared/<area>`; a task record under `.atc/tasks/` selects the
   test files that themselves name `.atc/tasks`; another path selects the test
@@ -134,7 +139,6 @@ class Module:
     path: str
     package: str | None
     imports: set[str] = field(default_factory=set)
-    load_imports: set[str] = field(default_factory=set)
     literals: list[str] = field(default_factory=list)
 
 
@@ -160,25 +164,11 @@ def _resolve(node: ast.ImportFrom, package: str | None) -> str:
     return node.module or ""
 
 
-def _at_load(tree: ast.Module) -> set[int]:
-    """Ids of import statements that run when the module loads, outside any function."""
-    found: set[int] = set()
-    stack: list[ast.AST] = list(tree.body)
-    while stack:
-        node = stack.pop()
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
-            continue
-        if isinstance(node, (ast.Import, ast.ImportFrom)):
-            found.add(id(node))
-        stack.extend(ast.iter_child_nodes(node))
-    return found
-
-
 def parse(path: Path, name: str, rel: str, package: str | None) -> Module:
+    """A source file's imports, wherever they stand, and its string literals."""
     source = path.read_text(encoding="utf-8")
     tree = ast.parse(source)
     module = Module(name, rel, package, literals=string_literals(source).split("\n"))
-    at_load = _at_load(tree)
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             names = {alias.name for alias in node.names}
@@ -188,8 +178,6 @@ def parse(path: Path, name: str, rel: str, package: str | None) -> Module:
         else:
             continue
         module.imports |= names
-        if id(node) in at_load:
-            module.load_imports |= names
     return module
 
 
@@ -233,24 +221,20 @@ class Graph:
         return found - {module.name}
 
     def _closure(self, start: str) -> set[str]:
-        seen, stack = {start}, [start]
-        while stack:
-            for name in self.edges[stack.pop()] - seen:
-                seen.add(name)
-                stack.append(name)
-        return seen
+        return self._closure_over((start,), self.edges.__getitem__)
 
     def _load_set(self) -> set[str]:
-        """Modules every test session loads: conftest and the plugin with all their imports, then load-time imports."""
-        roots = {"conftest", PLUGIN_MODULE}
-        seen = set(roots)
-        stack = [n for r in roots for n in self.modules[r].imports if n in self.modules]
+        """Modules code of every test session can run: conftest and the plugin with every import of theirs and of
+        what they import, top-level or inside a function, transitively."""
+        return self._closure_over(("conftest", PLUGIN_MODULE),
+                                  lambda name: {n for n in self.modules[name].imports if n in self.modules})
+
+    def _closure_over(self, roots: Iterable[str], step) -> set[str]:
+        seen, stack = set(roots), list(roots)
         while stack:
-            name = stack.pop()
-            if name in seen:
-                continue
-            seen.add(name)
-            stack.extend(n for n in self.modules[name].load_imports if n in self.modules)
+            for name in step(stack.pop()) - seen:
+                seen.add(name)
+                stack.append(name)
         return seen
 
     def importers(self, name: str) -> set[str]:

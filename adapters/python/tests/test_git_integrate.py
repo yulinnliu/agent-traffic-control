@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from atc_testkit import locations
+import atc_cli
 import git_integrate as gi
 
 SETTLE = 20.0  # seconds a process gets to reach a state on a loaded host
@@ -1528,8 +1529,6 @@ def workspace(repo: Path) -> Path:
 
 @pytest.mark.integration
 def test_atc_hands_its_root_to_integrate(repo: Path, workspace: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    import atc_cli
-
     tip = topic(repo, {"a.txt": "a2\n"})
     args = [tip]
     assert atc_cli.main(["--root", str(workspace), "integrate", "--repo", str(repo), *args]) == 2
