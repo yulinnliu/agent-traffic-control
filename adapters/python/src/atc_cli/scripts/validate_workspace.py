@@ -878,11 +878,11 @@ def report_hook(workspace_yaml: Path) -> None:
     """Report, never fail: PreToolUse hook entries, baseline and table as `atc guard` checks them
     (docs/ENFORCEMENT.md § PreToolUse hook)."""
     import generate_enforcement
-    import guard
+    import hook_report
     if not workspace_yaml.is_file():
         return
     home = generate_enforcement.default_home()
-    refusal = guard.stop_of(guard.report(workspace_yaml, home, generate_enforcement.default_atc_home(home)))
+    refusal = hook_report.stop_of(hook_report.report(workspace_yaml, home, generate_enforcement.default_atc_home(home)))
     if refusal is not None:
         print(f"sync --check: pretooluse hook {refusal.token}: {refusal.detail}; {refusal.hint}")
 

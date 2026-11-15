@@ -476,6 +476,26 @@ def test_g20_g21_a_missing_or_invalid_baseline_denies(workspace, home, harness):
     assert baseline.read_text(encoding="utf-8") == "{not json"
 
 
+@pytest.mark.parametrize("change", ["version", "table-version", "table-field"])
+def test_g20_a_baseline_of_another_version_or_with_a_broken_table_denies(workspace, home, change):
+    assert install(workspace, home) == 0
+    baseline, cache = paths(workspace, home)["baseline"], paths(workspace, home)["cache"]
+    record = json.loads(baseline.read_text(encoding="utf-8"))
+    if change == "version":
+        record["version"] = hook_state.FORMAT + 1
+    elif change == "table-version":
+        record["table"]["version"] = 2
+    else:
+        del record["table"]["write_roots"]
+    baseline.write_text(json.dumps(record), encoding="utf-8")
+    hook_state.remove(cache)
+    with pytest.raises(hook_state.Failure) as raised:
+        hook_state.read_baseline(baseline)
+    assert raised.value.token == "BASELINE_INVALID"
+    assert "BASELINE_INVALID" in (engine(workspace, home, "git status") or "")
+    assert json.loads(baseline.read_text(encoding="utf-8")) == record
+
+
 def test_g30_another_map_never_touches_this_maps_state(workspace, home, tmp_path):
     assert install(workspace, home) == 0
     before = snapshot(paths(workspace, home)["dir"])
@@ -583,11 +603,38 @@ Path(request["key_out"]).write_text(json.dumps({"key": {"slept": True}, "sources
 time.sleep(60)
 """
 
-SPAWNER = """import json, subprocess, sys, time
+SPAWNER = """import json, os, subprocess, sys, time
 from pathlib import Path
-subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+grandchild = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+Path(__file__).with_name("pids.json").write_text(json.dumps([os.getpid(), grandchild.pid]))
 time.sleep(60)
 """
+
+
+def alive(pid: int) -> bool:
+    """Whether process ``pid`` still runs; never signals it."""
+    if os.name == "nt":
+        import ctypes
+        kernel = ctypes.windll.kernel32
+        handle = kernel.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+        if not handle:
+            return False
+        try:
+            code = ctypes.c_ulong()
+            return bool(kernel.GetExitCodeProcess(handle, ctypes.byref(code))) and code.value == 259  # STILL_ACTIVE
+        finally:
+            kernel.CloseHandle(handle)
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    try:
+        with open(f"/proc/{pid}/stat", encoding="ascii") as stat:
+            return stat.read().rsplit(")", 1)[-1].split()[0] != "Z"
+    except OSError:
+        return True
 
 
 @pytest.mark.parametrize("harness", ["claude", "codex"])
@@ -613,18 +660,49 @@ def test_g26_g27_the_deadline_denies_and_the_timeout_is_cached(workspace, home, 
     assert record["failure"]["token"] == "COMPOSE_TIMEOUT"
 
 
+KEYED_SLEEPER = """import json, sys, time
+from pathlib import Path
+sys.path.insert(0, {scripts!r})
+import generate_enforcement as ge
+request = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+def sleep(*args, **kwargs):
+    time.sleep(60)
+ge._git_texts = ge._file_texts = sleep
+ge.compose_result(Path(request["workspace"]), Path(request["home"]), Path(request["atc_home"]),
+                  key_out=Path(request["key_out"]))
+"""
+
+
 def test_g27_a_timeout_under_the_current_key_denies_at_once(workspace, home, monkeypatch, tmp_path):
+    assert install(workspace, home) == 0
+    sleeper = tmp_path / "sleeper.py"
+    sleeper.write_text(KEYED_SLEEPER.format(scripts=str(hook_state.SCRIPTS)), encoding="utf-8")
+    counter = Counter(monkeypatch, sleeper)
+    with pytest.raises(hook_state.Failure):
+        table_now(workspace, home, seconds=3.0)
+    record = json.loads(paths(workspace, home)["cache"].read_text(encoding="utf-8"))
+    assert record["failure"]["token"] == "COMPOSE_TIMEOUT" and record["sources"]
+    started = time.monotonic()
+    with pytest.raises(hook_state.Failure) as raised:
+        table_now(workspace, home, seconds=3.0)
+    assert raised.value.token == "COMPOSE_TIMEOUT" and counter.calls == 1 and time.monotonic() - started < 1
+
+
+def test_g27_a_timeout_before_the_child_wrote_its_key_is_not_cached(workspace, home, monkeypatch, tmp_path):
+    """Its key would be the map's alone, which a fix on a repository's main never changes."""
     assert install(workspace, home) == 0
     sleeper = tmp_path / "sleeper.py"
     sleeper.write_text(SLEEPER.replace('{"key": {"slept": True}, "sources": None, "env_names": None}', "None"),
                        encoding="utf-8")
+    real = hook_state.run_child
     counter = Counter(monkeypatch, sleeper)
-    with pytest.raises(hook_state.Failure):
-        table_now(workspace, home, seconds=2.0)
-    started = time.monotonic()
-    with pytest.raises(hook_state.Failure) as raised:
-        table_now(workspace, home, seconds=2.0)
-    assert raised.value.token == "COMPOSE_TIMEOUT" and counter.calls == 1 and time.monotonic() - started < 1
+    for _ in range(2):
+        with pytest.raises(hook_state.Failure) as raised:
+            table_now(workspace, home, seconds=2.0)
+        assert raised.value.token == "COMPOSE_TIMEOUT"
+    assert counter.calls == 2 and not paths(workspace, home)["cache"].exists()
+    monkeypatch.setattr(hook_state, "run_child", real)
+    assert verdict(workspace, home, "git status") is None
 
 
 def test_g75_a_grandchild_holding_a_handle_does_not_hold_the_deadline(workspace, home, tmp_path):
@@ -634,6 +712,11 @@ def test_g75_a_grandchild_holding_a_handle_does_not_hold_the_deadline(workspace,
     with pytest.raises(hook_state.Failure) as raised:
         hook_state.run_child(workspace, home, atc_home(home), 1.0, spawner)
     assert raised.value.token == "COMPOSE_TIMEOUT" and time.monotonic() - started < 5
+    pids = json.loads((tmp_path / "pids.json").read_text(encoding="utf-8"))
+    until = time.monotonic() + 5
+    while any(alive(pid) for pid in pids) and time.monotonic() < until:
+        time.sleep(0.1)
+    assert not [pid for pid in pids if alive(pid)], "the timeout leaves the child or its grandchild running"
 
 
 # Fail closed, as the harness runs it

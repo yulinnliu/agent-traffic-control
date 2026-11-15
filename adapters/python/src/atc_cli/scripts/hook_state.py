@@ -421,11 +421,12 @@ def cache_record(result: dict, table: dict | None = None, retained: dict | None 
             "retained": retained, "failure": failure.as_dict() if failure else None, "atc": result.get("atc")}
 
 
-def _failure_key(workspace: Path, home: Path, partial: object) -> dict:
-    """The key a timed-out or crashed composition is cached under: what the child wrote, else the map's."""
+def _failure_key(partial: object) -> dict | None:
+    """The key a timed-out or crashed composition is cached under: the one the child wrote, with its sources. None
+    when it wrote none: a key of the map alone would hold the failure after a fix on a repository's `main`."""
     if isinstance(partial, dict) and isinstance(partial.get("key"), dict):
         return partial
-    return {"key": make_key(workspace, file_hash(workspace), None, None, home), "sources": None, "env_names": None}
+    return None
 
 
 def table_for(workspace: Path, home: Path, atc_home: Path, until: float, child: Path = CHILD) -> dict:
@@ -446,7 +447,9 @@ def table_for(workspace: Path, home: Path, atc_home: Path, until: float, child: 
         try:
             result = run_child(workspace, home, atc_home, until - time.monotonic() - KILL_MARGIN, child)
         except (TimedOut, ComposeCrashed) as failure:
-            write_json(paths["cache"], cache_record(_failure_key(workspace, home, failure.key), failure=failure))
+            keyed = _failure_key(failure.key)
+            if keyed is not None:
+                write_json(paths["cache"], cache_record(keyed, failure=failure))
             raise
         if isinstance(result.get("failure"), dict):
             failure = Failure(str(result["failure"].get("token")), str(result["failure"].get("detail")))

@@ -187,15 +187,15 @@ def hook_checks(workspace_file: Path, home: Path | None = None) -> list[Check]:
     """The PreToolUse hook: its entries, its baseline, whether its table composes, what the baseline keeps, a
     legacy table (docs/ENFORCEMENT.md § PreToolUse hook). Composes in memory; writes nothing."""
     import generate_enforcement as ge
-    import guard
+    import hook_report
     home = Path(home) if home is not None else ge.default_home()
-    found = guard.report(workspace_file.absolute(), home, ge.default_atc_home(home))
+    found = hook_report.report(workspace_file.absolute(), home, ge.default_atc_home(home))
     entries, baseline, table = found["entries"], found["baseline"], found["table"]
     if all(state == "missing" for state in entries.values()) and baseline["status"] == "BASELINE_MISSING":
-        return [Check("pretooluse entries", "NOT_INITIALIZED", f"no hook entry; {guard.INSTALL_HINT}")]
+        return [Check("pretooluse entries", "NOT_INITIALIZED", f"no hook entry; {hook_report.INSTALL_HINT}")]
     bad = {h: s for h, s in entries.items() if s != "current"}
     checks = [Check("pretooluse entries", "ERROR", "; ".join(f"ENTRY_{s.upper()}: the {h} entry is {s}"
-                                                              for h, s in bad.items()) + f"; {guard.INSTALL_HINT}")
+                                                              for h, s in bad.items()) + f"; {hook_report.INSTALL_HINT}")
               if bad else Check("pretooluse entries", "READY", "claude and codex entries current")]
     checks.append(Check("pretooluse baseline", "READY", f"written by {baseline['written_by']} at {baseline['at']}")
                   if baseline["status"] == "READY" else
@@ -208,7 +208,7 @@ def hook_checks(workspace_file: Path, home: Path | None = None) -> list[Check]:
     else:
         checks.append(Check("pretooluse table", "ERROR", f"{table['token']}: {table['detail']}"))
     checks += [Check("pretooluse retained" if "rules kept" in line else "pretooluse legacy", "WARN", line)
-               for line in guard.warnings(found)]
+               for line in hook_report.warnings(found)]
     return checks
 
 

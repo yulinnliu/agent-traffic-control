@@ -324,12 +324,7 @@ def _atc_identity() -> dict:
         version = metadata.version(TOOL)
     except metadata.PackageNotFoundError:
         version = "unknown"
-    try:
-        import release_pin
-        release = release_pin.installed()
-    except Exception:  # identity is reporting only
-        release = None
-    return {"version": version, "commit": release.commit if release else None}
+    return {"version": version}
 
 
 def compose_result(workspace: Path, home: Path, atc_home: Path, key_out: Path | None = None,

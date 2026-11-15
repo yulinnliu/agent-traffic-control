@@ -369,7 +369,7 @@ table: <TOKEN>: <detail>` and the Owner's next step, `atc doctor`:
 | `POLICY_TOO_LARGE` | a policy file over 256 KiB | yes |
 | `MAIN_UNREADABLE` | a repository without a readable `refs/heads/main` | yes |
 | `GOVERNANCE_CHECKOUT_UNSET` | the workspace directory is a governance checkout the map does not declare | yes |
-| `COMPOSE_TIMEOUT` | composing took past the deadline | yes |
+| `COMPOSE_TIMEOUT`, `COMPOSE_FAILED` | composing took past the deadline, or its process exited without a result | yes, once the key names its sources; not before |
 | `COMPOSE_BUSY` | another process held the lock past the deadline | no |
 | `BASELINE_MISSING`, `BASELINE_INVALID` | no baseline, or one that cannot be read; the Owner runs `atc guard --reset` | no |
 | `USAGE` | an entry with both `--workspace` and `--table` | no |
