@@ -270,7 +270,9 @@ Each task record carries `tests: none | standard | strict`, set by
   `atc test <task> --candidate`.
 - `strict`: a change to a guard (a refusal, a deletion, authority, a safety
   boundary, data integrity). `standard`, plus `atc test <task> --mutants
-  <file>` by the writer and by the reviewer.
+  <file>`, which the reviewer writes and runs. The writer writes and runs no
+  mutant; its step report lists the guards the change adds or alters, each
+  as `file:line` and what it blocks, as the reviewer's starting point.
 
 A project with `atc-testkit` defaults to `standard`; a project without it has
 only `none`. A reviewer may FAIL a task whose diff exceeds its level. The

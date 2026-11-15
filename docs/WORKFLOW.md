@@ -17,17 +17,17 @@ prints one verdict line on success; a refusal prints `STOP <TOKEN>: ...` or
 | Step | Who | Command |
 | --- | --- | --- |
 | 1. Open the task | coordinator | `atc task create "<title>" --project <project> [--tests <level>]` |
-| 2. Work and test | writer | `atc test <ID>`; under `strict` also `atc test <ID> --mutants <file>` |
+| 2. Work and test | writer | `atc test <ID>`; under `strict` the step report lists the guards |
 | 3. Check and report | writer | `atc integrate <ID> --sha <sha> --check`; step report to `~/.atc/reports/<ID>-<sha>.md` |
-| 4. Review | reviewer | `atc test <ID> --sha <sha>`, `atc test <ID> --candidate --sha <sha>`; verdict to `~/.atc/reports/<ID>-<sha>-review.md` |
+| 4. Review | reviewer | `atc test <ID> --sha <sha>`, `atc test <ID> --candidate --sha <sha>`; under `strict` also `atc test <ID> --mutants <file> --sha <sha>`; verdict to `~/.atc/reports/<ID>-<sha>-review.md` |
 | 5. Integrate | the Owner | `atc integrate <ID> --sha <sha>` |
 | 6. Close | coordinator | `atc task close <ID> --check`, then `atc task close <ID>` |
 | 7. Push | the Owner | `atc push <project>` after the coordinator's `atc push <project> --check` |
 
 The record's test level decides steps 2 and 4 (`VERIFICATION.md` § Testing,
 Test levels): `none` runs no test and the reviewer reads the diff,
-`standard` runs the commands above, `strict` adds the mutants for the writer
-and the reviewer.
+`standard` runs the commands above, `strict` adds the mutants, which the
+reviewer writes and runs from the guards the writer's step report lists.
 
 ## 1. Open the task
 
@@ -59,7 +59,6 @@ The writer, in the worktree:
 ```text
 atc test <ID>
 atc test <ID> -- tests/test_one.py
-atc test <ID> --mutants <mutants.json>
 ```
 
 `atc test <ID>` runs the tests related to the task's changes since its
