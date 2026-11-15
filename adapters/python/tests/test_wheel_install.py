@@ -1,9 +1,13 @@
 """The `atc` wheel installed the way `uv tool install` installs it, not editable: every module and schema a command
-reads ships in it (docs/WORKFLOW.md § Installing a release). Built and installed offline from uv's cache."""
+reads ships in it (docs/WORKFLOW.md § Installing a release). The wheels are built without build isolation by the
+backends the dev group locks into this environment and installed without their dependencies, which this environment
+already holds, so nothing reads uv's cache or the network."""
 from __future__ import annotations
 
 import os
 import subprocess
+import sys
+import sysconfig
 from pathlib import Path
 
 import pytest
@@ -14,8 +18,8 @@ ADAPTER = Path(__file__).resolve().parents[1]
 TESTKIT = ADAPTER / "atc-testkit"
 # The variables `uv run` sets for this suite's own environment, which would point the child uv at it.
 SHADOWING = ("VIRTUAL_ENV", "UV_PROJECT_ENVIRONMENT", "PYTHONPATH", "PYTHONHOME")
-CACHE_MISS = ("uv found no package or build backend in its cache for an offline build or install; run "
-              "`uv sync --locked` in adapters/python online once, then rerun:\n")
+CACHE_MISS = ("an offline build or install failed; `uv sync --locked` in adapters/python installs the build "
+              "backends:\n")
 
 
 def uv(*args: str | Path, cwd: Path = ADAPTER) -> subprocess.CompletedProcess:
@@ -34,12 +38,16 @@ def installed(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """The `atc` launcher of a fresh environment holding the two wheels and nothing else."""
     base = tmp_path_factory.mktemp("wheel")
     dist = base / "dist"
-    offline("build", "--wheel", "--out-dir", dist, ADAPTER)
-    offline("build", "--wheel", "--out-dir", dist, TESTKIT)
+    for source in (ADAPTER, TESTKIT):
+        offline("build", "--wheel", "--no-build-isolation", "--python", sys.executable, "--out-dir", dist, source)
     venv = base / "venv"
-    offline("venv", "--python", "3.12", venv)
+    offline("venv", "--python", sys.executable, venv)
     python = venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-    offline("pip", "install", "--python", python, *sorted(dist.glob("*.whl")))
+    offline("pip", "install", "--no-deps", "--python", python, *sorted(dist.glob("*.whl")))
+    # The dependencies come from this suite's environment, after the wheels on sys.path. A .pth line only appends a
+    # directory, so the editable atc_cli that environment's own .pth files name stays out.
+    site = next(venv.glob("**/site-packages"))
+    (site / "dependencies.pth").write_text(sysconfig.get_paths()["purelib"] + "\n", encoding="utf-8")
     return python.parent / ("atc.exe" if os.name == "nt" else "atc")
 
 
@@ -60,7 +68,7 @@ def test_the_wheel_runs_version_doctor_and_hook(installed: Path, tmp_path: Path)
     doctor = run_atc(installed, "doctor", "--root", str(root), cwd=tmp_path)
     output = doctor.stdout + doctor.stderr
     assert "Traceback" not in output and "MISSING_DEPENDENCY" not in output, output
-    assert "atc install" in output and "records no installed commit" in output, output
+    assert "installed atc" in output and "records no installed commit" in output, output
     hook = run_atc(installed, "hook", "--help", cwd=tmp_path)
     assert hook.returncode == 0 and hook.stdout.startswith("usage: atc hook"), hook.stderr
 

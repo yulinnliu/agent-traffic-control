@@ -21,6 +21,10 @@ atc-maintain = "atc_cli.maintain:main"
 dev = [
     "pytest==8.3.5",
     "pytest-xdist==3.6.1",
+    # The build backends of atc and atc-testkit, so tests/test_wheel_install.py builds both wheels without isolation
+    # and without the network.
+    "hatchling==1.27.0",
+    "setuptools>=68",
 ]
 
 [tool.uv.sources]
