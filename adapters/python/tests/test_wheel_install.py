@@ -5,6 +5,7 @@ already holds, so nothing reads uv's cache or the network."""
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 import sysconfig
@@ -38,7 +39,10 @@ def installed(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """The `atc` launcher of a fresh environment holding the two wheels and nothing else."""
     base = tmp_path_factory.mktemp("wheel")
     dist = base / "dist"
-    for source in (ADAPTER, TESTKIT):
+    # setuptools builds inside its source tree; a copy keeps parallel workers' builds of the testkit apart.
+    testkit = base / "atc-testkit"
+    shutil.copytree(TESTKIT, testkit, ignore=shutil.ignore_patterns("build", "*.egg-info", "__pycache__", "*.md"))
+    for source in (ADAPTER, testkit):
         offline("build", "--wheel", "--no-build-isolation", "--python", sys.executable, "--out-dir", dist, source)
     venv = base / "venv"
     offline("venv", "--python", sys.executable, venv)
