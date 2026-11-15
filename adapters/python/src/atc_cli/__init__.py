@@ -16,7 +16,6 @@ Workspace:
   sync        write and commit the files ATC owns in projects, or --check them
   doctor      diagnose runtime readiness; changes nothing
   guard       check, or --install, the PreToolUse hook and its permission rules
-  install     install a release tag as this host's atc, or --check it
   checkout    make a clean tree of a project at a commit on its main, for a build
   hook        decide one PreToolUse hook call (the command the hook entry runs)
 
@@ -37,7 +36,6 @@ import sys
 from pathlib import Path
 
 SCRIPTS = Path(__file__).resolve().parent / "scripts"
-CHECKOUT = SCRIPTS.parents[4]
 COMMANDS = {
     "task": "task_records",
     "test": "task_tests",
@@ -49,7 +47,6 @@ COMMANDS = {
     "sync": "sync_project",
     "doctor": "doctor",
     "guard": "guard",
-    "install": "release_install",
     "checkout": "build_checkout",
 }
 HOOK = "hook"
@@ -91,7 +88,10 @@ def usage() -> str:
 
 
 def reinstall_command() -> str:
-    return f'uv tool install -e "{SCRIPTS.parents[2]}" --force'
+    """How the Owner reinstalls this `atc` (`release_pin.reinstall_command`)."""
+    scripts_on_path()
+    import release_pin
+    return release_pin.reinstall_command()
 
 
 def escape_unencodable_output() -> None:
@@ -139,12 +139,12 @@ def _guard(command: str, rest: list[str], checkout: Path) -> int | None:
 
 
 def _release_pin(command: str, rest: list[str], root: Path) -> int | None:
-    """STOP when a release copy acts on a project pinned to another release (`release_pin`)."""
+    """STOP when the installed release acts on a project pinned to another release (`release_pin`)."""
     scripts_on_path()
     import cli_conventions
     import release_pin
     environ = dict(os.environ)
-    refusal = release_pin.check(command, rest, root, CHECKOUT, os.getcwd(), environ)
+    refusal = release_pin.check(command, rest, root, release_pin.installed(), os.getcwd(), environ)
     return None if refusal is None else cli_conventions.refuse(refusal, wants_json(rest))
 
 

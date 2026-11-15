@@ -84,34 +84,23 @@ def checkout_check(checkout: Path) -> Check:
     return Check("canonical checkout", "READY", f"{checkout} is on main and clean")
 
 
-def copy_drift(code: Path) -> str | None:
-    """Why a release copy is not clean at the commit of the tag it is named after, or None."""
+def install_check(record: object = None) -> Check:
+    """The installed `atc`: the commit and tag `uv tool install` recorded, a development install, or neither
+    (docs/WORKFLOW.md § Installing a release). ``record`` stands for `direct_url.json` in tests."""
+    import atc_cli
     import release_pin
-    tag = release_pin._git(code, "rev-parse", "--verify", "--quiet", f"refs/tags/{code.name}^{{commit}}")
-    head = release_pin._git(code, "rev-parse", "HEAD")
-    status = release_pin._git(code, "status", "--porcelain", "--untracked-files=no")
-    if tag.returncode != 0 or head.returncode != 0 or status.returncode != 0:
-        return f"its Git state or the tag {code.name} cannot be read"
-    if head.stdout.strip() != tag.stdout.strip():
-        return f"HEAD {head.stdout.strip()[:12]} is not {code.name} ({tag.stdout.strip()[:12]})"
-    if status.stdout.strip():
-        return "it has tracked modifications"
-    return None
-
-
-def install_check(code: Path, version: str) -> Check:
-    """The installed version and the copy it runs from, clean at its tag (docs/WORKFLOW.md § Installing a release)."""
-    if checkout_guard.release_copy(code):
-        drift = copy_drift(code)
-        if drift:
-            return Check("atc install", "ERROR", f"the release copy {code} is not the release: {drift}; the Owner "
-                                                 f"removes it with git worktree remove --force --force and runs "
-                                                 f"atc install {code.name}")
-        return Check("atc install", "READY", f"atc {version} from the release copy {code}")
-    if checkout_guard.state(code).canonical:
-        return Check("atc install", "WARN", f"atc {version} runs the canonical checkout {code}, which every "
-                                            "integration changes; the Owner installs a release: atc install TAG")
-    return Check("atc install", "READY", f"atc {version} from {code}, a development copy")
+    record = release_pin.READ if record is None else record
+    version = atc_cli.package_version()
+    release = release_pin.installed(record)
+    if release is not None:
+        return Check("atc install", "READY", f"atc {version} at {release.name} ({release.commit[:12]}) from "
+                                             f"{release.url or 'an unrecorded source'}")
+    source = release_pin.editable(record)
+    if source is not None:
+        return Check("atc install", "READY", f"atc {version}, a development install from {source}")
+    return Check("atc install", "WARN", f"atc {version} records no installed commit, so no project pin is "
+                                        f"compared; the Owner installs a release tag: "
+                                        f"{release_pin.install_command('<source>', '<tag>')}")
 
 
 def pin_check(project, installed, root: Path) -> Check:
@@ -122,20 +111,10 @@ def pin_check(project, installed, root: Path) -> Check:
     if installed is None:
         return Check(f"projects.{project.name}.pin", "READY", f"pins {shown}; atc runs no installed release")
     if pinned == installed.commit.lower():
-        return Check(f"projects.{project.name}.pin", "READY", f"pins {installed.tag} ({shown}), the installed release")
+        return Check(f"projects.{project.name}.pin", "READY", f"pins {installed.name} ({shown}), the installed release")
     refusal = release_pin.mismatch(project, installed, root)
     return Check(f"projects.{project.name}.pin", "ERROR", f"{refusal.detail}; task commands refuse; "
                                                           f"fix: {refusal.hint}")
-
-
-def running_atc() -> tuple[Path, str]:
-    from importlib import metadata
-
-    import atc_cli
-    try:
-        return atc_cli.CHECKOUT, metadata.version("agent-traffic-control")
-    except metadata.PackageNotFoundError:
-        return atc_cli.CHECKOUT, "unknown"
 
 
 def worker_pool(environ: dict[str, str]) -> dict:
@@ -235,9 +214,10 @@ def hook_check(workspace_file: Path, home: Path | None = None) -> Check:
 
 def diagnose(root: Path = ROOT, environ: dict[str, str] | None = None, checkout: Path | None = None) -> list[Check]:
     """``checkout`` is the canonical checkout the guard reads, by default ``root``."""
+    import release_pin
     environ = environ if environ is not None else dict(os.environ)
     checks = [Check("workspace root", "READY", str(root.resolve())), checkout_check(checkout or root),
-              install_check(*running_atc())]
+              install_check()]
 
     env_problems = validator.workspace_env_problems(root, environ)
     if "ATC_ROOT" not in env_problems:
@@ -251,8 +231,8 @@ def diagnose(root: Path = ROOT, environ: dict[str, str] | None = None, checkout:
         Check(
             "atc command",
             "READY" if atc_path else "ERROR",
-            atc_path or "not on PATH; skills call it; the Owner installs a release: uv run --directory "
-                        f"\"{root / 'adapters' / 'python'}\" atc install TAG",
+            atc_path or "not on PATH; skills call it; the Owner installs a release tag: "
+                        + release_pin.install_command("<source>", "<tag>"),
         )
     )
     checks += worker_pool_checks(environ)
@@ -289,12 +269,12 @@ def diagnose(root: Path = ROOT, environ: dict[str, str] | None = None, checkout:
         status, detail = managed_worktree.readiness(root, environ, os.path.expanduser("~"))
         checks.append(Check("atc-worktree", status, detail))
 
-    import release_pin
-    installed = release_pin.installed(running_atc()[0])
+    installed = release_pin.installed()
+    history = release_pin.history(root)
     for name, entry in projects.items():
         project_path = (root / entry["repo"]).resolve()
         if project_path.is_dir():
-            checks.append(pin_check(SimpleNamespace(name=name, repo=str(project_path)), installed, root))
+            checks.append(pin_check(SimpleNamespace(name=name, repo=str(project_path)), installed, history))
         for field in ("repo", "worktrees", "state"):
             path = (root / entry[field]).resolve()
             exists = path.is_dir()

@@ -17,8 +17,7 @@ import os
 import sys
 from pathlib import Path
 
-from atc_cli import (CHECKOUT, SCRIPTS, command_name, enveloped, escape_unencodable_output, scripts_on_path,
-                     wants_json)
+from atc_cli import command_name, enveloped, escape_unencodable_output, scripts_on_path, wants_json
 
 COMMANDS = {"sync": "sync_project", "validate": "validate_workspace", "policies": "policies",
             "task": "task_records", "guard": "generate_enforcement"}
@@ -29,25 +28,34 @@ def usage() -> str:
     return __doc__.strip()
 
 
-def checkout_of(cwd: Path) -> Path:
+def code_checkout() -> Path | None:
+    """The ATC checkout this program runs from: the checkout of its editable install's `adapters/python`, else
+    None (an install from a tag or a wheel)."""
+    scripts_on_path()
+    import release_pin
+    source = release_pin.editable()
+    return source.parents[1] if source is not None else None
+
+
+def checkout_of(cwd: Path, code: Path | None) -> Path | None:
     """The ATC checkout holding ``cwd``, else the one serving this program."""
     for candidate in (cwd.resolve(), *cwd.resolve().parents):
         if (candidate / "adapters" / "python" / "src" / "atc_cli" / "scripts" / "validate_workspace.py").is_file():
             return candidate
-    return CHECKOUT
+    return code
 
 
-def refused(checkout: Path) -> str | None:
-    """Why this program may not run here: the scripts are absent (a published package), ``checkout`` is a canonical
-    one, which every session reads as the workspace, or a release copy, whose code the installed `atc` runs."""
-    if not SCRIPTS.is_dir():
-        return "this installation carries no maintainer scripts"
+def refused(checkout: Path | None, code: Path | None) -> str | None:
+    """Why this program may not run here: it is not an editable install of an ATC checkout (the installed
+    `atc`), or ``checkout`` or the checkout it runs from is a canonical one, which every session reads as the
+    workspace."""
+    if code is None or checkout is None:
+        return "this atc-maintain is not an editable install of an ATC worktree"
     scripts_on_path()
     import checkout_guard
-    if checkout_guard.state(checkout).canonical or checkout_guard.state(CHECKOUT).canonical:
-        return f"{checkout} is the canonical checkout"
-    if checkout_guard.release_copy(checkout):
-        return f"{checkout} is a release copy of the installed atc"
+    for candidate in (checkout, code):
+        if checkout_guard.state(candidate).canonical:
+            return f"{candidate} is the canonical checkout"
     return None
 
 
@@ -62,8 +70,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"usage: atc-maintain <command> [<args>]\natc-maintain: error: unknown command: {command}",
               file=sys.stderr)
         return 2
-    checkout = checkout_of(Path.cwd())
-    if not any(arg in ("-h", "--help") for arg in rest) and (why := refused(checkout)):
+    code = code_checkout()
+    checkout = checkout_of(Path.cwd(), code)
+    if not any(arg in ("-h", "--help") for arg in rest) and (why := refused(checkout, code)):
         print(f"ERROR CHECKOUT_CANONICAL {why}", file=sys.stderr)
         print("hint: run it as `uv run --locked atc-maintain` from adapters/python of an ATC worktree "
               "(root AGENTS.md § Changing this repo)", file=sys.stderr)

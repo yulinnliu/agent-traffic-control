@@ -27,14 +27,16 @@ def test_init_writes_map_and_directories(tmp_path: Path, capsys: pytest.CaptureF
 @pytest.mark.integration
 def test_init_without_atc_on_path_names_the_first_install(tmp_path: Path, capsys: pytest.CaptureFixture[str],
                                                          monkeypatch: pytest.MonkeyPatch) -> None:
-    """The first install is `atc install` of the latest release tag on main, run from the checkout's adapter
+    """The first install is the Owner's `uv tool install` of the latest release tag on main from this checkout
     (docs/WORKFLOW.md § Installing a release); TAG when main has no release yet."""
     monkeypatch.setattr(bootstrap.shutil, "which", lambda name: None)
     root = tmp_path / "root"
     root.mkdir()
-    adapter = root / "adapters" / "python"
+    source = root.resolve().as_uri()
     assert bootstrap.init(root, "owner/repo", force=False, environ={}) == 0
-    assert capsys.readouterr().out.splitlines()[-1] == f'  put atc on PATH: uv run --directory "{adapter}" atc install TAG'
+    assert capsys.readouterr().out.splitlines()[-1] == (
+        f"  put atc on PATH, from the Owner's terminal: "
+        f'uv tool install --force "git+{source}@TAG#subdirectory=adapters/python"')
     run_git(root, "init", "-q", "-b", "main")
     write(root / "README.md", "x\n")
     run_git(root, "add", "-A")
@@ -42,8 +44,9 @@ def test_init_without_atc_on_path_names_the_first_install(tmp_path: Path, capsys
     run_git(root, "tag", "v0.9.0")
     run_git(root, "tag", "v0.10.0")
     assert bootstrap.init(root, "owner/repo", force=True, environ={}) == 0
-    assert capsys.readouterr().out.splitlines()[-1] == (f'  put atc on PATH: uv run --directory "{adapter}" '
-                                                       "atc install v0.10.0")
+    assert capsys.readouterr().out.splitlines()[-1] == (
+        f"  put atc on PATH, from the Owner's terminal: "
+        f'uv tool install --force "git+{source}@v0.10.0#subdirectory=adapters/python"')
 
 
 def test_init_refuses_to_overwrite_without_force(tmp_path: Path) -> None:

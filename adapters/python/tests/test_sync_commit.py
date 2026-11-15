@@ -102,7 +102,7 @@ def test_sync_renders_the_latest_release_not_the_checkout(tmp_path: Path, capsys
     assert (project / ".atc/governance/CORE.md").read_text(encoding="utf-8") == "# CORE.md\n\nunreleased\n"
 
 
-def test_sync_from_a_release_copy_targets_the_installed_release(tmp_path: Path, capsys: pytest.CaptureFixture[str],
+def test_sync_targets_the_installed_release(tmp_path: Path, capsys: pytest.CaptureFixture[str],
                                                                  monkeypatch: pytest.MonkeyPatch) -> None:
     """An installed release older than the latest tag: sync renders the installed one, which clears the release-pin
     mismatch, so a project never moves ahead of the tool (docs/WORKFLOW.md § Installing a release)."""
@@ -113,7 +113,7 @@ def test_sync_from_a_release_copy_targets_the_installed_release(tmp_path: Path, 
     write(root / "shared/governance/CORE.md", "# CORE.md\n\nnewer\n")
     commit_root(root, "newer")
     run_git(root, "tag", "v0.0.2")
-    release = release_pin.Release(RELEASE, released, tmp_path / "releases" / RELEASE)
+    release = release_pin.Release(released, RELEASE, "file:///C:/hosts/governance")
     monkeypatch.setattr(sync_project, "installed_release", lambda: release)
     demo = SimpleNamespace(name="demo", repo=str(project))
     assert release_pin.mismatch(demo, release, root).token == "RELEASE_MISMATCH"
@@ -125,11 +125,14 @@ def test_sync_from_a_release_copy_targets_the_installed_release(tmp_path: Path, 
     assert release_pin.mismatch(demo, release, root) is None
 
 
-def test_the_installed_release_is_the_copy_sync_runs_from(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_installed_release_is_the_one_atc_records(monkeypatch: pytest.MonkeyPatch) -> None:
     import release_pin
-    monkeypatch.setattr(release_pin, "installed", lambda code: code)
-    assert sync_project.installed_release() == Path(sync_project.__file__).resolve().parents[5]
-    assert (sync_project.installed_release() / "adapters" / "python" / "src" / "atc_cli" / "scripts" / "sync_project.py").is_file()
+    monkeypatch.setattr(release_pin, "direct_url", lambda: {
+        "url": "file:///C:/hosts/governance", "vcs_info": {"vcs": "git", "commit_id": "c" * 40,
+                                                          "requested_revision": "v0.0.2"}})
+    assert sync_project.installed_release() == release_pin.Release("c" * 40, "v0.0.2", "file:///C:/hosts/governance")
+    monkeypatch.setattr(release_pin, "direct_url", lambda: {"url": "file:///C:/w", "dir_info": {"editable": True}})
+    assert sync_project.installed_release() is None
 
 
 def test_sync_with_no_installed_release_targets_the_latest_tag(tmp_path: Path, capsys: pytest.CaptureFixture[str],
@@ -152,11 +155,11 @@ def test_an_installed_release_off_main_stops_before_any_project(tmp_path: Path, 
     side = commit_root(root, "topic")
     run_git(root, "checkout", "-q", "main")
     monkeypatch.setattr(sync_project, "installed_release",
-                        lambda: release_pin.Release("v0.0.2", side, tmp_path / "releases" / "v0.0.2"))
+                        lambda: release_pin.Release(side, "v0.0.2", "file:///C:/hosts/governance"))
     assert sync_project.main(["demo"], root=root) == 1
     err = capsys.readouterr().err
     assert err.startswith(f"STOP RELEASE_NOT_ON_MAIN: the installed release v0.0.2 ({side[:12]}) is not in the history")
-    assert "hint: install a release tagged on this checkout's main with atc install TAG" in err
+    assert "hint: the Owner installs a release tagged on main with uv tool install" in err
     assert not (project / ".atc").exists()
 
 

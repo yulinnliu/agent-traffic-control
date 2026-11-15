@@ -23,6 +23,8 @@ import argparse
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -47,8 +49,10 @@ HOOK_ONLY = ("with_args", "unless_args", "push_targets", "background")
 HOOK_TABLE = "pretooluse.json"
 HOOK_TABLE_VERSION = 1
 ENGINE = "pretooluse_hook.py"
+# The distribution `uv tool install` names its tool environment after.
+TOOL = "agent-traffic-control"
 ENGINE_FILES = (ENGINE, "shell_words.py", "write_targets.py", "globs.py")
-# The engine the hook runs is the one beside this module: a release copy's for the installed `atc`.
+# The engine `atc hook` runs: the one beside this module, inside the installed `atc`.
 ENGINE_DIR = Path(__file__).resolve().parent
 # The hook scripts the engine replaces (the worktree cd guard and the write scope guard); install drops their
 # entries. A pattern, so the test selector reads no edge to the cd guard's module.
@@ -218,8 +222,7 @@ def _hook_sources(base: Path, doc: dict) -> list[tuple[str, Path, list[tuple[Pat
 def hook_table(workspace: Path, table_dir: Path, schemas: Path = policies.SCHEMAS, engine_dir: Path | None = None) -> str:
     """The PreToolUse hook's table (docs/ENFORCEMENT.md § PreToolUse hook); raises PolicyError or ValueError.
 
-    It protects the table, the engine's files and every release copy of the installed `atc`."""
-    import checkout_guard
+    It protects the table, the engine's files and uv's tool environment of the installed `atc`."""
     base, doc = _workspace_doc(workspace)
     commands: list[dict] = []
     filesystem: list[dict] = []
@@ -275,11 +278,27 @@ def hook_table(workspace: Path, table_dir: Path, schemas: Path = policies.SCHEMA
         if path not in write_roots:
             write_roots.append(path)
     scripts = engine_dir or ENGINE_DIR
+    tool = tool_environment()
     protected = ([_norm(table_dir, base)] + [_norm(scripts / name, base) for name in ENGINE_FILES]
-                 + [_norm(checkout_guard.releases_dir(), base)])
+                 + ([_norm(tool, base)] if tool is not None else []))
     table = {"version": HOOK_TABLE_VERSION, "commands": commands, "filesystem": filesystem,
              "worktrees": worktrees, "write_roots": write_roots, "protected": protected}
     return json.dumps(table, indent=2, ensure_ascii=False) + "\n"
+
+
+def tool_environment() -> Path | None:
+    """uv's tool environment of the installed `atc`, `<uv tool dir>/agent-traffic-control`, which `uv tool install`
+    replaces; None without uv."""
+    uv = shutil.which("uv")
+    if uv is None:
+        return None
+    try:
+        found = subprocess.run([uv, "tool", "dir"], capture_output=True, text=True, encoding="utf-8",
+                               errors="replace", check=False, timeout=60)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    lines = found.stdout.strip().splitlines()
+    return Path(lines[-1].strip()) / TOOL if found.returncode == 0 and lines else None
 
 
 def default_table_dir() -> Path:

@@ -33,27 +33,31 @@ checkout is off `main`, stops with `ERROR CHECKOUT_UNREADABLE` when its Git
 state cannot be read, and warns with `WARNING CHECKOUT_DIRTY` while it has
 tracked modifications: `atc` and every session read it as the workspace.
 `atc-maintain` stops with `ERROR CHECKOUT_CANONICAL` when the checkout
-it would act on is the canonical one or a release copy. A module the installed `atc` lacks stops
-the command with `ERROR MISSING_DEPENDENCY` and the reinstall command.
+it would act on, or the one it runs from, is the canonical one, or when it is
+not an editable install of an ATC checkout (the installed `atc`). A module
+the installed `atc` lacks stops the command with `ERROR MISSING_DEPENDENCY`
+and the reinstall command.
 
 ## Release pin
 
-An `atc` running from a release copy stops a task-flow command
+An `atc` installed from a release tag, whose `direct_url.json` (PEP 610)
+records the installed commit, stops a task-flow command
 (`task create|update|resume|close`, `test ID` without `--clean`, `--list` or
 `--private`, `integrate`, `push`, with or without `--check`) on a registered
 project whose `.atc/atc.lock` does not pin that release's commit, with
 `STOP RELEASE_MISMATCH` and a hint: `atc sync <project>`, which then targets
 the installed release, when the pin is behind it or missing; the Owner's
-`atc install` of the pinned release when the pin is ahead of it. The workspace root is never compared,
-and a development copy compares nothing (`docs/WORKFLOW.md` § Installing a
-release).
+`uv tool install` of the pinned release when the pin is ahead of it. The
+workspace root is never compared, and an install that records no commit
+(an editable development install) compares nothing (`docs/WORKFLOW.md`
+§ Installing a release).
 
 ## Command groups
 
 | Group | Commands |
 | --- | --- |
 | Task lifecycle | `task` (`create`, `update`, `list`, `resume`, `close`), `test`, `integrate`, `push` |
-| Workspace | `init`, `add`, `remove`, `sync`, `doctor`, `guard`, `install`, `checkout`, `hook` |
+| Workspace | `init`, `add`, `remove`, `sync`, `doctor`, `guard`, `checkout`, `hook` |
 
 `atc hook` is the command a PreToolUse hook entry runs: it reads no
 workspace, so it runs before root resolution and the canonical checkout

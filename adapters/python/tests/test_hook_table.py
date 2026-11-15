@@ -59,6 +59,7 @@ def home(tmp_path, monkeypatch) -> Path:
     path.mkdir()
     monkeypatch.setenv("USERPROFILE", str(path))
     monkeypatch.setenv("HOME", str(path))
+    monkeypatch.setattr(ge, "tool_environment", lambda: path / "uv-tools" / "agent-traffic-control")
     return path
 
 
@@ -114,7 +115,15 @@ def test_the_table_composes_the_workspace_policy_first_then_each_project(workspa
     assert table["write_roots"] == [norm(root), norm(home / ".atc"), norm(home.parent / "scratch")]
     assert table["protected"] == [norm(home / ".atc" / "enforcement"),
                                   *(norm(ge.ENGINE_DIR / name) for name in ge.ENGINE_FILES),
-                                  norm(home / ".atc" / "releases")]
+                                  norm(home / "uv-tools" / "agent-traffic-control")]
+
+
+def test_the_tool_environment_is_where_uv_installs_atc(tmp_path, monkeypatch) -> None:
+    """`uv tool dir` names where `uv tool install` keeps each tool; UV_TOOL_DIR moves it."""
+    monkeypatch.setenv("UV_TOOL_DIR", str(tmp_path / "tools"))
+    assert ge.tool_environment() == tmp_path / "tools" / "agent-traffic-control"
+    monkeypatch.setattr(ge.shutil, "which", lambda name: None)
+    assert ge.tool_environment() is None
 
 
 def test_the_table_and_the_command_name_the_engine_of_the_composing_atc(workspace, home):

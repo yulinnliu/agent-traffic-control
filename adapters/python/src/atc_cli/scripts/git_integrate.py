@@ -1404,22 +1404,6 @@ def check_executable(argv0: str) -> None:
         raise Refused("VERIFIER_NOT_FOUND", f"the verifier executable {argv0} is not on PATH")
 
 
-def tool_checkout_warning(checkout: Path = hw.ROOT) -> str | None:
-    """A warning when the checkout this code runs from is not a clean `main`."""
-    if git(checkout, "rev-parse", "--show-toplevel", check=False).returncode:
-        return None
-    branch = git(checkout, "branch", "--show-current", check=False).stdout.strip()
-    dirty = bool(git(checkout, "status", "--porcelain", "--untracked-files=no", check=False).stdout.strip())
-    if branch == "main" and not dirty:
-        return None
-    sha = git(checkout, "rev-parse", "HEAD", check=False).stdout.strip()
-    state = f"on {branch}" if branch else "on a detached HEAD"
-    return (
-        f"the atc tool checkout {checkout} is {state} at {sha}"
-        f"{' with uncommitted changes' if dirty else ''}; this run uses its code"
-    )
-
-
 def resolve_binding(
     args: argparse.Namespace, repo: Path, main: str, main_tip: str, branch: str | None, branch_source: str,
     reviewed: str,
@@ -1505,8 +1489,6 @@ def resolve(args: argparse.Namespace, root: Path, cwd: str) -> Target:
         raise Refused("VERIFY_TIMEOUT_INVALID", f"AGENTS.md at {main} declares a verifier timeout that is not greater than zero")
 
     check_executable(argv[0])
-    if warning := tool_checkout_warning():
-        warnings.append(warning)
     verifier = {
         "argv_file": declared.argv_file, "timeout": timeout,
     }

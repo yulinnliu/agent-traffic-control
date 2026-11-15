@@ -706,8 +706,8 @@ def test_doctor_requires_the_atc_command(tmp_path: Path) -> None:
     root = make_env_workspace(tmp_path)
     by_name = {check.name: check for check in doctor.diagnose(root, {"PATH": str(tmp_path / "empty")})}
     detail = by_name["atc command"].detail
-    assert by_name["atc command"].status == "ERROR" and detail.endswith(" atc install TAG")
-    assert f'uv run --directory "{root / "adapters" / "python"}"' in detail
+    assert by_name["atc command"].status == "ERROR"
+    assert detail.endswith('uv tool install --force "git+<source>@<tag>#subdirectory=adapters/python"')
 
 
 def test_validator_fails_on_mismatched_atc_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

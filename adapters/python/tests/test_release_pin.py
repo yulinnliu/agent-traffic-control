@@ -1,5 +1,5 @@
 """The release-pin guard (src/atc_cli/scripts/release_pin.py, docs/WORKFLOW.md § Installing a release): an installed release
-acts on a project only while its `.atc/atc.lock` pins that release, and doctor reports the pins and the copy."""
+acts on a project only while its `.atc/atc.lock` pins that release, and doctor reports the pins and the install."""
 from __future__ import annotations
 
 import os
@@ -40,9 +40,18 @@ def lock(revision: str) -> str:
     return f'version = 1\nsource = "example/governance"\nrevision = "{revision}"\n'
 
 
+SOURCE = "file:///C:/hosts/governance"
+
+
+def record(commit: str, revision: str = "v0.6.0", url: str = SOURCE) -> dict:
+    """`direct_url.json` as `uv tool install` writes it for a Git tag (PEP 610)."""
+    return {"url": url, "vcs_info": {"vcs": "git", "commit_id": commit, "requested_revision": revision},
+            "subdirectory": "adapters/python"}
+
+
 class Ws:
-    def __init__(self, root: Path, project: Path, copy: Path, old: str, new: str) -> None:
-        self.root, self.project, self.copy, self.old, self.new = root, project, copy, old, new
+    def __init__(self, root: Path, project: Path, release: release_pin.Release, old: str, new: str) -> None:
+        self.root, self.project, self.release, self.old, self.new = root, project, release, old, new
 
     def pin(self, revision: str | None) -> None:
         path = self.project / ".atc" / "atc.lock"
@@ -51,14 +60,15 @@ class Ws:
         else:
             path.write_text(lock(revision), encoding="utf-8", newline="\n")
 
-    def check(self, command: str, *rest: str, code: Path | None = None):
-        return release_pin.check(command, list(rest), self.root, code or self.copy, str(self.root), dict(os.environ))
+    def check(self, command: str, *rest: str, release: object = "installed"):
+        release = self.release if release == "installed" else release
+        return release_pin.check(command, list(rest), self.root, release, str(self.root), dict(os.environ))
 
 
 @pytest.fixture()
 def ws(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Ws:
-    """A root with releases v0.5.0 and v0.6.0, v0.6.0 installed as a release copy, and project demo (prefix DEMO)
-    pinning v0.5.0."""
+    """A root with releases v0.5.0 and v0.6.0, v0.6.0 installed by `uv tool install` from its tag, and project demo
+    (prefix DEMO) pinning v0.5.0."""
     home = tmp_path / "home"
     monkeypatch.setenv("USERPROFILE", str(home))
     monkeypatch.setenv("HOME", str(home))
@@ -79,10 +89,7 @@ def ws(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Ws:
     project.mkdir(parents=True)
     git(project, "init", "-q", "-b", "main")
     put(project, {"AGENTS.md": "# AGENTS.md\n\n## Task records\n\n- Task prefix: DEMO\n", ".atc/atc.lock": lock(old)})
-    copy = home / ".atc" / "releases" / "v0.6.0"
-    copy.parent.mkdir(parents=True)
-    git(root, "worktree", "add", "-q", "--detach", str(copy), "v0.6.0")
-    return Ws(root, project, copy, old, new)
+    return Ws(root, project, release_pin.installed(record(new)), old, new)
 
 
 GUARDED = [
@@ -115,7 +122,7 @@ def test_a_task_flow_command_on_a_project_pinned_to_another_release_stops(ws: Ws
 
 
 EXEMPT = [
-    ("doctor",), ("doctor", "-v"), ("sync",), ("sync", "demo"), ("install", "v0.5.0"), ("guard",),
+    ("doctor",), ("doctor", "-v"), ("sync",), ("sync", "demo"), ("guard",),
     ("guard", "--install"), ("init",), ("add", "demo"), ("remove", "demo"),
     ("task", "list"), ("task", "list", "DEMO-0001"),
     ("test", "DEMO-0001", "--clean"), ("test", "--list", "DEMO-0001"), ("test", "--private", "--", "x"),
@@ -138,11 +145,36 @@ def test_the_workspace_root_is_never_compared(ws: Ws, call: tuple[str, ...]) -> 
     assert ws.check(*call) is None
 
 
-def test_a_development_copy_is_not_guarded(ws: Ws, tmp_path: Path) -> None:
-    """`uv run atc` in a topic worktree, or an atc still installed from the canonical checkout, has no installed
+def test_an_install_without_a_recorded_commit_is_not_guarded(ws: Ws, tmp_path: Path) -> None:
+    """`uv run atc` in a topic worktree (editable), a local or wheel install, or no record at all: no installed
     release to compare."""
-    assert ws.check("integrate", "DEMO-0001", code=ws.root) is None
-    assert ws.check("integrate", "DEMO-0001", code=tmp_path / "home" / ".atc" / "other" / "v0.6.0") is None
+    editable = {"url": (tmp_path / "worktree" / "adapters" / "python").as_uri(), "dir_info": {"editable": True}}
+    for found in (editable, {"url": "file:///C:/wheel.whl", "archive_info": {}}, None, {"vcs_info": {}}):
+        assert release_pin.installed(found) is None
+        assert ws.check("integrate", "DEMO-0001", release=release_pin.installed(found)) is None
+    assert release_pin.editable(editable) == tmp_path / "worktree" / "adapters" / "python"
+    assert release_pin.editable(record(ws.new)) is None
+
+
+def test_the_installed_release_is_the_recorded_commit_and_tag(ws: Ws) -> None:
+    release = release_pin.installed(record(ws.new))
+    assert (release.commit, release.tag, release.url, release.name) == (ws.new, "v0.6.0", SOURCE, "v0.6.0")
+    by_sha = release_pin.installed(record(ws.new, revision=ws.new[:12]))
+    assert (by_sha.tag, by_sha.name) == (None, ws.new[:12])
+    assert release_pin.reinstall_command(record(ws.new)) == (
+        f'uv tool install --force "git+{SOURCE}@v0.6.0#subdirectory=adapters/python"')
+
+
+def test_the_running_atc_reads_its_own_direct_url(monkeypatch: pytest.MonkeyPatch, ws: Ws) -> None:
+    from importlib import metadata
+
+    class Distribution:
+        def read_text(self, name: str) -> str | None:
+            return __import__("json").dumps(record(ws.new)) if name == "direct_url.json" else None
+    monkeypatch.setattr(metadata, "distribution", lambda name: Distribution())
+    assert release_pin.installed() == ws.release
+    monkeypatch.setattr(metadata, "distribution", lambda name: (_ for _ in ()).throw(metadata.PackageNotFoundError(name)))
+    assert release_pin.installed() is None and release_pin.direct_url() is None
 
 
 def test_the_installed_pin_passes_and_a_missing_lock_stops(ws: Ws) -> None:
@@ -162,11 +194,12 @@ def test_a_project_ahead_of_the_installed_release_names_the_install(ws: Ws) -> N
     ws.pin(other)
     refusal = ws.check("integrate", "DEMO-0001")
     assert refusal.detail.startswith(f"demo pins no release ({other[:12]})")
-    assert refusal.hint == (f"the project is ahead of the installed release; the Owner runs atc install of the "
-                            f"release tag at {other[:12]}")
+    assert refusal.hint == (f"the project is ahead of the installed release; the Owner runs uv tool install of "
+                            f"the release tag at {other[:12]}")
     git(ws.root, "tag", "v0.7.0")
-    assert ws.check("integrate", "DEMO-0001").hint == ("the project is ahead of the installed release; the Owner "
-                                                       "runs atc install v0.7.0")
+    assert ws.check("integrate", "DEMO-0001").hint == (
+        "the project is ahead of the installed release; the Owner runs "
+        f'uv tool install --force "git+{SOURCE}@v0.7.0#subdirectory=adapters/python"')
 
 
 def test_the_dispatcher_stops_before_the_command_runs(ws: Ws, monkeypatch: pytest.MonkeyPatch,
@@ -174,7 +207,7 @@ def test_the_dispatcher_stops_before_the_command_runs(ws: Ws, monkeypatch: pytes
     import git_integrate
     ran: list = []
     monkeypatch.setattr(git_integrate, "main", lambda rest, root: ran.append(rest) or 0)
-    monkeypatch.setattr(atc_cli, "CHECKOUT", ws.copy)
+    monkeypatch.setattr(release_pin, "direct_url", lambda: record(ws.new))
     assert atc_cli.main(["--root", str(ws.root), "integrate", "DEMO-0001"], checkout=NOT_CANONICAL) == 1
     err = capsys.readouterr().err
     assert err.startswith("STOP RELEASE_MISMATCH: demo pins v0.5.0") and "hint: atc sync demo moves it to the installed release" in err
@@ -185,8 +218,7 @@ def test_the_dispatcher_stops_before_the_command_runs(ws: Ws, monkeypatch: pytes
 
 
 def test_doctor_reports_each_pin_against_the_installed_release(ws: Ws) -> None:
-    installed = release_pin.installed(ws.copy)
-    assert (installed.tag, installed.commit) == ("v0.6.0", ws.new)
+    installed = ws.release
     demo = SimpleNamespace(name="demo", repo=str(ws.project))
     check = doctor.pin_check(demo, installed, ws.root)
     assert check == doctor.Check("projects.demo.pin", "ERROR", (
@@ -199,14 +231,14 @@ def test_doctor_reports_each_pin_against_the_installed_release(ws: Ws) -> None:
         "projects.demo.pin", "READY", f"pins {ws.new[:12]}; atc runs no installed release")
 
 
-def test_doctor_reports_a_release_copy_that_is_not_clean_at_its_tag(ws: Ws) -> None:
-    assert doctor.install_check(ws.copy, "0.6.0") == doctor.Check(
-        "atc install", "READY", f"atc 0.6.0 from the release copy {ws.copy}")
-    (ws.copy / "README.md").write_text("edited\n", encoding="utf-8")
-    check = doctor.install_check(ws.copy, "0.6.0")
-    assert check.status == "ERROR" and "it has tracked modifications" in check.detail
-    git(ws.copy, "checkout", "-q", "--", "README.md")
-    git(ws.copy, "checkout", "-q", "--detach", "v0.5.0")
-    check = doctor.install_check(ws.copy, "0.6.0")
-    assert check.status == "ERROR" and f"HEAD {ws.old[:12]} is not v0.6.0 ({ws.new[:12]})" in check.detail
-    assert check.detail.endswith("atc install v0.6.0")
+def test_doctor_reports_the_installed_commit_a_development_install_or_neither(ws: Ws, tmp_path: Path) -> None:
+    import atc_cli
+    version = atc_cli.package_version()
+    assert doctor.install_check(record(ws.new)) == doctor.Check(
+        "atc install", "READY", f"atc {version} at v0.6.0 ({ws.new[:12]}) from {SOURCE}")
+    source = tmp_path / "worktree" / "adapters" / "python"
+    assert doctor.install_check({"url": source.as_uri(), "dir_info": {"editable": True}}) == doctor.Check(
+        "atc install", "READY", f"atc {version}, a development install from {source}")
+    check = doctor.install_check({"url": "file:///C:/wheel.whl", "archive_info": {}})
+    assert check.status == "WARN" and "records no installed commit" in check.detail
+    assert check.detail.endswith('uv tool install --force "git+<source>@<tag>#subdirectory=adapters/python"')

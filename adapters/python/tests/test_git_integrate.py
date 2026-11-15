@@ -45,7 +45,6 @@ def repo(tmp_path: Path, atc_tmp: Path, monkeypatch: pytest.MonkeyPatch) -> Path
     }.items():
         monkeypatch.setenv(key, value)
     monkeypatch.delenv("ATC_ROOT", raising=False)
-    monkeypatch.setattr(gi, "tool_checkout_warning", lambda *_args, **_kwargs: None)
     root = tmp_path / "repo"
     root.mkdir()
     register(root)
@@ -60,8 +59,6 @@ TASK_PREFIX = "ATC"
 # The record ID each topic branch carries, allocated by `topic`; `integrate` names it.
 TASK_IDS: dict[str, str] = {"topic": "ATC-0001"}  # the default branch of `topic`
 OWNER = gi.OWNER_RUN_QUOTE
-_REAL_TOOL_CHECKOUT_WARNING = gi.tool_checkout_warning
-# The fixture repository is not the workspace checkout: the real tool-checkout warning stays out of its runs.  # the quote every integrate run records as its authority
 
 
 def task_id(branch: str) -> str:
@@ -1539,16 +1536,6 @@ def test_atc_hands_its_root_to_integrate(repo: Path, workspace: Path, capsys: py
     assert refusal(capsys.readouterr().err)[0].startswith("ERROR USAGE unrecognized arguments: --repo")
     assert atc_cli.main(["--root", str(workspace), "integrate", "ATC-0001", "--sha", *args]) == 0
     assert main_tip(repo) == tip
-
-
-@pytest.mark.integration
-def test_the_tool_checkout_warning_names_its_branch_and_sha(repo: Path) -> None:
-    assert _REAL_TOOL_CHECKOUT_WARNING(repo) is None
-    run_git(repo, "switch", "-q", "-c", "elsewhere")
-    head = main_tip(repo)
-    assert _REAL_TOOL_CHECKOUT_WARNING(repo) == f"the atc tool checkout {repo} is on elsewhere at {head}; this run uses its code"
-    (repo / "a.txt").write_text("changed\n", encoding="utf-8")
-    assert _REAL_TOOL_CHECKOUT_WARNING(repo).endswith(f"at {head} with uncommitted changes; this run uses its code")
 
 
 @pytest.mark.integration

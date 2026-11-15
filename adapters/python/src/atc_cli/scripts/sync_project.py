@@ -489,7 +489,8 @@ STOP_HINTS = {
     "INTEGRATION_BUSY": "wait for the running integration, then sync again",
     "REVISION_NOT_ON_MAIN": "name a commit on the ATC checkout's main",
     "NO_RELEASE_TAG": "fetch the tags, or name a revision with --revision",
-    "RELEASE_NOT_ON_MAIN": "install a release tagged on this checkout's main with atc install TAG",
+    "RELEASE_NOT_ON_MAIN": "the Owner installs a release tagged on main with uv tool install "
+                           "(docs/WORKFLOW.md § Installing a release)",
     "EXPORT_FAILED": "check the content repository's Git state",
     "NO_MANIFEST": "name a revision that carries atc-manifest.yaml (0.7.0 or later)",
     "MANIFEST_INVALID": "fix atc-manifest.yaml in a topic of the governance repository",
@@ -638,9 +639,9 @@ def release_tags(root: Path, revision: str) -> tuple[str | None, str | None]:
 
 
 def installed_release():
-    """The release this code is when it runs from a release copy (`release_pin`), else None."""
+    """The release `atc` was installed from (`release_pin.installed`), else None."""
     import release_pin
-    return release_pin.installed(Path(__file__).resolve().parents[5])
+    return release_pin.installed()
 
 
 def content_repository(root: Path, *, fetch: bool = True) -> Path:
@@ -668,7 +669,7 @@ def resolve_target(root: Path, revision: str | None) -> tuple[str, str | None, b
     release = installed_release()
     if release is not None:
         if _git(root, "merge-base", "--is-ancestor", release.commit, f"refs/heads/{MAIN}", check=False).returncode:
-            raise SyncStop("RELEASE_NOT_ON_MAIN", f"the installed release {release.tag} ({release.commit[:12]}) is not "
+            raise SyncStop("RELEASE_NOT_ON_MAIN", f"the installed release {release.name} ({release.commit[:12]}) is not "
                                                   f"in the history of the ATC checkout's {MAIN}")
         return release.commit, release.tag, False
     tags = merged_release_tags(root, f"refs/heads/{MAIN}")

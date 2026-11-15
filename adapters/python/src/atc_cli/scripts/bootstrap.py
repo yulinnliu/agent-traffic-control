@@ -81,7 +81,9 @@ def init(root: Path, governance_source: str | None, force: bool, environ: dict[s
         (root / name).mkdir(exist_ok=True)
     print(f"INITIALIZED workspace.yaml (governance_source {source})")
     if not shutil.which("atc"):
-        print(f'  put atc on PATH: uv run --directory "{root / "adapters" / "python"}" atc install {latest_tag(root)}')
+        import release_pin
+        print(f"  put atc on PATH, from the Owner's terminal: "
+              f"{release_pin.install_command(root.resolve().as_uri(), latest_tag(root))}")
     return 0
 
 
