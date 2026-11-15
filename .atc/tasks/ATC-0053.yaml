@@ -1,0 +1,20 @@
+task_id: ATC-0053
+title: The hook keeps its own table; guard --install writes only the harness entries
+repository: yulinnliu/agent-traffic-control
+base_sha: de9a0d675832fee7105a53a332de2cc1d5486148
+scope: 'Today `atc guard --install` does two jobs: - it writes the harness hook entries (`atc hook --harness X` in `~/.claude/settings.json` and `~/.codex/hooks.json`); - it composes the PreToolUse table `~/.atc/enforcement/pretooluse.json` from the workspace policy, every registered project''s policy and the workspace map. Whenever any of the table''s inputs change, the table goes stale. That happens after a new `atc` install, a policy change, or `atc add` or `atc remove`. `atc doctor` then reports drift until the Owner reruns `--install`. Goal: `atc hook` maintains the table itself, so `atc guard --install` is a one-time step per host that only writes the harness entries. - **Inputs.** The table is composed only from reviewed inputs: each repository''s `main` (the workspace root''s and every registered project''s), read from Git objects, plus the workspace map. Agent edits in a worktree, or uncommitted edits, never reach the table. - **Cache.** The composed table is cached under the ATC
+  home. Its key is the installed `atc` version or commit, plus each input''s `main` SHA and the map. On a cache hit the hook adds almost no cost per tool call. On a key change it recomposes. - **Failure.** If composition fails (bad policy, unreadable repository), the hook fails closed for the harness, which means it blocks, as today''s entry does. The hook must say why and how to fix it, and `atc doctor` must name the cause. - **Doctor and guard.** `atc doctor` and `atc guard` (check) report whether the harness entries are present and current, and whether the table composes. They no longer report table drift as an Owner action. - **Agent permissions.** Agents still cannot run `atc guard --install` (hard-deny `atc-guard-install`), and nothing an agent can run without the Owner may loosen the table. - **Documentation.** Update ENFORCEMENT, WORKFLOW § Installing a release, and the CLI help.'
+tests: strict
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: de9a0d675832fee7105a53a332de2cc1d5486148
+branch: claude+ATC-0053
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
+decisions:
+- 'Owner 11-16 「atc guard --install 目前要另外裝有怪」, then 「為何不發版前做?發版是我們控制的，不急，沒有必要天天發，除非有重大BUG」: this lands before the next release; the release waits for it.'
+- Design first. The design is reviewed before any implementation, because it changes the enforcement boundary.
