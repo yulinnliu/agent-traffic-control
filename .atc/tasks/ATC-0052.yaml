@@ -1,0 +1,20 @@
+task_id: ATC-0052
+title: Close-out unlinks inner junctions; session titles; squash message rule
+repository: yulinnliu/agent-traffic-control
+base_sha: de9a0d675832fee7105a53a332de2cc1d5486148
+scope: 'Three small changes in the workspace root, ahead of the release on 2026-11-16: 1. `atc task close`: a registered scratch that holds links (junctions, symlinks) whose targets all lie inside that same scratch is deleted. Each inner link is removed as a link, never by following it, and then the tree is deleted. A scratch with any link whose target lies outside it keeps today''s refusal, which names the link. Seen 11-15: `~/.atc/tmp/ATC-0051-c0cd5f6` was refused for test-fixture junctions that all pointed inside it. 2. The shared skill `atc-review`, in its Claude Code overlay: a session started for a role is titled `[<task ID>] <topic>` and named `<task id lowercased>-<topic>` ([a-z0-9-], at most 24 characters). The coordinator gets the ID from `atc task create` before it starts the session, and never uses a placeholder. 3. Governance `GIT_WORKFLOW.md` § Explicitly authorized squash: the squash commit message no longer has to carry the source tip SHA. The decision record and the `integrations.jsonl`
+  line already hold that SHA. Route the change through `GOVERNANCE_CHANGES.md`.'
+tests: strict
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: de9a0d675832fee7105a53a332de2cc1d5486148
+branch: claude+ATC-0052
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
+decisions:
+- 'Owner 11-16 「3 件都進」: these three items land before today''s release. The Owner''s words authorize the `shared/governance/` change in item 3 for this topic only.'
+- 'Owner earlier: squash commits carry no `(squash of <sha>)` suffix, as the Owner''s kept exception. Item 3 aligns the governance text with it.'
