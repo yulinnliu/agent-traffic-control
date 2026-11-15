@@ -372,9 +372,8 @@ requires an authorized context under the applicable repository rules.
 Squash (`git merge --squash`) is not a default integration method. The task
 authority may select it for a specific reviewed tip and target branch. The
 decision records the tip SHA, the reviewed SHA, the target branch, and the
-task with the Owner's words that select the squash; the squash commit
-message carries the source tip SHA. The first row of the table above still
-applies: the tip must be the reviewed SHA before squashing.
+task with the Owner's words that select the squash. The first row of the
+table above still applies: the tip must be the reviewed SHA before squashing.
 
 Squashing leaves the reviewed commits untouched on the topic branch, so the
 freeze rule above holds, but they are no longer ancestors of `main`. The
