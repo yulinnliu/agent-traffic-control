@@ -108,6 +108,41 @@ def test_a_conftest_patch_of_a_module_it_does_not_import_selects_the_tests_that_
     assert chosen(graph, f"{ADAPTER}/scripts/patched.py") == ["tests/test_patched.py"]
 
 
+def test_a_name_a_file_declares_as_data_adds_no_edge_unless_the_file_imports_it(tmp_path, monkeypatch):
+    monkeypatch.setattr(select_tests, "DATA_NAMES", {"table.py": frozenset({"target"}),
+                                                     "loader.py": frozenset({"target"})})
+    graph = small_graph(tmp_path, monkeypatch, {
+        "tests/conftest.py": "", "scripts/target.py": "",
+        "scripts/table.py": "TABLE = {'target': 'atc'}\n",
+        "scripts/loader.py": "TABLE = {'target': 'atc'}\n\ndef run():\n    import target\n",
+        "scripts/runner.py": "MODULE = 'target'\n",
+        "tests/test_table.py": "import table\n", "tests/test_loader.py": "import loader\n",
+        "tests/test_runner.py": "import runner\n",
+    })
+    assert chosen(graph, f"{ADAPTER}/scripts/target.py") == ["tests/test_loader.py", "tests/test_runner.py"]
+
+
+def test_a_declared_data_name_is_never_imported_by_its_file(graph):
+    """A file that starts to load a name it declares as data makes its declaration wrong: drop it from `DATA_NAMES`."""
+    for file, names in select_tests.DATA_NAMES.items():
+        modules = [m for m in graph.modules.values() if m.path.rsplit("/", 1)[-1] == file]
+        assert modules, f"{file} declares data names but is no module of the graph"
+        for module in modules:
+            imported = {name for name in names
+                        if any(i == name or i.startswith(f"{name}.") for i in module.imports)}
+            assert not imported, f"{module.path} imports {sorted(imported)}, which DATA_NAMES declares as data"
+
+
+def test_the_hook_names_the_cli_as_data(graph, monkeypatch):
+    """`pretooluse_hook.py` maps `python -m atc_cli` to `atc`: the tests that reach the hook reach the CLI only through
+    what they import."""
+    hook = next(m for m in graph.modules.values() if m.path.endswith("/pretooluse_hook.py"))
+    assert "atc_cli" in hook.literals and "atc_cli" not in graph.edges[hook.name]
+    monkeypatch.setattr(select_tests, "DATA_NAMES", {})
+    assert len(chosen(graph, f"{ADAPTER}/src/atc_cli/__init__.py")) \
+        < len(chosen(select_tests.Graph(), f"{ADAPTER}/src/atc_cli/__init__.py"))
+
+
 def test_the_cli_selects_the_tests_that_reach_it_not_the_full_suite(graph):
     """`conftest.py` patches `atc_cli` only once a test file loaded it, so it loads `atc_cli` in no test."""
     selected = chosen(graph, f"{ADAPTER}/src/atc_cli/__init__.py")

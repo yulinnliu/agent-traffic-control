@@ -18,6 +18,8 @@ root. Selection is by test file and reads the static structure of the code:
   and so does a directory; a file of another kind adds the test files whose
   reach names its file name. With no test file, Markdown selects nothing and
   another file the full suite.
+- A module name a file declares in `DATA_NAMES` is data that file never runs:
+  naming it in a string adds no edge; importing it still does.
 - An import inside a function counts like one at load time: it reaches for the
   test files that reach its module, and nothing more.
 - `conftest.py`, the pytest plugin and everything they import, at load time or
@@ -66,6 +68,9 @@ SELF_TEST = "test_select_tests.py"
 STAGE_RUNNER = (sys.executable, "-m", "atc_testkit.ci", "--stages")
 # Files that name other modules as data, not as inputs: only their imports are edges.
 IMPORTS_ONLY = frozenset({"select_tests.py", SELF_TEST})
+# Module names a file writes in strings as data it never runs, per file: no edge, unless the file imports the name.
+# `pretooluse_hook.py` maps `python -m atc_cli` to the `atc` command it classifies.
+DATA_NAMES = {"pretooluse_hook.py": frozenset({"atc_cli"})}
 FULL_FILES = frozenset({
     CONFTEST,
     f"{ADAPTER}/pyproject.toml",
@@ -203,9 +208,10 @@ class Graph:
             raise ValueError(f"declared directory readers are not test files: {sorted(undeclared)}")
 
     def _edges(self, module: Module) -> set[str]:
-        found = {name for name in module.imports if name in self.modules}
+        imported = {name for name in module.imports if name in self.modules}
         if PurePosixPath(module.path).name in IMPORTS_ONLY:
-            return found - {module.name}
+            return imported - {module.name}
+        found = set(imported)
         literals = set(module.literals)
         text = "\n".join(module.literals)
         for other in self.modules.values():
@@ -218,7 +224,8 @@ class Graph:
             elif other.package is not None and other.package == module.package \
                     and other.name.rsplit(".", 1)[-1] in literals:
                 found.add(other.name)
-        return found - {module.name}
+        data = DATA_NAMES.get(PurePosixPath(module.path).name, frozenset())
+        return (found - data | imported) - {module.name}
 
     def _closure(self, start: str) -> set[str]:
         return self._closure_over((start,), self.edges.__getitem__)
