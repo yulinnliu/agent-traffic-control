@@ -1,7 +1,9 @@
 """`scripts/select_tests.py`: this adapter's test selection, read from this checkout's code."""
 from __future__ import annotations
 
+import ast
 import json
+import re
 
 import pytest
 
@@ -122,15 +124,52 @@ def test_a_name_a_file_declares_as_data_adds_no_edge_unless_the_file_imports_it(
     assert chosen(graph, f"{ADAPTER}/scripts/target.py") == ["tests/test_loader.py", "tests/test_runner.py"]
 
 
-def test_a_declared_data_name_is_never_imported_by_its_file(graph):
-    """A file that starts to load a name it declares as data makes its declaration wrong: drop it from `DATA_NAMES`."""
+LOADERS = frozenset({"import_module", "__import__", "run_module"})
+MODULE_OPTION = re.compile(r"(?:^|\s)-m\s+([\w.]+)")
+
+
+def loaded_names(source: str) -> set[str]:
+    """Module names a source loads beyond its import statements: the first string argument of
+    ``importlib.import_module``, ``__import__`` or ``runpy.run_module``, and the string after ``-m`` in an argv list
+    or a command string."""
+    found: set[str] = set()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Call) and node.args and isinstance(node.args[0], ast.Constant) \
+                and isinstance(node.args[0].value, str):
+            function = node.func
+            name = function.attr if isinstance(function, ast.Attribute) else getattr(function, "id", "")
+            if name in LOADERS:
+                found.add(node.args[0].value)
+        elif isinstance(node, (ast.List, ast.Tuple)):
+            values = [e.value if isinstance(e, ast.Constant) else None for e in node.elts]
+            found |= {after for before, after in zip(values, values[1:])
+                      if before == "-m" and isinstance(after, str)}
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+            found |= set(MODULE_OPTION.findall(node.value))
+    return found
+
+
+@pytest.mark.parametrize(("source", "loaded"), [
+    ("import importlib\nimportlib.import_module('x.y')\n", {"x.y"}),
+    ("from importlib import import_module\nimport_module('x')\n", {"x"}),
+    ("__import__('x')\n", {"x"}), ("import runpy\nrunpy.run_module('x')\n", {"x"}),
+    ("ARGV = [sys.executable, '-m', 'x', 'run']\n", {"x"}), ("COMMAND = 'python -m x.cli --help'\n", {"x.cli"}),
+    ("TABLE = {'x': 'atc'}\nif words[0:1] == ['-m']:\n    pass\n", set()),
+])
+def test_a_load_beyond_an_import_statement_is_found(source, loaded):
+    assert loaded_names(source) == loaded
+
+
+def test_a_declared_data_name_is_never_loaded_by_its_file(graph):
+    """A file that starts to load a name it declares as data, by an import statement, a dynamic import or a ``-m``
+    argument, makes its declaration wrong: drop it from `DATA_NAMES`."""
     for file, names in select_tests.DATA_NAMES.items():
         modules = [m for m in graph.modules.values() if m.path.rsplit("/", 1)[-1] == file]
         assert modules, f"{file} declares data names but is no module of the graph"
         for module in modules:
-            imported = {name for name in names
-                        if any(i == name or i.startswith(f"{name}.") for i in module.imports)}
-            assert not imported, f"{module.path} imports {sorted(imported)}, which DATA_NAMES declares as data"
+            loads = module.imports | loaded_names((graph.workspace / module.path).read_text(encoding="utf-8"))
+            loaded = {name for name in names if any(i == name or i.startswith(f"{name}.") for i in loads)}
+            assert not loaded, f"{module.path} loads {sorted(loaded)}, which DATA_NAMES declares as data"
 
 
 def test_the_hook_names_the_cli_as_data(graph, monkeypatch):
