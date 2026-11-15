@@ -329,7 +329,10 @@ seven days after its last change.
   says, to the receiving session addressed by the exact name ListAgents
   shows. The harness's idle note carries only the first few hundred
   characters; it is a pointer, never the report.
-- A large hand-over (a brief revised repeatedly, a template) may go as a file
-  in the side-session notes folder, the message naming its absolute path.
+- A step report or a verdict is always a file under `~/.atc/reports/`,
+  never in the side-session notes folder, where `atc task close` does not
+  find it. The notes folder holds hand-overs only: a brief revised
+  repeatedly, a template, a question file awaiting the Owner's ruling; the
+  message names its absolute path.
 - Sessions are archived and scratches removed at close-out (governance
   `DELIVERY.md` § Close-out).

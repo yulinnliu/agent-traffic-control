@@ -43,7 +43,9 @@ Work rules:
   - Commands for the Owner are plain `atc ...` lines, one per command, with
     no environment prefix (governance GIT_WORKFLOW.md § Owner-run commands).
   - Finish as atc-review "Writer: the step report" step 5: one line, the
-    report's path and the tip's full 40-character SHA.
+    report's path and the tip's full 40-character SHA. The report file is
+    `~/.atc/reports/<ID>-<full 40-character SHA>.md`, never the notes
+    folder.
 Hard rules:
   Fixed text, the Owner's: no change to authorization files,
   system or security settings; no `atc integrate` except `--check`; no push;
