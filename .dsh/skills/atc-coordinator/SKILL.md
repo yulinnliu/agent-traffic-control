@@ -1,6 +1,6 @@
 ---
 name: atc-coordinator
-description: Coordinating one task across a writer session and a reviewer session - open the task record, start and brief both sessions, hand the Owner the integration and push commands for an exact SHA and read their completion from Git, close the task. Not for doing the writing or the review yourself, nor for a single-session task.
+description: Coordinate a task split into a writer session and a reviewer session - open the record, brief both, relay the verdict, hand the Owner the integrate and push commands, close out. Not for the writer or the reviewer, nor a single-session task.
 managed-by: agent-traffic-control
 canonical: atc-coordinator
 ---
@@ -17,6 +17,10 @@ never produces one.
 
 The writer and the reviewer are different sessions. The reviewer has not
 seen the writer's conversation, and neither session is the coordinator.
+
+After a compaction, or whenever this text may be stale, invoke this skill and
+`atc-review` again and follow their current text on disk, not a remembered
+version.
 
 The coordinator never runs the integration or the push of `main` in the
 Owner's place. The Owner runs each command against an exact SHA (governance
