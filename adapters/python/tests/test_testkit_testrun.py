@@ -137,7 +137,9 @@ def test_a_runs_commit_is_its_export_source_else_its_trees_head(tree: Path) -> N
         subprocess.run(["git", *GIT_IDENTITY, *args], cwd=tree, env=env, check=True, capture_output=True)
     head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=tree, env=env, check=True, capture_output=True,
                           text=True).stdout.strip()
-    assert testrun.tree_commit(tree / "tests", exported) == head
+    assert testrun.tree_commit(tree / "tests", None) == head
+    assert testrun.tree_commit(tree, types.SimpleNamespace(commit="")) == head
+    assert testrun.tree_commit(tree, exported) == "c" * 40
 
 
 @pytest.mark.unit

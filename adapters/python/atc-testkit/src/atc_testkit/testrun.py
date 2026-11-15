@@ -824,10 +824,11 @@ MUTANTS_COMMAND = "mutants"
 
 
 def tree_commit(tree: Path, row: scratch.Row | None) -> str:
-    """The commit a run tests: the export's source commit, else the tree's ``HEAD``; empty when neither is known."""
-    if row is not None and row.commit and _git_lines(tree, "rev-parse", "--show-toplevel") is None:
+    """The commit a run tests: the source commit an export's registry line names, else the tree's ``HEAD``; empty
+    when neither is known."""
+    if row is not None and row.commit:
         return row.commit
-    return (_git_lines(tree, "rev-parse", "HEAD") or [row.commit if row is not None and row.commit else ""])[0]
+    return (_git_lines(tree, "rev-parse", "HEAD") or [""])[0]
 
 
 def _run_workers(arguments: Sequence[str]) -> int:
