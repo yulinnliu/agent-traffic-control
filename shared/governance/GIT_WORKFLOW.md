@@ -571,8 +571,13 @@ that revision already carries the Owner's integration approval in the ATC
 repository. Pushing it still needs `push_main` authority under
 `## Publication boundary`.
 
-Sync renders from the ATC checkout on `main` with no tracked change, and
-renders nothing until that checkout's own adapters are current. Per project
+Sync renders from the tree of the exact revision of `governance_source` it
+targets, read from Git objects: the `governance_checkout` that
+`workspace.yaml` names, else the local cache under the ATC home. Where the
+workspace directory is itself the governance checkout, sync renders nothing
+until that checkout is on `main`, has no tracked change, and its own adapters
+match the tip of `main`; elsewhere it delivers the revision's `workspace`
+items instead. Per project
 it takes the Integration Slot and writes nothing when the checkout is not on
 `main`, has uncommitted or untracked changes, or does not contain
 `origin/main`. A changed path outside the files sync owns stops the project
