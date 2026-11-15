@@ -351,7 +351,8 @@ the verifier.
   them.
 - The gate and the verifier give the processes they start the same two
   values and `RUFF_CACHE_DIR` as `~/.atc/cache/ruff`
-  (`TESTKIT.md` § Isolated environment).
+  (`TESTKIT.md` § Isolated environment), and so do the runs of `atc test ID`
+  and the `uv sync` that builds the environment of its export (§ Checkout).
 - A cache entry is safe to delete at any time; the next run downloads it again.
 
 ## Outside the ATC home

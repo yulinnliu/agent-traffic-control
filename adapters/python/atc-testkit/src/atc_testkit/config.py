@@ -30,3 +30,7 @@ def ignored_paths(root: Path, platform: str = os.name) -> tuple[str, ...]:
 
 def data_root_variables(root: Path) -> tuple[str, ...]:
     return tuple(tool_table(root).get("data_root_variables", ()))
+
+
+def credential_variables(root: Path) -> tuple[str, ...]:
+    return tuple(tool_table(root).get("credential_variables", ()))

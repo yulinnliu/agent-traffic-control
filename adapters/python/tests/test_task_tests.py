@@ -16,7 +16,7 @@ import yaml
 
 import git_integrate
 import task_tests
-from atc_testkit import checkout, scratch, testrun
+from atc_testkit import checkout, locations, scratch, testrun
 
 pytestmark = pytest.mark.integration
 
@@ -90,7 +90,7 @@ def workspace(tmp_path: Path, atc_tmp: Path) -> Workspace:
 @pytest.fixture()
 def calls(monkeypatch: pytest.MonkeyPatch) -> dict[str, list]:
     """The stand-ins: each call's arguments in order; the mutant run also reads the mutant list it is given."""
-    seen: dict[str, list] = {"run": [], "mutants": [], "candidate": [], "sync": []}
+    seen: dict[str, list] = {"run": [], "mutants": [], "candidate": [], "sync": [], "sync_env": []}
 
     def run(argv, environ=None) -> int:
         seen["run"].append(list(argv))
@@ -106,6 +106,7 @@ def calls(monkeypatch: pytest.MonkeyPatch) -> dict[str, list]:
 
     def sync(directory, environ, run=None) -> Path:
         seen["sync"].append(Path(directory))
+        seen["sync_env"].append(dict(environ))
         venv = Path(directory) / ".venv"
         python = venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
         python.parent.mkdir(parents=True)
@@ -147,6 +148,9 @@ def test_a_sha_is_exported_into_the_task_and_commit_scratch_and_reused(workspace
     [row] = scratch.registered(atc_tmp)
     assert (row.task, row.commit, row.project) == (TASK, workspace.base, "demo")
     assert len(calls["sync"]) == 1
+    [env] = calls["sync_env"]
+    shared = locations.cache_directories(dict(HARNESS, ATC_TMP=str(atc_tmp)))
+    assert {name: env.get(name) for name in shared} == shared, "the export builds with the verifier's caches"
     assert option(calls["run"][-1], "--scratch") == name
 
     assert workspace.run(TASK, "--sha", workspace.base) == 0

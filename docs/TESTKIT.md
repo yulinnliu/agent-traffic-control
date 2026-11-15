@@ -689,6 +689,12 @@ scratch entries. In order:
    environment as the next step. This guard is what proves the copy, not an
    installed checkout, is what runs: an environment built from another
    checkout installs that checkout's packages, and the guard names them.
+   Every process the run starts after the guard (the selector, pytest) gets
+   the verifier's environment, § Isolated environment, built from the one
+   steps 3 and 4 made, with the scratch as the run's working directory: so
+   `HOME` and `USERPROFILE` name `<scratch>/home`, the uv, Python and ruff
+   caches are those under `~/.atc/cache`, and the project's credential
+   variables are removed. The data-root variables keep `<scratch>/qdr`.
 6. Run pytest with `PYTHONUNBUFFERED=1`, `-q`, `-p no:cacheprovider`,
    `--basetemp <scratch>/bt` and, when xdist is installed, the run's worker
    option, its output written as it arrives to

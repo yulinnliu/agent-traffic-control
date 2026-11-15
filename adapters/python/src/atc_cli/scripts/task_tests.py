@@ -124,7 +124,8 @@ def export(task: Task, sha: str, environ: dict[str, str]) -> tuple[str, str, Pat
             raise Refusal("NO_TESTKIT", f"{commit[:12]} has no pyproject.toml with [tool.atc-testkit]",
                           "its tasks use tests: none; the reviewer reads the diff")
         code = checkout.checkout([commit, "--task", task.id, "--worktree", str(task.source()), "--scratch", name,
-                                  "--lock-dir", lock], environ, say=lambda _line: None)
+                                  "--lock-dir", lock], {**environ, **locations.cache_directories(environ)},
+                                 say=lambda _line: None)
         if code:
             raise Refusal("SYNC_FAILED", f"building the environment of {name} failed",
                           f"atc test {task.id} --clean, then run again", cli_conventions.STOP)

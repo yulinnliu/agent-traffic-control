@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from atc_testkit import elapsed, python_toolchain, scratch, testrun, workers
+from atc_testkit import elapsed, isolation, locations, python_toolchain, scratch, testrun, workers
 from atc_testkit.locations import Refusal
 
 TASK = "ATC-0044"
@@ -88,6 +88,39 @@ def test_a_run_isolates_the_temporary_and_data_directories(tree: Path, atc_tmp: 
     assert values["DATA"] == f"{scratch_dir / 'qdr'} None"
     assert values["HAMI"] == "None"
     assert Path(values["FILE"]).is_relative_to(tree.resolve())
+
+
+ENVIRONMENT_TEST = """import json, os
+from pathlib import Path
+
+def test_environment():
+    names = ["HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "XDG_CACHE_HOME", "UV_CACHE_DIR",
+             "UV_PYTHON_INSTALL_DIR", "RUFF_CACHE_DIR", "PYTHONIOENCODING", "GIT_X", "SOME_API_KEY", "MY_CRED",
+             "QUANT_DATA_ROOT"]
+    seen = {name: os.environ.get(name) for name in names}
+    seen["gitconfig"] = (Path(os.environ["HOME"]) / ".gitconfig").is_file()
+    print("ENV " + json.dumps(seen))
+"""
+
+
+@pytest.mark.integration
+def test_a_runs_tests_get_the_verifiers_environment_with_the_scratch_as_working_directory(tree: Path,
+                                                                                         atc_tmp: Path) -> None:
+    (tree / "pyproject.toml").write_text('[tool.atc-testkit]\ncredential_variables = ["MY_CRED"]\n', encoding="utf-8")
+    (tree / "tests/test_environment.py").write_text(ENVIRONMENT_TEST, encoding="utf-8")
+    run = run_tests(tree, "s", sys.executable, "-s", "-n", "0", "tests/test_environment.py", GIT_X="1",
+                    SOME_API_KEY="k", MY_CRED="c", PYTHONIOENCODING="cp1252")
+    assert run.returncode == 0, run.stdout + run.stderr
+    seen = json.loads(next(line for line in run.stdout.splitlines() if line.startswith("ENV "))[4:])
+    place = atc_tmp / "s"
+    caches = locations.cache_directories(dict(os.environ))
+    reference = isolation.IsolatedRun(place, environ=dict(os.environ, QUANT_DATA_ROOT=str(place / "qdr")),
+                                      credentials=["MY_CRED"]).environment(testrun.CHILD_STAGE)
+    assert seen == {"HOME": str(place / "home"), "USERPROFILE": str(place / "home"),
+                    "APPDATA": reference["APPDATA"], "LOCALAPPDATA": reference["LOCALAPPDATA"],
+                    "XDG_CACHE_HOME": reference["XDG_CACHE_HOME"], **caches, "PYTHONIOENCODING": "utf-8",
+                    "GIT_X": None, "SOME_API_KEY": None, "MY_CRED": None, "QUANT_DATA_ROOT": str(place / "qdr"),
+                    "gitconfig": True}
 
 
 def test_the_exit_code_is_pytests(tree: Path, atc_tmp: Path) -> None:
@@ -370,6 +403,19 @@ def test_mutants_are_killed_or_survive_and_files_are_restored(export: Export, tm
     assert lines[3] == "restored-ok src/fixture_pkg/__init__.py"
     assert lines[-1] == "done: 2 mutants, 1 survived S two"
     assert b"return 1" in export.file.read_bytes()
+
+
+@pytest.mark.integration
+def test_mutant_runs_get_the_verifiers_environment(export: Export, tmp_path: Path) -> None:
+    home = export.place / "home"
+    caches = locations.cache_directories(dict(os.environ))
+    (export.place / "tree/tests/test_value.py").write_text(
+        "import os\nimport fixture_pkg\n\ndef test_value():\n    assert fixture_pkg.value() == 1\n"
+        f"    assert os.environ['HOME'] == {str(home)!r} and os.environ['UV_CACHE_DIR'] == {caches['UV_CACHE_DIR']!r}\n"
+        "    assert 'GIT_X' not in os.environ and os.environ['PYTHONIOENCODING'] == 'utf-8'\n", encoding="utf-8")
+    run = export.run(tmp_path, [KILLED], GIT_X="1")
+    lines = mutant_lines(run)
+    assert lines[0].startswith("BASELINE-OK") and lines[1].startswith("KILLED"), run.stdout + run.stderr
 
 
 ERRORING = {"label": "E three", "edits": [{"path": "src/fixture_pkg/__init__.py", "old": "return 1", "new": "return 1 / 0"}]}

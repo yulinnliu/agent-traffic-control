@@ -17,7 +17,8 @@ import threading
 import time
 import xml.etree.ElementTree as ElementTree
 
-from . import config, desktop, elapsed, locations, python_toolchain, scratch, stages, timing, toolchain as toolchains
+from . import config, desktop, elapsed, isolation, locations, python_toolchain, scratch, stages, timing
+from . import toolchain as toolchains
 from . import workers as host_workers
 from .git import git_env
 from .isolation import drop_hami_variables
@@ -208,6 +209,13 @@ def isolate(tree: Path, place: Path, python: str, environ: MutableMapping[str, s
     return private_desktop(environ)
 
 
+def child_environment(tree: Path, place: Path, environ: Mapping[str, str]) -> dict[str, str]:
+    """The environment of a process the run starts: the verifier's (docs/TESTKIT.md § Isolated environment), the
+    scratch as its working directory and the run's data roots kept."""
+    return isolation.IsolatedRun(place, environ=environ, credentials=config.credential_variables(tree),
+                                 toolchain=toolchains.for_tree(tree)).environment(CHILD_STAGE)
+
+
 def private_desktop(environ: Mapping[str, str]) -> bool:
     """On Windows a run is private unless ``ATC_PRIVATE_DESKTOP=0``; another value than 0 or 1 is refused."""
     value = environ.get(PRIVATE_DESKTOP_VARIABLE, "")
@@ -243,8 +251,9 @@ def execute(tree_argument: str, scratch_argument: str, python_argument: str, pyt
     root, place = locate_scratch(scratch_argument, environ)
     claim_scratch(root, place, tree, task)
     private = isolate(tree, place, python, environ)
-    command = _pytest_command(python, tree, place, environ, private, pytest_arguments, junit)
-    return _capture(command, tree, environ, private, timeout)
+    child = child_environment(tree, place, environ)
+    command = _pytest_command(python, tree, place, child, private, pytest_arguments, junit)
+    return _capture(command, tree, child, private, timeout)
 
 
 def verify_commit(worktree: str, sha: str) -> None:
@@ -761,9 +770,10 @@ def run(argv: Sequence[str], environ: MutableMapping[str, str] | None = None) ->
     paths = changed_paths(tree, args.related, row) if args.related else None
     environ["PYTHONUNBUFFERED"] = "1"
     private = isolate(tree, place, python, environ)
+    child = child_environment(tree, place, environ)
     items = None
     if paths is not None:
-        chosen = touched(tree, python, paths, environ)
+        chosen = touched(tree, python, paths, child)
         head = f"RELATED {args.related}: {len(paths)} changed paths, {len(chosen)} test paths"
         if not chosen:
             print(head, "NO_TESTS no test selected", sep="\n", flush=True)
@@ -777,11 +787,11 @@ def run(argv: Sequence[str], environ: MutableMapping[str, str] | None = None) ->
     if private:
         print(EXCLUSION_NOTE, flush=True)
     budget = stages.open_budget(f"atc test {place.name}", environ, root=tree, max_wait=args.timeout)
-    xdist = xdist_installed(python, tree, environ)
+    xdist = xdist_installed(python, tree, child)
     workers, pytest_arguments = _worker_request(pytest_arguments, tree, environ, xdist)
     if workers is not None and workers.source == stages.SOURCE_DEFAULT and budget.active:
         if items is None:
-            items = _count(python, tree, place, environ, private, pytest_arguments)
+            items = _count(python, tree, place, child, private, pytest_arguments)
         workers = workers.capped(items)
     want, floor = (workers.count, workers.floor()) if workers is not None else (1, 1)
     want, floor = max(1, want), max(1, floor)
@@ -798,10 +808,11 @@ def run(argv: Sequence[str], environ: MutableMapping[str, str] | None = None) ->
             print(workers_line, flush=True)
             environ[stages.WORKERS_LINE] = workers_line
         budget.annotate(log=str(log), limit=workers_line)
-        command = _pytest_command(python, tree, place, environ, private, pytest_arguments, xdist=xdist)
+        child = child_environment(tree, place, environ)
+        command = _pytest_command(python, tree, place, child, private, pytest_arguments, xdist=xdist)
         started = time.monotonic()
         try:
-            result: Result | None = _logged(command, tree, environ, private, args.timeout, log, args.progress)
+            result: Result | None = _logged(command, tree, child, private, args.timeout, log, args.progress)
         except KeyboardInterrupt:
             result = None
         seconds = time.monotonic() - started
@@ -820,6 +831,7 @@ def run(argv: Sequence[str], environ: MutableMapping[str, str] | None = None) ->
 
 
 RUN_COMMAND = "test"
+CHILD_STAGE = "tests"
 MUTANTS_COMMAND = "mutants"
 
 
