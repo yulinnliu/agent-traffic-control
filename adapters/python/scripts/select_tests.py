@@ -107,6 +107,8 @@ DIRECTORY_READERS = {
     f"{TESTS}/test_integration_verify.py": ("AGENTS.md",),
     f"{TESTS}/test_shell_install.py": SCRIPT_READS,
     f"{TESTS}/test_packaged_schemas.py": ("shared/policies/schemas", f"{CLI_SRC}/schemas"),
+    # Builds and installs the wheels in a subprocess: any packaged module or the policy it composes.
+    f"{TESTS}/test_wheel_install.py": (CLI_SRC, TESTKIT_SRC, "policies/hard-deny.yaml"),
 }
 
 
