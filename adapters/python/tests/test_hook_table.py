@@ -138,7 +138,7 @@ def test_the_entry_runs_atc_hook_and_the_table_protects_the_composing_engine(wor
 
 
 def test_install_replaces_the_entry_of_an_engine_named_by_path(tmp_path):
-    """A release before 0.7.0 ran the engine of its release copy by path; install keeps one managed entry."""
+    """An entry that runs the engine of a release copy by path is managed; install keeps one managed entry."""
     settings = tmp_path / "settings.json"
     old = {"type": "command", "command": 'python "C:/x/.atc/releases/v0.6.0/adapters/python/scripts/pretooluse_hook.py"'
                                         " --harness claude"}

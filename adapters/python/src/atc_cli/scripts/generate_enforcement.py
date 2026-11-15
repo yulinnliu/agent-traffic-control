@@ -54,7 +54,7 @@ TOOL = "agent-traffic-control"
 ENGINE_FILES = (ENGINE, "shell_words.py", "write_targets.py", "globs.py")
 # The engine `atc hook` runs: the one beside this module, inside the installed `atc`.
 HOOK_COMMAND = "atc hook"
-# A hook entry ATC manages: `atc hook`, or an engine named by path, as releases before 0.7.0 wrote it.
+# A hook entry ATC manages: `atc hook`, or an engine named by path, as a release copy's entry wrote it.
 MANAGED_COMMAND = re.compile(r"(?:^|[\s\"'/\\])atc(?:\.exe)?[\"']?\s+hook\b")
 ENGINE_DIR = Path(__file__).resolve().parent
 # The hook scripts the engine replaces (the worktree cd guard and the write scope guard); install drops their

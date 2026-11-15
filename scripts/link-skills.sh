@@ -220,7 +220,7 @@ else
 fi
 
 if ! command -v atc >/dev/null 2>&1; then
-  echo "note: skills that run a tool call the atc command; put it on PATH with:"
-  echo "  uv run --directory \"$ROOT/adapters/python\" atc install <tag>"
+  echo "note: skills that run a tool call the atc command; the Owner puts it on PATH by installing a release tag:"
+  echo "  uv tool install --force \"git+<source>@<tag>#subdirectory=adapters/python\""
 fi
 exit $status

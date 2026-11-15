@@ -492,7 +492,7 @@ STOP_HINTS = {
     "RELEASE_NOT_ON_MAIN": "the Owner installs a release tagged on main with uv tool install "
                            "(docs/WORKFLOW.md § Installing a release)",
     "EXPORT_FAILED": "check the content repository's Git state",
-    "NO_MANIFEST": "name a revision that carries atc-manifest.yaml (0.7.0 or later)",
+    "NO_MANIFEST": "name a revision that carries atc-manifest.yaml",
     "MANIFEST_INVALID": "fix atc-manifest.yaml in a topic of the governance repository",
     "MANIFEST_SOURCE_MISSING": "fix atc-manifest.yaml in a topic of the governance repository",
     "MANIFEST_TOO_NEW": "install a newer atc release first",

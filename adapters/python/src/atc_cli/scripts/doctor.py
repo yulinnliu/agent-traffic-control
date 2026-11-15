@@ -93,14 +93,14 @@ def install_check(record: object = None) -> Check:
     version = atc_cli.package_version()
     release = release_pin.installed(record)
     if release is not None:
-        return Check("atc install", "READY", f"atc {version} at {release.name} ({release.commit[:12]}) from "
-                                             f"{release.url or 'an unrecorded source'}")
+        return Check("installed atc", "READY", f"atc {version} at {release.name} ({release.commit[:12]}) from "
+                                               f"{release.url or 'an unrecorded source'}")
     source = release_pin.editable(record)
     if source is not None:
-        return Check("atc install", "READY", f"atc {version}, a development install from {source}")
-    return Check("atc install", "WARN", f"atc {version} records no installed commit, so no project pin is "
-                                        f"compared; the Owner installs a release tag: "
-                                        f"{release_pin.install_command('<source>', '<tag>')}")
+        return Check("installed atc", "READY", f"atc {version}, a development install from {source}")
+    return Check("installed atc", "WARN", f"atc {version} records no installed commit, so no project pin is "
+                                          f"compared; the Owner installs a release tag: "
+                                          f"{release_pin.install_command('<source>', '<tag>')}")
 
 
 def pin_check(project, installed, root: Path) -> Check:

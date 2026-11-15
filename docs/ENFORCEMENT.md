@@ -334,12 +334,14 @@ running the engine or one of the retired guards (`worktree_cd_guard.py`, `write_
 | Codex | `Bash\|apply_patch` | `atc hook --harness codex` |
 
 `atc hook` runs the engine of whatever `atc` is installed, so a new install
-needs no new entry; an entry that runs an engine by path, as releases before
-0.7.0 wrote it, is a managed entry `--install` replaces. While
-`uv tool install` replaces the environment the command is briefly missing:
-the Claude Code entry asks to block on that failure (`onFailure: block`),
-while Codex blocks only on exit 2 and runs the call unchecked, so the Owner
-installs when no session runs. A table outside the default
+needs no new entry; an entry that runs an engine by path, as a release copy's
+entry did, is a managed entry `--install` replaces. The harness finds `atc`
+on its own PATH, so the entry checks a call only where `atc` is on that PATH.
+When the harness cannot run `atc`, because it is not on PATH or because
+`uv tool install` is replacing the environment, the Claude Code entry asks to
+block the call (`onFailure: block`), while Codex blocks only on exit 2 and
+runs the call unchecked. So the Owner installs when no session runs and checks
+that `atc` resolves in the shell each harness starts from. A table outside the default
 directory adds `--table "<file>"`. Codex then
 asks the Owner to trust the entry once in `/hooks`. The workspace policy
 denies agents `atc guard --install`, so it runs from the Owner's terminal,

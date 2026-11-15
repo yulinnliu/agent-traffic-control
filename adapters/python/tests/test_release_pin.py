@@ -248,10 +248,10 @@ def test_doctor_reports_the_installed_commit_a_development_install_or_neither(ws
     import atc_cli
     version = atc_cli.package_version()
     assert doctor.install_check(record(ws.new)) == doctor.Check(
-        "atc install", "READY", f"atc {version} at v0.6.0 ({ws.new[:12]}) from {SOURCE}")
+        "installed atc", "READY", f"atc {version} at v0.6.0 ({ws.new[:12]}) from {SOURCE}")
     source = tmp_path / "worktree" / "adapters" / "python"
     assert doctor.install_check({"url": source.as_uri(), "dir_info": {"editable": True}}) == doctor.Check(
-        "atc install", "READY", f"atc {version}, a development install from {source}")
+        "installed atc", "READY", f"atc {version}, a development install from {source}")
     check = doctor.install_check({"url": "file:///C:/wheel.whl", "archive_info": {}})
     assert check.status == "WARN" and "records no installed commit" in check.detail
     assert check.detail.endswith('uv tool install --force "git+<source>@<tag>#subdirectory=adapters/python"')
