@@ -1,0 +1,23 @@
+task_id: ATC-0054
+title: Mutants are judged by the tests that run the mutated lines
+repository: yulinnliu/agent-traffic-control
+base_sha: 9f06f6577172903aac1624defb4f00034b5a7cf3
+scope: '`atc test ID --mutants FILE` judges each mutant by the tests the tree''s `selector` picks with `--direct` for the files its edits name, plus the mutant''s own `tests` (docs/TESTKIT.md § `atc test ID --mutants`). The unit is a test file: every test in a file that imports the mutated module judges the mutant, though most never execute the mutated lines. A killed mutant stops at the first failure (`-x`), so the cost sits in surviving mutants, which run every judging test. In ATC-0052''s review, 23 mutants ran one after another for about 24 minutes; the 3 survivors ran 72 to 90 tests each (105 to 174 s), one of them on an `except` branch no test reaches. Goal: each mutant runs only the tests that execute the lines it edits. - **Coverage from the baseline.** The baseline already runs the union of the judging tests. It records, per test, the lines it executes (per-test coverage contexts), including code run in child processes the tests start (most `atc` tests spawn `atc` as a subprocess).
+  - **Selection.** Each mutant runs the baseline tests that executed any line its edits touch, plus its own `tests`, still with `-x`. A file the coverage could not observe (no data for it) falls back to today''s file-level selection for that mutant, and the run says so. - **Not covered.** A mutant whose edited lines no test executed is reported without running, with its own verdict word (for example `NOT_COVERED`), counted with the survivors in the `done:` line, since it is a test gap. - **Unchanged.** `-- TEST...` still judges every mutant by the given tests; `NO_TESTS` before the baseline still stops a mutant the selector gives nothing; the host worker budget is unchanged (one token for the command). - **Measurement.** Replay ATC-0052''s reviewer mutants (23 mutants against 9f06f6577172903aac1624defb4f00034b5a7cf3; mutants `C:\Users\ANDYLI~1\AppData\Local\Temp\claude\6e70b198f2a4d680\680d152f-da81-4fbb-a004-f35db855269a\scratchpad\atc0052-all-mutants.json`, old run''s log `...\scratchpad\mutants.log`
+  in the same folder) with the old and the new selection and report wall time and per-mutant verdicts; the verdicts must match except survivors that become `NOT_COVERED`. - **Documentation.** docs/TESTKIT.md § `atc test ID --mutants`, the atc-review mutant guidance where it describes judging tests, and the CLI help. Parallel mutant runs are out of scope (a later task, if the measurement shows the need).'
+tests: strict
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: 9f06f6577172903aac1624defb4f00034b5a7cf3
+branch: claude+ATC-0054
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
+decisions:
+- 'Owner 11-16: 「selector 優化先弄?」 then 「現在開，平行進行」: coverage-guided judging first, in parallel with ATC-0053; parallel mutant runs wait for this task''s measurement.'
+- 'Owner 11-16 「改，併進 0053」: strict mutants are written and run by the reviewer only; the writer lists the guards it changed (file:line and what each refuses). This task follows that rule though ATC-0053 carries its text.'
+- 'Design first: the design (coverage of child processes, the fallback, the verdict word, the overhead on the baseline) is reviewed before implementation.'
+- No version bump; no governance change.
