@@ -242,6 +242,10 @@ For a status question, read `atc task list --all`.
   carries this line as the last line of its `Work rules`; a reviewer brief
   to a Claude session carries it as a `Work rules:` field after `Verdict`.
 - Sessions are addressed by the exact name ListAgents shows.
+- A turn that a peer session's message started cannot start a session, and
+  an `own_initiative` proposal card cannot carry `cwd`. A writer in another
+  project therefore starts only after the Owner says a word in this
+  session; until then, say which session waits and why.
 - Subscribe to the writer's idle notice where the harness offers it,
   instead of polling.
 - Sessions are archived at close-out (step 6) through the session

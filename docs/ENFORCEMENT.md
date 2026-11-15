@@ -323,8 +323,10 @@ the hook cannot tell where it lands. `$null`, `NUL`, `/dev/null` and `\\.\`
 devices write nothing; `\\?\` paths are checked without the prefix; a
 `FileSystem::` provider path is checked as its file path, `Temp:` as the
 temporary directory, and the `Env:`, `Variable:`, `Function:`, `Alias:`,
-`Cert:` and registry drives hold no files. Any other multi-letter drive is
-refused.
+`Cert:`, `WSMan:` and registry drives, and any provider but `FileSystem::`,
+hold no files, so a target that starts with one literally is no write
+target, whatever follows it (`Remove-Item "env:$($_.Name)"`). Any other
+multi-letter drive is refused.
 
 Known limits, which the hook allows:
 

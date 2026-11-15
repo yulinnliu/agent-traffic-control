@@ -337,6 +337,24 @@ def test_a_powershell_command_inside_the_roots_or_read_only_is_allowed(command):
     assert decide("PowerShell", command=command) is None
 
 
+@pytest.mark.parametrize("command", [
+    "Get-ChildItem env: | Where-Object { $_.Name -match 'KEY|TOKEN|SECRET' } | "
+    "ForEach-Object { Remove-Item \"env:$($_.Name)\" }",
+    "Remove-Item \"env:$name\"",
+    "Remove-Item \"Env:\\$name\"",
+    "Set-Item \"variable:$x\" 1",
+    "Remove-Item \"function:$f\"",
+    "Remove-Item \"alias:$a\"",
+    "Remove-Item \"HKCU:\\Software\\$k\" -Recurse",
+    "Remove-Item \"Cert:\\CurrentUser\\My\\$t\"",
+    "Remove-Item \"Registry::HKEY_CURRENT_USER\\$k\"",
+])
+def test_a_write_to_a_drive_that_holds_no_files_is_allowed_whatever_follows(command):
+    """`env:`, `variable:`, the registry and the other non-file-system drives and providers hold no files: what
+    follows them, resolved or not, never lands on disk."""
+    assert decide("PowerShell", command=command) is None
+
+
 @pytest.mark.parametrize("tool, command, target", [
     ("Bash", 'rm -rf "$UNKNOWN_DIR"', "$UNKNOWN_DIR"),
     ("Bash", 'x=$(mktemp); echo hi > "$x"', "$x"),
@@ -360,6 +378,12 @@ def test_a_powershell_command_inside_the_roots_or_read_only_is_allowed(command):
     ("PowerShell", "(Get-Item C:\\out\\f).Delete()", "$(object).Delete()"),
     ("PowerShell", "pwsh -EncodedCommand !!!", "$(script read from stdin or not decodable)"),
     ("PowerShell", "Set-Content \"$env:NOT_SET_ANYWHERE\\x\" v", "$env:NOT_SET_ANYWHERE\\x"),
+    ("PowerShell", "Remove-Item \"$d:\\x\"", "$d:\\x"),
+    ("PowerShell", "Remove-Item \"$($e):x\"", "$($e):x"),
+    ("PowerShell", "Remove-Item \"FileSystem::C:\\$x\"", "FileSystem::C:\\$x"),
+    ("PowerShell", "Remove-Item \"Microsoft.PowerShell.Core\\FileSystem::C:\\$x\"",
+     "Microsoft.PowerShell.Core\\FileSystem::C:\\$x"),
+    ("PowerShell", "Remove-Item \"envx\\$n\"", "envx\\$n"),
 ])
 def test_a_write_target_the_text_does_not_resolve_is_refused(monkeypatch, tool, command, target):
     monkeypatch.delenv("UNKNOWN_DIR", raising=False)

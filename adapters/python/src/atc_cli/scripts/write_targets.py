@@ -1022,6 +1022,20 @@ def patch_writes(patch: str) -> list[str]:
     return PATCH_FILE.findall(patch)
 
 
+LITERAL_DRIVE = re.compile(r"^([A-Za-z][\w.-]+):(?!:)")
+LITERAL_PROVIDER = re.compile(r"^((?:[\w.]+\\)?[A-Za-z]\w*)::")
+
+
+def no_files(target: str) -> bool:
+    """Whether ``target`` starts with a literal PowerShell drive (`env:`, `HKCU:`) or provider (`Registry::`) that
+    holds no files, so nothing after it, resolved or not, lands in the file system."""
+    drive = LITERAL_DRIVE.match(target)
+    if drive:
+        return drive.group(1).lower() in NON_FILE_DRIVES
+    provider = LITERAL_PROVIDER.match(target)
+    return provider is not None and not provider.group(1).lower().rsplit("\\", 1)[-1].endswith("filesystem")
+
+
 def resolve(target: str, cwd: str) -> str | None:
     """The case-folded long absolute path a target names, or None for a device or a provider that holds no files.
 
@@ -1029,6 +1043,8 @@ def resolve(target: str, cwd: str) -> str | None:
     """
     target = unquote(target).strip()
     if target.lower() == g.EXPAND + "null":
+        return None
+    if no_files(target):  # `env:$name`, `HKCU:\$k`: what follows a literal drive or provider holding no files
         return None
     if marked(target):
         raise Unresolved(target)

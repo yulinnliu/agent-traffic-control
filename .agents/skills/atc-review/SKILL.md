@@ -113,7 +113,11 @@ the targeted test commands are the ones the project's `AGENTS.md` names.
 Every run registers its scratch to the task (`<tmp>/<task>`, or
 `<tmp>/<task>-<sha7>` under `--sha`), so `atc task close` removes it; a
 directory under `<tmp>` named for the task but not registered to it is
-listed for the Owner's consent and never deleted. `<tmp>` is `~/.atc/tmp`,
+listed for the Owner's consent and never deleted. A reviewer, a subagent
+included, writes its own output files (captured output, notes, logs) only
+inside a scratch registered to the task, never directly under `<tmp>`,
+where close-out does not collect them; the verdict file alone goes to
+`~/.atc/reports/`. `<tmp>` is `~/.atc/tmp`,
 or `ATC_TMP` when that is set. The run removes every
 `HAMI_*` variable so the host's project settings stay out of it, points each
 data-root variable the tree's `[tool.atc-testkit]` names, or
