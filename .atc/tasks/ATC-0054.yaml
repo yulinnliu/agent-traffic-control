@@ -24,3 +24,4 @@ decisions:
 - 'Owner 11-16 「檔案/目錄縮小」: file and directory entries of a mutant''s own tests are narrowed by the line record; nodeids and options are kept as given.'
 - 'Owner 11-16 「testkit 自帶」: the line recorder is the testkit''s own sys.monitoring recorder, not coverage.py.'
 - 'Owner 11-16 「writer 跑」: the writer runs the measurement replay (ATC-0052''s mutants, old selection against new) and writes the results into the design § 6; it is a performance measurement, not a check of this task''s guards.'
+- 'Owner 11-16 「A 退回照跑」: a mutant whose edited file has no line record at all falls back to its file-level tests and runs (SURVIVED or a real KILLED), as the design at c4c31d1 says; NOT_COVERED needs the file observed.'
