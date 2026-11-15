@@ -370,13 +370,24 @@ def test_maintainer_commands_refuse_an_installed_atc(tmp_path: Path, monkeypatch
     monkeypatch.setattr(release_pin, "direct_url", lambda: {
         "url": "file:///C:/hosts/governance", "subdirectory": "adapters/python",
         "vcs_info": {"vcs": "git", "commit_id": "a" * 40, "requested_revision": "v0.7.0"}})
-    monkeypatch.chdir(tmp_path)
+    monkeypatch.chdir(worktree / "adapters" / "python")  # a worktree it would act on, from a wheel
     assert maintain.code_checkout() is None
     assert maintain.main(["validate"]) == 2
     assert capsys.readouterr().err.startswith("ERROR CHECKOUT_CANONICAL this atc-maintain is not an editable install")
     source = worktree / "adapters" / "python"
     monkeypatch.setattr(release_pin, "direct_url", lambda: {"url": source.as_uri(), "dir_info": {"editable": True}})
     assert maintain.code_checkout() == worktree
+
+
+def test_maintainer_commands_refuse_to_run_from_the_canonical_checkout(
+    canonical: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Acting on a worktree is not enough: the code must not be the canonical checkout's editable install."""
+    _, worktree = nested_checkouts(tmp_path / "other")
+    monkeypatch.setattr(maintain, "code_checkout", lambda: canonical)
+    monkeypatch.chdir(worktree / "adapters" / "python")
+    assert maintain.main(["validate"]) == 2
+    assert capsys.readouterr().err.startswith(f"ERROR CHECKOUT_CANONICAL {canonical} is the canonical checkout")
 
 
 def test_maintainer_commands_dispatch_to_their_modules(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

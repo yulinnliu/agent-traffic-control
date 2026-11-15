@@ -202,6 +202,19 @@ def test_a_project_ahead_of_the_installed_release_names_the_install(ws: Ws) -> N
         f'uv tool install --force "git+{SOURCE}@v0.7.0#subdirectory=adapters/python"')
 
 
+def test_a_host_reads_the_release_history_of_its_governance_checkout(ws: Ws, tmp_path: Path) -> None:
+    """A workspace directory that is no Git checkout reads the tags of the checkout `governance_checkout` names."""
+    host = tmp_path / "host"
+    host.mkdir()
+    (host / "workspace.yaml").write_text(f"version: 1\ngovernance_checkout: '{ws.root.as_posix()}'\n",
+                                         encoding="utf-8")
+    assert release_pin.history(host) == ws.root.resolve()
+    demo = SimpleNamespace(name="demo", repo=str(ws.project))
+    assert release_pin.mismatch(demo, ws.release, release_pin.history(host)).detail.startswith("demo pins v0.5.0")
+    (host / "workspace.yaml").write_text("version: 1\n", encoding="utf-8")
+    assert release_pin.history(host) == host
+
+
 def test_the_dispatcher_stops_before_the_command_runs(ws: Ws, monkeypatch: pytest.MonkeyPatch,
                                                        capsys: pytest.CaptureFixture[str]) -> None:
     import git_integrate
