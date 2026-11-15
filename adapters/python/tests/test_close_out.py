@@ -509,6 +509,26 @@ def test_check_with_inner_links_lists_the_scratch_and_deletes_nothing(
     assert (mine / "tree" / "fixture" / "deep" / "back").exists()
 
 
+def test_check_refuses_a_scratch_with_a_link_out_of_it_as_the_run_does_and_touches_nothing(
+        done, atc_tmp: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    ws, _topic, environ = done
+    mine = atc_tmp / "mine"
+    data = _fixture_links("junction" if os.name == "nt" else "symlink", mine)
+    neighbour = atc_tmp / "mine2"
+    neighbour.mkdir()
+    (neighbour / "keep.txt").write_text("neighbour", encoding="utf-8")
+    out = mine / "tree" / "out"
+    _make_link("junction" if os.name == "nt" else "symlink", out, neighbour)
+    code, payload, err = close(ws, environ, capsys, ws.root, "--check")
+    found = outcomes(payload)
+    assert code == 1 and payload["verdict"] == "REFUSED", (payload, err)
+    assert found[str(mine)] == ("REFUSED", "1 unexpected links") and found[str(out)][0] == "ANOMALY"
+    assert (out / "keep.txt").is_file() and (data / "keep.txt").is_file()
+    assert (mine / "tree" / "alias").exists() and (neighbour / "keep.txt").is_file()
+    code, payload, _err = close(ws, environ, capsys, ws.root)
+    assert code == 3 and outcomes(payload)[str(mine)] == ("REFUSED", "1 unexpected links")
+
+
 def ledger_reports(ws: Workspace) -> list[dict]:
     path = ws.repo / ".git" / "atc" / "integrations.jsonl"
     return [entry for entry in map(json.loads, path.read_text(encoding="utf-8").splitlines())

@@ -204,6 +204,17 @@ def _writable_retry(function: Callable[[str], object], target: str, _error: Base
     function(target)
 
 
+def judge_links(directory: str, expected: Callable[[str], bool],
+                say: Callable[[str], None]) -> tuple[list[str], str | None]:
+    """Step 4 of docs/ATC_HOME.md § Deleting without removing anything: the tree's links, and the reason the tree
+    stays when one is not expected, each such link printed as ``ANOMALY``."""
+    links = _links(directory)
+    anomalies = [link for link in links if not expected(link)]
+    for link in anomalies:
+        say(f"ANOMALY {link}")
+    return links, f"{len(anomalies)} unexpected links" if anomalies else None
+
+
 def remove_tree(directory: str | os.PathLike[str], expected: Callable[[str], bool],
                 say: Callable[[str], None] = print) -> str | None:
     """The single recursive delete of ATC's temporary tooling: steps 4 and 5 of docs/ATC_HOME.md § Deleting.
@@ -213,12 +224,9 @@ def remove_tree(directory: str | os.PathLike[str], expected: Callable[[str], boo
     directory = os.fspath(directory)
     if _is_link(os.lstat(_extended(directory))):
         return "is itself a link"
-    links = _links(directory)
-    anomalies = [link for link in links if not expected(link)]
-    if anomalies:
-        for link in anomalies:
-            say(f"ANOMALY {link}")
-        return f"{len(anomalies)} unexpected links"
+    links, why = judge_links(directory, expected, say)
+    if why:
+        return why
     for link in sorted(links, key=lambda path: path.count(os.sep), reverse=True):
         _remove_link(link)
     left = _links(directory)
@@ -316,6 +324,10 @@ def _clean_one(directory: str, root: Path, say: Callable[[str], None], check: st
             say(f"REFUSED {directory} (not a directory)")
             return 1
         if check is not None:
+            _links_found, why = judge_links(directory, scratch_links(directory), say)
+            if why:
+                say(f"REFUSED {directory} ({why})")
+                return 1
             say(f"DELETED {directory} ({check})")
             return 0
         why = remove_tree(directory, scratch_links(directory), say)

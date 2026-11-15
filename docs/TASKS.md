@@ -216,7 +216,8 @@ unregisters no scratch and takes no lock. Every item ends on the line the
 run would give it, `DELETED`, `SKIPPED` or `REFUSED`, each with its reason: a
 worktree's comes from the read-only audit of `atc task list -v` (`removable`,
 or what keeps it), a scratch's names it a registered scratch or a dependent
-run, and a report's previews its ledger line's `role` and `verdict`. The last
+run, or is the `REFUSED` with its `ANOMALY` links that step 4 of
+`ATC_HOME.md` § Deleting would give it, and a report's previews its ledger line's `role` and `verdict`. The last
 line counts them and says nothing was deleted. The exit code is 0 when no
 item would be `REFUSED`, else 1 with
 `STOP ITEM_REFUSED: <count> would be refused; ...` on stderr; `--json` gives
