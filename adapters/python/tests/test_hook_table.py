@@ -126,16 +126,32 @@ def test_the_tool_environment_is_where_uv_installs_atc(tmp_path, monkeypatch) ->
     assert ge.tool_environment() is None
 
 
-def test_the_table_and_the_command_name_the_engine_of_the_composing_atc(workspace, home):
-    """A release copy's `atc guard --install` points the hook at that copy, never at the workspace checkout."""
-    release = home / ".atc" / "releases" / "v0.6.0" / "adapters" / "python" / "src" / "atc_cli" / "scripts"
-    table = json.loads(ge.hook_table(workspace, home / ".atc" / "enforcement", engine_dir=release))
-    assert norm(release / "pretooluse_hook.py") in table["protected"]
-    assert norm(ge.ENGINE_DIR / "pretooluse_hook.py") not in table["protected"]
-    assert ge.engine_command(workspace, "claude", home / ".atc" / "enforcement", release) == (
-        f'python "{(release / "pretooluse_hook.py").as_posix()}" --harness claude')
-    assert ge.engine_command(workspace, "claude", home / ".atc" / "enforcement") == (
-        f'python "{(ge.ENGINE_DIR / "pretooluse_hook.py").as_posix()}" --harness claude')
+def test_the_entry_runs_atc_hook_and_the_table_protects_the_composing_engine(workspace, home):
+    """The entry names no path of the engine, so a new install needs no new entry; the table protects the engine
+    of the `atc` that composes it."""
+    table = json.loads(ge.hook_table(workspace, home / ".atc" / "enforcement"))
+    assert norm(ge.ENGINE_DIR / "pretooluse_hook.py") in table["protected"]
+    assert ge.engine_command(workspace, "claude", home / ".atc" / "enforcement") == "atc hook --harness claude"
+    other = home / "tables"
+    assert ge.engine_command(workspace, "codex", other) == (
+        f'atc hook --harness codex --table "{(other / ge.HOOK_TABLE).as_posix()}"')
+
+
+def test_install_replaces_the_entry_of_an_engine_named_by_path(tmp_path):
+    """A release before 0.7.0 ran the engine of its release copy by path; install keeps one managed entry."""
+    settings = tmp_path / "settings.json"
+    old = {"type": "command", "command": 'python "C:/x/.atc/releases/v0.6.0/adapters/python/scripts/pretooluse_hook.py"'
+                                        " --harness claude"}
+    mine = {"type": "command", "command": "my-own-hook"}
+    settings.write_text(json.dumps({"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [old, mine]}]}}),
+                        encoding="utf-8")
+    ge.install_hook(settings, ge.hook_group("claude", "atc hook --harness claude"))
+    ge.install_hook(settings, ge.hook_group("claude", "atc hook --harness claude"))
+    entries = json.loads(settings.read_text(encoding="utf-8"))["hooks"]["PreToolUse"]
+    commands = [hook["command"] for entry in entries for hook in entry["hooks"]]
+    assert sorted(commands) == ["atc hook --harness claude", "my-own-hook"]
+    assert all(ge._managed({"command": c}) for c in ("atc hook --harness codex", '"C:/bin/atc.exe" hook', "atc.exe hook"))
+    assert not any(ge._managed({"command": c}) for c in ("my-own-hook", "hatc hook", "atc hooks", "atc doctor"))
 
 
 def test_the_table_is_deterministic_and_refuses_a_bad_policy(workspace, home, monkeypatch):
@@ -161,16 +177,15 @@ def test_install_writes_the_table_and_replaces_the_retired_guards(workspace, hom
     table = home / ".atc" / "enforcement" / "pretooluse.json"
     assert table.is_file()
     settings = json.loads(claude.read_text(encoding="utf-8"))
-    engine = (ge.ENGINE_DIR / "pretooluse_hook.py").as_posix()
     assert settings["model"] == "x" and settings["hooks"]["UserPromptSubmit"]
     assert settings["hooks"]["PreToolUse"] == [
         {"matcher": "Edit|Write", "hooks": [{"type": "command", "command": "bash keep.sh"}]},
         {"matcher": "Bash|PowerShell|Edit|Write|NotebookEdit", "hooks": [{
-            "type": "command", "command": f'python "{engine}" --harness claude', "timeout": 10, "onFailure": "block"}]},
+            "type": "command", "command": "atc hook --harness claude", "timeout": 10, "onFailure": "block"}]},
     ]
     codex = json.loads((home / ".codex" / "hooks.json").read_text(encoding="utf-8"))
     assert codex == {"hooks": {"PreToolUse": [{"matcher": "Bash|apply_patch", "hooks": [{
-        "type": "command", "command": f'python "{engine}" --harness codex', "timeout": 10}]}]}}
+        "type": "command", "command": "atc hook --harness codex", "timeout": 10}]}]}}
     live = ["--workspace", str(workspace), "--check", "--live-hook-table", str(table),
             "--live-claude-hooks", str(claude), "--live-codex-hooks", str(home / ".codex" / "hooks.json")]
     assert ge.main(live) == 0

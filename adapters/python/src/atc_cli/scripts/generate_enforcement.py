@@ -53,6 +53,9 @@ ENGINE = "pretooluse_hook.py"
 TOOL = "agent-traffic-control"
 ENGINE_FILES = (ENGINE, "shell_words.py", "write_targets.py", "globs.py")
 # The engine `atc hook` runs: the one beside this module, inside the installed `atc`.
+HOOK_COMMAND = "atc hook"
+# A hook entry ATC manages: `atc hook`, or an engine named by path, as releases before 0.7.0 wrote it.
+MANAGED_COMMAND = re.compile(r"(?:^|[\s\"'/\\])atc(?:\.exe)?[\"']?\s+hook\b")
 ENGINE_DIR = Path(__file__).resolve().parent
 # The hook scripts the engine replaces (the worktree cd guard and the write scope guard); install drops their
 # entries. A pattern, so the test selector reads no edge to the cd guard's module.
@@ -219,7 +222,7 @@ def _hook_sources(base: Path, doc: dict) -> list[tuple[str, Path, list[tuple[Pat
     return sources
 
 
-def hook_table(workspace: Path, table_dir: Path, schemas: Path = policies.SCHEMAS, engine_dir: Path | None = None) -> str:
+def hook_table(workspace: Path, table_dir: Path, schemas: Path = policies.SCHEMAS) -> str:
     """The PreToolUse hook's table (docs/ENFORCEMENT.md § PreToolUse hook); raises PolicyError or ValueError.
 
     It protects the table, the engine's files and uv's tool environment of the installed `atc`."""
@@ -277,9 +280,8 @@ def hook_table(workspace: Path, table_dir: Path, schemas: Path = policies.SCHEMA
         path = _norm(_expand_root(root), base)
         if path not in write_roots:
             write_roots.append(path)
-    scripts = engine_dir or ENGINE_DIR
     tool = tool_environment()
-    protected = ([_norm(table_dir, base)] + [_norm(scripts / name, base) for name in ENGINE_FILES]
+    protected = ([_norm(table_dir, base)] + [_norm(ENGINE_DIR / name, base) for name in ENGINE_FILES]
                  + ([_norm(tool, base)] if tool is not None else []))
     table = {"version": HOOK_TABLE_VERSION, "commands": commands, "filesystem": filesystem,
              "worktrees": worktrees, "write_roots": write_roots, "protected": protected}
@@ -305,10 +307,11 @@ def default_table_dir() -> Path:
     return Path.home() / ".atc" / "enforcement"
 
 
-def engine_command(workspace: Path, harness: str, table_dir: Path, engine_dir: Path | None = None) -> str:
-    """The hook command: the engine of the `atc` that composes it, run by `python`, named by forward-slash path."""
+def engine_command(workspace: Path, harness: str, table_dir: Path) -> str:
+    """The hook command: `atc hook`, which runs the engine of whatever `atc` is installed, so a new install needs no
+    new entry; a table outside the default directory is named by forward-slash path."""
     base, _ = _workspace_doc(workspace)
-    command = f'python "{((engine_dir or ENGINE_DIR) / ENGINE).as_posix()}" --harness {harness}'
+    command = f"{HOOK_COMMAND} --harness {harness}"
     if _norm(table_dir, base) != _norm(default_table_dir(), base):
         command += f' --table "{(table_dir / HOOK_TABLE).as_posix()}"'
     return command
@@ -325,7 +328,7 @@ def _managed(hook: object) -> bool:
     if not isinstance(hook, dict):
         return False
     text = f"{hook.get('command', '')} {' '.join(map(str, hook.get('args') or []))}"
-    return ENGINE in text or RETIRED_GUARDS.search(text) is not None
+    return ENGINE in text or MANAGED_COMMAND.search(text) is not None or RETIRED_GUARDS.search(text) is not None
 
 
 def _settings(path: Path) -> dict:

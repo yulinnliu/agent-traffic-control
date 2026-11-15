@@ -47,10 +47,6 @@ commands:
       argv_prefix: [atc, push]
       unless_args: [--check, --help, -h]
       reason: Publication is the Owner's act; an agent runs only --check (governance GIT_WORKFLOW.md § Publication boundary).
-    - id: atc-install
-      argv_prefix: [atc, install]
-      unless_args: [--check, --help, -h]
-      reason: Installing a release as the host's atc is the Owner's act, like publication; an agent runs only --check.
     - id: atc-remove
       argv_prefix: [atc, remove]
       unless_args: [--check, --help, -h]
