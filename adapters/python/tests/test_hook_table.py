@@ -119,7 +119,7 @@ def test_the_table_composes_the_workspace_policy_first_then_each_project(workspa
 
 def test_the_table_and_the_command_name_the_engine_of_the_composing_atc(workspace, home):
     """A release copy's `atc guard --install` points the hook at that copy, never at the workspace checkout."""
-    release = home / ".atc" / "releases" / "v0.6.0" / "adapters" / "python" / "scripts"
+    release = home / ".atc" / "releases" / "v0.6.0" / "adapters" / "python" / "src" / "atc_cli" / "scripts"
     table = json.loads(ge.hook_table(workspace, home / ".atc" / "enforcement", engine_dir=release))
     assert norm(release / "pretooluse_hook.py") in table["protected"]
     assert norm(ge.ENGINE_DIR / "pretooluse_hook.py") not in table["protected"]

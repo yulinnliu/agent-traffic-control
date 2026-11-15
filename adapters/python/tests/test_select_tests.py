@@ -27,7 +27,7 @@ def test_a_script_selects_its_own_tests(graph):
 
 
 def test_a_script_selects_the_tests_that_reach_it_through_another_module(graph):
-    selected = chosen(graph, f"{ADAPTER}/scripts/git_preflight.py")
+    selected = chosen(graph, f"{ADAPTER}/src/atc_cli/scripts/git_preflight.py")
     assert {"tests/test_git_preflight.py", "tests/test_managed_worktree.py", "tests/test_git_integrate.py"} <= set(selected)
     assert "tests/test_testkit_release.py" not in selected
 
@@ -280,7 +280,7 @@ def test_the_declared_selector_prints_the_json_form():
 
 
 def test_direct_is_the_changed_tests_and_the_tests_one_edge_from_a_changed_module(graph, capsys):
-    preflight = f"{ADAPTER}/scripts/git_preflight.py"
+    preflight = f"{ADAPTER}/src/atc_cli/scripts/git_preflight.py"
     assert "tests/test_git_preflight.py" in select_tests.direct([preflight], graph)
     assert set(select_tests.direct([preflight], graph)) < set(chosen(graph, preflight))
     assert select_tests.direct([f"{ADAPTER}/tests/test_tooling.py", "docs/NO_TEST_NAMES_THIS.md"], graph) == [

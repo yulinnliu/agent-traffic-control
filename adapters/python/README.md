@@ -71,9 +71,14 @@ checkout and in a release copy, and is not part of the installed `atc`.
 
 `src/atc_cli/` holds the dispatchers for `atc` and `atc-maintain`: they resolve `--root`, applies the
 canonical checkout guard and wraps every `--json` result in the envelope of
-`shared/conformance/CLI.md` § Output; `scripts/cli_conventions.py` holds the
-exit codes, the shared options and the help form. The scripts stay runnable
-directly with `uv run python scripts/<name>.py`.
+`shared/conformance/CLI.md` § Output; `src/atc_cli/scripts/cli_conventions.py` holds
+the exit codes, the shared options and the help form. The scripts stay
+runnable directly with `uv run python src/atc_cli/scripts/<name>.py`. `src/atc_cli/scripts/` and `src/atc_cli/schemas/`, a
+byte-for-byte copy of `shared/policies/schemas/` that `test_packaged_schemas.py`
+holds equal, ship in the `atc` wheel. `scripts/` holds this repository's own
+tools, which the wheel leaves out: the integration verifier
+(`integration_verify.py` and the argv file `AGENTS.md` names), the test
+selector `select_tests.py` and `build_testkit_release.py`.
 
 ### validate
 

@@ -47,7 +47,7 @@ import yaml
 import manifest as mf
 import verification_section
 
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = Path(__file__).resolve().parents[5]
 # While `project_problems` runs: the sync target's tree, which delivered content is read from, and the content
 # repository locks are checked against (docs/LAYOUT.md § The manifest). ROOT for both otherwise.
 TREE: Path | None = None

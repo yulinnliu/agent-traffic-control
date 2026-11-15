@@ -17,8 +17,7 @@ from pathlib import Path
 import yaml
 from jsonschema import Draft202012Validator
 
-ROOT = Path(__file__).resolve().parents[3]
-SCHEMAS = ROOT / "shared" / "policies" / "schemas"
+SCHEMAS = Path(__file__).resolve().parents[1] / "schemas"  # the packaged copy of shared/policies/schemas
 KINDS = ("hard-deny", "approval-required", "permission-presets", "escalation")
 MODES = ("read", "edit", "write")
 
@@ -120,7 +119,7 @@ def main(argv: list[str] | None = None) -> int:
         see="README.md § Commands"))
     check.add_argument("directory", type=Path, metavar="DIR", help="the policy directory to check")
     check.add_argument("--schemas", type=Path, default=SCHEMAS, metavar="DIR",
-                       help="policy schema directory (default: shared/policies/schemas)")
+                       help="policy schema directory (default: the copy packaged with atc)")
     cli_conventions.add_json(check)
     args = parser.parse_args(argv)
 

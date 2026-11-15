@@ -1,4 +1,4 @@
-"""The release-pin guard (scripts/release_pin.py, docs/WORKFLOW.md § Installing a release): an installed release
+"""The release-pin guard (src/atc_cli/scripts/release_pin.py, docs/WORKFLOW.md § Installing a release): an installed release
 acts on a project only while its `.atc/atc.lock` pins that release, and doctor reports the pins and the copy."""
 from __future__ import annotations
 

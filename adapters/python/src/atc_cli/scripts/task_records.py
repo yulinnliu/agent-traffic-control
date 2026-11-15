@@ -22,8 +22,8 @@ import cli_conventions
 from cli_conventions import Refusal
 import task_section
 
-ROOT = Path(__file__).resolve().parents[3]
-SCHEMA = ROOT / "shared" / "policies" / "schemas" / "task.schema.json"
+ROOT = Path(__file__).resolve().parents[5]
+SCHEMA = Path(__file__).resolve().parents[1] / "schemas" / "task.schema.json"  # packaged copy of shared/policies/schemas
 TASKS_DIR = ".atc/tasks"
 MAIN = "main"
 TESTS = ("none", "standard", "strict")

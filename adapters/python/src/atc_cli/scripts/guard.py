@@ -19,7 +19,7 @@ import cli_conventions
 import generate_enforcement as ge
 import policies
 
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = Path(__file__).resolve().parents[5]
 INSTALL_HINT = "the Owner runs atc guard --install from their own terminal"
 
 

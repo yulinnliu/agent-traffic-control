@@ -477,7 +477,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--live-codex-hooks", type=Path, metavar="FILE",
                         help="with --check and --workspace: a Codex hooks.json whose hook entry must match")
     parser.add_argument("--schemas", type=Path, default=policies.SCHEMAS, metavar="DIR",
-                        help="policy schema directory (default: shared/policies/schemas)")
+                        help="policy schema directory (default: the copy packaged with atc)")
     cli_conventions.add_json(parser)
     args = parser.parse_args(argv)
     native_live = args.live_claude or args.live_claude_local or args.live_codex or args.live_hook

@@ -23,7 +23,7 @@ import git_preflight as gp
 from atc_testkit import locations, owner as candidate_owner
 import validate_workspace as validator
 
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = Path(__file__).resolve().parents[5]
 CONTRACT = 2
 HARNESSES = ("claude", "codex", "dsh")
 HARNESS_SIGNS = {"claude": ("CLAUDECODE",), "codex": ("CODEX_",), "dsh": ("DSH_",)}

@@ -12,7 +12,7 @@ import sync_project
 import validate_workspace as validator
 from test_tooling import commit_workspace, make_workspace, managed_adapter, run_git, user_home, write  # noqa: F401  (user_home: autouse)
 
-SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
+SCRIPTS = Path(__file__).resolve().parents[1] / "src" / "atc_cli" / "scripts"
 
 
 def _orphaned_project(tmp_path: Path) -> tuple[Path, Path]:

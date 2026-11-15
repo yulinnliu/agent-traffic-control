@@ -20,7 +20,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[3]
 CONFORMANCE = ROOT / "shared" / "conformance"
-SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
+SCRIPTS = Path(__file__).resolve().parents[1] / "src" / "atc_cli" / "scripts"
 
 TOOLS = {
     "validate-adapters": [str(SCRIPTS / "validate_workspace.py")],

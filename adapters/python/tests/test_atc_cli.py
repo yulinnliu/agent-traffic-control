@@ -149,8 +149,8 @@ def nested_checkouts(tmp_path: Path) -> tuple[Path, Path]:
     workspace = tmp_path / "workspace"
     worktree = workspace / ".claude" / "worktrees" / "topic"
     for checkout in (workspace, worktree):
-        (checkout / "adapters" / "python" / "scripts").mkdir(parents=True)
-        (checkout / "adapters" / "python" / "scripts" / "validate_workspace.py").write_text("", encoding="utf-8")
+        (checkout / "adapters" / "python" / "src" / "atc_cli" / "scripts").mkdir(parents=True)
+        (checkout / "adapters" / "python" / "src" / "atc_cli" / "scripts" / "validate_workspace.py").write_text("", encoding="utf-8")
     (workspace / "workspace.yaml").write_text("version: 1\n", encoding="utf-8")
     return workspace, worktree
 
@@ -355,7 +355,7 @@ def test_root_is_taken_before_or_after_the_command() -> None:
 
 def test_maintainer_commands_refuse_the_canonical_checkout(canonical: Path, monkeypatch: pytest.MonkeyPatch,
                                                            capsys: pytest.CaptureFixture[str]) -> None:
-    scripts = canonical / "adapters" / "python" / "scripts"  # maintain finds the checkout by its scripts
+    scripts = canonical / "adapters" / "python" / "src" / "atc_cli" / "scripts"  # maintain finds the checkout by its scripts
     scripts.mkdir(parents=True)
     (scripts / "validate_workspace.py").write_text("", encoding="utf-8")
     monkeypatch.chdir(canonical)
@@ -369,7 +369,7 @@ def test_maintainer_commands_refuse_a_release_copy(tmp_path: Path, monkeypatch: 
     monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     copy = tmp_path / "home" / ".atc" / "releases" / "v0.6.0"
-    scripts = copy / "adapters" / "python" / "scripts"
+    scripts = copy / "adapters" / "python" / "src" / "atc_cli" / "scripts"
     scripts.mkdir(parents=True)
     (scripts / "validate_workspace.py").write_text("", encoding="utf-8")
     monkeypatch.setattr(maintain, "CHECKOUT", copy)

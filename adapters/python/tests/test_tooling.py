@@ -995,7 +995,7 @@ def test_sync_plans_every_baseline_skill_in_every_selected_tool_dir(tmp_path: Pa
 
 
 def canonical_cli(root: Path) -> Path:
-    return root / "adapters/python/scripts/managed_worktree.py"
+    return root / "adapters/python/src/atc_cli/scripts/managed_worktree.py"
 
 
 def write_cli_stub(root: Path) -> None:
@@ -1051,7 +1051,7 @@ def test_doctor_exposes_the_managed_worktree_capability_when_it_loads() -> None:
 
 def test_doctor_starts_and_reports_a_missing_managed_worktree_module(tmp_path: Path) -> None:
     """Only a real startup exercises the import guard; diagnose() on the live module cannot."""
-    scripts = tmp_path / "adapters" / "python" / "scripts"  # doctor's ROOT is parents[3] of its own file
+    scripts = tmp_path / "adapters" / "python" / "src" / "atc_cli" / "scripts"  # doctor's ROOT is parents[5] of its own file
     shutil.copytree(Path(doctor.__file__).resolve().parent, scripts)
     real_module = scripts / "managed_worktree.py"
     write_minimal_workspace(tmp_path)

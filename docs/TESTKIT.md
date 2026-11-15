@@ -388,8 +388,8 @@ working-directory rules bind it as they bind a project's verifier.
   static checks follow, then the stages.
 - Static checks: `git diff --check` of the range and the static checks of
   the `python-adapter` job in `.github/workflows/validate.yml`, run from
-  `adapters/python`: `uv run --locked python scripts/validate_workspace.py`
-  and `uv run --locked python scripts/policies.py check
+  `adapters/python`: `uv run --locked atc-maintain validate` and
+  `uv run --locked atc-maintain policies check
   ../../shared/policies/examples`.
 - Selection: in place of the job's full run of the stages, `test_paths`
   maps the range through `select_tests.py` (`adapters/python/README.md`

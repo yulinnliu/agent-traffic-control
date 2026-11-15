@@ -68,9 +68,10 @@ FULL_FILES = frozenset({
     f"{ADAPTER}/atc-testkit/pyproject.toml",
     f"{TESTS}/unmarked_baseline.txt",
 })
-# Source roots and the package each holds; a top-level file of `scripts/` is its own module.
+# Source roots and the package each holds; a top-level file of either `scripts/` is its own module.
 SOURCE_ROOTS = {
     f"{ADAPTER}/scripts": None,
+    f"{ADAPTER}/src/atc_cli/scripts": None,
     f"{ADAPTER}/src/atc_cli": "atc_cli",
     f"{ADAPTER}/atc-testkit/src/atc_testkit": "atc_testkit",
 }
@@ -105,6 +106,7 @@ DIRECTORY_READERS = {
     f"{TESTS}/test_manifest_content.py": ("atc-manifest.yaml",),
     f"{TESTS}/test_integration_verify.py": ("AGENTS.md",),
     f"{TESTS}/test_shell_install.py": SCRIPT_READS,
+    f"{TESTS}/test_packaged_schemas.py": ("shared/policies/schemas", f"{CLI_SRC}/schemas"),
 }
 
 

@@ -18,11 +18,14 @@ SHORTEST_ROOT_NAME = 3
 ROOT_MARGIN = len("/new")
 SESSION_RESERVE = 1 + 5 + ROOT_MARGIN  # a separator, a test's root of five characters and its margin
 HOST_TMP = Path(os.path.realpath(os.environ.get("ATC_TMP") or Path.home() / ".atc" / "tmp"))
-SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
-if str(SCRIPTS) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS))
+ADAPTER = Path(__file__).resolve().parents[1]
+SCRIPTS = ADAPTER / "src" / "atc_cli" / "scripts"
+TOOLS = ADAPTER / "scripts"
+for directory in (TOOLS, SCRIPTS):
+    if str(directory) not in sys.path:
+        sys.path.insert(0, str(directory))
 
-import root_reads  # noqa: E402  (needs SCRIPTS on the path for select_tests)
+import root_reads  # noqa: E402  (needs TOOLS on the path for select_tests)
 
 
 def pytest_configure(config: pytest.Config) -> None:

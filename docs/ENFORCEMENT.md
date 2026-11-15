@@ -6,7 +6,7 @@ reads the policy and writes that configuration, deterministically, so a
 project commits the output and its CI diffs it. If the generated file and the
 policy disagree, the policy wins and the file is regenerated.
 
-Reference implementation: `adapters/python/scripts/generate_enforcement.py`
+Reference implementation: `adapters/python/src/atc_cli/scripts/generate_enforcement.py`
 (`atc-maintain guard`). Golden outputs: `shared/conformance/generate-enforcement/`.
 
 ## Outputs

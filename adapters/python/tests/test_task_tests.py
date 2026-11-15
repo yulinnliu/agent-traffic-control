@@ -1,4 +1,4 @@
-"""`atc test ID` (scripts/task_tests.py, docs/TESTKIT.md § Commands) on tmp repositories: the related tests of a
+"""`atc test ID` (src/atc_cli/scripts/task_tests.py, docs/TESTKIT.md § Commands) on tmp repositories: the related tests of a
 task's worktree, an export of a commit, mutants, the candidate, and the scratch listing and cleaning.
 
 The uv sync, the pytest runs, the mutant runs and the candidate verifier are stand-ins that record what the front

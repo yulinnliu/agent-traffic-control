@@ -32,7 +32,7 @@ def usage() -> str:
 def checkout_of(cwd: Path) -> Path:
     """The ATC checkout holding ``cwd``, else the one serving this program."""
     for candidate in (cwd.resolve(), *cwd.resolve().parents):
-        if (candidate / "adapters" / "python" / "scripts" / "validate_workspace.py").is_file():
+        if (candidate / "adapters" / "python" / "src" / "atc_cli" / "scripts" / "validate_workspace.py").is_file():
             return candidate
     return CHECKOUT
 

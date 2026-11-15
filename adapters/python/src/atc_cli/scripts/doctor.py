@@ -31,7 +31,7 @@ except (ImportError, SyntaxError) as exc:
 else:
     WORKTREE_IMPORT_ERROR = ""
 
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = Path(__file__).resolve().parents[5]
 
 
 @dataclass(frozen=True)

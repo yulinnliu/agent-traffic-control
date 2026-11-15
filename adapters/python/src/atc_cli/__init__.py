@@ -36,8 +36,8 @@ import os
 import sys
 from pathlib import Path
 
-SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"
-CHECKOUT = SCRIPTS.parents[2]
+SCRIPTS = Path(__file__).resolve().parent / "scripts"
+CHECKOUT = SCRIPTS.parents[4]
 COMMANDS = {
     "task": "task_records",
     "test": "task_tests",
@@ -91,7 +91,7 @@ def usage() -> str:
 
 
 def reinstall_command() -> str:
-    return f'uv tool install -e "{SCRIPTS.parent}" --force'
+    return f'uv tool install -e "{SCRIPTS.parents[2]}" --force'
 
 
 def escape_unencodable_output() -> None:

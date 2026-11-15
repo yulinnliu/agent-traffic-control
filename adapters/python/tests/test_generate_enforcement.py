@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src" / "atc_cli" / "scripts"))
 import generate_enforcement
 
 CASE = Path(__file__).resolve().parents[3] / "shared/conformance/generate-enforcement/filesystem-modes/input"

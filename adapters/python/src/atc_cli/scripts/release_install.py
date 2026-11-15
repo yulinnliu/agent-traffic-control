@@ -24,7 +24,7 @@ import checkout_guard
 import cli_conventions
 import git_preflight as gp
 
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = Path(__file__).resolve().parents[5]
 TAG = re.compile(r"^v\d+\.\d+\.\d+$")
 DISTRIBUTION = "agent-traffic-control"
 # The console scripts uv writes into its bin directory; on Windows they are copied launchers.

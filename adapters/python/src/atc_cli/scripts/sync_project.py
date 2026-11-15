@@ -44,7 +44,7 @@ import verification_section
 import cli_conventions
 from integration_slot import IntegrationSlot
 
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = Path(__file__).resolve().parents[5]
 MAIN = "main"
 # The `--json` result: one entry per checkout `run` plans, None outside `--json` (shared/conformance/CLI.md § Output).
 EVENTS: list[dict] | None = None
@@ -640,7 +640,7 @@ def release_tags(root: Path, revision: str) -> tuple[str | None, str | None]:
 def installed_release():
     """The release this code is when it runs from a release copy (`release_pin`), else None."""
     import release_pin
-    return release_pin.installed(Path(__file__).resolve().parents[3])
+    return release_pin.installed(Path(__file__).resolve().parents[5])
 
 
 def content_repository(root: Path, *, fetch: bool = True) -> Path:

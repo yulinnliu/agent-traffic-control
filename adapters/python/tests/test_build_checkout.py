@@ -1,4 +1,4 @@
-"""`atc checkout` (scripts/build_checkout.py, docs/WORKFLOW.md § Build trees) and `atc hook`."""
+"""`atc checkout` (src/atc_cli/scripts/build_checkout.py, docs/WORKFLOW.md § Build trees) and `atc hook`."""
 from __future__ import annotations
 
 import json

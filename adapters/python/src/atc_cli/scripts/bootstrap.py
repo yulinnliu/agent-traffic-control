@@ -28,7 +28,7 @@ import cli_conventions
 import validate_workspace
 import sync_project
 
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = Path(__file__).resolve().parents[5]
 SCRIPTS = Path(__file__).resolve().parent
 NAME = re.compile(r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")
 URL = re.compile(r"^(https?://|git@|ssh://)")

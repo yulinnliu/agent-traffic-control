@@ -24,7 +24,7 @@ from atc_testkit import locations, scratch
 import cli_conventions
 import managed_worktree
 
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = Path(__file__).resolve().parents[5]
 PREFIX = "build+"
 SHORT = 7
 MAIN = "refs/heads/main"

@@ -12,9 +12,10 @@ pytestmark = pytest.mark.integration
 
 TESTS = Path(__file__).resolve().parent
 SCRIPTS = TESTS.parent / "scripts"
+CLI_SCRIPTS = TESTS.parent / "src" / "atc_cli" / "scripts"
 CONFTEST = f"""import sys
 from pathlib import Path
-sys.path[:0] = [{str(TESTS)!r}, {str(SCRIPTS)!r}]
+sys.path[:0] = [{str(TESTS)!r}, {str(SCRIPTS)!r}, {str(CLI_SCRIPTS)!r}]
 import root_reads
 
 def pytest_configure(config):

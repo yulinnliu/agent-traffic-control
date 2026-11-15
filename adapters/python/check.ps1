@@ -182,7 +182,7 @@ try {
         throw "uv is required. Install it from https://docs.astral.sh/uv/ and rerun this command."
     }
 
-    $validateArgs = @("run", "--locked", "python", "scripts/validate_workspace.py")
+    $validateArgs = @("run", "--locked", "python", "src/atc_cli/scripts/validate_workspace.py")
     if ($Projects) {
         $validateArgs += "--projects"
     }
