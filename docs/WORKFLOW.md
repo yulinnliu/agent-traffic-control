@@ -198,6 +198,12 @@ atc install <tag>
 atc guard --install
 ```
 
+On a host whose workspace directory is itself the ATC checkout, its
+`workspace.yaml` names it with `governance_checkout: .` before a release
+from 0.7.0 on is installed. Without that line such a release stops `atc
+sync` and `atc add` with `GOVERNANCE_CHECKOUT_UNSET`; releases before 0.7.0
+ignore the key, so the Owner adds it first.
+
 `atc install` creates `~/.atc/releases/<tag>` (`ATC_HOME.md` § Layout), a
 detached worktree of the workspace root repository at the tag, locked so no
 worktree cleanup removes it, unless it already exists clean at that tag. It

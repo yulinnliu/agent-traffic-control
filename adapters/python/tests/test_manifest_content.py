@@ -215,14 +215,46 @@ def test_the_root_adapter_check_renders_from_mains_git_objects_not_the_working_t
 
 
 @pytest.mark.integration
-def test_doctor_warns_when_a_governance_checkout_does_not_say_so(tmp_path: Path) -> None:
+def test_a_governance_checkout_without_governance_checkout_stops_sync_add_and_doctor(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """Fix 1: the workspace directory is a checkout of the governance repository but workspace.yaml does not say
+    so; sync, add and doctor stop with GOVERNANCE_CHECKOUT_UNSET and never fall back to a cache of origin."""
+    import bootstrap
     import doctor
-    root, _ = make_workspace(tmp_path)
-    assert doctor.governance_checkout_hint(root) is None
+    root, project = make_workspace(tmp_path)
+    commit_workspace(root, project)
     path = root / "workspace.yaml"
-    path.write_text(path.read_text(encoding="utf-8").replace("governance_checkout: .\n", ""), encoding="utf-8")
-    hint = doctor.governance_checkout_hint(root)
-    assert hint is not None and hint.status == "WARN" and "governance_checkout: ." in hint.detail
+    path.write_text(path.read_text(encoding="utf-8").replace("governance_checkout: .\n", "")
+                    + "governance_source: owner/atc\n", encoding="utf-8")
+    capsys.readouterr()
+    for argv in (["demo"], ["demo", "--check"], []):
+        assert sync_project.main(argv, root=root) == 1
+        err = capsys.readouterr().err
+        assert "GOVERNANCE_CHECKOUT_UNSET" in err and "add governance_checkout: . to workspace.yaml" in err
+    assert not (project / ".atc").exists()
+    other = root / "projects" / "other"
+    other.mkdir(parents=True)
+    run_git(other, "init", "-q", "-b", "main")
+    assert bootstrap.add(root, "other", None, []) == 1
+    assert "GOVERNANCE_CHECKOUT_UNSET" in capsys.readouterr().err
+    assert not (other / ".atc").exists()
+    check = doctor.root_adapter_check(root)
+    assert check.status == "ERROR" and check.detail.startswith("GOVERNANCE_CHECKOUT_UNSET")
+    assert not content.cache_dir("owner/atc").exists()
+
+
+@pytest.mark.integration
+def test_doctor_reads_the_content_cache_without_fetching(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fix 2: doctor changes nothing: with no cache it warns and fetches nothing; with one it reads it as it is."""
+    import doctor
+    workspace, project, remote = remote_workspace(tmp_path, monkeypatch)
+    check = doctor.root_adapter_check(workspace)
+    assert check.status == "WARN" and check.detail.startswith("CONTENT_CACHE_MISSING")
+    assert not content.cache_dir("owner/atc").exists()
+    assert sync_project.main(["demo"], root=workspace) == 0
+    content._FETCHED.clear()
+    monkeypatch.setattr(content, "remote_url", lambda name: str(tmp_path / "unreachable.git"))
+    assert doctor.root_adapter_check(workspace).status == "READY"
 
 
 @pytest.mark.integration

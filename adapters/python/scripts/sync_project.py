@@ -438,18 +438,19 @@ def workspace_scope_plan(root: Path, target: Target) -> list[PlanItem]:
     return plan
 
 
-def workspace_adapter_plan(root: Path, target: Target | None = None) -> tuple[list[PlanItem], bool]:
+def workspace_adapter_plan(root: Path, target: Target | None = None, *,
+                           fetch: bool = True) -> tuple[list[PlanItem], bool]:
     """The root-adapter check doctor and sync share (docs/LAYOUT.md § The manifest), and whether ``root`` is
     the governance checkout. The actual copies are the workspace directory's. The expected ones are rendered
     from the Git objects of the tip of `main` when the workspace directory is the governance checkout, never
     from its working tree; otherwise from ``target``, the sync target (resolved when None), whose `workspace`
-    items sync delivers."""
+    items sync delivers; ``fetch`` false reads the content cache without fetching it."""
     if content.is_workspace_checkout(root):
         with main_tip_tree(root) as tree:
             return root_adapter_plan(root, tree), True
     if target is not None:
         return workspace_scope_plan(root, target), False
-    with exported_target(root, None) as resolved:
+    with exported_target(root, None, fetch=fetch) as resolved:
         return workspace_scope_plan(root, resolved), False
 
 
@@ -497,6 +498,8 @@ STOP_HINTS = {
     "GOVERNANCE_CHECKOUT_INVALID": "point governance_checkout in workspace.yaml at a Git checkout",
     "CONTENT_SOURCE_UNKNOWN": "set governance_source (<owner>/<repo>) or governance_checkout in workspace.yaml",
     "CONTENT_FETCH_FAILED": "check the network and that governance_source names a reachable repository",
+    "CONTENT_CACHE_MISSING": "run atc sync, which fetches the content cache",
+    "GOVERNANCE_CHECKOUT_UNSET": "add governance_checkout: . to workspace.yaml",
     "GIT_FAILED": "check the project's Git state",
 }
 COLLISION_HINT = "the file is not ATC-managed; move it aside or ask the Owner, then sync again"
@@ -640,10 +643,10 @@ def installed_release():
     return release_pin.installed(Path(__file__).resolve().parents[3])
 
 
-def content_repository(root: Path) -> Path:
+def content_repository(root: Path, *, fetch: bool = True) -> Path:
     """The content repository of the workspace directory ``root`` (`content.repository`); SyncStop without one."""
     try:
-        return content.repository(root)
+        return content.repository(root, fetch=fetch)
     except content.ContentError as exc:
         raise SyncStop(exc.token, exc.detail) from None
 
@@ -677,12 +680,12 @@ def resolve_target(root: Path, revision: str | None) -> tuple[str, str | None, b
 
 
 @contextlib.contextmanager
-def exported_target(root: Path, revision: str | None) -> Iterator[Target]:
+def exported_target(root: Path, revision: str | None, *, fetch: bool = True) -> Iterator[Target]:
     """The sync target of the workspace directory ``root`` with its sources exported from the content
     repository to a temporary tree for the duration of the block. A revision without a usable manifest, or
     one that needs a newer atc, stops (D5: `NO_MANIFEST`, `MANIFEST_INVALID`, `MANIFEST_SOURCE_MISSING`,
     `MANIFEST_TOO_NEW`)."""
-    repo = content_repository(root)
+    repo = content_repository(root, fetch=fetch)
     commit, tag, named = resolve_target(repo, revision)
     with tempfile.TemporaryDirectory(prefix="atc-sync-", ignore_cleanup_errors=True) as temporary:
         tree = Path(temporary) / "tree"

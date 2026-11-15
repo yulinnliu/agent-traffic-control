@@ -55,15 +55,8 @@ def origin_slug(root: Path) -> str | None:
 
 def is_governance_checkout(root: Path) -> bool:
     """Whether ``root`` is the top of a Git checkout carrying `atc-manifest.yaml`: the governance repository."""
-    import manifest
-    if not manifest.present(root):
-        return False
-    try:
-        top = subprocess.check_output(["git", "-C", str(root), "rev-parse", "--show-toplevel"], text=True,
-                                      stderr=subprocess.DEVNULL).strip()
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        return False
-    return Path(top).resolve() == root.resolve()
+    import content
+    return content.holds_governance(root)
 
 
 def init(root: Path, governance_source: str | None, force: bool, environ: dict[str, str] | None = None) -> int:

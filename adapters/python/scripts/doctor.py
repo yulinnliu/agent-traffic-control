@@ -43,11 +43,15 @@ class Check:
 
 def root_adapter_check(root: Path) -> Check:
     """The workspace directory's own adapters, by the check `atc sync` stops on (`workspace_adapter_plan`): rendered
-    from the Git objects of `main` when the directory is the governance checkout, else from the sync target."""
+    from the Git objects of `main` when the directory is the governance checkout, else from the sync target, read
+    from the content cache without fetching it: doctor changes nothing, so a cache not yet fetched is a WARN."""
     try:
-        plan, checkout = sync_project.workspace_adapter_plan(root)
+        plan, checkout = sync_project.workspace_adapter_plan(root, fetch=False)
     except sync_project.SyncStop as stop:
-        return Check("workspace-managed adapters", "ERROR", f"{stop.code}: {stop.detail}")
+        status = "WARN" if stop.code == "CONTENT_CACHE_MISSING" else "ERROR"
+        hint = sync_project.STOP_HINTS.get(stop.code)
+        return Check("workspace-managed adapters", status,
+                     f"{stop.code}: {stop.detail}" + (f"; fix: {hint}" if hint else ""))
     except ValueError as exc:
         return Check("workspace-managed adapters", "ERROR", str(exc))
     source = f"the tip of {sync_project.MAIN}" if checkout else "the sync target"
@@ -59,17 +63,6 @@ def root_adapter_check(root: Path) -> Check:
                      f"{len(pending)} differ from {source} ({shown}{', ...' if len(pending) > 3 else ''}); fix: {fix}")
     adapters = sum(item.path.name == "SKILL.md" for item in plan)
     return Check("workspace-managed adapters", "READY", f"{adapters} adapters current with {source}")
-
-
-def governance_checkout_hint(root: Path) -> Check | None:
-    """WARN when the workspace directory is a checkout of the governance repository but `workspace.yaml` does not
-    say so: atc then fetches content from origin and no checkout guard applies (docs/LAYOUT.md § The manifest)."""
-    import content
-    import manifest
-    if content.governance_checkout(root) is not None or not manifest.present(root) or not (root / ".git").exists():
-        return None
-    return Check("governance_checkout", "WARN", f"{root} is a checkout of the governance repository but workspace.yaml "
-                                               "has no governance_checkout; add governance_checkout: .")
 
 
 def checkout_check(checkout: Path) -> Check:
@@ -288,9 +281,6 @@ def diagnose(root: Path = ROOT, environ: dict[str, str] | None = None, checkout:
     checks.append(Check("PyYAML", "READY", f"{yaml.__version__}"))
 
     checks.append(root_adapter_check(root))
-    unset = governance_checkout_hint(root)
-    if unset:
-        checks.append(unset)
 
     if managed_worktree is None:
         checks.append(Check("atc-worktree", "ERROR", f"the shared capability could not be loaded: {WORKTREE_IMPORT_ERROR}"))

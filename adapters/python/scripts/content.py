@@ -77,8 +77,20 @@ def cache_dir(name: str, environ: dict[str, str] | None = None) -> Path:
     return atc_home(environ) / CONTENT / owner / f"{repo}.git"
 
 
-def repository(root: Path, environ: dict[str, str] | None = None) -> Path:
-    """The content repository of the workspace at ``root``; the cache is fetched once per process."""
+def holds_governance(root: Path) -> bool:
+    """Whether ``root`` is the top of a Git checkout carrying `atc-manifest.yaml`: the governance repository."""
+    import manifest
+    if not manifest.present(root):
+        return False
+    found = _git("-C", str(root), "rev-parse", "--show-toplevel")
+    return found.returncode == 0 and same(Path(found.stdout.strip()), root.resolve())
+
+
+def repository(root: Path, environ: dict[str, str] | None = None, *, fetch: bool = True) -> Path:
+    """The content repository of the workspace at ``root``; the cache is fetched once per process, and with
+    ``fetch`` false only read: a missing cache is ``CONTENT_CACHE_MISSING``. A workspace directory that is a
+    checkout of the governance repository without `governance_checkout` is ``GOVERNANCE_CHECKOUT_UNSET``: its
+    content comes from that checkout, never from a cache of origin."""
     checkout = governance_checkout(root)
     if checkout is not None:
         found = _git("-C", str(checkout), "rev-parse", "--git-dir")
@@ -86,6 +98,9 @@ def repository(root: Path, environ: dict[str, str] | None = None) -> Path:
             raise ContentError("GOVERNANCE_CHECKOUT_INVALID",
                                f"governance_checkout {checkout} is not a Git checkout ({found.stderr.strip()})")
         return checkout
+    if holds_governance(root):
+        raise ContentError("GOVERNANCE_CHECKOUT_UNSET", f"{root} is a checkout of the governance repository but "
+                                                        "workspace.yaml has no governance_checkout")
     name = source(root)
     if name is None:
         raise ContentError("CONTENT_SOURCE_UNKNOWN", "workspace.yaml names neither governance_checkout nor an "
@@ -93,6 +108,10 @@ def repository(root: Path, environ: dict[str, str] | None = None) -> Path:
     cache = cache_dir(name, environ)
     key = os.path.normcase(str(cache))
     if key in _FETCHED:
+        return cache
+    if not fetch:
+        if not (cache / "HEAD").is_file():
+            raise ContentError("CONTENT_CACHE_MISSING", f"{cache} has not been fetched; atc sync fetches it")
         return cache
     if not (cache / "HEAD").is_file():
         cache.parent.mkdir(parents=True, exist_ok=True)

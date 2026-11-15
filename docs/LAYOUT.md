@@ -86,7 +86,13 @@ working tree: the Git objects of the checkout `workspace.yaml` names as
 `~/.atc/content/<owner>/<repo>.git` of `governance_source`, cloned on first
 use and fetched (`main` and tags) once per run. A SHA names the same tree in
 either, so the SHA is the integrity check. A host without `governance_checkout`
-syncs only to commits and tags pushed to the governance repository.
+syncs only to commits and tags pushed to the governance repository. A
+workspace directory that is itself a checkout of the governance repository
+(a Git top level holding `atc-manifest.yaml`) but whose `workspace.yaml` has
+no `governance_checkout` never falls back to the cache: sync and `atc add`
+stop, and doctor reports an `ERROR`, with `GOVERNANCE_CHECKOUT_UNSET` and the
+fix `governance_checkout: .`. Doctor reads the cache as it is and fetches
+nothing; a cache not yet fetched is a `WARN` (`CONTENT_CACHE_MISSING`).
 
 The workspace directory's own skill copies are checked by one check that
 `atc doctor` and `atc sync` share: the copies on disk against copies rendered
