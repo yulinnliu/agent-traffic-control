@@ -28,7 +28,8 @@ Agent Traffic Control 就是做這件事的。它不是 gateway，也不是 orch
   `atc task close` 會拒絕。
 - **hard deny 是 harness 的設定，不是文字。** maintainer 的產生器（`atc-maintain guard`）從同一份
   `hard-deny.yaml` 產生 Claude Code 的 `permissions.deny`、Codex 的 rules 區塊
-  和 git pre-commit hook，`--check` 會回報不一致；`atc guard --install` 負責裝上 hook 表。
+  和 git pre-commit hook，`--check` 會回報不一致。PreToolUse hook 從各 repository `main` 上的 policy
+  自己組出表，Owner 在每台主機跑一次 `atc guard --install` 裝上它的 entry。
   裝上之後，被禁止的動作由 harness 直接拒絕。
 
 ## 為什麼需要它

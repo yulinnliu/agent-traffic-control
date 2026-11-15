@@ -125,29 +125,69 @@ Git skips it on Linux and macOS.
 
 One hook binds every Claude Code and Codex session on the machine: the engine
 `pretooluse_hook.py` of the installed `atc`, which `atc hook` runs
-(`WORKFLOW.md` § Installing a release), standard library only, reading one
-composed table. The hook sees the text of
+(`WORKFLOW.md` § Installing a release), standard library only, reading a
+table it composes itself from reviewed `main` inputs. The hook sees the text of
 a tool call, not what a program does once it runs; it turns a mistaken
 command into a refusal with a reason and is not a security boundary.
 
-**Table.** `atc-maintain guard --workspace <map> --hook-out <dir>` writes
-`<dir>/pretooluse.json` (LF, deterministic) from, in order:
+**Table.** The entry names the workspace map (`--workspace`), the home
+directory (`--home`) and the ATC home (`--atc-home`); the hook reads no
+environment variable for them. It composes its table from, in order:
 
-1. the workspace policy, `policies/hard-deny.yaml` of this repository; its
-   repository-relative globs apply under `workspace_root` and
-   `worktrees/root/*`;
-2. each registered project's `policies/hard-deny.yaml`, read from its
-   checkout; its repository-relative globs apply under its `repo` and its
-   `worktrees/*`;
+1. the workspace policy: on a host whose map sets `governance_checkout`,
+   `policies/hard-deny.yaml` at that checkout's `refs/heads/main`; a
+   workspace directory that is a governance checkout without it stops at
+   `GOVERNANCE_CHECKOUT_UNSET`; elsewhere the workspace's own
+   `policies/hard-deny.yaml` file. Its repository-relative globs apply under
+   `workspace_root` and `worktrees/root/*`;
+2. each registered project's `policies/hard-deny.yaml` at its
+   `refs/heads/main`; its repository-relative globs apply under its `repo`
+   and its `worktrees/*`. A project whose `main` holds none adds no policy
+   rule;
 3. the workspace map: each `state` root (an edit/write deny), the
    `worktrees` roots, and the write roots: `workspace_root` plus each
    `agent_write_roots` entry, with `%VAR%`, `$VAR` and `~` expanded.
 
+Edits in a worktree, uncommitted edits and topic branches never reach the
+table. Policy files are read from the Git objects of the commit the key names
+(`git --no-replace-objects cat-file --batch`), each at most 256 KiB, as YAML
+without anchors or aliases. Git runs with an environment built from scratch
+(no inherited `GIT_*`, `GIT_CONFIG_NOSYSTEM=1`).
+
 Command rules apply to every session, whatever their source; `~`-rooted globs
 apply everywhere. A rule already composed from an earlier source is not
 repeated. Paths are stored absolute, long-form and case-folded. The engine
-files, the table directory and uv's tool environment of the installed `atc`
-(`<uv tool dir>/agent-traffic-control`) are write-protected in every call.
+files, the state directory `<atc-home>/enforcement/`, the map, a workspace
+policy read from a file, and uv's tool environment of the running `atc` (its
+`sys.prefix` when it holds `uv-receipt.toml`) are write-protected in every
+call.
+
+**State.** Under `<atc-home>/enforcement/`, one set per map, named by the
+first 16 hex digits `<m>` of the sha256 of the map's absolute path:
+
+| File | Holds | Written by |
+| --- | --- | --- |
+| `baseline-<m>.json` | the effective table, which only tightens | `atc guard --install` and `--reset`; the hook writes baseline ⊕ fresh |
+| `table-<m>.json` | the key and the effective table, or the failure, of the last composition | the hook |
+| `compose-<m>.lock` | a one-byte lock | the hook, `--install`, `--reset` |
+
+The key holds the map's sha256, each Git input's `main` SHA, a workspace
+policy file's sha256, the values of the variables `agent_write_roots`
+names, and a fingerprint of the composing code (size and mtime of its files),
+so a new install, a commit on a `main` or a map change recomposes on the next
+call. On a hit the hook reads the refs and stats the files, about 1 ms, without
+starting Git. On a miss it takes the lock, rereads the cache, reads the
+baseline and composes in a child process; the whole miss stays within 6 s of
+the hook's start, so Codex, which runs a call whose hook times out, never
+reaches its own timeout. The child process tree is killed at the deadline.
+
+**Ratchet.** A composition never loosens the effective table. On success the
+hook writes baseline ⊕ fresh: the union of `commands`, `filesystem`,
+`worktrees` and `protected`, and the intersection of `write_roots` (a root is
+kept when it lies within a root of the other side). What only the baseline
+holds is `retained`, which `atc doctor` and `atc guard` report. A failure, a
+missing or invalid baseline or a damaged cache never touches the baseline.
+Loosening takes the Owner's `atc guard --reset`.
 
 **Command entries.** The schema adds four hook-only fields to a
 `commands.deny` entry; all the conditions of one entry hold for it to deny:
@@ -316,37 +356,79 @@ each command in the session's `cwd`.
 
 **Failure.** The payload is read as UTF-8 bytes, whatever the console code
 page; one that is not UTF-8, not JSON or not an object prints a deny naming
-that cause. Any other error of the engine (a missing or invalid table)
-prints a deny naming the error and the Owner's repair,
-`atc guard --install`. The Claude Code entry also sets
+that cause. When the table cannot be composed the hook denies every call,
+in both harnesses, with `Refused: the PreToolUse hook cannot compose its
+table: <TOKEN>: <detail>` and the Owner's next step, `atc doctor`:
+
+| Token | Cause | Cached by key |
+| --- | --- | --- |
+| `WORKSPACE_MISSING`, `WORKSPACE_INVALID` | the map cannot be read, or is not a valid map | yes |
+| `POLICY_INVALID` | a policy fails its schema, contradicts itself or uses a YAML alias; names `<label> <repo>@<sha>` | yes |
+| `POLICY_TOO_LARGE` | a policy file over 256 KiB | yes |
+| `MAIN_UNREADABLE` | a repository without a readable `refs/heads/main` | yes |
+| `GOVERNANCE_CHECKOUT_UNSET` | the workspace directory is a governance checkout the map does not declare | yes |
+| `COMPOSE_TIMEOUT` | composing took past the deadline | yes |
+| `COMPOSE_BUSY` | another process held the lock past the deadline | no |
+| `BASELINE_MISSING`, `BASELINE_INVALID` | no baseline, or one that cannot be read; the Owner runs `atc guard --reset` | no |
+| `USAGE` | an entry with both `--workspace` and `--table` | no |
+
+A failure cached by key denies at once until an input changes. Any other
+error of the engine prints a deny naming the error and `atc doctor`. The
+Claude Code entry also sets
 `"onFailure": "block"` (Claude Code 2.1.295 or later) and `"timeout": 10`,
 so a hook that cannot start, crashes or stalls blocks the call. Codex offers
 no such option: there a hook that cannot start lets the call run.
 
-**Installation.** `atc guard --install`, run by the Owner, writes the
-table (to `~/.atc/enforcement`) and replaces, in
-`~/.claude/settings.json` and `~/.codex/hooks.json`, every PreToolUse entry
-running the engine or one of the retired guards (`worktree_cd_guard.py`, `write_scope_guard.py`) with:
+**Installation.** `atc guard --install`, run once per host by the Owner,
+composes the table in the Owner's terminal, refuses on the checks of
+`--reset` below (replace refs, alternates, a diverged `main`), writes the
+baseline (the old baseline ⊕ fresh ⊕ a legacy `pretooluse.json`), deletes
+the map's cache, and replaces, in `~/.claude/settings.json` and
+`~/.codex/hooks.json`, every PreToolUse entry running the engine or one of
+the retired guards (`worktree_cd_guard.py`, `write_scope_guard.py`) with:
 
 | Harness | Matcher | Command |
 | --- | --- | --- |
-| Claude Code | `Bash\|PowerShell\|Edit\|Write\|NotebookEdit` | `atc hook --harness claude` |
-| Codex | `Bash\|apply_patch` | `atc hook --harness codex` |
+| Claude Code | `Bash\|PowerShell\|Edit\|Write\|NotebookEdit` | `atc hook --harness claude --workspace "<map>" --home "<home>" --atc-home "<atc-home>"` |
+| Codex | `Bash\|apply_patch` | `atc hook --harness codex --workspace "<map>" --home "<home>" --atc-home "<atc-home>"` |
 
-`atc hook` runs the engine of whatever `atc` is installed, so a new install
-needs no new entry; an entry that runs an engine by path, as a release copy's
-entry did, is a managed entry `--install` replaces. The harness finds `atc`
+`<home>` is the Owner's home directory and `<atc-home>` is `<home>/.atc`. An entry whose values differ from those the Owner's terminal
+resolves is outdated. `atc hook` runs the engine of whatever `atc` is
+installed and composes from `main`, so a new install, a policy change on
+`main` or `atc add` needs no new entry; an entry that runs an engine by path,
+or without `--workspace`, is a managed entry `--install` replaces. The harness finds `atc`
 on its own PATH, so the entry checks a call only where `atc` is on that PATH.
 When the harness cannot run `atc`, because it is not on PATH or because
 `uv tool install` is replacing the environment, the Claude Code entry asks to
 block the call (`onFailure: block`), while Codex blocks only on exit 2 and
 runs the call unchecked. So the Owner installs when no session runs and checks
-that `atc` resolves in the shell each harness starts from. A table outside the default
-directory adds `--table "<file>"`. Codex then
-asks the Owner to trust the entry once in `/hooks`. The workspace policy
-denies agents `atc guard --install`, so it runs from the Owner's terminal,
-which no hook sees. `atc guard` without `--install` checks the table and the
-entries and writes nothing.
+that `atc` resolves in the shell each harness starts from. Codex then
+asks the Owner to trust the entry once in `/hooks`. `atc hook --table FILE`
+(or neither option, `~/.atc/enforcement/pretooluse.json`) reads a static
+table instead; `--workspace` with `--table` is a `USAGE` deny.
+
+**Reset.** `atc guard --reset`, from the Owner's terminal, is the one way to
+loosen the table. It refuses unless both entries are current; refuses on
+`refs/replace/*` (`REPLACE_REFS_PRESENT`), `objects/info/alternates`
+(`ALTERNATES_PRESENT`) or a `main` that does not descend from
+`refs/remotes/origin/main` (`MAIN_DIVERGED`; nothing is fetched, so this
+check informs and does not prove); prints each input as `<label>
+<repo>@<sha>` and the rules and write roots the baseline would drop (against
+the cache, else the legacy table, labelled `no baseline: compared with ...`,
+when there is no baseline); asks `[y/N]`, or takes `--yes` (`--json` writes
+only with `--yes`); then, under the lock, writes the baseline as the fresh
+table and deletes the cache and the legacy table.
+
+**Agents.** The workspace policy denies agents `atc guard --install` and
+`--reset`, `atc hook --workspace`, `atc init --force` and `uv tool
+install`/`upgrade`/`uninstall`, so they run from the Owner's terminal, which
+no hook sees. `atc guard` without an option reports the entries, the
+baseline, whether the table composes, what is retained and a legacy table,
+and writes nothing; `atc doctor` prints the same lines.
+
+**Matching uv.** uv's options before the subcommand are dropped, with the
+value of those that take one, so `uv --quiet tool install x` matches
+`[uv, tool, install]`.
 
 ## Drift
 
@@ -361,7 +443,7 @@ normalisation:
 | `--live-claude-local PATH` | the machine-local segment of the file's `permissions.deny` list, in order, against the `--workspace` render |
 | `--live-codex PATH` | the `# BEGIN atc hard-deny` ... `# END atc hard-deny` block, markers included; a file without exactly one block drifts |
 | `--live-hook PATH` | the whole hook file |
-| `--live-hook-table PATH` | the whole PreToolUse hook table, against a fresh compose (needs `--workspace`) |
+| `--live-hook-table PATH` | the whole PreToolUse hook table, against a fresh compose from each repository's `main` (needs `--workspace`) |
 | `--live-claude-hooks PATH` | the PreToolUse entries of a Claude settings file that run the engine or a retired guard: exactly the rendered entry |
 | `--live-codex-hooks PATH` | the same for a Codex `hooks.json` |
 

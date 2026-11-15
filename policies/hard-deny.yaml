@@ -1,6 +1,6 @@
 # The workspace policy: what no agent on this machine may do, whatever its project.
-# `atc guard --install` composes it, first, with every registered project's own
-# policy into the PreToolUse hook's table (docs/ENFORCEMENT.md § PreToolUse hook).
+# The PreToolUse hook composes it, first, with every registered project's own
+# policy on main into its table (docs/ENFORCEMENT.md § PreToolUse hook).
 version: 1
 
 capabilities:
@@ -59,10 +59,27 @@ commands:
       argv_prefix: [atc, test]
       background: true
       reason: Tests and verification run in the foreground (governance DELIVERY.md § Background work).
-    - id: atc-guard-install
+    - id: atc-guard-install-reset
       argv_prefix: [atc, guard]
-      with_args: [--install]
-      reason: The hook's table and settings entries change only from the Owner's own terminal.
+      with_args: [--install, --reset]
+      reason: The hook's settings entries and baseline change only from the Owner's own terminal.
+    - id: atc-hook-workspace
+      argv_prefix: [atc, hook]
+      with_args: [--workspace]
+      reason: Only the harness runs the hook against the workspace map; a tool call cannot make it compose.
+    - id: atc-init-force
+      argv_prefix: [atc, init]
+      with_args: [--force]
+      reason: Rewriting the workspace map is the Owner's act.
+    - id: uv-tool-install
+      argv_prefix: [uv, tool, install]
+      reason: Agents never install atc; replacing it replaces the hook's composer and engine.
+    - id: uv-tool-upgrade
+      argv_prefix: [uv, tool, upgrade]
+      reason: Agents never install atc; upgrading it replaces the hook's composer and engine.
+    - id: uv-tool-uninstall
+      argv_prefix: [uv, tool, uninstall]
+      reason: Agents never uninstall atc; the hook runs from it.
     - id: atc-maintain-guard-hook-out
       argv_prefix: [atc-maintain, guard]
       with_args: [--hook-out]

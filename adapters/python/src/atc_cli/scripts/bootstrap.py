@@ -104,7 +104,8 @@ def _error(token: str, detail: str, hint: str | None = None) -> int:
     return cli_conventions.refuse(cli_conventions.Refusal(token, detail, hint, cli_conventions.ERROR))
 
 
-def register(root: Path, name: str) -> dict:
+def registration(root: Path, name: str) -> tuple[dict, str | None]:
+    """The map entry of ``name`` and the map's text with it added, or None when it is registered already."""
     path = root / "workspace.yaml"
     if not path.is_file():
         raise SystemExit(_stop("WORKSPACE_MISSING", f"{path} is missing", "atc init"))
@@ -112,7 +113,7 @@ def register(root: Path, name: str) -> dict:
     projects = data.get("projects") or {}
     entry = {"repo": f"projects/{name}", "worktrees": f"worktrees/{name}", "state": f"state/{name}-data"}
     if name in projects:
-        return projects[name]
+        return projects[name], None
     text = path.read_text(encoding="utf-8")
     block = f"  {name}:\n    repo:      {entry['repo']}\n    worktrees: {entry['worktrees']}\n    state:     {entry['state']}\n"
     if re.search(r"^projects:\s*\{\}\s*$", text, re.MULTILINE):
@@ -121,8 +122,33 @@ def register(root: Path, name: str) -> dict:
         text = text.rstrip("\n") + "\n" + block
     else:
         text = text.rstrip("\n") + "\nprojects:\n" + block
-    path.write_text(text, encoding="utf-8", newline="\n")
-    print(f"registered {name} in {path}")
+    return entry, text
+
+
+def hook_refusal(root: Path, text: str) -> cli_conventions.Refusal | None:
+    """The failure of the PreToolUse table composed from the map ``text`` before it is written, if any
+    (docs/ENFORCEMENT.md § PreToolUse hook, Table)."""
+    import generate_enforcement as ge
+    home = ge.default_home()
+    result = ge.compose_result(root / "workspace.yaml", home, ge.default_atc_home(home),
+                               map_bytes=text.encode("utf-8"))
+    if "failure" not in result:
+        return None
+    failure = result["failure"]
+    return cli_conventions.Refusal(failure["token"], "with this project the hook table does not compose: "
+                                                     f"{failure['detail']}",
+                                   "fix the project's policies on its main, then run atc add again; "
+                                   "workspace.yaml is unchanged")
+
+
+def register(root: Path, name: str, text: str | None = None) -> dict:
+    """Write the map with ``name`` registered; ``text`` is the map `registration` returned, when the caller has it."""
+    entry, composed = registration(root, name)
+    text = composed if text is None else text
+    if text is not None:
+        path = root / "workspace.yaml"
+        path.write_text(text, encoding="utf-8", newline="\n")
+        print(f"registered {name} in {path}")
     return entry
 
 
@@ -168,7 +194,12 @@ def add(root: Path, name: str, url: str | None, skills: list[str], verbose: bool
     if not (project / ".git").exists():
         return _stop("PROJECT_NOT_A_REPOSITORY", f"projects/{name} is not a git repository",
                      "clone it there, or pass --url")
-    entry = register(root, name)
+    _, text = registration(root, name)
+    if text is not None:
+        refusal = hook_refusal(root, text)
+        if refusal is not None:
+            return cli_conventions.refuse(refusal)
+    entry = register(root, name, text)
     for key in ("worktrees", "state"):
         (root / entry[key]).mkdir(parents=True, exist_ok=True)
     try:

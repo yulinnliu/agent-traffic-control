@@ -875,13 +875,16 @@ def report_machine_local(project_path: Path, label: str, workspace_yaml: Path) -
 
 
 def report_hook(workspace_yaml: Path) -> None:
-    """Report, never fail: an installed PreToolUse hook table or entry that differs from the policies."""
+    """Report, never fail: PreToolUse hook entries, baseline and table as `atc guard` checks them
+    (docs/ENFORCEMENT.md § PreToolUse hook)."""
     import generate_enforcement
+    import guard
     if not workspace_yaml.is_file():
         return
-    found = generate_enforcement.hook_drift(workspace_yaml)
-    if found:
-        print(f"sync --check: pretooluse hook differs from the policies: {'; '.join(found)}; the Owner runs atc guard --install")
+    home = generate_enforcement.default_home()
+    refusal = guard.stop_of(guard.report(workspace_yaml, home, generate_enforcement.default_atc_home(home)))
+    if refusal is not None:
+        print(f"sync --check: pretooluse hook {refusal.token}: {refusal.detail}; {refusal.hint}")
 
 
 def check_atc_dir(project_path: Path, label: str, source: Path | None = None) -> None:

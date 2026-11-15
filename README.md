@@ -31,8 +31,10 @@ reading the rules:
 - **Hard denies are harness configuration, not prose.** The maintainer
   generator (`atc-maintain guard`) produces Claude Code's `permissions.deny`,
   a Codex rules block and a git pre-commit hook from one `hard-deny.yaml`,
-  and `--check` reports drift. `atc guard --install` puts the hook table in
-  place; once installed, the harness refuses the denied action.
+  and `--check` reports drift. A PreToolUse hook composes its table from
+  the policies on each repository's `main`, and the Owner's one-time
+  `atc guard --install` puts its entry in place; once installed, the harness
+  refuses the denied action.
 
 ## Why
 

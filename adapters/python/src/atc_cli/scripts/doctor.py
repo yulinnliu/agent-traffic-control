@@ -6,7 +6,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
+import subprocess
 import sys
 from dataclasses import dataclass
 from types import SimpleNamespace
@@ -82,25 +84,6 @@ def checkout_check(checkout: Path) -> Check:
     if current.dirty:
         return Check("canonical checkout", "ERROR", f"{checkout} has tracked modifications; atc and sessions read them")
     return Check("canonical checkout", "READY", f"{checkout} is on main and clean")
-
-
-def install_check(record: object = None) -> Check:
-    """The installed `atc`: the commit and tag `uv tool install` recorded, a development install, or neither
-    (docs/WORKFLOW.md § Installing a release). ``record`` stands for `direct_url.json` in tests."""
-    import atc_cli
-    import release_pin
-    record = release_pin.READ if record is None else record
-    version = atc_cli.package_version()
-    release = release_pin.installed(record)
-    if release is not None:
-        return Check("installed atc", "READY", f"atc {version} at {release.name} ({release.commit[:12]}) from "
-                                               f"{release.url or 'an unrecorded source'}")
-    source = release_pin.editable(record)
-    if source is not None:
-        return Check("installed atc", "READY", f"atc {version}, a development install from {source}")
-    return Check("installed atc", "WARN", f"atc {version} records no installed commit, so no project pin is "
-                                          f"compared; the Owner installs a release tag: "
-                                          f"{release_pin.install_command('<source>', '<tag>')}")
 
 
 def pin_check(project, installed, root: Path) -> Check:
@@ -200,24 +183,127 @@ def memory_checks(environ: dict[str, str], found: dict | None = None) -> list[Ch
     return [Check("memory", "WARN", warning) for warning in found["warnings"]]
 
 
-def hook_check(workspace_file: Path, home: Path | None = None) -> Check:
-    """The PreToolUse hook's installed table and entries against the policies (docs/ENFORCEMENT.md § Drift)."""
-    import generate_enforcement
-    found = generate_enforcement.hook_drift(workspace_file, home)
-    if found is None:
-        return Check("pretooluse hook", "NOT_INITIALIZED", "no hook table; the Owner runs atc guard --install")
-    if found:
-        return Check("pretooluse hook", "ERROR", f"differs from the policies: {'; '.join(found)}; "
-                                                  "the Owner runs atc guard --install")
-    return Check("pretooluse hook", "READY", "table and entries current")
+def hook_checks(workspace_file: Path, home: Path | None = None) -> list[Check]:
+    """The PreToolUse hook: its entries, its baseline, whether its table composes, what the baseline keeps, a
+    legacy table (docs/ENFORCEMENT.md § PreToolUse hook). Composes in memory; writes nothing."""
+    import generate_enforcement as ge
+    import guard
+    home = Path(home) if home is not None else ge.default_home()
+    found = guard.report(workspace_file.absolute(), home, ge.default_atc_home(home))
+    entries, baseline, table = found["entries"], found["baseline"], found["table"]
+    if all(state == "missing" for state in entries.values()) and baseline["status"] == "BASELINE_MISSING":
+        return [Check("pretooluse entries", "NOT_INITIALIZED", f"no hook entry; {guard.INSTALL_HINT}")]
+    bad = {h: s for h, s in entries.items() if s != "current"}
+    checks = [Check("pretooluse entries", "ERROR", "; ".join(f"ENTRY_{s.upper()}: the {h} entry is {s}"
+                                                              for h, s in bad.items()) + f"; {guard.INSTALL_HINT}")
+              if bad else Check("pretooluse entries", "READY", "claude and codex entries current")]
+    checks.append(Check("pretooluse baseline", "READY", f"written by {baseline['written_by']} at {baseline['at']}")
+                  if baseline["status"] == "READY" else
+                  Check("pretooluse baseline", "ERROR", f"{baseline['status']}: {baseline['detail']}"))
+    if table["composes"]:
+        inputs = ", ".join(f"{label}@{str(where).rsplit('@', 1)[-1][:7]}" for label, where in
+                           (table.get("inputs") or {}).items())
+        checks.append(Check("pretooluse table", "READY", f"composes; {table['rules']} rules; inputs {inputs}; "
+                            + ("cached" if table["cached"] else "recomposes on the next call")))
+    else:
+        checks.append(Check("pretooluse table", "ERROR", f"{table['token']}: {table['detail']}"))
+    checks += [Check("pretooluse retained" if "rules kept" in line else "pretooluse legacy", "WARN", line)
+               for line in guard.warnings(found)]
+    return checks
 
 
-def diagnose(root: Path = ROOT, environ: dict[str, str] | None = None, checkout: Path | None = None) -> list[Check]:
-    """``checkout`` is the canonical checkout the guard reads, by default ``root``."""
+# Checks that follow from an installed atc older than main: their ERROR becomes a NOTE under the root line.
+DERIVED = re.compile(r"^(workspace-managed adapters|projects\.[^.]+\.(integration|testkit))$")
+SKEWED = ("ATC_NOT_ON_MAIN", "ATC_BELOW_MIN", "ATC_BEHIND_RELEASE", "ATC_BEHIND_MAIN")
+SKEW_PATHS = ("adapters/python/", "atc-manifest.yaml", "shared/", "policies/")
+VERSION = re.compile(r"^min_atc:\s*['\"]?(\d+)\.(\d+)\.(\d+)", re.MULTILINE)
+
+
+def _git(repo: Path, *args: str) -> subprocess.CompletedProcess:
+    env = {k: v for k, v in os.environ.items() if not k.upper().startswith("GIT_")}
+    return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, encoding="utf-8",
+                          errors="replace", env=env, check=False)
+
+
+def _version(text: str) -> tuple[int, ...] | None:
+    found = re.match(r"(\d+)\.(\d+)\.(\d+)", text)
+    return tuple(int(part) for part in found.groups()) if found else None
+
+
+def skew_check(root: Path, record: object = None) -> tuple[Check, str | None]:
+    """The installed `atc` against the workspace's `main` (docs/WORKFLOW.md § Installing a release): the root line
+    doctor prints first, and its state token when the installed atc is older (``SKEWED``)."""
+    import atc_cli
+    import release_pin
+    import sync_project
+    record = release_pin.READ if record is None else record
+    version = atc_cli.package_version()
+    source = release_pin.editable(record)
+    if source is not None:
+        return Check("installed atc", "READY", f"atc {version}, a development install from {source}; not compared "
+                                               "with main"), None
+    release = release_pin.installed(record)
+    if release is None:
+        return Check("installed atc", "WARN", f"atc {version} records no installed commit, so no project pin is "
+                                              f"compared; the Owner installs a release tag: "
+                                              f"{release_pin.install_command('<source>', '<tag>')}"), None
+    repo = release_pin.history(root)
+    named = f"atc {version} at {release.name} ({release.commit[:12]})"
+    main = _git(repo, "rev-parse", "--verify", "-q", "refs/heads/main^{commit}").stdout.strip()
+    if not main or _git(repo, "cat-file", "-e", f"{release.commit}^{{commit}}").returncode:
+        return Check("installed atc", "WARN", f"ATC_SKEW_UNKNOWN: {named} cannot be compared with main in {repo}; "
+                                              "run atc sync, which fetches, or check the install's source"), None
+    tags = sync_project.merged_release_tags(repo, "refs/heads/main")
+    latest = tags[0] if tags else None
+    install = (release_pin.install_command(release.url, latest[0], release.subdirectory)
+               if latest and release.url else "uv tool install of the latest release tag on main")
+    if _git(repo, "merge-base", "--is-ancestor", release.commit, main).returncode:
+        return Check("installed atc", "ERROR", f"ATC_NOT_ON_MAIN: {named} is not in the history of main; "
+                                               f"the Owner runs {install}"), "ATC_NOT_ON_MAIN"
+    manifest_text = _git(repo, "show", f"{main}:atc-manifest.yaml").stdout
+    minimum = VERSION.search(manifest_text)
+    if minimum and _version(version) is not None and _version(version) < tuple(int(p) for p in minimum.groups()):
+        return Check("installed atc", "ERROR", f"ATC_BELOW_MIN: {named} is older than main's min_atc "
+                                               f"{'.'.join(minimum.groups())}; the Owner runs {install}"), "ATC_BELOW_MIN"
+    if latest and latest[1] != release.commit and not _git(repo, "merge-base", "--is-ancestor", release.commit,
+                                                           latest[1]).returncode:
+        return Check("installed atc", "ERROR", f"ATC_BEHIND_RELEASE: {named} is older than the release {latest[0]} "
+                                               f"on main; the Owner runs {install}"), "ATC_BEHIND_RELEASE"
+    ahead = _git(repo, "rev-list", "--count", f"{release.commit}..{main}", "--", *SKEW_PATHS).stdout.strip()
+    if ahead and ahead != "0":
+        return Check("installed atc", "WARN", f"ATC_BEHIND_MAIN: main has {ahead} commits after {named} that change "
+                                              "what atc runs or delivers, with no newer release tag; the Owner tags "
+                                              "and installs a release when ready"), "ATC_BEHIND_MAIN"
+    return Check("installed atc", "READY", f"{named}, main's latest release"), None
+
+
+def apply_skew(checks: list[Check], root_line: Check, state: str | None) -> list[Check]:
+    """The root line right after `workspace root`; under a skew, each derived ERROR as a NOTE beneath it, and a
+    table that does not compose keeping its ERROR with a hint."""
+    rest = [c for c in checks if c.name != "workspace root"]
+    head = [c for c in checks if c.name == "workspace root"]
+    if state is None:
+        return [*head, root_line, *rest]
+    notes, others = [], []
+    for check in rest:
+        if check.status == "ERROR" and (DERIVED.match(check.name) or (
+                check.name.endswith(".pin") and "ahead of the installed release" in check.detail)):
+            notes.append(Check(check.name, "NOTE", f"follows from installed atc: {check.detail}"))
+        elif check.status == "ERROR" and check.name == "pretooluse table":
+            others.append(Check(check.name, "ERROR", f"{check.detail}; the installed atc is older than main; "
+                                                     "installing the latest release may fix it"))
+        else:
+            others.append(check)
+    return [*head, root_line, *notes, *others]
+
+
+def diagnose(root: Path = ROOT, environ: dict[str, str] | None = None, checkout: Path | None = None,
+             record: object = None) -> list[Check]:
+    """``checkout`` is the canonical checkout the guard reads, by default ``root``; ``record`` stands for the
+    installed `direct_url.json` in tests."""
     import release_pin
     environ = environ if environ is not None else dict(os.environ)
-    checks = [Check("workspace root", "READY", str(root.resolve())), checkout_check(checkout or root),
-              install_check()]
+    checks = [Check("workspace root", "READY", str(root.resolve())), checkout_check(checkout or root)]
 
     env_problems = validator.workspace_env_problems(root, environ)
     if "ATC_ROOT" not in env_problems:
@@ -316,8 +402,8 @@ def diagnose(root: Path = ROOT, environ: dict[str, str] | None = None, checkout:
             checks.append(Check(f"projects.{name}.integration", "READY", f"{managed} managed adapters current"))
 
     if workspace_file.is_file() and not validator.FAILURES:
-        checks.append(hook_check(workspace_file))
-    return checks
+        checks += hook_checks(workspace_file)
+    return apply_skew(checks, *skew_check(root, record))
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -325,7 +411,7 @@ def build_parser() -> argparse.ArgumentParser:
         "Diagnose local Agent Traffic Control runtime readiness; changes nothing.",
         "Prints one verdict line and the checks that are not READY; -v prints every check and the host test\n"
         "worker pool: the runs holding or waiting for workers.",
-        exit="0 every check READY, WARN or NOT_INITIALIZED; 1 a check reports ERROR; 2 usage error",
+        exit="0 every check READY, WARN or NOT_INITIALIZED; 1 a check reports ERROR or NOTE; 2 usage error",
         see="README.md § Commands"))
     cli_conventions.add_verbose(parser)
     cli_conventions.add_json(parser)
@@ -336,18 +422,21 @@ def main(argv: list[str] | None = None, root: Path = ROOT) -> int:
     args = build_parser().parse_args(argv)
     checks = diagnose(root)
     errors = sum(check.status == "ERROR" for check in checks)
+    notes = sum(check.status == "NOTE" for check in checks)
     not_initialized = sum(check.status == "NOT_INITIALIZED" for check in checks)
-    code = cli_conventions.STOP if errors else cli_conventions.OK
+    code = cli_conventions.STOP if errors or notes else cli_conventions.OK
     if args.json:
-        print(json.dumps({"verdict": "NOT_READY" if errors else "READY", "errors": errors,
+        print(json.dumps({"verdict": "NOT_READY" if errors or notes else "READY", "errors": errors, "notes": notes,
                           "not_initialized": not_initialized,
-                          "checks": [{"name": c.name, "status": c.status, "detail": c.detail} for c in checks],
+                          "checks": [{"name": c.name, "status": c.status, "detail": c.detail,
+                                      **({"follows": "installed atc"} if c.status == "NOTE" else {})}
+                                     for c in checks],
                           "worker_pool": worker_pool(dict(os.environ)),
                           "memory": memory(dict(os.environ))}, indent=2))
         return code
     warnings = sum(check.status == "WARN" for check in checks)
-    print(f"{'NOT_READY' if errors else 'READY'} doctor: {errors} error(s), {warnings} warning(s), "
-          f"{not_initialized} not initialized")
+    print(f"{'NOT_READY' if errors or notes else 'READY'} doctor: {errors} error(s), {warnings} warning(s), "
+          f"{not_initialized} not initialized, {notes} note(s)")
     for check in checks:
         if args.verbose or check.status != "READY":
             print(f"  {check.status:15} {check.name}: {check.detail}")
@@ -356,10 +445,11 @@ def main(argv: list[str] | None = None, root: Path = ROOT) -> int:
         print("  test workers:")
         for line in pool_status.lines(pool_status.collect(dict(os.environ))):
             print(f"    {line}")
-    if errors:
+    if errors or notes:
         sys.stdout.flush()
-        print("STOP NOT_READY: each ERROR line names the check and what it found", file=sys.stderr)
-        print("hint: fix the ERROR checks, then run atc doctor again", file=sys.stderr)
+        print("STOP NOT_READY: each ERROR or NOTE line names the check and what it found", file=sys.stderr)
+        print("hint: fix the ERROR checks and the root line the NOTEs follow from, then run atc doctor again",
+              file=sys.stderr)
     return code
 
 

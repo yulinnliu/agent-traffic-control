@@ -31,7 +31,7 @@ def table(tmp_path, monkeypatch) -> dict:
     (root / "policies" / "hard-deny.yaml").write_text(POLICY.read_text(encoding="utf-8"), encoding="utf-8")
     workspace = root / "workspace.yaml"
     workspace.write_text(f"version: 1\nworkspace_root: {root.as_posix()}\nprojects: {{}}\n", encoding="utf-8")
-    return json.loads(ge.hook_table(workspace, home / ".atc" / "enforcement"))
+    return json.loads(ge.fresh_table(workspace, home, home / ".atc"))
 
 
 def verdict(table: dict, command: str, tool: str = "Bash", background: bool = False) -> str | None:
@@ -49,8 +49,22 @@ REFUSED = [
     ("atc-push", "Bash", "atc push root --json", False),
     ("atc-remove", "Bash", "atc remove sandbox", False),
     ("atc-remove", "PowerShell", "atc remove sandbox --json", False),
-    ("atc-guard-install", "Bash", "atc guard --install", False),
-    ("atc-guard-install", "PowerShell", "atc guard --install --json", False),
+    ("atc-guard-install-reset", "Bash", "atc guard --install", False),
+    ("atc-guard-install-reset", "PowerShell", "atc guard --install --json", False),
+    ("atc-guard-install-reset", "Bash", "atc guard --reset", False),
+    ("atc-guard-install-reset", "PowerShell", "atc guard --reset --yes", False),
+    ("atc-guard-install-reset", "Bash", "atc guard --reset=1", False),
+    ("atc-hook-workspace", "Bash", "atc hook --harness claude --workspace x", False),
+    ("atc-hook-workspace", "PowerShell", "atc hook --workspace=x", False),
+    ("atc-init-force", "Bash", "atc init --force", False),
+    ("atc-init-force", "PowerShell", "atc init owner/repo --force", False),
+    ("uv-tool-install", "Bash", "uv tool install --force agent-traffic-control", False),
+    ("uv-tool-install", "PowerShell", "uv tool install x", False),
+    ("uv-tool-upgrade", "Bash", "uv tool upgrade agent-traffic-control", False),
+    ("uv-tool-uninstall", "PowerShell", "uv tool uninstall agent-traffic-control", False),
+    ("uv-tool-install", "Bash", "uv --quiet tool install x", False),
+    ("uv-tool-install", "PowerShell", "uv --directory d tool install x", False),
+    ("uv-tool-install", "Bash", "uv --cache-dir=c -q tool install x", False),
     ("atc-test-background", "Bash", "atc test ATC-0001 &", False),
     ("atc-test-background", "PowerShell", "atc test ATC-0001 --all", True),
     ("atc-maintain-guard-hook-out", "Bash", "uv run --locked atc-maintain guard --hook-out", False),
@@ -70,6 +84,11 @@ ALLOWED = [
     ("Bash", "atc guard", False),
     ("Bash", "atc guard --json", False),
     ("Bash", "atc guard --help", False),
+    ("Bash", "atc hook --harness claude --table x", False),
+    ("Bash", "atc init", False),
+    ("PowerShell", "atc init owner/repo", False),
+    ("Bash", "uv tool list", False),
+    ("PowerShell", "uv --directory d tool list", False),
     ("Bash", "atc test ATC-0001", False),
     ("Bash", "atc test ATC-0001 --all", False),
     ("PowerShell", "atc test ATC-0001 -- -q", False),
@@ -110,3 +129,11 @@ def test_a_global_root_option_does_not_hide_the_subcommand(table, command):
 
 def test_a_global_root_option_keeps_the_check_form_allowed(table):
     assert verdict(table, "atc --root . push root --check") is None
+
+
+@pytest.mark.parametrize("rule, command", [(rule, command) for rule, tool, command, background in REFUSED
+                                           if tool == "Bash" and not background])
+def test_codex_refuses_the_same_forms(table, rule, command):
+    payload = {"tool_name": "Bash", "tool_input": {"command": command}, "cwd": CWD}
+    reason = hook.decide(payload, table, "codex")
+    assert reason is not None and f"`{rule}`" in reason

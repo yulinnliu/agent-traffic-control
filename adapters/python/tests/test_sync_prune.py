@@ -251,6 +251,8 @@ def test_bootstrap_add_installs_opt_in_skills_in_the_selected_tool_dirs_only(tmp
     project = root / "projects" / "third"
     project.mkdir(parents=True)
     run_git(project, "init", "-q", "-b", "main")
+    run_git(project, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q", "--allow-empty", "-m",
+            "start")
     write(project / "AGENTS.md", "# AGENTS.md\n\n## What this is\n\nThird.\n\n" + VERIFICATION_SECTION)
     write(project / "scripts/integration-verify.json", '["python", "-c", "pass"]\n')
     release_workspace(root)

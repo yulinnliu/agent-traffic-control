@@ -432,7 +432,7 @@ def test_doctor_verdict_line_counts_and_lists_only_what_is_not_ready(monkeypatch
         doctor.Check("a", "READY", "ok"), doctor.Check("b", "WARN", "w"), doctor.Check("c", "NOT_INITIALIZED", "n")])
     assert doctor.main([], root=NOT_CANONICAL) == 0
     lines = capsys.readouterr().out.splitlines()
-    assert lines[0] == "READY doctor: 0 error(s), 1 warning(s), 1 not initialized"
+    assert lines[0] == "READY doctor: 0 error(s), 1 warning(s), 1 not initialized, 0 note(s)"
     assert any(line.endswith("b: w") for line in lines) and any(line.endswith("c: n") for line in lines)
     assert not any(line.endswith("a: ok") for line in lines)
 
@@ -456,5 +456,5 @@ def test_doctor_error_is_not_ready_and_stops_on_stderr(monkeypatch: pytest.Monke
     monkeypatch.setattr(doctor, "diagnose", lambda root, environ=None, checkout=None: [doctor.Check("x", "ERROR", "bad")])
     assert doctor.main([], root=NOT_CANONICAL) == 1
     captured = capsys.readouterr()
-    assert captured.out.startswith("NOT_READY doctor: 1 error(s), 0 warning(s), 0 not initialized\n")
+    assert captured.out.startswith("NOT_READY doctor: 1 error(s), 0 warning(s), 0 not initialized, 0 note(s)\n")
     assert captured.err.startswith("STOP NOT_READY: ") and "hint: fix the ERROR checks" in captured.err

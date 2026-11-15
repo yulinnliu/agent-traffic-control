@@ -15,7 +15,7 @@ Workspace:
   remove      unregister a project
   sync        write and commit the files ATC owns in projects, or --check them
   doctor      diagnose runtime readiness; changes nothing
-  guard       check, or --install, the PreToolUse hook and its permission rules
+  guard       check, --install or --reset the PreToolUse hook and its permission rules
   checkout    make a clean tree of a project at a commit on its main, for a build
   hook        decide one PreToolUse hook call (the command the hook entry runs)
 
@@ -50,10 +50,12 @@ COMMANDS = {
     "checkout": "build_checkout",
 }
 HOOK = "hook"
-HOOK_USAGE = """usage: atc hook [--harness {claude,codex}] [--table FILE] [--payload FILE]
+HOOK_USAGE = """usage: atc hook [--harness {claude,codex}] [--workspace MAP --home DIR --atc-home DIR | --table FILE]
+                [--payload FILE]
 
 Decide one PreToolUse hook call: read the payload on stdin, or from --payload, and print a deny decision or
-nothing. It reads no workspace, so it runs before root resolution and the checkout guard.
+nothing. With --workspace it uses the table composed from MAP and each repository's main, cached under
+--atc-home; with --table, or neither, a static table. It runs before root resolution and the checkout guard.
 
 Exit: 0 decided (a deny decision on stdout, or nothing); 2 the decision could not be written
 See: docs/ENFORCEMENT.md § PreToolUse hook"""

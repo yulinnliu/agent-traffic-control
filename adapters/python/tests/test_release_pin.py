@@ -2,6 +2,7 @@
 acts on a project only while its `.atc/atc.lock` pins that release, and doctor reports the pins and the install."""
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -247,11 +248,98 @@ def test_doctor_reports_each_pin_against_the_installed_release(ws: Ws) -> None:
 def test_doctor_reports_the_installed_commit_a_development_install_or_neither(ws: Ws, tmp_path: Path) -> None:
     import atc_cli
     version = atc_cli.package_version()
-    assert doctor.install_check(record(ws.new)) == doctor.Check(
-        "installed atc", "READY", f"atc {version} at v0.6.0 ({ws.new[:12]}) from {SOURCE}")
+    assert doctor.skew_check(ws.root, record(ws.new)) == (doctor.Check(
+        "installed atc", "READY", f"atc {version} at v0.6.0 ({ws.new[:12]}), main's latest release"), None)
     source = tmp_path / "worktree" / "adapters" / "python"
-    assert doctor.install_check({"url": source.as_uri(), "dir_info": {"editable": True}}) == doctor.Check(
-        "installed atc", "READY", f"atc {version}, a development install from {source}")
-    check = doctor.install_check({"url": "file:///C:/wheel.whl", "archive_info": {}})
+    assert doctor.skew_check(ws.root, {"url": source.as_uri(), "dir_info": {"editable": True}}) == (doctor.Check(
+        "installed atc", "READY", f"atc {version}, a development install from {source}; not compared with main"),
+        None)
+    check, state = doctor.skew_check(ws.root, {"url": "file:///C:/wheel.whl", "archive_info": {}})
+    assert state is None
     assert check.status == "WARN" and "records no installed commit" in check.detail
     assert check.detail.endswith('uv tool install --force "git+<source>@<tag>#subdirectory=adapters/python"')
+
+
+# Version skew first (docs/WORKFLOW.md § Installing a release; docs/design/ATC-0053.md § 6.1, G62-G74)
+
+
+def test_g65_an_installed_commit_off_main_is_an_error(ws: Ws) -> None:
+    git(ws.root, "checkout", "-q", "-b", "side")
+    side = put(ws.root, {"side.txt": "x\n"})
+    git(ws.root, "checkout", "-q", "main")
+    check, state = doctor.skew_check(ws.root, record(side))
+    assert (check.status, state) == ("ERROR", "ATC_NOT_ON_MAIN") and "uv tool install" in check.detail
+
+
+def test_g62_an_installed_release_older_than_mains_latest_is_one_error(ws: Ws) -> None:
+    check, state = doctor.skew_check(ws.root, record(ws.old, "v0.5.0"))
+    assert (check.status, state) == ("ERROR", "ATC_BEHIND_RELEASE")
+    assert check.detail.endswith(f'uv tool install --force "git+{SOURCE}@v0.6.0#subdirectory=adapters/python"')
+
+
+def test_g64_g71_an_installed_atc_below_min_atc_comes_first(ws: Ws) -> None:
+    put(ws.root, {"atc-manifest.yaml": "version: 1\nmin_atc: 999.0.0\n"})
+    check, state = doctor.skew_check(ws.root, record(ws.old, "v0.5.0"))
+    assert (check.status, state) == ("ERROR", "ATC_BELOW_MIN") and "999.0.0" in check.detail
+    put(ws.root, {"atc-manifest.yaml": "version: 1\nmin_atc: 0.0.1\n"})
+    assert doctor.skew_check(ws.root, record(ws.old, "v0.5.0"))[1] == "ATC_BEHIND_RELEASE"
+
+
+def test_g66_only_commits_changing_what_atc_runs_count_behind_main(ws: Ws) -> None:
+    put(ws.root, {".atc/tasks/ATC-0001.yaml": "id: ATC-0001\n"})
+    check, state = doctor.skew_check(ws.root, record(ws.new))
+    assert (check.status, state) == ("READY", None)
+    put(ws.root, {"adapters/python/x.py": "x = 1\n"})
+    check, state = doctor.skew_check(ws.root, record(ws.new))
+    assert (check.status, state) == ("WARN", "ATC_BEHIND_MAIN") and "main has 1 commits after" in check.detail
+
+
+def test_g69_a_commit_the_history_lacks_is_unknown(ws: Ws) -> None:
+    check, state = doctor.skew_check(ws.root, record("f" * 40))
+    assert (check.status, state) == ("WARN", None) and check.detail.startswith("ATC_SKEW_UNKNOWN")
+
+
+DRIFT = [doctor.Check("workspace root", "READY", "/w"),
+         doctor.Check("workspace-managed adapters", "ERROR", "2 drifted"),
+         doctor.Check("projects.demo.integration", "ERROR", "1 missing or drifted items"),
+         doctor.Check("projects.demo.testkit", "ERROR", "old testkit"),
+         doctor.Check("projects.demo.pin", "ERROR", "the project is ahead of the installed release; fix"),
+         doctor.Check("projects.other.pin", "ERROR", "demo pins v0.5.0; fix"),
+         doctor.Check("pretooluse table", "ERROR", "POLICY_INVALID: bad"),
+         doctor.Check("uv", "READY", "uv")]
+ROOT_LINE = doctor.Check("installed atc", "ERROR", "ATC_BEHIND_RELEASE: older")
+
+
+def test_g62_g72_g74_under_a_skew_derived_errors_become_notes_below_the_root_line() -> None:
+    checks = doctor.apply_skew(DRIFT, ROOT_LINE, "ATC_BEHIND_RELEASE")
+    assert [c.name for c in checks][:6] == ["workspace root", "installed atc", "workspace-managed adapters",
+                                            "projects.demo.integration", "projects.demo.testkit", "projects.demo.pin"]
+    assert [c.status for c in checks[2:6]] == ["NOTE"] * 4
+    assert all(c.detail.startswith("follows from installed atc: ") for c in checks[2:6])
+    rest = {c.name: c for c in checks[6:]}
+    assert rest["projects.other.pin"].status == "ERROR"
+    assert rest["pretooluse table"].status == "ERROR" and rest["pretooluse table"].detail.endswith(
+        "the installed atc is older than main; installing the latest release may fix it")
+
+
+def test_g63_without_a_skew_drift_stays_an_error() -> None:
+    checks = doctor.apply_skew(DRIFT, doctor.Check("installed atc", "READY", "latest"), None)
+    assert [c.name for c in checks][:2] == ["workspace root", "installed atc"]
+    assert "NOTE" not in [c.status for c in checks] and sum(c.status == "ERROR" for c in checks) == 6
+
+
+@pytest.mark.parametrize("root_line, extra, code", [
+    (doctor.Check("installed atc", "WARN", "ATC_BEHIND_MAIN: x"), doctor.Check("x", "NOTE", "follows from installed atc: y"), 1),
+    (doctor.Check("installed atc", "WARN", "ATC_BEHIND_MAIN: x"), doctor.Check("x", "READY", "y"), 0),
+])
+def test_g67_g73_a_note_exits_1_and_is_counted(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+                                               root_line: doctor.Check, extra: doctor.Check, code: int) -> None:
+    checks = [doctor.Check("workspace root", "READY", "/w"), root_line, extra]
+    monkeypatch.setattr(doctor, "diagnose", lambda root: checks)
+    assert doctor.main([]) == code
+    out = capsys.readouterr().out
+    assert out.splitlines()[0].endswith(f"{int(code)} note(s)")
+    assert doctor.main(["--json"]) == code
+    result = json.loads(capsys.readouterr().out)
+    assert result["notes"] == code and [c["name"] for c in result["checks"]][:2] == ["workspace root", "installed atc"]
+    assert [c.get("follows") for c in result["checks"]] == [None, None, "installed atc" if code else None]

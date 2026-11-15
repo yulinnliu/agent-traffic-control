@@ -40,11 +40,26 @@ class PolicyError(Exception):
         self.problems = problems
 
 
-def _read(path: Path) -> object:
+class StrictLoader(yaml.SafeLoader):
+    """SafeLoader without anchors and aliases, so parsing time follows the text's size."""
+
+    def compose_node(self, parent, index):  # noqa: ANN001 - PyYAML's signature
+        event = self.peek_event()
+        if isinstance(event, yaml.AliasEvent) or getattr(event, "anchor", None):
+            raise yaml.YAMLError("YAML anchors and aliases are not allowed")
+        return super().compose_node(parent, index)
+
+
+def strict_load(text: str | bytes) -> object:
+    """``text`` as YAML with SafeLoader's types and no anchor or alias; raises yaml.YAMLError."""
+    return yaml.load(text, Loader=StrictLoader)  # noqa: S506 - StrictLoader is a SafeLoader
+
+
+def _parse(text: str, name: str) -> object:
     try:
-        return yaml.safe_load(path.read_text(encoding="utf-8"))
+        return strict_load(text)
     except yaml.YAMLError as exc:
-        raise PolicyError([f"schema-violation: {path.name}: not valid YAML ({exc})"]) from exc
+        raise PolicyError([f"schema-violation: {name}: not valid YAML ({exc})"]) from exc
 
 
 def _validate(kind: str, data: object, name: str, schemas: Path) -> list[str]:
@@ -60,14 +75,20 @@ def _validate(kind: str, data: object, name: str, schemas: Path) -> list[str]:
 def load(directory: Path, schemas: Path = SCHEMAS) -> dict[str, dict]:
     """Return {kind: data} for the policy files present, or raise PolicyError."""
     directory = Path(directory)
+    return load_texts({kind: (directory / f"{kind}.yaml").read_text(encoding="utf-8") for kind in KINDS
+                       if (directory / f"{kind}.yaml").is_file()}, schemas)
+
+
+def load_texts(texts: dict[str, str], schemas: Path = SCHEMAS) -> dict[str, dict]:
+    """`load` of policy texts by kind, read elsewhere (a commit's Git objects)."""
     problems: list[str] = []
     loaded: dict[str, dict] = {}
     for kind in KINDS:
-        path = directory / f"{kind}.yaml"
-        if not path.is_file():
+        if kind not in texts:
             continue
-        data = _read(path)
-        kind_problems = _validate(kind, data, path.name, schemas)
+        name = f"{kind}.yaml"
+        data = _parse(texts[kind], name)
+        kind_problems = _validate(kind, data, name, schemas)
         if kind_problems:
             problems.extend(kind_problems)
         else:

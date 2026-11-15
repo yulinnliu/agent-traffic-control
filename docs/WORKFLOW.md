@@ -196,13 +196,17 @@ source is that checkout:
 
 ```text
 uv tool install --force "git+file:///<checkout>@<tag>#subdirectory=adapters/python"
-atc guard --install
 ```
 
 Every other host installs the same tag from GitHub:
 
 ```text
 uv tool install --force "git+https://github.com/<owner>/<repo>@<tag>#subdirectory=adapters/python"
+```
+
+Once per host, after the first install, the Owner also runs:
+
+```text
 atc guard --install
 ```
 
@@ -210,16 +214,27 @@ The `<checkout>` URL uses forward slashes and `%20` for a space. uv builds
 the wheel at the tag, keeps it in its own tool environment and records the
 installed commit and the requested tag in the distribution's
 `direct_url.json` (PEP 610); `atc doctor` reports the version, commit, tag
-and source from it. `atc guard --install` writes the hook entry `atc hook`,
-which runs the engine of whatever `atc` is installed, so a later install
-needs no new entry; it protects uv's tool environment of `atc` from agent
-writes. A rollback is the same command with an earlier tag. On Windows, uv
+and source from it, and compares it with the workspace's `main` first: an
+installed `atc` that is not on `main`, older than `min_atc` of
+`atc-manifest.yaml`, or older than the latest release tag on `main` is one
+ERROR line naming the install command, and the drift that follows from it
+(workspace-managed adapters, a project's integration or testkit, a pin ahead
+of the installed release) is listed beneath it as NOTE, which still exits 1.
+Commits on `main` after the installed release that change what `atc` runs or
+delivers are a WARN. `atc guard --install` writes the baseline of the
+PreToolUse hook's table and the hook entry `atc hook`, which runs the engine
+of whatever `atc` is installed and composes its table from `main`, so a later
+install, a policy change on `main` or `atc add` needs no new entry
+(`ENFORCEMENT.md` § PreToolUse hook). A rollback is the same command with an
+earlier tag; it does not loosen the hook's table, which only
+`atc guard --reset` does. On Windows, uv
 cannot replace `atc.exe` while it runs: the Owner installs when no session
 runs, and reruns the command after a `WinError 32`.
 
 On a host whose workspace directory is itself the ATC checkout, its
 `workspace.yaml` names it with `governance_checkout: .`. Without that line
-`atc sync` and `atc add` stop with `GOVERNANCE_CHECKOUT_UNSET`.
+`atc sync` and `atc add` stop with `GOVERNANCE_CHECKOUT_UNSET`, and the
+PreToolUse hook denies every call with the same token.
 
 A release acts only on projects whose `.atc/atc.lock` pins it. While a
 project pins another revision, or none, the commands that run the task flow

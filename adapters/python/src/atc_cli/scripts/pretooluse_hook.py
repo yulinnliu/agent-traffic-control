@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """PreToolUse hook for Claude Code and Codex: deny a tool call the composed hard-deny table forbids.
 
-Reads the hook payload on stdin (or --payload) and the table `atc guard --install` writes, then prints one
+Reads the hook payload on stdin (or --payload) and the table: with --workspace, the one it composes from the
+map and each repository's `main` and caches (`hook_state`); with --table, that file as it is. Then prints one
 deny decision or nothing. Command rules match every simple command of a Bash or PowerShell call after
 normalisation; file rules, the write roots and the hook's own files bind the paths a call writes, and a write
 target the call's text does not resolve is refused; a top-level `cd` into a worktrees root is refused (Claude
@@ -17,10 +18,14 @@ import os
 import re
 import shlex
 import sys
+import time
 from pathlib import Path
+
+STARTED = time.monotonic()
 
 try:  # a helper that cannot load makes main deny every call
     import globs
+    import hook_state
     import shell_words as g
     import write_targets as w
 except Exception as exc:
@@ -30,7 +35,9 @@ else:
 
 TABLE_VERSION = 1
 DEFAULT_TABLE = Path.home() / ".atc" / "enforcement" / "pretooluse.json"
-REPAIR = "atc guard --install"
+REPAIR = "atc doctor"
+# Interpreter start-up before STARTED counts against the harness's timeout too.
+STARTUP_ALLOWANCE = 0.3
 FILE_TOOLS = {"Edit", "Write", "NotebookEdit"}
 WRITE_MODES = {"edit", "write"}
 
@@ -49,6 +56,10 @@ MODULE_COMMANDS = {"atc_cli": "atc"}
 PWSH_JOBS = {"start-job", "sajb", "start-threadjob"}
 PUSH_VALUE = {"--repo", "-o", "--push-option", "--receive-pack", "--exec"}
 PUSH_EVERYTHING = {"--all", "--mirror", "--branches"}
+# uv's global options that take a value, dropped with it before the subcommand.
+UV_GLOBAL_VALUE = {"--directory", "--project", "--cache-dir", "--config-file", "--color", "--python", "-p",
+                   "--allow-insecure-host", "--python-preference", "--index-url", "--extra-index-url",
+                   "--default-index", "--index", "--keyring-provider", "--find-links", "-f"}
 
 
 class TableError(Exception):
@@ -131,8 +142,11 @@ def normalise(words: list[str], cwd: str, nested: bool = False) -> list[tuple[li
     if not words:
         return []
     head = command_name(words[0])
-    if head == "uv" and words[1:2] == ["run"]:
-        return normalise(skip_options(words[2:], UV_VALUE), cwd, nested)
+    if head == "uv":
+        rest = skip_options(words[1:], UV_GLOBAL_VALUE)
+        if rest[:1] == ["run"]:
+            return normalise(skip_options(rest[1:], UV_VALUE), cwd, nested)
+        words = ["uv", *rest]
     if head == "uvx":
         return normalise(skip_options(words[1:], UV_VALUE), cwd, nested)
     if head in PYTHONS:
@@ -309,9 +323,9 @@ def path_denial(table: dict, target: str, path: str) -> str | None:
     """Why writing `path` (case-folded, long, absolute) is refused, or None."""
     for protected in table["protected"]:
         if g.within(path, protected):
-            return (f"Refused: {target} is part of the PreToolUse hook (its table or engine) or of the installed "
-                    f"atc; the Owner changes it with `atc guard --install` or `uv tool install` from their own "
-                    f"terminal.")
+            return (f"Refused: {target} is part of the PreToolUse hook (its state, its engine or an input the "
+                    f"table is composed from, such as the workspace map) or of the installed atc; the Owner "
+                    f"changes it from their own terminal (`atc guard --install`/`--reset`, `uv tool install`).")
     slash = path.replace("\\", "/")
     for rule in table["filesystem"]:
         if not WRITE_MODES & set(rule.get("modes", [])):
@@ -405,17 +419,36 @@ def deny(reason: str) -> str:
         "hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": reason}})
 
 
+class UsageError(ValueError):
+    pass
+
+
 def parse(argv: list[str]) -> dict[str, str]:
-    options = {"--harness": "claude", "--table": str(DEFAULT_TABLE), "--payload": ""}
+    options = {"--harness": "claude", "--table": "", "--payload": "", "--workspace": "", "--home": "",
+               "--atc-home": ""}
     rest = iter(argv)
     for arg in rest:
         name, sep, value = arg.partition("=")
         if name not in options:
-            raise ValueError(f"unknown argument {arg!r}")
+            raise UsageError(f"unknown argument {arg!r}")
         options[name] = value if sep else next(rest, "")
     if options["--harness"] not in ("claude", "codex"):
-        raise ValueError(f"--harness must be claude or codex, got {options['--harness']!r}")
+        raise UsageError(f"--harness must be claude or codex, got {options['--harness']!r}")
+    if options["--workspace"] and options["--table"]:
+        raise UsageError("--workspace and --table exclude each other")
+    if options["--workspace"] and not (options["--home"] and options["--atc-home"]):
+        raise UsageError("--workspace needs --home and --atc-home")
     return options
+
+
+def table_of(options: dict[str, str]) -> dict:
+    """The table the call is decided by: composed for --workspace (hook_state.Failure when it cannot be), else
+    the --table file, `~/.atc/enforcement/pretooluse.json` by default."""
+    if not options["--workspace"]:
+        return load_table(Path(options["--table"]) if options["--table"] else DEFAULT_TABLE)
+    until = STARTED + hook_state.DEADLINE - STARTUP_ALLOWANCE
+    return hook_state.table_for(Path(options["--workspace"]), Path(options["--home"]),
+                                Path(options["--atc-home"]), until)
 
 
 def read_payload(source: str) -> dict:
@@ -438,13 +471,19 @@ def main(argv: list[str] | None = None) -> int:
             raise IMPORT_ERROR
         options = parse(sys.argv[1:] if argv is None else argv)
         payload = read_payload(options["--payload"])
-        reason = decide(payload, load_table(Path(options["--table"])), options["--harness"])
+        reason = decide(payload, table_of(options), options["--harness"])
     except PayloadError as exc:
         reason = (f"Refused: the tool call's payload {exc}, so the PreToolUse hook could not decide. "
-                  f"Retry the call; if it recurs, the Owner repairs the hook from their own terminal with `{REPAIR}`.")
+                  f"Retry the call; if it recurs, the Owner runs `{REPAIR}` from their own terminal for the cause.")
+    except UsageError as exc:
+        reason = (f"Refused: the PreToolUse hook entry is malformed (USAGE: {exc}). The Owner runs `{REPAIR}` "
+                  f"from their own terminal for the cause.")
     except Exception as exc:  # the hook fails closed: its own error refuses the call
-        reason = (f"Refused: the PreToolUse hook could not decide ({type(exc).__name__}: {exc}). "
-                  f"The Owner repairs it from their own terminal with `{REPAIR}`.")
+        if IMPORT_ERROR is None and isinstance(exc, hook_state.Failure):
+            reason = hook_state.deny_reason(exc)
+        else:
+            reason = (f"Refused: the PreToolUse hook could not decide ({type(exc).__name__}: {exc}). "
+                      f"The Owner runs `{REPAIR}` from their own terminal for the cause.")
     if reason is None:
         return 0
     try:

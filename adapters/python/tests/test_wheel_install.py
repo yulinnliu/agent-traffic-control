@@ -80,8 +80,9 @@ def test_the_wheel_runs_version_doctor_and_hook(installed: Path, tmp_path: Path)
 
 
 def test_the_wheel_validates_policies_against_its_packaged_schemas(installed: Path, tmp_path: Path) -> None:
-    """`atc guard --install` composes the hook table from the schemas the wheel carries, into a home of its own: the
-    workspace's own policy installs, a policy missing a required key is a schema violation."""
+    """`atc guard --install` composes the hook table from the schemas the wheel carries, in the wheel's composing
+    child, into a home of its own: the workspace's own policy installs its baseline, a policy missing a required
+    key is a schema violation."""
     home = tmp_path / "home"
     home.mkdir()
     root = tmp_path / "workspace"
@@ -93,7 +94,7 @@ def test_the_wheel_validates_policies_against_its_packaged_schemas(installed: Pa
                       encoding="utf-8")
     guard = run_atc(installed, "guard", "--root", str(root), "--install", cwd=tmp_path, home=home)
     assert guard.returncode == 0 and guard.stdout.startswith("INSTALLED guard"), guard.stdout + guard.stderr
-    assert (home / ".atc" / "enforcement" / "pretooluse.json").is_file()
+    assert len(list((home / ".atc" / "enforcement").glob("baseline-*.json"))) == 1
     policy.write_text("version: 1\ncommands:\n  deny: []\n", encoding="utf-8")
     guard = run_atc(installed, "guard", "--root", str(root), "--install", cwd=tmp_path, home=home)
     output = guard.stdout + guard.stderr

@@ -72,6 +72,7 @@ def test_add_registers_onboards_and_validates(tmp_path: Path) -> None:
     project = root / "projects" / "second"
     project.mkdir(parents=True)
     run_git(project, "init", "-q", "-b", "main")
+    run_git(project, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q", "--allow-empty", "-m", "start")
     write(project / "AGENTS.md", "# AGENTS.md\n\nIntro.\n\n## What this is\n\nSecond.\n\n" + VERIFICATION_SECTION)
     write(project / "scripts/integration-verify.json", '["python", "-c", "pass"]\n')
     release_workspace(root)
@@ -108,6 +109,7 @@ def test_add_refuses_the_reserved_root_name_before_writing(tmp_path: Path) -> No
     project = root / "projects" / "root"
     project.mkdir(parents=True)
     run_git(project, "init", "-q", "-b", "main")
+    run_git(project, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q", "--allow-empty", "-m", "start")
     before = (root / "workspace.yaml").read_text(encoding="utf-8")
     assert bootstrap.add(root, "root", None, []) == 2
     assert (root / "workspace.yaml").read_text(encoding="utf-8") == before
@@ -123,6 +125,7 @@ def test_add_installs_requested_opt_in_adapter(tmp_path: Path) -> None:
     project = root / "projects" / "third"
     project.mkdir(parents=True)
     run_git(project, "init", "-q", "-b", "main")
+    run_git(project, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q", "--allow-empty", "-m", "start")
     write(project / "AGENTS.md", "# AGENTS.md\n\n## What this is\n\nThird.\n\n" + VERIFICATION_SECTION)
     write(project / "scripts/integration-verify.json", '["python", "-c", "pass"]\n')
     release_workspace(root)
@@ -206,3 +209,24 @@ def test_without_entry_drops_only_a_direct_child_of_the_section(name: str) -> No
         "  demo:\n    repo: projects/demo\n    worktrees: worktrees/demo\n    state: state/demo-data\n"
         "skill_harnesses:\n  demo: [claude]\n")
     assert bootstrap.without_entry(text, "skill_harnesses", name) == text
+
+
+@pytest.mark.integration
+def test_add_refuses_a_project_whose_main_breaks_the_hook_table(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """`atc add` composes the hook's table with the project before it writes the map (docs/ENFORCEMENT.md
+    § PreToolUse hook): a policy on its main that does not load leaves workspace.yaml as it was."""
+    root, _ = make_workspace(tmp_path, create_project=False)
+    shutil.copyfile(bootstrap.ROOT / "workspace.yaml.example", root / "workspace.yaml.example")
+    bootstrap.init(root, "owner/repo", force=True, environ={})
+    project = root / "projects" / "broken"
+    project.mkdir(parents=True)
+    run_git(project, "init", "-q", "-b", "main")
+    write(project / "policies/hard-deny.yaml", "version: [\n")
+    run_git(project, "add", "-A")
+    run_git(project, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q", "-m", "start")
+    release_workspace(root)
+    before = (root / "workspace.yaml").read_bytes()
+    capsys.readouterr()
+    assert bootstrap.add(root, "broken", None, []) == 1
+    assert "STOP POLICY_INVALID" in capsys.readouterr().err
+    assert (root / "workspace.yaml").read_bytes() == before

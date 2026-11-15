@@ -61,6 +61,12 @@ whole directory loses nothing that a tool cannot recreate; the installed
     workers/                    one row per process using the pool, locked for its life
     memory/                     per-project worker memory of recent runs, `<project>.json`
     timings.jsonl               one record per timed stage (`TESTKIT.md` § Stage times)
+  enforcement/                  the PreToolUse hook's state (`ENFORCEMENT.md` § PreToolUse hook); agents cannot write it
+    baseline-<m>.json           the effective table of one map; not regenerable: without it every call is denied
+                                until the Owner runs atc guard --reset
+    table-<m>.json              the keyed cache of the last composition; regenerable
+    compose-<m>.lock            the composition lock, one locked byte
+    pretooluse.json             legacy static table of an older entry; atc guard --reset deletes it
   content/                      regenerable
     <owner>/<repo>.git          bare cache of governance_source, the content repository of a workspace without governance_checkout (`LAYOUT.md` § The manifest)
   cache/                        regenerable

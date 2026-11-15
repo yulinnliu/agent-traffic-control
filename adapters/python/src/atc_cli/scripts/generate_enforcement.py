@@ -11,10 +11,9 @@ Writes three files under --out, deterministically, so a consuming project can co
 absolute paths, written to --local-out (never under --out). A filesystem glob holding a ${...} token is
 refused (`unresolved-token`).
 
---hook-out composes the PreToolUse hook's table from the workspace policy, every registered project's policy
-and the workspace map; `atc guard --install` (the Owner's) writes it and the hook entries into the Claude Code
-and Codex settings. Command entries with a hook-only condition reach the table only. This is
-`atc-maintain guard`.
+--hook-out writes the PreToolUse hook's table as the hook composes it (`compose_result`): the workspace
+policy and every registered project's policy at `main`, and the workspace map. Command entries with a
+hook-only condition reach the table only. This is `atc-maintain guard`.
 """
 
 from __future__ import annotations
@@ -23,7 +22,6 @@ import argparse
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -51,7 +49,7 @@ HOOK_TABLE_VERSION = 1
 ENGINE = "pretooluse_hook.py"
 # The distribution `uv tool install` names its tool environment after.
 TOOL = "agent-traffic-control"
-ENGINE_FILES = (ENGINE, "shell_words.py", "write_targets.py", "globs.py")
+ENGINE_FILES = (ENGINE, "shell_words.py", "write_targets.py", "globs.py", "hook_state.py", "compose_child.py")
 # The engine `atc hook` runs: the one beside this module, inside the installed `atc`.
 HOOK_COMMAND = "atc hook"
 # A hook entry ATC manages: `atc hook`, or an engine named by path, as a release copy's entry wrote it.
@@ -187,14 +185,6 @@ def local_settings(roots: list[str]) -> str:
     return json.dumps({"permissions": {"deny": deny}}, indent=2) + "\n"
 
 
-def _workspace_doc(workspace: Path) -> tuple[Path, dict]:
-    doc = yaml.safe_load(workspace.read_text(encoding="utf-8")) or {}
-    base = doc.get("workspace_root") if isinstance(doc, dict) else None
-    if not isinstance(base, str) or not _absolute(base.replace("\\", "/")):
-        raise ValueError(f"{workspace}: workspace_root must be an absolute path")
-    return Path(base), doc
-
-
 def _norm(path: str | Path, base: Path) -> str:
     """The hook's form of a path: absolute, long, case-folded Windows form (shell_words.native)."""
     import shell_words
@@ -202,15 +192,69 @@ def _norm(path: str | Path, base: Path) -> str:
     return write_targets.long_form(shell_words.native(str(path), str(base)))
 
 
-def _expand_root(entry: str) -> str:
-    import ntpath
-    entry = ntpath.expandvars(entry)
-    return str(Path.home()) + entry[1:] if entry.startswith("~") else entry
+ENV_REFERENCE = re.compile(r"%(\w+)%|\$\{(\w+)\}|\$(\w+)")
+ROOT_LABEL = "policies/hard-deny.yaml"
+SKEW_HINT = (" If atc doctor reports the installed atc older than main, installing the latest release may be "
+             "the fix; otherwise fix the policy in a topic and integrate it, and if this main is not the reviewed "
+             "one, the Owner resets it to its upstream.")
 
 
-def _hook_sources(base: Path, doc: dict) -> list[tuple[str, Path, list[tuple[Path, int]]]]:
-    """(label, policy directory, scopes of its repository-relative globs), the workspace policy first."""
-    sources = [("policies/hard-deny.yaml", base / "policies", [(base, 0), (base / "worktrees" / "root", 1)])]
+def _expand_root(entry: str, home: Path, environ: dict[str, str] | os._Environ) -> str:
+    """An `agent_write_roots` entry with `%VAR%`, `${VAR}`, `$VAR` and a leading `~` expanded (an unknown variable
+    stays as written)."""
+    def value(match: re.Match) -> str:
+        name = next(group for group in match.groups() if group)
+        return environ.get(name, match.group(0))
+    entry = ENV_REFERENCE.sub(value, entry)
+    return str(home) + entry[1:] if entry.startswith("~") else entry
+
+
+def env_names(doc: dict) -> list[str]:
+    """The environment variables the map's `agent_write_roots` name, in order: inputs of the table's key."""
+    names: list[str] = []
+    for root in doc.get("agent_write_roots") or []:
+        if isinstance(root, str):
+            for match in ENV_REFERENCE.finditer(root):
+                name = next(group for group in match.groups() if group)
+                if name not in names:
+                    names.append(name)
+    return names
+
+
+def _parse_map(data: bytes, workspace: Path) -> tuple[Path, dict]:
+    import hook_state
+    try:
+        doc = policies.strict_load(data.decode("utf-8-sig")) or {}
+    except (UnicodeDecodeError, yaml.YAMLError) as exc:
+        raise hook_state.Failure("WORKSPACE_INVALID", f"{workspace}: {exc}; the Owner fixes it.") from None
+    base = doc.get("workspace_root") if isinstance(doc, dict) else None
+    if not isinstance(base, str) or not _absolute(base.replace("\\", "/")):
+        raise hook_state.Failure("WORKSPACE_INVALID", f"{workspace}: workspace_root must be an absolute path; "
+                                                      "the Owner fixes it.")
+    for root in doc.get("agent_write_roots") or []:
+        if not isinstance(root, str) or not root.strip():
+            raise hook_state.Failure("WORKSPACE_INVALID", f"{workspace}: agent_write_roots holds a non-string or "
+                                                          "empty entry; the Owner fixes it.")
+    return Path(base), doc
+
+
+def _sources(workspace: Path, base: Path, doc: dict) -> list[dict]:
+    """Each policy source, the workspace policy first: a Git repository read at `main`, or (a workspace that is
+    no governance checkout) the workspace's own `policies/`; with the scopes of its repository-relative globs."""
+    import content
+    import hook_state
+    checkout = doc.get(content.GOVERNANCE_CHECKOUT)
+    root_scopes = [(base, 0), (base / "worktrees" / "root", 1)]
+    if isinstance(checkout, str) and checkout.strip():
+        sources = [{"label": ROOT_LABEL, "kind": "git", "path": str((workspace.parent / checkout).resolve()),
+                    "scopes": root_scopes}]
+    elif content.holds_governance(workspace.parent):
+        raise hook_state.Failure("GOVERNANCE_CHECKOUT_UNSET", f"{workspace.parent} is a checkout of the governance "
+                                 f"repository but {workspace.name} has no governance_checkout; the Owner adds "
+                                 "governance_checkout: . to it.")
+    else:
+        sources = [{"label": ROOT_LABEL, "kind": "file", "path": str(base / "policies"),
+                    "files": [f"{kind}.yaml" for kind in policies.KINDS], "scopes": root_scopes}]
     for name, entry in (doc.get("projects") or {}).items():
         if not isinstance(entry, dict) or not isinstance(entry.get("repo"), str):
             continue
@@ -218,28 +262,155 @@ def _hook_sources(base: Path, doc: dict) -> list[tuple[str, Path, list[tuple[Pat
         scopes = [(repo, 0)]
         if isinstance(entry.get("worktrees"), str):
             scopes.append((base / entry["worktrees"], 1))
-        sources.append((f"projects.{name}", repo / "policies", scopes))
+        sources.append({"label": f"projects.{name}", "kind": "git", "path": str(repo), "scopes": scopes})
     return sources
 
 
-def hook_table(workspace: Path, table_dir: Path, schemas: Path = policies.SCHEMAS) -> str:
-    """The PreToolUse hook's table (docs/ENFORCEMENT.md § PreToolUse hook); raises PolicyError or ValueError.
+def _public(source: dict) -> dict:
+    return {k: v for k, v in source.items() if k != "scopes"}
 
-    It protects the table, the engine's files and uv's tool environment of the installed `atc`."""
-    base, doc = _workspace_doc(workspace)
+
+def _git_texts(source: dict, sha: str, home: Path) -> dict[str, str]:
+    """The policy files of commit ``sha``, read from its Git objects by name; POLICY_TOO_LARGE above the limit."""
+    import hook_state
+    repo, where = Path(source["path"]), f"{source['label']} {source['path']}@{sha}"
+    names = [f"{sha}:policies/{kind}.yaml" for kind in policies.KINDS]
+    try:
+        check = hook_state.git(repo, ["cat-file", "--batch-check"], home, data=("\n".join(names) + "\n").encode())
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise hook_state.Failure("MAIN_UNREADABLE", f"{where}: git cat-file failed ({exc}).") from None
+    if check.returncode:
+        raise hook_state.Failure("MAIN_UNREADABLE", f"{where}: git cat-file failed "
+                                 f"({check.stderr.decode('utf-8', 'replace').strip()}).")
+    wanted: list[tuple[str, str]] = []
+    for kind, line in zip(policies.KINDS, check.stdout.decode("utf-8", "replace").splitlines()):
+        parts = line.split()
+        if len(parts) != 3 or parts[1] != "blob":
+            continue
+        if int(parts[2]) > hook_state.MAX_POLICY_BYTES:
+            raise hook_state.Failure("POLICY_TOO_LARGE", f"{where}: policies/{kind}.yaml is {parts[2]} bytes, over "
+                                     f"{hook_state.MAX_POLICY_BYTES}.{SKEW_HINT}")
+        wanted.append((kind, parts[0]))
+    if not wanted:
+        return {}
+    batch = hook_state.git(repo, ["cat-file", "--batch"], home,
+                           data=("\n".join(oid for _, oid in wanted) + "\n").encode())
+    out, position, texts = batch.stdout, 0, {}
+    for kind, _ in wanted:
+        end = out.index(b"\n", position)
+        size = int(out[position:end].split()[2])
+        texts[kind] = out[end + 1:end + 1 + size].decode("utf-8")
+        position = end + 1 + size + 1
+    return texts
+
+
+def _file_texts(source: dict) -> dict[str, str]:
+    import hook_state
+    texts = {}
+    for kind in policies.KINDS:
+        path = Path(source["path"]) / f"{kind}.yaml"
+        if not path.is_file():
+            continue
+        if path.stat().st_size > hook_state.MAX_POLICY_BYTES:
+            raise hook_state.Failure("POLICY_TOO_LARGE", f"{source['label']} {path}: {path.stat().st_size} bytes, "
+                                                         f"over {hook_state.MAX_POLICY_BYTES}.")
+        texts[kind] = path.read_text(encoding="utf-8")
+    return texts
+
+
+def _atc_identity() -> dict:
+    from importlib import metadata
+    try:
+        version = metadata.version(TOOL)
+    except metadata.PackageNotFoundError:
+        version = "unknown"
+    try:
+        import release_pin
+        release = release_pin.installed()
+    except Exception:  # identity is reporting only
+        release = None
+    return {"version": version, "commit": release.commit if release else None}
+
+
+def compose_result(workspace: Path, home: Path, atc_home: Path, key_out: Path | None = None,
+                   map_bytes: bytes | None = None, schemas: Path = policies.SCHEMAS) -> dict:
+    """Compose the hook's table from the map and each source at the commit its key names: `{key, sources,
+    env_names, inputs, table}`, or `{key, ..., failure}` (docs/ENFORCEMENT.md § PreToolUse hook, Table).
+    ``map_bytes`` stands for the map's text (`atc add` checks a map before writing it)."""
+    import hashlib
+    import hook_state
+    result: dict = {"atc": _atc_identity()}
+    data = map_bytes
+    try:
+        if data is None:
+            try:
+                data = workspace.read_bytes()
+            except OSError as exc:
+                raise hook_state.Failure("WORKSPACE_MISSING", f"{workspace} cannot be read "
+                                         f"({exc.strerror or exc}); the Owner restores it.") from None
+        map_hash = hashlib.sha256(data).hexdigest()
+        result.update(key=hook_state.make_key(workspace, map_hash, None, None, home), sources=None, env_names=None)
+        base, doc = _parse_map(data, workspace)
+        sources = _sources(workspace, base, doc)
+        names = env_names(doc)
+        public = [_public(source) for source in sources]
+        key = hook_state.make_key(workspace, map_hash, public, names, home)
+        result.update(key=key, sources=public, env_names=names)
+        if key_out is not None:
+            hook_state.write_json(key_out, {"key": key, "sources": public, "env_names": names})
+        loaded, inputs = [], {}
+        for source, (_, _, _, value) in zip(sources, key["sources"]):
+            if source["kind"] == "git":
+                if value is None:
+                    raise hook_state.Failure("MAIN_UNREADABLE", f"{source['label']}: {source['path']} has no "
+                                             "readable refs/heads/main; the Owner repairs the repository or runs "
+                                             "atc remove.")
+                where, texts = f"{source['label']} {source['path']}@{value}", _git_texts(source, value, home)
+                inputs[source["label"]] = f"{source['path']}@{value}"
+            else:
+                where, texts = f"{source['label']} {source['path']}", _file_texts(source)
+                inputs[source["label"]] = f"{source['path']} sha256 {value}"
+            hard = None
+            if "hard-deny" in texts:
+                try:
+                    hard = policies.load_texts(texts, schemas)["hard-deny"]
+                except policies.PolicyError as exc:
+                    raise hook_state.Failure("POLICY_INVALID", "; ".join(f"{where}: {p}" for p in exc.problems)
+                                             + "." + SKEW_HINT) from None
+                problems = unresolved_tokens(hard)
+                if problems:
+                    raise hook_state.Failure("POLICY_INVALID", "; ".join(f"{where}: {p}" for p in problems)
+                                             + "." + SKEW_HINT)
+            loaded.append((source, hard))
+        result.update(inputs=inputs, table=_table(workspace, base, doc, loaded, home, atc_home))
+    except hook_state.Failure as failure:
+        result["failure"] = failure.as_dict()
+    return result
+
+
+def fresh_table(workspace: Path, home: Path, atc_home: Path, schemas: Path = policies.SCHEMAS) -> str:
+    """The composed table as LF JSON text; raises hook_state.Failure."""
+    import hook_state
+    result = compose_result(workspace, home, atc_home, schemas=schemas)
+    if "failure" in result:
+        raise hook_state.Failure(result["failure"]["token"], result["failure"]["detail"])
+    return json.dumps(result["table"], indent=2, ensure_ascii=False) + "\n"
+
+
+def _table(workspace: Path, base: Path, doc: dict, loaded: list[tuple[dict, dict | None]], home: Path,
+           atc_home: Path) -> dict:
+    """The PreToolUse hook's table from the loaded policies and the map (docs/ENFORCEMENT.md § PreToolUse hook).
+
+    It protects its state directory, the map, a workspace's own policies, the engine's files and the installed
+    `atc`'s uv tool environment."""
+    import hook_state
     commands: list[dict] = []
     filesystem: list[dict] = []
     seen: set[str] = set()
-    for label, directory, scopes in _hook_sources(base, doc):
-        if not (directory / "hard-deny.yaml").is_file():
+    for source, hard in loaded:
+        if hard is None:
             continue
-        try:
-            hard = policies.load(directory, schemas)["hard-deny"]
-        except policies.PolicyError as exc:
-            raise policies.PolicyError([f"{label}: {problem}" for problem in exc.problems]) from exc
-        problems = unresolved_tokens(hard)
-        if problems:
-            raise policies.PolicyError([f"{label}: {problem}" for problem in problems])
+        label, scopes = source["label"], source["scopes"]
         for command in hard.get("commands", {}).get("deny", []):
             condition = {k: command[k] for k in ("argv_prefix", *HOOK_ONLY) if k in command}
             key = json.dumps(condition, sort_keys=True)
@@ -252,7 +423,7 @@ def hook_table(workspace: Path, table_dir: Path, schemas: Path = policies.SCHEMA
             entry = entries[index]
             reason = entry.get("reason", "") if isinstance(entry, dict) else ""
             if glob.startswith("~"):
-                rule_glob, scope = _norm(str(Path.home()) + glob[1:], base).replace("\\", "/"), None
+                rule_glob, scope = _norm(str(home) + glob[1:], base).replace("\\", "/"), None
             else:
                 rule_glob, scope = glob, [{"base": _norm(path, base), "depth": depth} for path, depth in scopes]
             key = json.dumps([rule_glob, modes, scope])
@@ -275,46 +446,38 @@ def hook_table(workspace: Path, table_dir: Path, schemas: Path = policies.SCHEMA
                 worktrees.append(path)
     write_roots = [_norm(base, base)]
     for root in doc.get("agent_write_roots") or []:
-        if not isinstance(root, str) or not root.strip():
-            raise ValueError(f"{workspace}: agent_write_roots holds a non-string or empty entry")
-        path = _norm(_expand_root(root), base)
+        path = _norm(_expand_root(root, home, os.environ), base)
         if path not in write_roots:
             write_roots.append(path)
     tool = tool_environment()
-    protected = ([_norm(table_dir, base)] + [_norm(ENGINE_DIR / name, base) for name in ENGINE_FILES]
+    own = [_norm(Path(s["path"]), base) for s, _ in loaded if s["kind"] == "file"]
+    protected = ([_norm(Path(atc_home) / hook_state.ENFORCEMENT, base), _norm(workspace, base), *own]
+                 + [_norm(ENGINE_DIR / name, base) for name in ENGINE_FILES]
                  + ([_norm(tool, base)] if tool is not None else []))
-    table = {"version": HOOK_TABLE_VERSION, "commands": commands, "filesystem": filesystem,
-             "worktrees": worktrees, "write_roots": write_roots, "protected": protected}
-    return json.dumps(table, indent=2, ensure_ascii=False) + "\n"
+    return {"version": HOOK_TABLE_VERSION, "commands": commands, "filesystem": filesystem,
+            "worktrees": worktrees, "write_roots": write_roots, "protected": protected}
 
 
 def tool_environment() -> Path | None:
-    """uv's tool environment of the installed `atc`, `<uv tool dir>/agent-traffic-control`, which `uv tool install`
-    replaces; None without uv."""
-    uv = shutil.which("uv")
-    if uv is None:
-        return None
-    try:
-        found = subprocess.run([uv, "tool", "dir"], capture_output=True, text=True, encoding="utf-8",
-                               errors="replace", check=False, timeout=60)
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    lines = found.stdout.strip().splitlines()
-    return Path(lines[-1].strip()) / TOOL if found.returncode == 0 and lines else None
+    """The uv tool environment of the running `atc` (`sys.prefix` holding uv's `uv-receipt.toml`), which `uv tool
+    install` replaces; None when it runs from elsewhere."""
+    prefix = Path(sys.prefix)
+    return prefix if (prefix / "uv-receipt.toml").is_file() else None
 
 
-def default_table_dir() -> Path:
-    return Path.home() / ".atc" / "enforcement"
+def default_home() -> Path:
+    return Path.home()
 
 
-def engine_command(workspace: Path, harness: str, table_dir: Path) -> str:
+def default_atc_home(home: Path) -> Path:
+    return Path(home) / ".atc"
+
+
+def engine_command(workspace: Path, harness: str, home: Path, atc_home: Path) -> str:
     """The hook command: `atc hook`, which runs the engine of whatever `atc` is installed, so a new install needs no
-    new entry; a table outside the default directory is named by forward-slash path."""
-    base, _ = _workspace_doc(workspace)
-    command = f"{HOOK_COMMAND} --harness {harness}"
-    if _norm(table_dir, base) != _norm(default_table_dir(), base):
-        command += f' --table "{(table_dir / HOOK_TABLE).as_posix()}"'
-    return command
+    new entry; it names the map and the home and ATC home the hook keeps its state under, by forward-slash path."""
+    return (f'{HOOK_COMMAND} --harness {harness} --workspace "{Path(workspace).absolute().as_posix()}" '
+            f'--home "{Path(home).absolute().as_posix()}" --atc-home "{Path(atc_home).absolute().as_posix()}"')
 
 
 def hook_group(harness: str, command: str) -> dict:
@@ -357,32 +520,21 @@ def install_hook(path: Path, group: dict) -> None:
 
 def hooks_current(path: Path, group: dict) -> bool:
     """The file's PreToolUse entries that run the engine or a retired guard are exactly `group`."""
+    return entry_state(path, group) == "current"
+
+
+def entry_state(path: Path, group: dict) -> str:
+    """`current` when the file's managed PreToolUse entries are exactly `group`, `missing` when it has none,
+    else `outdated` (an unreadable file included)."""
     try:
         doc = _settings(path)
     except ValueError:
-        return False
+        return "outdated"
     entries = (doc.get("hooks") or {}).get("PreToolUse") or []
     managed = [e for e in entries if isinstance(e, dict) and any(_managed(h) for h in e.get("hooks", []))]
-    return managed == [group]
-
-
-def hook_drift(workspace: Path, home: Path | None = None) -> list[str] | None:
-    """None when no hook table is installed; else what differs from a fresh compose (empty when current)."""
-    home = home or Path.home()
-    table_dir = home / ".atc" / "enforcement"
-    installed = table_dir / HOOK_TABLE
-    if not installed.is_file():
-        return None
-    try:
-        expected = hook_table(workspace, table_dir)
-        groups = {h: hook_group(h, engine_command(workspace, h, table_dir)) for h in ("claude", "codex")}
-    except (policies.PolicyError, OSError, ValueError, yaml.YAMLError) as exc:
-        return [f"cannot compose ({exc})"]
-    found = [] if _read(installed) == expected else [f"table {installed}"]
-    for harness, path in (("claude", home / ".claude" / "settings.json"), ("codex", home / ".codex" / "hooks.json")):
-        if not hooks_current(path, groups[harness]):
-            found.append(f"{harness} hook entry in {path}")
-    return found
+    if not managed:
+        return "missing"
+    return "current" if managed == [group] else "outdated"
 
 
 def render(hard: dict) -> dict[str, str]:
@@ -560,15 +712,15 @@ def main(argv: list[str] | None = None) -> int:
         local = {LOCAL_FILE: local_settings(roots)} if roots else None
     table = None
     groups: dict[str, dict] = {}
-    table_dir = args.hook_out or default_table_dir()
+    home = default_home()
     if hook_write or live_hooks:
+        import hook_state
         try:
-            table = hook_table(args.workspace, table_dir, args.schemas)
-            groups = {h: hook_group(h, engine_command(args.workspace, h, table_dir)) for h in ("claude", "codex")}
-        except policies.PolicyError as exc:
-            return problem(list(exc.problems))
-        except (OSError, ValueError, yaml.YAMLError) as exc:
-            return problem([f"workspace: {exc}"])
+            table = fresh_table(args.workspace.absolute(), home, default_atc_home(home), args.schemas)
+        except hook_state.Failure as exc:
+            return problem([f"{exc.token}: {exc.detail}"])
+        groups = {h: hook_group(h, engine_command(args.workspace, h, home, default_atc_home(home)))
+                  for h in ("claude", "codex")}
     if args.check:
         found = []
         if args.policies is not None:
@@ -587,7 +739,7 @@ def main(argv: list[str] | None = None) -> int:
             return done("DRIFT", ["DRIFT " + ", ".join(found)], 1,
                         ("DRIFT", "the enforcement configs differ from the policies",
                          "regenerate with atc-maintain guard --policies DIR --out DIR; the Owner runs "
-                         "atc guard --install for the live copies"), drift=found)
+                         "atc guard --install for the hook entries"), drift=found)
         return done("CURRENT", ["CURRENT enforcement configs"], 0, drift=[])
     lines = []
     if args.policies is not None:
@@ -608,7 +760,7 @@ def main(argv: list[str] | None = None) -> int:
     table_target = None
     installed: list[str] = []
     if table is not None:
-        table_target = table_dir / HOOK_TABLE
+        table_target = args.hook_out / HOOK_TABLE
         table_target.parent.mkdir(parents=True, exist_ok=True)
         write_if_changed(table_target, table)
         lines.append(f"  hook-table: {table_target}")

@@ -112,4 +112,4 @@ def test_a_doctor_warning_leaves_the_exit_code_alone(monkeypatch: pytest.MonkeyP
                                                      capsys: pytest.CaptureFixture[str]) -> None:
     monkeypatch.setattr(doctor, "diagnose", lambda root: [doctor.Check("memory", "WARN", "low")])
     assert doctor.main([]) == 0
-    assert "READY doctor: 0 error(s), 1 warning(s), 0 not initialized\n" in capsys.readouterr().out
+    assert "READY doctor: 0 error(s), 1 warning(s), 0 not initialized, 0 note(s)\n" in capsys.readouterr().out

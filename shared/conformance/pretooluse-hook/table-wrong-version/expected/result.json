@@ -3,6 +3,6 @@
   "output_contains": [
     "\"permissionDecision\": \"deny\"",
     "the PreToolUse hook could not decide",
-    "atc guard --install"
+    "atc doctor"
   ]
 }
