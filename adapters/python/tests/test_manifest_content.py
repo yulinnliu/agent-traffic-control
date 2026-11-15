@@ -235,9 +235,15 @@ def test_a_governance_checkout_without_governance_checkout_stops_sync_add_and_do
     other = root / "projects" / "other"
     other.mkdir(parents=True)
     run_git(other, "init", "-q", "-b", "main")
+    before = path.read_text(encoding="utf-8")
     assert bootstrap.add(root, "other", None, []) == 1
     assert "GOVERNANCE_CHECKOUT_UNSET" in capsys.readouterr().err
     assert not (other / ".atc").exists()
+    assert path.read_text(encoding="utf-8") == before
+    assert not (root / "worktrees" / "other").exists() and not (root / "state" / "other-data").exists()
+    assert bootstrap.add(root, "cloned", "https://example.invalid/cloned.git", []) == 1
+    assert "GOVERNANCE_CHECKOUT_UNSET" in capsys.readouterr().err
+    assert not (root / "projects" / "cloned").exists() and path.read_text(encoding="utf-8") == before
     check = doctor.root_adapter_check(root)
     assert check.status == "ERROR" and check.detail.startswith("GOVERNANCE_CHECKOUT_UNSET")
     assert not content.cache_dir("owner/atc").exists()

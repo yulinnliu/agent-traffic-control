@@ -149,16 +149,20 @@ def add(root: Path, name: str, url: str | None, skills: list[str], verbose: bool
     reserved = validate_workspace.reserved_root_problem(name, f"worktrees/{name}")
     if reserved:
         return _error("PROJECT_NAME_RESERVED", f"{name}: {reserved}", "choose another name")
+    if url and not URL.match(url):
+        return _error("URL_INVALID", f"--url {url} is not a URL",
+                      f"place an existing checkout at projects/{name} and run it without --url")
+    try:  # the content repository first: a workspace that cannot sync gets no clone and no registration
+        sync_project.content_repository(root)
+    except sync_project.SyncStop as stop:
+        return _stop(stop.code, stop.detail, sync_project.STOP_HINTS.get(stop.code))
     project = root / "projects" / name
-    if url and URL.match(url):
+    if url:
         if project.exists():
             return _stop("PROJECT_EXISTS", f"{project} exists", "drop --url to register it as it is")
         cloned = subprocess.run(["git", "clone", "--quiet", url, str(project)], capture_output=True, text=True)
         if cloned.returncode != 0:
             return _error("CLONE_FAILED", f"git clone {url}: {cloned.stderr.strip()}", "check the URL and access")
-    elif url:
-        return _error("URL_INVALID", f"--url {url} is not a URL",
-                      f"place an existing checkout at projects/{name} and run it without --url")
     if not (project / ".git").exists():
         return _stop("PROJECT_NOT_A_REPOSITORY", f"projects/{name} is not a git repository",
                      "clone it there, or pass --url")
