@@ -726,8 +726,13 @@ from then; a wait past its limit stops it with `WORKER_WAIT_TIMEOUT` (exit
 
 Applies each mutant of `FILE` alone to the export of `SHA` (the branch tip
 when `--sha` is absent) in the scratch `<ID>-<sha7>`, through the isolation of
-`atc test ID`. The judging tests are the `TEST...` after `--`, else the
-related tests; with neither, `NO_TESTS`. Each run is pytest with `-x` and a
+`atc test ID`. The judging tests are the `TEST...` after `--`, which judge
+every mutant. Without them, each mutant is judged by the tests the tree's
+`selector` picks with `--direct` for the paths its edits name (§ Commands,
+`atc test ID` step 2), followed by its own `tests`; a mutant that gets none
+stops the command with `NO_TESTS` before the baseline. That list goes to
+`<scratch>/mutants-selected.json` with each mutant's `tests` filled in, and
+the baseline runs their union, never the task's related tests. Each run is pytest with `-x` and a
 900-second timeout. The command holds one host worker token from before the
 baseline to its end; a wait for it past 900 seconds stops the command with
 `WORKER_WAIT_TIMEOUT` (exit 124) before the baseline, and an interrupt

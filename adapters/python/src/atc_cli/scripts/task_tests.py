@@ -10,6 +10,7 @@ scratch named after the task, and every run prunes stale scratch entries first.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 from pathlib import Path
@@ -30,6 +31,7 @@ TESTKIT_HINTS = {
     "SHA_NOT_FOUND": "name a commit of the task's repository",
     "VENV_MISSING": "atc test ID --clean, then run again to rebuild the scratch",
 }
+SELECTED_MUTANTS = "mutants-selected.json"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -39,8 +41,9 @@ def build_parser() -> argparse.ArgumentParser:
         "    the tests related to the task's changes since its base_sha (--all: the full suite), in the task's\n"
         "    worktree, or with --sha in an export of SHA (scratch ID-SHA7, its environment built once)\n"
         "atc test ID --mutants FILE [--sha SHA] [-- TEST...]\n"
-        "    apply each mutant of FILE alone to an export of SHA (default: the branch tip) and run its tests\n"
-        "    (default: the related tests); a mutant's kill_rule is failure or assertion\n"
+        "    apply each mutant of FILE alone to an export of SHA (default: the branch tip) and run its tests:\n"
+        "    the TESTs after --, else the tests the tree's selector picks for its edited paths plus its own\n"
+        "    tests; a mutant's kill_rule is failure or assertion\n"
         "atc test ID --candidate [--sha SHA]\n"
         "    the integration verifier on the candidate atc integrate ID would build (default SHA: the branch tip)\n"
         "atc test ID --clean      delete the task's scratches\n"
@@ -146,32 +149,41 @@ def run_tests(task: Task, args: argparse.Namespace, pytest_args: list[str], envi
     return testrun.run([*argv, *(["--", *pytest_args] if pytest_args else [])], environ)
 
 
-def related_tests(directory: Path, task: Task, name: str, environ: dict[str, str]) -> list[str]:
-    """The test files the task's changes since its base touch, relative to ``directory``, the test directory of
-    the export in the scratch ``name``, whose registry line names the source commit to diff."""
-    if not task.base:
-        return []
-    root = locations.locate(environ).tmp
-    row = next((r for r in scratch.registered(root) if Path(r.scratch).name == name), None)
-    python = toolchains.for_tree(directory).interpreter(directory)
-    paths = testrun.changed_paths(directory, task.base, row)
-    return testrun.touched(directory, python, paths, environ)
-
-
-def run_mutants(task: Task, args: argparse.Namespace, tests: list[str], environ: dict[str, str]) -> int:
-    try:
-        testrun.read_mutants(args.mutants)
-    except locations.Refusal as refusal:
-        raise Refusal(refusal.token, refusal.detail, f"write {testrun.MUTANTS_SHAPE}") from None
-    name, commit, directory = export(task, args.sha or task.tip(), environ)
+def selected_mutants(entries: list[dict], directory: Path, place: Path,
+                     environ: dict[str, str]) -> tuple[Path, list[str]]:
+    """Each mutant judged by the tests the tree's selector picks for its edited paths, then its own ``tests``,
+    written to ``<scratch>/mutants-selected.json``: that file and every judging test, relative to the export's
+    root."""
     tree = directory
     while tree.name != checkout.TREE:
         tree = tree.parent
     prefix = directory.relative_to(tree).as_posix()
-    tests = tests or [t if prefix == "." else f"{prefix}/{t}" for t in related_tests(directory, task, name, environ)]
+    python = toolchains.for_tree(directory).interpreter(directory)
+    chosen: list[str] = []
+    for entry in entries:
+        paths = sorted({edit["path"] for edit in entry["edits"]})
+        picked = [t if prefix == "." else f"{prefix}/{t}" for t in testrun.touched(directory, python, paths, environ)]
+        entry["tests"] = list(dict.fromkeys([*picked, *entry.get("tests", ())]))
+        if not entry["tests"]:
+            raise Refusal("NO_TESTS", f"no test judges the mutant {entry['label']}: the selector picks none for "
+                                      f"{', '.join(paths)} and it names no tests", "name the judging tests after -- "
+                                                                                    "or in the mutant's tests")
+        chosen += entry["tests"]
+    listing = place / SELECTED_MUTANTS
+    listing.write_text(json.dumps(entries, indent=1), encoding="utf-8")
+    return listing, list(dict.fromkeys(chosen))
+
+
+def run_mutants(task: Task, args: argparse.Namespace, tests: list[str], environ: dict[str, str]) -> int:
+    try:
+        entries = testrun.read_mutants(args.mutants)
+    except locations.Refusal as refusal:
+        raise Refusal(refusal.token, refusal.detail, f"write {testrun.MUTANTS_SHAPE}") from None
+    name, commit, directory = export(task, args.sha or task.tip(), environ)
+    listing = Path(args.mutants).resolve()
     if not tests:
-        raise Refusal("NO_TESTS", "no test is related to the task's changes", "name the judging tests after --")
-    return testrun.mutants([name, commit, str(task.source()), str(Path(args.mutants).resolve()), "--task", task.id,
+        listing, tests = selected_mutants(entries, directory, locations.locate(environ).tmp / name, environ)
+    return testrun.mutants([name, commit, str(task.source()), str(listing), "--task", task.id,
                             "--tests", *tests], environ)
 
 

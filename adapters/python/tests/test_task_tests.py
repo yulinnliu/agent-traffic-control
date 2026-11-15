@@ -159,21 +159,53 @@ def test_a_sha_is_exported_into_the_task_and_commit_scratch_and_reused(workspace
     assert len(scratch.registered(atc_tmp)) == 1
 
 
-def test_mutants_judge_the_branch_tip_by_default_with_each_mutants_kill_rule(
-        workspace: Workspace, calls: dict[str, list], tmp_path: Path) -> None:
-    """Without tests after --, the judging tests are those the branch changed since its base, read from the
-    export's source commit (the export is no Git working tree)."""
-    put(workspace.worktree, {"tests/test_value.py": "def test_value():\n    assert 2 == 2\n"}, "test the widget")
+def write_mutants(tmp_path: Path, entries: list[dict]) -> Path:
     listing = tmp_path / "mutants.json"
-    edit = [{"path": "src/demo.py", "old": "X = 2", "new": "X = 3"}]
-    listing.write_text(json.dumps([{"label": "a", "edits": edit, "kill_rule": "assertion"},
-                                   {"label": "b", "edits": edit}]), encoding="utf-8")
+    listing.write_text(json.dumps(entries), encoding="utf-8")
+    return listing
+
+
+DEMO_EDIT = [{"path": "src/demo.py", "old": "X = 2", "new": "X = 3"}]
+TEST_EDIT = [{"path": "tests/test_value.py", "old": "2 == 2", "new": "2 == 3"}]
+
+
+def test_mutants_judge_the_branch_tip_by_default_each_by_its_selected_and_own_tests(
+        workspace: Workspace, calls: dict[str, list], tmp_path: Path) -> None:
+    """Without tests after --, each mutant is judged by what the selector picks for its edited paths (the stand-in
+    environment runs no selector, so a changed test file picks itself) and its own tests; a test file the branch
+    changed that no mutant reaches stays out, so the baseline is never the task's related tests."""
+    put(workspace.worktree, {"tests/test_value.py": "def test_value():\n    assert 2 == 2\n",
+                             "tests/test_other.py": "def test_other():\n    assert True\n"}, "test the widget")
+    listing = write_mutants(tmp_path, [
+        {"label": "a", "edits": DEMO_EDIT, "tests": ["tests/test_own.py"], "kill_rule": "assertion"},
+        {"label": "b", "edits": TEST_EDIT}])
     assert workspace.run(TASK, "--mutants", str(listing)) == 0
     [(argv, entries)] = calls["mutants"]
     tip = git(workspace.worktree, "rev-parse", "HEAD")
     assert argv[0] == f"{TASK}-{tip[:7]}" and argv[1] == tip
+    assert Path(argv[3]).name == task_tests.SELECTED_MUTANTS and Path(argv[3]).parent.name == argv[0]
+    assert [(entry["label"], entry["tests"], entry.get("kill_rule")) for entry in entries] == [
+        ("a", ["tests/test_own.py"], "assertion"), ("b", ["tests/test_value.py"], None)]
+    assert argv[argv.index("--tests") + 1:] == ["tests/test_own.py", "tests/test_value.py"]
+    assert json.loads(listing.read_text(encoding="utf-8"))[0]["tests"] == ["tests/test_own.py"]
+
+
+def test_a_mutant_its_selection_and_own_tests_leave_without_tests_stops_before_the_run(
+        workspace: Workspace, calls: dict[str, list], tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    listing = write_mutants(tmp_path, [{"label": "b", "edits": TEST_EDIT}, {"label": "a", "edits": DEMO_EDIT}])
+    assert workspace.run(TASK, "--mutants", str(listing)) == 1
+    err = capsys.readouterr().err
+    assert err.startswith("STOP NO_TESTS: no test judges the mutant a: the selector picks none for src/demo.py")
+    assert calls["mutants"] == []
+
+
+def test_tests_after_dashes_judge_every_mutant_from_the_given_file(
+        workspace: Workspace, calls: dict[str, list], tmp_path: Path) -> None:
+    listing = write_mutants(tmp_path, [{"label": "a", "edits": DEMO_EDIT}])
+    assert workspace.run(TASK, "--mutants", str(listing), "--", "tests/test_value.py") == 0
+    [(argv, entries)] = calls["mutants"]
+    assert Path(argv[3]) == listing.resolve() and "tests" not in entries[0]
     assert argv[argv.index("--tests") + 1:] == ["tests/test_value.py"]
-    assert [entry.get("kill_rule") for entry in entries] == ["assertion", None]
 
 
 def test_a_candidate_is_verified_at_the_branch_tip_or_the_given_sha(workspace: Workspace,
