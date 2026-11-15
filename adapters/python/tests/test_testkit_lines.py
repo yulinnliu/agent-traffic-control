@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from atc_testkit import lines, testrun
+from test_testkit_tmp import link_directory, unlink_directory
 
 SOURCE = (
     "import os\n"                                  # 1
@@ -124,9 +125,9 @@ def test_files_and_directories_narrow_and_other_items_stay(tree: Path, tmp_path:
     assert choice.tests == [A1, B1, "-x", "tests/test_b.py"]  # a path after an option stays as given
     only_b = lines.choose(mutant("    if link: return 1"), ["tests/test_b.py"], tree, prepared, record)
     assert only_b.tests == [B1]
-    gone = lines.choose(mutant("    if link: return 1"), ["tests/test_gone.py", "tests/test_b.py"], tree, prepared,
+    gone = lines.choose(mutant("    if link: return 1"), ["tests/test_absent_from_tree.py", "tests/test_b.py"], tree, prepared,
                         record)
-    assert gone.tests == [B1, "tests/test_gone.py"]  # a path that is not in the tree stays as given
+    assert gone.tests == [B1, "tests/test_absent_from_tree.py"]  # a path that is not in the tree stays as given
 
 
 @pytest.mark.unit
@@ -232,6 +233,23 @@ def test_the_lines_directory_is_cleared_by_the_one_recursive_delete(tree: Path, 
     with pytest.raises(lines.Refusal) as caught:
         lines.prepare(tmp_path, tree, [])
     assert caught.value.token == "LINES_NOT_CLEARED" and seen == [tmp_path / lines.DIRECTORY]
+
+
+@pytest.mark.integration
+def test_a_link_in_the_lines_directory_stops_the_run_and_its_target_survives(tree: Path, tmp_path: Path) -> None:
+    prepared = lines.prepare(tmp_path, tree, [])
+    target = tmp_path / "outside"
+    (target / "kept.txt").parent.mkdir()
+    (target / "kept.txt").write_text("x", encoding="utf-8")
+    link = prepared.data / "out"
+    link_directory(link, target)
+    try:
+        with pytest.raises(lines.Refusal) as caught:
+            lines.prepare(tmp_path, tree, [])
+        assert caught.value.token == "LINES_NOT_CLEARED" and (target / "kept.txt").read_text(encoding="utf-8") == "x"
+    finally:
+        if os.path.lexists(link):
+            unlink_directory(link)
 
 
 def _python(tmp_path: Path, pythonpath: list[Path], code: str) -> subprocess.CompletedProcess[str]:
