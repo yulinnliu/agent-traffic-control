@@ -32,3 +32,4 @@ decisions:
 - Step A is the revised design only; step B (code) waits for the Owner's ruling on it.
 - 'Correction to the 11-15 still-in-force decision: D7 local-first covers content only (sync reads the governance_checkout''s Git objects); whether the governance host installs atc from its local checkout at a tag is design decision DC, not yet ruled.'
 - 'Correction to the 11-15 「Reset 重做」 decision: withdrawing ATC-0050 was the coordinator''s proposal (release copies go away), which the Owner accepted with 「Reset 重做」; it is not the Owner''s own words.'
+- 'Owner 11-15 design rulings: DA move scripts into the package (src/atc_cli/scripts); DB hook entry is atc hook; DC local-first (governance host installs from git+file at a tag, others from the GitHub tag); DD drop the atc-install rule, docs state install is the Owner''s act. DE not asked: Owner''s earlier 「都不發」 stands, no release until the Owner says.'
