@@ -187,6 +187,7 @@ def test_mutants_judge_the_branch_tip_by_default_each_by_its_selected_and_own_te
     assert [(entry["label"], entry["tests"], entry.get("kill_rule")) for entry in entries] == [
         ("a", ["tests/test_own.py"], "assertion"), ("b", ["tests/test_value.py"], None)]
     assert argv[argv.index("--tests") + 1:] == ["tests/test_own.py", "tests/test_value.py"]
+    assert "--lines" in argv[:argv.index("--tests")]  # the baseline's line record narrows each selection
     assert json.loads(listing.read_text(encoding="utf-8"))[0]["tests"] == ["tests/test_own.py"]
 
 
@@ -205,7 +206,7 @@ def test_tests_after_dashes_judge_every_mutant_from_the_given_file(
     assert workspace.run(TASK, "--mutants", str(listing), "--", "tests/test_value.py") == 0
     [(argv, entries)] = calls["mutants"]
     assert Path(argv[3]) == listing.resolve() and "tests" not in entries[0]
-    assert argv[argv.index("--tests") + 1:] == ["tests/test_value.py"]
+    assert argv[argv.index("--tests") + 1:] == ["tests/test_value.py"] and "--lines" not in argv
 
 
 def test_a_candidate_is_verified_at_the_branch_tip_or_the_given_sha(workspace: Workspace,

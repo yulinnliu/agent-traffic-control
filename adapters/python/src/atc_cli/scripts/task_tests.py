@@ -42,8 +42,9 @@ def build_parser() -> argparse.ArgumentParser:
         "    worktree, or with --sha in an export of SHA (scratch ID-SHA7, its environment built once)\n"
         "atc test ID --mutants FILE [--sha SHA] [-- TEST...]\n"
         "    apply each mutant of FILE alone to an export of SHA (default: the branch tip) and run its tests:\n"
-        "    the TESTs after --, else the tests the tree's selector picks for its edited paths plus its own\n"
-        "    tests; a mutant's kill_rule is failure or assertion\n"
+        "    the TESTs after --, else of the tests the tree's selector picks for its edited paths plus its own\n"
+        "    tests those the baseline saw run its edited lines (NOT_COVERED when none did); a mutant's kill_rule\n"
+        "    is failure or assertion\n"
         "atc test ID --candidate [--sha SHA]\n"
         "    the integration verifier on the candidate atc integrate ID would build (default SHA: the branch tip)\n"
         "atc test ID --clean      delete the task's scratches\n"
@@ -181,10 +182,11 @@ def run_mutants(task: Task, args: argparse.Namespace, tests: list[str], environ:
         raise Refusal(refusal.token, refusal.detail, f"write {testrun.MUTANTS_SHAPE}") from None
     name, commit, directory = export(task, args.sha or task.tip(), environ)
     listing = Path(args.mutants).resolve()
-    if not tests:
+    narrow = not tests
+    if narrow:
         listing, tests = selected_mutants(entries, directory, locations.locate(environ).tmp / name, environ)
     return testrun.mutants([name, commit, str(task.source()), str(listing), "--task", task.id,
-                            "--tests", *tests], environ)
+                            *(["--lines"] if narrow else []), "--tests", *tests], environ)
 
 
 def clean(task_id: str, environ: dict[str, str]) -> int:

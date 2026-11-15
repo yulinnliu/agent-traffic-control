@@ -767,7 +767,37 @@ memory clamp.
 - The tests run once unmutated first, `--tests` together with every
   mutant's own `tests`; a failing baseline prints `BASELINE-RED` and exits
   1 before any mutant is applied.
+- Without `TEST...`, the baseline also records the lines each test executes
+  in the `.py` files the mutants edit, in the pytest process and in every
+  process it starts that keeps `PYTHONPATH` (a nested testkit run keeps the
+  recorder). The recorder is a `sys.monitoring` tool the command writes to
+  `<scratch>/lines/hook` (a `sitecustomize` that hands over to the one it
+  shadows, and a pytest plugin that gives each test its own context, passed
+  to its child processes in `ATC_LINES_CONTEXT`); each process appends its
+  rows to `<scratch>/lines/data`, which every baseline starts empty. Only
+  the baseline records. The tests of a mutant are then, in baseline order,
+  the tests that executed a line it changes: the lines where `old` and `new`
+  differ, each widened to its innermost statement, a compound statement by
+  its header alone. A file or directory among its file-level tests narrows
+  to those tests; a node ID, an option and a path right after an option stay
+  as given. `<scratch>/mutants-covered.json` lists each mutant's lines,
+  tests and how it is judged.
+- A mutant that no recorded test executes, with no node ID among its tests,
+  prints `NOT_COVERED <label> -> no baseline test runs <path>:<lines>`
+  without a run and counts as a survivor. A mutant keeps its file-level
+  tests, after `NOTE <label>: <why>; judged by its file-level tests`, when
+  an edit is in a file that is not Python or cannot be read, that no
+  recorded process loaded (no row at all), whose `old` does not occur
+  exactly once before the run, or whose changed lines also ran outside a
+  test (at import). A recorder that did not start in the pytest process
+  (no `sys.monitoring`, no free tool id) prints `NOTE lines: not recorded;
+  every mutant is judged by its file-level tests`. Past 30 000 characters
+  a mutant's tests go to pytest in an `@argfile`. A process started with
+  `-I` or `-E`, or with an environment without `PYTHONPATH`, and a test that
+  reads the source instead of executing it are not recorded, so a mutant
+  only they would kill shows as `SURVIVED` or `NOT_COVERED`.
 - Each mutant prints one verdict line, preceded by its stage-time line
+  (none for `NOT_COVERED`, which runs nothing)
   (§ Stage times). Its files are restored whether or not the run completes. Every edit and restore moves the file's modification time
   to a later whole second than its last, so a bytecode cache, which records
   that second and the size, never stands in for the source the run is meant
@@ -791,7 +821,8 @@ memory clamp.
   survivors: `done: M mutants, S survived <labels>`, or
   `done: N of M mutants, S survived <labels>` after any abort, also one on the
   last mutant, where `N` counts the mutants that printed a `KILLED`,
-  `SURVIVED` or `INCONCLUSIVE` line. A survivor exits 1.
+  `SURVIVED`, `NOT_COVERED` or `INCONCLUSIVE` line; `S` and the labels
+  include the `NOT_COVERED` mutants. A survivor exits 1.
 
 ### `atc test ID --candidate [--sha SHA]`
 

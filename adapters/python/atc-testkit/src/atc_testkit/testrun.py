@@ -17,7 +17,7 @@ import threading
 import time
 import xml.etree.ElementTree as ElementTree
 
-from . import config, desktop, elapsed, isolation, locations, python_toolchain, scratch, stages, timing
+from . import config, desktop, elapsed, isolation, lines, locations, python_toolchain, scratch, stages, timing
 from . import toolchain as toolchains
 from . import workers as host_workers
 from .git import git_env
@@ -33,7 +33,7 @@ PRIVATE_DESKTOP_VARIABLE = "ATC_PRIVATE_DESKTOP"
 INTERACTIVE_EXCLUSION = "not interactive_desktop"
 EXCLUSION_NOTE = (f"NOTE private desktop: interactive_desktop tests are excluded; {PRIVATE_DESKTOP_VARIABLE}=0 "
                   "runs on the interactive desktop with them")
-KILLED, SURVIVED, INCONCLUSIVE = "KILLED", "SURVIVED", "INCONCLUSIVE"
+KILLED, SURVIVED, INCONCLUSIVE, NOT_COVERED = "KILLED", "SURVIVED", "INCONCLUSIVE", "NOT_COVERED"
 BASELINE_STAGE, MUTANT_STAGE = "baseline", "mutant:"
 KILL_FAILURE, KILL_ASSERTION = "failure", "assertion"
 # The start of a junit failure message that kills a mutant under the assertion rule.
@@ -197,7 +197,7 @@ def isolate(tree: Path, place: Path, python: str, environ: MutableMapping[str, s
     locations.enter(place, environ)
 
     directories = pythonpath_directories(tree)
-    environ["PYTHONPATH"] = os.pathsep.join(directories)
+    environ["PYTHONPATH"] = lines.keep_hook(environ, os.pathsep.join(directories))
     os.chdir(tree)
     for directory in directories:
         if not os.path.isdir(directory):
@@ -244,14 +244,18 @@ def _pytest_command(python: str, tree: Path, place: Path, environ: Mapping[str, 
 
 def execute(tree_argument: str, scratch_argument: str, python_argument: str, pytest_arguments: Sequence[str],
             environ: MutableMapping[str, str], *, task: str, timeout: float | None = None,
-            junit: Path | None = None) -> Result:
-    """One captured pytest run of a mutant; a refusal raises ``Refusal`` with its token and exit code."""
+            junit: Path | None = None, recording: lines.Prepared | None = None) -> Result:
+    """One captured pytest run of a mutant; a refusal raises ``Refusal`` with its token and exit code. With
+    ``recording`` the run records the lines each test runs (docs/TESTKIT.md § ``atc test ID --mutants FILE``)."""
     tree = resolve_tree(tree_argument)
     python = resolve_python(python_argument)
     root, place = locate_scratch(scratch_argument, environ)
     claim_scratch(root, place, tree, task)
     private = isolate(tree, place, python, environ)
     child = child_environment(tree, place, environ)
+    if recording is not None:
+        child = lines.environment(recording, tree, child)
+        pytest_arguments = ["-p", lines.PLUGIN, *pytest_arguments]
     command = _pytest_command(python, tree, place, child, private, pytest_arguments, junit)
     return _capture(command, tree, child, private, timeout)
 
@@ -437,6 +441,9 @@ def _mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None,
                              "in the directory the scratch's registry line names, else in NAME/tree)")
     parser.add_argument("--tests", nargs="+", required=True, metavar="ARG",
                         help="pytest arguments naming the tests that judge a mutant")
+    parser.add_argument("--lines", action="store_true",
+                        help="record the lines each baseline test runs and judge each mutant by the tests that ran "
+                             "the lines it edits; a mutant no baseline test runs is NOT_COVERED")
     parser.add_argument("--kill-rule", choices=(KILL_FAILURE, KILL_ASSERTION), default=KILL_FAILURE,
                         help="failure (default): any failed test kills; assertion: only a run whose every failure "
                              "is an assertion, with no test errored, kills")
@@ -470,8 +477,10 @@ def _mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None,
     attempts = 0
     clock = elapsed.Clock(args.task, args.sha, MUTANTS_COMMAND, stages.pool_directory(environ))
 
-    def attempt(label: str, tests: Sequence[str], rule: str = KILL_FAILURE, stage: str = BASELINE_STAGE
-                ) -> tuple[str, str]:
+    recording = lines.prepare(place, tree, entries) if args.lines else None
+
+    def attempt(label: str, tests: Sequence[str], rule: str = KILL_FAILURE, stage: str = BASELINE_STAGE,
+                recorded: lines.Prepared | None = None) -> tuple[str, str]:
         nonlocal attempts
         junit = None
         if rule == KILL_ASSERTION:
@@ -480,18 +489,19 @@ def _mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None,
             junit.unlink(missing_ok=True)
         attempts += 1
         started = time.monotonic()
-        result = execute(str(tree), str(place), python, ["-x", *tests], environ, task=args.task,
-                         timeout=MUTANT_SECONDS, junit=junit)
+        result = execute(str(tree), str(place), python, ["-x", *lines.arguments(tests, place, f"{attempts:03d}")],
+                         environ, task=args.task, timeout=MUTANT_SECONDS, junit=junit, recording=recorded)
         verdict = _verdict(result, junit)
         word = verdict[0] if stage != BASELINE_STAGE else ("PASS" if verdict[0] == SURVIVED else "FAIL")
         clock.stage(stage, time.monotonic() - started, _run_workers(tests), word)
         return verdict
 
-    verdict, summary = attempt("baseline", baseline_tests)
+    verdict, summary = attempt("baseline", baseline_tests, recorded=recording)
     passed = verdict == SURVIVED
     print(f"{'BASELINE-OK' if passed else 'BASELINE-RED'} {summary}", flush=True)
     if not passed:
         return 1
+    choices = _choices(entries, args.tests, tree, place, recording)
 
     touched: set[str] = set()
     survivors: list[str] = []
@@ -500,13 +510,21 @@ def _mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None,
         for mutant in entries:
             originals: dict[Path, bytes] = {}
             try:
+                choice = choices.get(mutant["label"])
+                if choice is not None and choice.kind == lines.UNCOVERED:
+                    print(f"{NOT_COVERED} {mutant['label']} -> {lines.uncovered(choice)}", flush=True)
+                    finished += 1
+                    survivors.append(mutant["label"])
+                    continue
+                if choice is not None and choice.note:
+                    print(f"NOTE {mutant['label']}: {choice.note}; judged by its file-level tests", flush=True)
                 _apply(tree, mutant, touched, originals)
                 rule = mutant.get("kill_rule", args.kill_rule)
                 if rule not in (KILL_FAILURE, KILL_ASSERTION):
                     raise Refusal("MUTANT_INVALID", f"{mutant['label']}: kill_rule {rule!r} is not "
                                                     f"{KILL_FAILURE} or {KILL_ASSERTION}")
-                verdict, summary = attempt(mutant["label"], mutant.get("tests") or args.tests, rule,
-                                           f"{MUTANT_STAGE}{mutant['label']}")
+                tests = choice.tests if choice is not None else mutant.get("tests") or args.tests
+                verdict, summary = attempt(mutant["label"], tests, rule, f"{MUTANT_STAGE}{mutant['label']}")
                 print(f"{verdict:<8} {mutant['label']} -> {summary}", flush=True)
                 finished += 1
                 if verdict == SURVIVED:
@@ -535,6 +553,25 @@ def _mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None,
     counted = f"{finished} of {len(entries)}" if aborted else finished
     print(f"done: {counted} mutants, {len(survivors)} survived", *survivors, flush=True)
     return aborted or (1 if mismatched or survivors else 0)
+
+
+def _choices(entries: Sequence[Mapping], tests: Sequence[str], tree: Path, place: Path,
+             recording: lines.Prepared | None) -> dict[str, lines.Choice]:
+    """Each mutant's tests by the baseline's line record, written to ``<scratch>/mutants-covered.json``; none
+    without a recording, and only a note when the recorder did not start."""
+    if recording is None:
+        return {}
+    record = lines.read(recording.data)
+    if record is None:
+        print(lines.NOT_RECORDED, flush=True)
+        return {}
+    choices = {entry["label"]: lines.choose(entry, entry.get("tests") or tests, tree, recording, record)
+               for entry in entries}
+    (place / lines.COVERED).write_text(json.dumps(
+        [{"label": label, "judged_by": choice.kind, "lines": choice.lines, "tests": choice.tests,
+          **({"note": choice.note} if choice.note else {})} for label, choice in choices.items()], indent=1),
+        encoding="utf-8")
+    return choices
 
 
 # One run (docs/TESTKIT.md § Commands)

@@ -371,6 +371,11 @@ class Export:
 def export(tree: Path, atc_tmp: Path) -> Export:
     (tree / "tests/test_value.py").write_text(
         "import fixture_pkg\ndef test_value():\n    assert fixture_pkg.value() == 1\n", encoding="utf-8")
+    return make_export(tree, atc_tmp)
+
+
+def make_export(tree: Path, atc_tmp: Path) -> Export:
+    """``tree`` committed and copied into the scratch ``m`` as its export."""
     env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
 
     def git(*args: str) -> str:
@@ -481,6 +486,65 @@ def test_a_mutants_own_tests_judge_it_and_join_the_baseline(export: Export, tmp_
     (export.place / "tree/tests/test_other.py").write_text("def test_other():\n    assert 0\n", encoding="utf-8")
     run = export.run(tmp_path, [{**KILLED, "tests": ["tests/test_other.py"]}])
     assert run.returncode == 1 and mutant_lines(run)[0].startswith("BASELINE-RED")
+
+
+LINES_MODULE = ("def value():\n    return 1\n\n\n"
+                "def unused():\n    return 5\n\n\n"
+                "def child_only():\n    return 7\n")
+CHILD_TEST = ("import subprocess, sys\n\n\n"
+              "def test_child():\n"
+              "    code = 'import sys, fixture_pkg; sys.exit(0 if fixture_pkg.child_only() == 7 else 3)'\n"
+              "    assert subprocess.run([sys.executable, '-c', code]).returncode == 0\n")
+BY_LINES = [
+    {"label": "K value", "edits": [{"path": "src/fixture_pkg/__init__.py", "old": "return 1", "new": "return 2"}]},
+    {"label": "U unused", "edits": [{"path": "src/fixture_pkg/__init__.py", "old": "return 5", "new": "return 6"}]},
+    {"label": "C child", "edits": [{"path": "src/fixture_pkg/__init__.py", "old": "return 7", "new": "return 8"}]},
+]
+
+
+@pytest.fixture()
+def lines_export(tree: Path, atc_tmp: Path) -> Export:
+    (tree / "src/fixture_pkg/__init__.py").write_text(LINES_MODULE, encoding="utf-8")
+    (tree / "tests/test_value.py").write_text(
+        "import fixture_pkg\n\n\ndef test_value():\n    assert fixture_pkg.value() == 1\n", encoding="utf-8")
+    (tree / "tests/test_child.py").write_text(CHILD_TEST, encoding="utf-8")
+    (tree / "tests/test_other.py").write_text("def test_other():\n    pass\n", encoding="utf-8")
+    return make_export(tree, atc_tmp)
+
+
+@pytest.mark.integration
+def test_with_lines_each_mutant_runs_only_the_tests_that_ran_its_lines_also_in_child_processes(
+        lines_export: Export, tmp_path: Path) -> None:
+    stale = lines_export.place / "lines" / "data"
+    stale.mkdir(parents=True)
+    (stale / "1-stale.tsv").write_text(f"tests/test_other.py::test_other\t"
+                                       f"{os.path.normcase(os.path.realpath(lines_export.file))}\t6\n", encoding="utf-8")
+    run = lines_export.run(tmp_path, BY_LINES, "--lines")
+    lines = mutant_lines(run)
+    assert run.returncode == 1, run.stdout + run.stderr
+    assert lines[0].startswith("BASELINE-OK 3 passed")
+    assert lines[1].startswith("KILLED   K value -> FAILED tests/test_value.py::test_value")
+    assert lines[2] == "NOT_COVERED U unused -> no baseline test runs src/fixture_pkg/__init__.py:6"
+    assert lines[3].startswith("KILLED   C child -> FAILED tests/test_child.py::test_child")
+    assert lines[-1] == "done: 3 mutants, 1 survived U unused"
+    covered = json.loads((lines_export.place / "mutants-covered.json").read_text(encoding="utf-8"))
+    assert [(entry["label"], entry["judged_by"], entry["tests"]) for entry in covered] == [
+        ("K value", "lines", ["tests/test_value.py::test_value"]),
+        ("U unused", "not covered", []),
+        ("C child", "lines", ["tests/test_child.py::test_child"]),  # recorded in the child the test started
+    ]
+    assert [line.split()[1] for line in elapsed_lines(run.stdout)] == ["baseline", "mutant:K", "mutant:C"]
+    assert b"return 5" in lines_export.file.read_bytes()
+
+
+@pytest.mark.integration
+def test_with_lines_a_file_without_a_record_runs_its_file_level_tests(lines_export: Export, tmp_path: Path) -> None:
+    mutant = {"label": "F toml", "edits": [{"path": "pyproject.toml", "old": 'version = "1"', "new": 'version = "2"'}]}
+    run = lines_export.run(tmp_path, [mutant], "--lines")
+    lines = mutant_lines(run)
+    assert lines[1] == ("NOTE F toml: pyproject.toml is not a Python file; "
+                        "judged by its file-level tests"), run.stdout + run.stderr
+    assert lines[2].startswith("SURVIVED F toml -> 3 passed")
 
 
 def junit_report(tmp_path: Path, body: str) -> Path:
