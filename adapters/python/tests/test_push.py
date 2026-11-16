@@ -311,3 +311,34 @@ def test_an_unrecorded_commit_lists_null_provenance_in_json(ws: Path, capsys: py
     row = json.loads(capsys.readouterr().out)["repositories"][0]
     assert set(row) == {"name", "repo", "commits", "main_tip", "verdict", "reason", "detail", "hint"}
     assert (row["reason"], row["detail"]) == ("UNRECORDED_COMMITS", f"root: {stray[:12]}")
+
+
+@pytest.mark.parametrize("of", ["absent", "a list"])
+def test_a_supplement_without_a_string_of_is_skipped(ws: Path, of: str) -> None:
+    base, c1, _c2, c3 = reset_below(ws)
+    bad = {"kind": "commits", "main_before": base, "commits": [c1], "recorded_at": "2026-11-16T00:00:00+00:00"}
+    if of == "a list":
+        bad["of"] = [MISSING]
+    write_ledger(ws, line(MISSING, base), bad, line(c3, c1))
+    assert owners(gp.push_listing(ws))[0] == (c1, None, None, None)
+    lines, unresolvable = gp.ledger_backfill(ws, gp._ledger(ws), "2026-11-16T00:00:00+00:00")
+    assert ([s["of"] for s in lines], unresolvable) == ([c3], 1)
+
+
+@pytest.mark.parametrize(("extra", "owner"), [
+    ({"kind": "report"}, None),
+    ({"kind": "commits", "candidate_sha": "d" * 40}, ("d" * 40, "line")),
+])
+def test_only_a_commits_line_without_a_candidate_is_a_supplement(ws: Path, extra: dict, owner: tuple | None) -> None:
+    """Another kind, or a line with its own candidate, never stands in for MISSING's commits."""
+    base, c1, _c2, c3 = reset_below(ws)
+    other = {"of": MISSING, "main_before": base, "commits": [c1], "recorded_at": "2026-11-16T00:00:00+00:00", **extra}
+    write_ledger(ws, line(MISSING, base), other, line(c3, c1))
+    entry = owners(gp.push_listing(ws))[0]
+    assert (entry[1], entry[3]) == (owner or (None, None))
+
+
+def test_a_malformed_commit_list_falls_back_to_the_recorded_range(ws: Path) -> None:
+    base, c1, c2, c3 = reset_below(ws)
+    write_ledger(ws, line(c2, base, commits=[c1[:12], c2[:12]]), line(c3, c1))
+    assert owners(gp.push_listing(ws))[0] == (c1, c2, False, "graph")

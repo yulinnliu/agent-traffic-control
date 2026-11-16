@@ -1746,3 +1746,26 @@ def test_a_check_or_a_refused_integration_writes_no_backfill(repo: Path, capsys:
     assert integrate(repo, "topic", tip) == 3
     assert "VERIFICATION_FAILED" in capsys.readouterr().err
     assert ledger_lines(repo) == before
+
+
+@pytest.mark.integration
+def test_a_backfill_git_failure_still_records_the_runs_own_line(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    _base, candidate = legacy_ledger(repo)
+    real = gp.recorded_range
+
+    def broken(repo_arg: Path, sha: str, base: object) -> list[str] | None:
+        if sha == candidate:
+            raise gp.GitError("rev-list failed: missing intermediate object")
+        return real(repo_arg, sha, base)
+
+    monkeypatch.setattr(gp, "recorded_range", broken)
+    tip = topic(repo, {"a.txt": "a2\n"})
+    assert integrate(repo, "topic", tip, "--json") == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["ledger_backfill"] == {"added": 0, "unresolvable": 2}
+    assert Path(data["integration_record"]).name == "integrations.jsonl"
+    last = ledger_lines(repo)[-1]
+    assert (last["candidate_sha"], last["commits"]) == (tip, [tip])
+    assert [r.get("kind") for r in ledger_lines(repo)].count("commits") == 0

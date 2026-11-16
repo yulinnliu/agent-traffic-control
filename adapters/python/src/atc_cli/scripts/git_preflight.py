@@ -429,7 +429,10 @@ def ledger_backfill(repo: Path, ledger: list[dict], at: str) -> tuple[list[dict]
         if (candidate, base) in done:
             continue
         done.add((candidate, base))
-        commits = recorded_range(repo, candidate, base)
+        try:
+            commits = recorded_range(repo, candidate, base)
+        except GitError:
+            commits = None  # an older line's broken range never blocks the run's own line
         if commits is None:
             unresolvable += 1
             continue
