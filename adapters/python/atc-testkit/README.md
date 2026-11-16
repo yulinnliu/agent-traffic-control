@@ -66,11 +66,15 @@ and pushed-commit identity when a consumer's gate requires it.
 `evidence` lets a pre-push gate reuse a passed `atc integrate` candidate
 verification in place of its test stage; the formats and the reuse table are
 `shared/conformance/verification-evidence/README.md` at the bound governance
-revision. It reads records of `atc-verification-evidence/1` and `/2`, and
-writes reports of `atc-verification-report/2`, which record the time slack.
+revision. It reads records of `atc-verification-evidence/3`, and writes
+reports of `atc-verification-report/3`, which record the time slack and the
+run's input set (`inputs`), so a record serves every commit with the same
+inputs.
 
 - The project's integration verifier calls `write_report(os.environ, root,
-  selection.pytest_paths(), stages)` once its checks pass. It writes the report
+  selection.pytest_paths(), stages, inputs=...)` once its checks pass; the
+  verifier skeleton (`atc_testkit.verifier`) passes `inputs.summary` of the
+  candidate. It writes the report
   to the path in `ATC_VERIFICATION_REPORT` and returns `None` when the variable
   is unset. A `Stage` holds what decides which tests run: the marker expression
   and ignored paths, without worker counts, temporary directories or verbosity.

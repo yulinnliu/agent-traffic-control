@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from atc_testkit import evidence, gate, selection, stages
+from atc_testkit import evidence, gate, inputs, selection, stages
 from atc_testkit.project import Project, StaticCheck
 
 ZERO = "0" * 40
@@ -329,7 +329,8 @@ def test_static_checks_run_on_an_unknown_range(repo: Path) -> None:
 
 
 def write_record(repo: Path, commit_sha: str, stages_list, *, selector=None) -> None:
-    report = evidence.build_report(repo, [], stages_list)
+    ran = inputs.summary(inputs.entries(inputs.git_reader(repo), commit_sha), [], commit_sha)
+    report = evidence.build_report(repo, [], stages_list, inputs=ran)
     if selector:
         report["selector"] = selector
     record = {"schema": evidence.RECORD_SCHEMA, "candidate_sha": commit_sha, "tree": git(repo, "rev-parse", commit_sha + "^{tree}"),

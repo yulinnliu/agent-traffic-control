@@ -1004,7 +1004,7 @@ def test_valid_report_writes_evidence_record(repo: Path, capsys: pytest.CaptureF
     assert record.pop("duration_seconds") >= 0
     assert record.pop("verified_at").endswith("+00:00")
     assert record == {
-        "schema": "atc-verification-evidence/2", "candidate_sha": tip,
+        "schema": "atc-verification-evidence/3", "candidate_sha": tip,
         "tree": run_git(repo, "rev-parse", f"{tip}^{{tree}}"), "clean": True,
         "expected_main": before, "reviewed": tip, "verdict": "FF",
         "task": "ATC-0001", "tasks": ["ATC-0001"],
@@ -1051,7 +1051,8 @@ def test_verifier_without_report_integrates_and_writes_no_record(
     "not json",
     json.dumps(REPORT)[:40],
     json.dumps([REPORT]),
-    json.dumps({**REPORT, "schema": "atc-verification-report/3"}),
+    json.dumps({**REPORT, "schema": "atc-verification-report/4"}),
+    json.dumps({**REPORT, "schema": "atc-verification-report/3", "time_slack": 2.0, "inputs": {"digest": "d"}}),
     json.dumps({**REPORT, "schema": "atc-verification-report/2"}),
     json.dumps({**REPORT, "schema": "atc-verification-report/2", "time_slack": True}),
     json.dumps({key: value for key, value in REPORT.items() if key != "selection"}),
@@ -1061,7 +1062,7 @@ def test_verifier_without_report_integrates_and_writes_no_record(
     json.dumps({**REPORT, "stages": [{"name": "parallel", "marker": "not slow"}]}),
     json.dumps({**REPORT, "dependency_inputs": {"uv.lock": None}}),
     "",
-], ids=["not-json", "truncated", "not-object", "schema", "no-slack", "slack-type", "no-selection", "full-type", "paths-type",
+], ids=["not-json", "truncated", "not-object", "schema", "inputs-shape", "no-slack", "slack-type", "no-selection", "full-type", "paths-type",
         "selector", "stage-ignore", "input-digest", "empty"])
 def test_invalid_report_integrates_and_writes_no_record(
     repo: Path, capsys: pytest.CaptureFixture[str], text: str,

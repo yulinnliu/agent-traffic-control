@@ -25,7 +25,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
-from atc_testkit import elapsed, locations, owner, scratch, stages, timing, workers as host_workers
+from atc_testkit import elapsed, inputs, locations, owner, scratch, stages, timing, workers as host_workers
 import git_preflight as gp
 import cli_conventions
 import managed_worktree as hw
@@ -45,8 +45,10 @@ BUDGET_EXCEEDED = "test budget exceeded: optimise the tests or ask the Owner; a 
 WORKTREE_BRANCH = re.compile(r"(?:worktree-)?[^+/]+\+(?P<topic>.+)")
 # Formats: shared/conformance/verification-evidence/README.md
 # Every report schema a record wraps: /2 adds the compared time_slack, /1 is a project on an earlier testkit.
-REPORT_SCHEMAS = ("atc-verification-report/1", "atc-verification-report/2")
-EVIDENCE_SCHEMA = "atc-verification-evidence/2"
+REPORT_SCHEMAS = ("atc-verification-report/1", "atc-verification-report/2", "atc-verification-report/3")
+# /3 carries the inputs the verifier ran on; only a /3 report is reused.
+INPUT_REPORT_SCHEMA = REPORT_SCHEMAS[-1]
+EVIDENCE_SCHEMA = "atc-verification-evidence/3"
 EVIDENCE_DIR = ("atc", "verification-evidence")
 EVIDENCE_RETENTION_SECONDS = 14 * 24 * 3600
 CANDIDATE_RECORDS = "verify"  # the subdirectory of EVIDENCE_DIR holding `atc test --candidate` records, which no gate reads
@@ -461,7 +463,23 @@ def _valid_report(report: object) -> bool:
         )
         and isinstance(inputs, dict)
         and all(isinstance(key, str) and isinstance(value, str) for key, value in inputs.items())
+        and (report["schema"] != INPUT_REPORT_SCHEMA or report.get("inputs") is None
+             or _valid_inputs(report["inputs"]))
     )
+
+
+def _valid_inputs(value: object) -> bool:
+    return (isinstance(value, dict) and isinstance(value.get("ran_on"), str) and isinstance(value.get("digest"), str)
+            and _strings(value.get("excluded")))
+
+
+def inputs_match(repo: Path, tree: str, report: dict) -> bool:
+    """Whether ``tree``'s input digest, outside the paths the report's run excluded, equals that run's."""
+    recorded = report.get("inputs")
+    if report.get("schema") != INPUT_REPORT_SCHEMA or not _valid_inputs(recorded):
+        return False
+    entries = inputs.entries(lambda *args: git(repo, *args).stdout, tree)
+    return inputs.digest(entries, recorded["excluded"]) == recorded["digest"]
 
 
 def _read_report(path: Path) -> tuple[dict | None, str | None]:
@@ -578,10 +596,34 @@ def candidate_tree(repo: Path, verdict: str, expected_main: str, reviewed: str) 
     return done.stdout.split()[0] if done.returncode == 0 and done.stdout.split() else None
 
 
+def _read_candidate(path: Path) -> dict | None:
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return record if isinstance(record, dict) else None
+
+
+def _matching_record(t: "Target", tree: str) -> Path | None:
+    """The newest passed candidate record of another key whose run's inputs equal ``tree``'s."""
+    found = []
+    for path in _evidence_dir(t.repo).joinpath(CANDIDATE_RECORDS).glob("*.json"):
+        record = _read_candidate(path)
+        if (record is not None and record.get("schema") == EVIDENCE_SCHEMA and record.get("kind") == "verify"
+                and record.get("result") == PASS and isinstance(record.get("report"), dict)
+                and _valid_report(record["report"]) and inputs_match(t.repo, tree, record["report"])):
+            found.append((str(record.get("verified_at", "")), path))
+    return max(found)[1] if found else None
+
+
 def reuse_check(t: "Target", verdict: str, expected_main: str) -> tuple[dict | None, str, Path | None]:
-    """The candidate record `atc integrate` reuses in place of the verifier, or the first reason it cannot."""
+    """The candidate record `atc integrate` reuses in place of the verifier, or the first reason it cannot: the record
+    under the candidate's own key, else the newest passed one whose run's inputs equal the candidate's."""
+    tree = candidate_tree(t.repo, verdict, expected_main, t.reviewed)
     try:
         path = candidate_record_path(t.repo, verdict, expected_main, t.reviewed)
+        if not path.is_file() and tree is not None:
+            path = _matching_record(t, tree) or path
         raw = path.read_text(encoding="utf-8")
     except FileNotFoundError:
         return None, "NO_RECORD", None
@@ -605,20 +647,16 @@ def reuse_check(t: "Target", verdict: str, expected_main: str) -> tuple[dict | N
         return None, "SCHEMA_MISMATCH", path
     if record.get("clean") is not True:
         return None, "NOT_CLEAN", path
-    if (record.get("expected_main"), record.get("reviewed"), record.get("carried_over_from")) != (
-            expected_main, t.reviewed, t.carried_from):
-        return None, "BASE_MISMATCH", path
-    tree = candidate_tree(t.repo, verdict, expected_main, t.reviewed)
-    if record.get("verdict") != verdict or tree is None or record["tree"] != tree:
-        return None, "TREE_MISMATCH", path
+    if tree is None or not inputs_match(t.repo, tree, report):
+        return None, "INPUTS_MISMATCH", path
     if record["verify_argv"] != t.verify_argv:
         return None, "ARGV_MISMATCH", path
     if record["timeout"] != t.timeout:
         return None, "TIMEOUT_MISMATCH", path
     if record["platform"] != _platform():
         return None, "PLATFORM_MISMATCH", path
-    inputs = report["dependency_inputs"]
-    if any(_checkout_digest(t.repo, tree, name) != digest for name, digest in inputs.items()):
+    dependencies = report["dependency_inputs"]
+    if any(_checkout_digest(t.repo, tree, name) != digest for name, digest in dependencies.items()):
         return None, "DEPENDENCY_MISMATCH", path
     vendored = _vendored_selector(t.repo, tree)
     if vendored is not None and report["selector"]["version"] != vendored:
@@ -629,7 +667,7 @@ def reuse_check(t: "Target", verdict: str, expected_main: str) -> tuple[dict | N
         slack = None
     if report.get("time_slack") != slack:
         return None, "TIME_SLACK_MISMATCH", path
-    return {**record, "path": str(path)}, REUSED, path
+    return {**record, "path": str(path), "candidate_tree": tree}, REUSED, path
 
 
 
@@ -1181,7 +1219,9 @@ def _reuse_note(reuse: dict | None) -> dict | None:
     """What an evidence record and an integration line say about a reused `atc test --candidate` record."""
     if reuse is None:
         return None
-    return {"record": reuse["path"], "candidate_sha": reuse["candidate_sha"], "verified_at": reuse["verified_at"]}
+    inputs_of = reuse["report"]["inputs"]
+    return {"record": reuse["path"], "candidate_sha": reuse["candidate_sha"], "verified_at": reuse["verified_at"],
+            "reused_from": {"ran_on": inputs_of["ran_on"], "inputs": inputs_of["digest"]}}
 
 
 @dataclass
@@ -1274,9 +1314,9 @@ def build_and_verify(
         started = time.monotonic()
         if reuse is not None:
             tree = _git_ok(candidate_dir, "rev-parse", f"{candidate_sha}^{{tree}}")
-            if tree != reuse["tree"]:
+            if tree != reuse["candidate_tree"]:
                 raise stop("CANDIDATE_CHANGED",
-                           f"candidate tree {tree} differs from the reused record's {reuse['tree']}",
+                           f"candidate tree {tree} differs from the tree the reuse check read, {reuse['candidate_tree']}",
                            after_candidate=True)
             _reused(built, reuse, progress)
             yield built

@@ -13,17 +13,15 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import __version__, timing
+from . import __version__, inputs, timing
 
-# /2 adds the compared time_slack; atc integrate also writes a record around a /1 report.
-REPORT_SCHEMA = "atc-verification-report/2"
-RECORD_SCHEMA = "atc-verification-evidence/2"
-# Every record schema a gate reads: /2 names the task and authority where /1 held an authority reference.
-RECORD_SCHEMAS = ("atc-verification-evidence/1", RECORD_SCHEMA)
+# /3 adds the inputs the verifier ran on, which every reuse compares.
+REPORT_SCHEMA = "atc-verification-report/3"
+RECORD_SCHEMA = "atc-verification-evidence/3"
 REPORT_ENV = "ATC_VERIFICATION_REPORT"
 SELECTOR_NAME = "atc-testkit"
 ABSENT = "absent"
-EVIDENCE_DIR = ("atc", "verification-evidence")
+EVIDENCE_DIR = inputs.EVIDENCE_DIR
 
 
 @dataclass(frozen=True)
@@ -82,12 +80,22 @@ def selector_record() -> dict[str, str]:
     return {"name": SELECTOR_NAME, "version": __version__}
 
 
+def test_file_identity(file: str, marker: str, dependency_inputs: Mapping[str, str], time_slack: float) -> dict:
+    """The identity of one test file's run: the file by its path from the repository's top, the category
+    expression it ran under, the selector, the platform, the time slack and the dependency files."""
+    return {"kind": inputs.KIND, "file": file, "marker": marker, "selector": selector_record(),
+            "platform": platform_record(), "time_slack": time_slack,
+            "dependency_inputs": dict(dependency_inputs)}
+
+
 def build_report(root: Path, pytest_paths: Iterable[str] | None, stages: Iterable[Stage], *,
                  dependency_files: Iterable[str] | None = None, time_slack: float | None = None,
-                 **recorded: object) -> dict:
+                 inputs: Mapping | None = None, **recorded: object) -> dict:
     """The verifier's report; ``recorded`` keys (classification, checks, durations) are never compared.
 
-    ``time_slack`` is the slack the stages ran with, the process environment's by default.
+    ``time_slack`` is the slack the stages ran with, the process environment's by default. ``inputs`` names the
+    commit the verifier ran on, its input digest and the paths outside its input set; ``None`` when they could not
+    be read, which no reuse accepts.
     """
     return {
         "schema": REPORT_SCHEMA,
@@ -96,6 +104,7 @@ def build_report(root: Path, pytest_paths: Iterable[str] | None, stages: Iterabl
         "stages": [stage.record() for stage in stages],
         "dependency_inputs": dependency_digests(root, dependency_files),
         "time_slack": timing.slack() if time_slack is None else time_slack,
+        "inputs": None if inputs is None else dict(inputs),
         "python": platform.python_version(),
         **recorded,
     }
@@ -133,15 +142,24 @@ def _seconds(value: object) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
+def _recorded_inputs(record: Mapping) -> Mapping | None:
+    report = record.get("report")
+    found = report.get("inputs") if isinstance(report, dict) else None
+    if (isinstance(found, dict) and isinstance(found.get("digest"), str) and isinstance(found.get("ran_on"), str)
+            and _strings(found.get("excluded"))):
+        return found
+    return None
+
+
 def _well_formed(record: Mapping) -> bool:
     report = record.get("report")
-    if record.get("schema") not in RECORD_SCHEMAS or not isinstance(report, dict):
+    if record.get("schema") != RECORD_SCHEMA or not isinstance(report, dict):
         return False
     if report.get("schema") != REPORT_SCHEMA or not _seconds(report.get("time_slack")):
         return False
     selection, selector = report.get("selection"), report.get("selector")
     return (
-        isinstance(record.get("candidate_sha"), str) and isinstance(record.get("tree"), str)
+        _recorded_inputs(record) is not None
         and isinstance(record.get("clean"), bool) and _strings(record.get("verify_argv"))
         and isinstance(record.get("platform"), dict)
         and isinstance(selector, dict)
@@ -158,20 +176,42 @@ def _argv_file(path: Path) -> object:
         return None
 
 
+def _inputs_match(record: Mapping, tree: list[inputs.Entry]) -> bool:
+    recorded = _recorded_inputs(record)
+    return recorded is not None and inputs.digest(tree, recorded["excluded"]) == recorded["digest"]
+
+
+def _read_record(path: Path) -> object:
+    return json.loads(path.read_bytes().decode("utf-8"))
+
+
+def _matching_record(directory: Path, tree: list[inputs.Entry]) -> Path | None:
+    """The newest record whose run's inputs equal the pushed commit's."""
+    found = []
+    for path in directory.glob("*.json"):
+        try:
+            record = _read_record(path)
+        except (OSError, ValueError):
+            continue
+        if isinstance(record, dict) and _well_formed(record) and _inputs_match(record, tree):
+            found.append((str(record.get("verified_at", "")), path))
+    return max(found)[1] if found else None
+
+
 def _decide(git: Callable[..., str], root: Path, pushed: str, pytest_paths: Iterable[str] | None,
             stages: Iterable[Stage], argv_file: Path, dependency_files: Iterable[str],
             time_slack: float) -> Decision:
     common = Path(git("rev-parse", "--path-format=absolute", "--git-common-dir").strip())
-    path = common.joinpath(*EVIDENCE_DIR) / f"{pushed}.json"
+    directory = common.joinpath(*EVIDENCE_DIR)
+    tree = inputs.entries(git, pushed)
+    path = directory / f"{pushed}.json"
+    if not path.is_file():
+        path = _matching_record(directory, tree) or path
     try:
-        raw = path.read_bytes()
+        record = _read_record(path)
     except FileNotFoundError:
         return Decision(False, "NO_RECORD")
-    except OSError:
-        return Decision(False, "UNREADABLE", path=path)
-    try:
-        record = json.loads(raw.decode("utf-8"))
-    except ValueError:
+    except (OSError, ValueError):
         return Decision(False, "UNREADABLE", path=path)
     if not isinstance(record, dict):
         return Decision(False, "UNREADABLE", path=path)
@@ -179,8 +219,7 @@ def _decide(git: Callable[..., str], root: Path, pushed: str, pytest_paths: Iter
         return Decision(False, "SCHEMA_MISMATCH", path=path)
     report = record["report"]
     checks = (
-        ("COMMIT_MISMATCH", lambda: record["candidate_sha"] == pushed),
-        ("TREE_MISMATCH", lambda: record["tree"] == git("rev-parse", f"{pushed}^{{tree}}").strip()),
+        ("INPUTS_MISMATCH", lambda: _inputs_match(record, tree)),
         ("NOT_CLEAN", lambda: record["clean"] is True),
         ("PLATFORM_MISMATCH", lambda: record["platform"] == platform_record()),
         ("DEPENDENCY_MISMATCH",
@@ -219,5 +258,6 @@ def describe(decision: Decision) -> str:
     if not decision.reuse:
         return f"pre-push: tests RUN (evidence: {decision.reason})"
     record = decision.record or {}
+    ran_on = (_recorded_inputs(record) or {}).get("ran_on")
     return (f"pre-push: tests REUSED (atc integrate evidence, candidate {record.get('candidate_sha')}, "
-            f"verified {record.get('verified_at')})")
+            f"verified {record.get('verified_at')}, reused_from ran_on {ran_on})")

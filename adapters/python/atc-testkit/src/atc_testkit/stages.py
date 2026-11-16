@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
+import itertools
 import os
 from pathlib import Path
 import platform
@@ -24,6 +25,7 @@ PARALLEL = Stage("parallel", "not slow and not serial and not interactive_deskto
 SERIAL = Stage("serial", "serial and not slow and not interactive_desktop")
 INTERACTIVE = Stage("interactive", "interactive_desktop and not slow")
 SLOW = Stage("slow", "slow")
+PRIVATE_EXCLUSION = "not interactive_desktop"
 STAGE_ORDER = (PARALLEL, SERIAL, INTERACTIVE)
 TEST_COMMAND_STAGE = "tests"
 BASE_DIRECTORY_STAGES = frozenset({TEST_COMMAND_STAGE, *(stage.name for stage in STAGE_ORDER)})
@@ -116,6 +118,21 @@ def selects(expression: str, categories: Iterable[str]) -> bool:
     if position != len(tokens):
         raise ValueError(f"not a category expression: {expression!r}")
     return value
+
+
+def covers(recorded: str, wanted: str) -> bool:
+    """Whether every test the category expression ``wanted`` selects is selected by ``recorded``; ``""`` selects all."""
+    if not recorded.strip():
+        return True
+    if not wanted.strip():
+        return False
+    names = sorted({token for token in CATEGORY_TOKEN.findall(f"{recorded} {wanted}")
+                    if token not in ("and", "or", "not", "(", ")")})
+    for held in itertools.product((False, True), repeat=len(names)):
+        categories = [name for name, on in zip(names, held) if on]
+        if selects(wanted, categories) and not selects(recorded, categories):
+            return False
+    return True
 
 
 def refuse_log_directory(logs: Path) -> int:
@@ -480,7 +497,8 @@ def run_stages(runner: Sequence[str], paths: Sequence[str], *, cwd: Path | str, 
                run: Run = run_logged, toolchain: Toolchain | None = None,
                budget: host_workers.Budget | None = None,
                count: Callable[[Sequence[str], Path | str, Mapping[str, str]], int | None] | None = None,
-               clock: elapsed.Clock | None = None) -> Outcome:
+               clock: elapsed.Clock | None = None,
+               paths_for: Callable[[Stage], Sequence[str] | None] | None = None) -> Outcome:
     """Run each stage in order until one fails; a stage that collects no test passes, a run of only those is refused.
 
     ``workers`` is the caller's resolved count, an explicit integer, or ``None`` for ``resolve_workers()``; the
@@ -489,7 +507,9 @@ def run_stages(runner: Sequence[str], paths: Sequence[str], *, cwd: Path | str, 
     gives them back when it ends: the parallel stage's count, down to ``Workers.floor()``; one for every other
     stage. ``WaitTimeout`` passes through. ``count`` (``collected_items``) collects a pooled parallel stage of the
     Python toolchain first, so a default count asks for no more than ``Workers.capped`` allows. ``clock`` reports each
-    stage's elapsed time from its tokens held to its end (docs/TESTKIT.md § Stage times).
+    stage's elapsed time from its tokens held to its end (docs/TESTKIT.md § Stage times). ``paths_for`` gives a
+    stage's own paths in place of ``paths``; ``None`` skips the stage as passed, its tests reused
+    (docs/TESTKIT.md § Input evidence).
     """
     toolchain = toolchains.resolve() if toolchain is None else toolchain
     if not isinstance(workers, Workers):
@@ -497,12 +517,16 @@ def run_stages(runner: Sequence[str], paths: Sequence[str], *, cwd: Path | str, 
     budget = host_workers.Budget(None, label="") if budget is None else budget
     collected = False
     for stage in stage_list:
+        own = paths if paths_for is None else paths_for(stage)
+        if own is None:
+            collected = True
+            continue
         log = log_for(stage)
         parallel = stage.name == PARALLEL.name
         wanted = workers
         if (parallel and count is not None and budget.active and workers.source == SOURCE_DEFAULT
                 and toolchain.name == "python"):
-            command = toolchain.stage_command(runner, stage, None, [*options_for(stage), "--collect-only"], paths)
+            command = toolchain.stage_command(runner, stage, None, [*options_for(stage), "--collect-only"], own)
             wanted = workers.capped(count(command, cwd, env_for(stage)))
         grant = budget.acquire(stage.name, wanted.count if parallel else 1, wanted.floor() if parallel else 1)
         try:
@@ -516,7 +540,7 @@ def run_stages(runner: Sequence[str], paths: Sequence[str], *, cwd: Path | str, 
                 budget.annotate(limit=env[WORKERS_LINE])
                 print(granted.line(), slack_line(env), sep="\n", flush=True)
             command = toolchain.stage_command(runner, stage, stage_workers(stage, granted.count), options_for(stage),
-                                              paths)
+                                              own)
             started = time.monotonic()
             code = run(command, cwd=cwd, env=env, log=log, private=private_desktop(stage))
             if clock is not None:

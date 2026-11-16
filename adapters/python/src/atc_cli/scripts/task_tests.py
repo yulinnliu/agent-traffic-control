@@ -22,6 +22,7 @@ import cli_conventions
 import git_preflight as gp
 import managed_worktree as hw
 import task_records
+import verification_section
 from cli_conventions import Refusal
 
 ROOT = hw.ROOT
@@ -143,6 +144,29 @@ def export(task: Task, sha: str, environ: dict[str, str]) -> tuple[str, str, Pat
     return name, commit, test_dir(tree, task)
 
 
+def repository_top(directory: Path, worktree: Path | None) -> Path:
+    """The top of the tree a run tests: the worktree, or the ``tree`` directory of an export."""
+    if worktree is not None:
+        return worktree
+    top = directory
+    while top.name != checkout.TREE and top.parent != top:
+        top = top.parent
+    return top
+
+
+def verifier_argv_file(top: Path) -> Path | None:
+    """The verifier argv file the tree's `AGENTS.md` names, which classifies its input set (docs/TESTKIT.md
+    § Input evidence); ``None`` when it names none."""
+    try:
+        declared = verification_section.declaration((top / "AGENTS.md").read_text(encoding="utf-8"))
+    except OSError:
+        return None
+    if declared is None or declared.argv_file is None:
+        return None
+    path = top / declared.argv_file
+    return path if path.is_file() else None
+
+
 def run_tests(task: Task, args: argparse.Namespace, pytest_args: list[str], environ: dict[str, str]) -> int:
     if args.sha:
         name, _commit, directory = export(task, args.sha, environ)
@@ -154,6 +178,9 @@ def run_tests(task: Task, args: argparse.Namespace, pytest_args: list[str], envi
             *timeout_of(directory), *(["--progress"] if args.verbose else [])]
     if task.base:
         argv += ["--lint", task.base]
+    argv_file = verifier_argv_file(repository_top(Path(directory), None if args.sha else task.worktree))
+    if argv_file is not None:
+        argv += ["--verifier-argv", str(argv_file)]
     if args.lint:
         argv += ["--lint-only"]
     elif not args.all and task.base:

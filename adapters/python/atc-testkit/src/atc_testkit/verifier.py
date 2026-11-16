@@ -5,6 +5,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 import importlib
 import importlib.util
+import json
 import os
 from pathlib import Path, PurePosixPath
 import pkgutil
@@ -13,7 +14,8 @@ import subprocess
 import sys
 import time
 
-from . import elapsed, evidence, isolation, lint, locations, scratch, stages, timing, workers as workers_module
+from . import elapsed, evidence, inputs, isolation, lint, locations, scratch, stages, timing, \
+    workers as workers_module
 from .git import SelectionError, baseline_deltas, changed_paths, git_env
 from .project import Project, StaticCheck
 from .selection import Selection, describe
@@ -224,6 +226,109 @@ def is_test_input(path: str, testpaths: Sequence[str]) -> bool:
             or (len(parts) > 3 and parts[0] == "packages" and parts[2] == "tests"))
 
 
+def non_input(project: Project, commit: str) -> Callable[[str], bool]:
+    """The project's documentation-only classifier for one path of ``commit``: a path no check reads
+    (docs/TESTKIT.md § Input evidence)."""
+    if project.select is None:
+        return lambda path: project.documentation_only([path])
+    prefixes = project.automation_markdown_prefixes
+
+    def judge(path: str) -> bool:
+        managed = is_atc_managed(path, project.root, commit)
+        if not managed and not (path.lower().endswith(MARKDOWN_SUFFIXES) and not is_automation_markdown(path, prefixes)):
+            return False
+        return documentation_only([path], project.select([path], None).pytest_paths(), prefixes, lambda _path: managed)
+    return judge
+
+
+def excluded_paths(project: Project, commit: str) -> list[str]:
+    """The paths of ``commit`` outside the input set."""
+    tree = inputs.entries(inputs.git_reader(project.root), commit)
+    return inputs.non_inputs((path for _mode, _blob, path in tree), non_input(project, commit))
+
+
+def _classify(project: Project, commit: str) -> int:
+    """``ATC_INPUTS_OF``: print the excluded paths of ``commit`` as one JSON line, and run no check."""
+    try:
+        excluded = excluded_paths(project, commit)
+    except Exception as error:  # noqa: BLE001 - a reader treats a failed classification as no excluded list
+        print(f"INPUTS_UNREADABLE {type(error).__name__}: {error}", file=sys.stderr)
+        return 1
+    print(json.dumps({"commit": commit, "excluded": excluded,
+                      "dependency_files": list(project.tests_dependency_files())}), flush=True)
+    return 0
+
+
+class _Reuse:
+    """The stages' input evidence: each stage runs only the files no record covers, and the files a passed stage
+    ran are recorded after the final-state check (docs/TESTKIT.md § Input evidence)."""
+
+    def __init__(self, project: Project, work: Path, sha: str, environ: Mapping[str, str]):
+        self.project, self.work, self.sha = project, work, sha
+        self.common = inputs.common_directory(project.root)
+        self.tree = inputs.entries(inputs.git_reader(project.root), sha)
+        self.excluded = excluded_paths(project, sha)
+        self.dependencies = evidence.dependency_digests(project.root, project.tests_dependency_files())
+        self.slack = timing.slack(environ)
+        self.finder = inputs.Finder(self.common, self.tree) if inputs.has_records(self.common) else None
+        self.ran: list[stages.Stage] = []
+
+    @classmethod
+    def create(cls, project: Project, work: Path, sha: str, environ: Mapping[str, str]) -> _Reuse | None:
+        """``None``, after a note, when the candidate's input set cannot be read: the stages run every file and the
+        report names no inputs."""
+        try:
+            return cls(project, work, sha, environ)
+        except Exception as error:  # noqa: BLE001 - evidence never decides a verdict
+            print(f"input evidence: off ({type(error).__name__}: {error})", flush=True)
+            return None
+
+    def report(self) -> dict:
+        return inputs.summary(self.tree, self.excluded, self.sha)
+
+    def identity(self, file: str, marker: str) -> dict:
+        return evidence.test_file_identity(file, marker, self.dependencies, self.slack)
+
+    def covered(self, file: str, marker: str) -> bool:
+        assert self.finder is not None
+        return any(stages.covers(recorded, marker) and self.finder.find(self.identity(file, recorded)) is not None
+                   for recorded in dict.fromkeys(("", stages.PRIVATE_EXCLUSION, marker)))
+
+    def outcomes(self, stage: stages.Stage) -> Path:
+        return self.work / f"{stage.name}-outcomes.json"
+
+    def paths(self, stage: stages.Stage, paths: Sequence[str], cwd: Path, env: Mapping[str, str],
+              command: Sequence[str]) -> Sequence[str] | None:
+        """The paths ``stage`` runs: ``paths`` when no record exists or its files cannot be listed, the files no
+        record covers, or ``None`` when records cover every file."""
+        if self.finder is None:
+            return paths
+        listing = self.work / f"{stage.name}-collected.json"
+        done = subprocess.run(list(command), cwd=cwd, env={**env, inputs.COLLECTED: str(listing)},
+                              capture_output=True, timeout=stages.COLLECT_TIMEOUT, stdin=subprocess.DEVNULL,
+                              creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        files = inputs.repository_files(listing, self.project.root) if done.returncode in (0, 5) else None
+        if files is None:
+            print(f"{stage.name}: input evidence not read: its files could not be listed", flush=True)
+            return paths
+        prefix = Path(os.path.relpath(os.path.realpath(cwd), os.path.realpath(self.project.root))).as_posix()
+        missing = [file for file in files if not self.covered(file, stage.marker)]
+        print(f"{stage.name}: REUSED {len(files) - len(missing)} files, RUN {len(missing)} files", flush=True)
+        if not missing:
+            return None
+        return [file if prefix == "." else file.removeprefix(f"{prefix}/") for file in missing]
+
+    def record(self) -> None:
+        """Write a record for every file each passed stage ran; a failure leaves the verdict a pass."""
+        try:
+            for stage in self.ran:
+                for file in inputs.repository_files(self.outcomes(stage), self.project.root, "passed") or []:
+                    inputs.write(self.common, self.identity(file, stage.marker), self.tree, self.excluded, self.sha)
+            inputs.prune(self.common)
+        except Exception as error:  # noqa: BLE001 - the verification already passed
+            print(f"input evidence: not written ({type(error).__name__}: {error})", flush=True)
+
+
 @dataclass(frozen=True)
 class _Row:
     token: str
@@ -236,9 +341,9 @@ class _Checks:
 
     def __init__(self, project: Project, work: Path, isolated: isolation.IsolatedRun, run: stages.Run,
                  workers: stages.Workers | None = None, budget: workers_module.Budget | None = None,
-                 clock: elapsed.Clock | None = None):
+                 clock: elapsed.Clock | None = None, reuse: _Reuse | None = None):
         self.project, self.work, self.isolated, self.run_logged = project, work, isolated, run
-        self.workers, self.budget, self.clock = workers, budget, clock
+        self.workers, self.budget, self.clock, self.reuse = workers, budget, clock, reuse
         self.check_seconds, self.checks_run = 0.0, 0
 
     def row(self, row: _Row | StaticCheck, name: str | None = None) -> None:
@@ -269,15 +374,34 @@ class _Checks:
 
     def stages(self, pytest_paths: list[str], cwd: Path | None = None) -> None:
         project = self.project
+        cwd = project.root if cwd is None else cwd
+        reuse = self.reuse if self.isolated.toolchain.name == "python" else None
         self.report_checks()
+
+        def env_for(stage: stages.Stage) -> dict[str, str]:
+            env = dict(self.isolated.environment(stage.name))
+            if reuse is not None:
+                env[inputs.OUTCOMES] = str(reuse.outcomes(stage))
+            return env
+
+        def paths_for(stage: stages.Stage) -> Sequence[str] | None:
+            command = self.isolated.toolchain.stage_command(
+                project.stage_entry(), stage, None, [*self.isolated.run_options(stage.name), "--collect-only", "-q"],
+                pytest_paths)
+            own = pytest_paths if reuse is None else reuse.paths(stage, pytest_paths, cwd, env_for(stage), command)
+            if reuse is not None and own is not None:
+                reuse.ran.append(stage)
+            return own
+
         try:
             outcome = stages.run_stages(
-                project.stage_entry(), pytest_paths, cwd=project.root if cwd is None else cwd,
-                stage_list=project.stage_list(), env_for=lambda stage: self.isolated.environment(stage.name),
+                project.stage_entry(), pytest_paths, cwd=cwd,
+                stage_list=project.stage_list(), env_for=env_for,
                 options_for=lambda stage: self.isolated.run_options(stage.name),
                 log_for=lambda stage: self.work / self.isolated.toolchain.stage_log(stage.name), workers=self.workers,
                 run=self.run_logged, toolchain=self.isolated.toolchain, budget=self.budget,
-                count=stages.collected_items if self.run_logged is stages.run_logged else None, clock=self.clock)
+                count=stages.collected_items if self.run_logged is stages.run_logged else None, clock=self.clock,
+                paths_for=paths_for)
         except workers_module.WaitTimeout as refusal:
             raise VerifyError(refusal.token, *refusal.detail.splitlines()) from refusal
         if outcome.token == stages.NO_TESTS_COLLECTED:
@@ -297,11 +421,12 @@ def check_final_state(root: Path, sha: str) -> None:
         raise VerifyError("CANDIDATE_DIRTY", *dirty[:REPORTED_LINES])
 
 
-def _write_report(environ: Mapping[str, str], project: Project, pytest_paths: list[str] | None, doc_only: bool) -> None:
+def _write_report(environ: Mapping[str, str], project: Project, pytest_paths: list[str] | None, doc_only: bool,
+                  reuse: _Reuse | None) -> None:
     """A report that cannot be written leaves the verdict a pass."""
     try:
         path = evidence.write_report(environ, project.root, pytest_paths, project.stage_list(),
-                                     dependency_files=project.tests_dependency_files(),
+                                     dependency_files=project.tests_dependency_files(), inputs=None if reuse is None else reuse.report(),
                                      classification="documentation-only" if doc_only else "impact-selected")
     except Exception as error:  # noqa: BLE001 - the verification already passed
         print(f"verification report: not written ({type(error).__name__}: {error})", flush=True)
@@ -365,6 +490,8 @@ def _root_checks(project: Project, checks: _Checks, base: str, sha: str,
 def main(project: Project, environ: Mapping[str, str] | None = None, run: stages.Run = stages.run_logged) -> int:
     """Run the checks in the section's order; exit 0, 1 for a refusal, 9 for an unsuitable temporary root."""
     environ = os.environ if environ is None else environ
+    if environ.get(inputs.CLASSIFY):
+        return _classify(project, environ[inputs.CLASSIFY])
     work = None
     try:
         isolation.drop_hami_variables(os.environ)
@@ -390,14 +517,17 @@ def main(project: Project, environ: Mapping[str, str] | None = None, run: stages
         isolated = isolation.IsolatedRun(work, credentials=project.credential_variables,
                                          data_roots=project.data_root_variables, toolchain=toolchain)
         clock = elapsed.Clock(elapsed.task_of(environ), sha, CLOCK_COMMAND, stages.pool_directory(environ))
-        checks = _Checks(project, work, isolated, run, workers, budget, clock)
+        reuse = _Reuse.create(project, work, sha, environ)
+        checks = _Checks(project, work, isolated, run, workers, budget, clock, reuse)
         if project.select is None:
             doc_only, pytest_paths = _root_checks(project, checks, base, sha, paths)
         else:
             doc_only = _consumer_checks(project, checks, base, sha, paths, chosen)
         checks.report_checks()
         check_final_state(project.root, sha)
-        _write_report(environ, project, pytest_paths, doc_only)
+        if reuse is not None:
+            reuse.record()
+        _write_report(environ, project, pytest_paths, doc_only, reuse)
     except locations.Refusal as refusal:
         print(refusal.token, file=sys.stderr)
         print(refusal.detail, file=sys.stderr)

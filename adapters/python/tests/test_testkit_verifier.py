@@ -738,6 +738,52 @@ def test_atc_verify_runs_the_verifier_on_the_candidate_without_the_slot_or_a_ref
     assert [path.suffix for path in (atc_tmp / "candidates").iterdir()] == [".log"]
 
 
+def commit_on_topic(root: Path, files: dict[str, str]) -> str:
+    """A commit on ``topic`` writing ``files``; it becomes the tip `verify` and `integrate` use."""
+    git(root, "switch", "-q", "topic")
+    for name, text in files.items():
+        (root / name).parent.mkdir(parents=True, exist_ok=True)
+        (root / name).write_text(text, encoding="utf-8")
+    git(root, "add", ".")
+    git(root, "commit", "-q", "-m", "edit")
+    tip = git(root, "rev-parse", "HEAD")
+    git(root, "switch", "-q", "main")
+    (root / ".git/atc-test-tip").write_text(tip, encoding="utf-8")
+    return tip
+
+
+def input_records(root: Path) -> list[dict]:
+    return [json.loads(path.read_text(encoding="utf-8"))
+            for path in (root / ".git/atc/verification-evidence/inputs").glob("*.json")]
+
+
+@pytest.mark.integration
+def test_a_candidate_reuses_each_test_file_a_run_on_the_same_inputs_passed(
+        integration_repo: Path, atc_tmp: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """docs/TESTKIT.md § Input evidence: Markdown here is outside the input set, so a commit that only edits one
+    reuses the stage's file; a change to the product runs it again."""
+    script = (integration_repo / "verify.py").read_text(encoding="utf-8").replace(
+        "documentation_only=lambda paths: False", "documentation_only=lambda paths: all(p.endswith('.md') for p in paths)")
+    first = commit_on_topic(integration_repo, {
+        "verify.py": script, "notes.md": "notes\n", "tests/conftest.py": 'pytest_plugins = ("atc_testkit.plugin",)\n',
+        "tests/test_a.py": "import pytest\n\n\n@pytest.mark.unit\ndef test_a(tmp_path):\n    assert tmp_path.is_dir()\n"})
+    assert verify(integration_repo) == 0
+    assert "ELAPSED parallel" in capsys.readouterr().out
+    recorded = input_records(integration_repo)
+    assert [(r["identity"]["file"], r["identity"]["marker"], r["ran_on"]) for r in recorded] == [
+        ("tests/test_a.py", stages.PARALLEL.marker, first)]
+
+    commit_on_topic(integration_repo, {"notes.md": "notes 2\n"})
+    assert verify(integration_repo) == 0
+    out = capsys.readouterr().out
+    assert "ELAPSED parallel" not in out and len(input_records(integration_repo)) == 1
+
+    changed = commit_on_topic(integration_repo, {"src/fixture_prod/tool.py": "x = 2\n"})
+    assert verify(integration_repo) == 0
+    assert "ELAPSED parallel" in capsys.readouterr().out
+    assert sorted(r["ran_on"] for r in input_records(integration_repo)) == sorted([first, changed])
+
+
 @pytest.mark.integration
 def test_atc_integrate_reuses_the_root_forms_verify_record(
         integration_repo: Path, atc_tmp: Path, capsys: pytest.CaptureFixture[str]) -> None:

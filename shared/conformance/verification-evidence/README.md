@@ -10,12 +10,13 @@ The verifier may write a report to the path in `ATC_VERIFICATION_REPORT`
 before it exits zero. The path lies outside the candidate checkout.
 
 ```text
-schema              "atc-verification-report/2"
+schema              "atc-verification-report/3"
 selector            {"name": str, "version": str}
 selection           {"full": bool, "paths": [str, ...]}
 stages              [{"name": str, "marker": str, "ignore": [str, ...]}, ...]
 dependency_inputs   {<repo-relative path>: <sha256 hex, or "absent">, ...}
 time_slack          number: the seconds of ATC_TEST_TIME_SLACK the stages ran with
+inputs              {"ran_on": str, "digest": str, "excluded": [str, ...]} | null
 ```
 
 - `selection` is what the verifier executed: `full` for the project's default
@@ -32,8 +33,31 @@ time_slack          number: the seconds of ATC_TEST_TIME_SLACK the stages ran wi
   names `adapters/python/uv.lock`.
 - `time_slack` is the slack the stages ran with, the default when the
   variable was unset (`docs/TESTKIT.md` § Time slack).
+- `inputs` names the run's input set (§ Input set): `ran_on` is the commit
+  the verifier ran against, `excluded` the paths of that commit's tree outside
+  the input set, sorted, and `digest` the input digest of that tree with
+  `excluded` left out. `null`, or a `/2` or `/1` report, records a run no
+  other commit can reuse.
 - Further keys (`python`, `classification`, `checks`, `durations`) are
   recorded and never compared.
+
+## Input set
+
+A run's inputs are the files of the commit it ran against, less the paths
+the project classifies as outside every test's input: for the workspace root
+the documentation-only ranges (`docs/TESTKIT.md` § The workspace root's
+verifier), for a consumer its managed files and Markdown. The **input digest**
+of a tree is the SHA-256 hex digest of its `git ls-tree -r -z --full-tree`
+entries outside the excluded paths, each written as the string
+`<mode> <blob> <path>`, the strings sorted and joined by `\n`, encoded in
+UTF-8.
+
+A reader decides that a commit has a run's inputs by computing the digest of
+the commit's tree with the run's `excluded` left out and comparing it with
+the run's `digest`. It needs neither the project's classification nor its
+code. A path the commit adds outside the input set is not in the run's
+`excluded` list, so the reader counts it as an input and the digests differ:
+the comparison errs toward running the tests.
 
 ## Record
 
@@ -41,9 +65,9 @@ After `verification=PASS`, with `main` updated and read back, the adapter
 writes `<git-common-dir>/atc/verification-evidence/<candidate_sha>.json`:
 
 ```text
-schema               "atc-verification-evidence/2"
-candidate_sha        full commit ID the verifier ran against
-tree                 tree ID of that commit
+schema               "atc-verification-evidence/3"
+candidate_sha        full commit ID the verifier ran against, for audit
+tree                 tree ID of that commit, for audit
 clean                true: candidate HEAD unchanged and status empty after the verifier
 expected_main        main before the integration
 reviewed             reviewed source SHA; the rebased tip of a carried-over approval
@@ -59,12 +83,15 @@ verified_at          UTC timestamp, ISO 8601
 duration_seconds     verifier wall clock
 report               the report above, verbatim
 reused               present only when the integration reused a candidate record in place of
-                     the verifier: {"record": path, "candidate_sha": str, "verified_at": str};
-                     verified_at, duration_seconds and report then come from that record
+                     the verifier: {"record": path, "candidate_sha": str, "verified_at": str,
+                     "reused_from": {"ran_on": str, "inputs": str}}, where reused_from names
+                     the run's commit and input digest; verified_at, duration_seconds and
+                     report then come from that record
 ```
 
-The adapter also wraps an `atc-verification-report/1` report, which has no
-`time_slack`: the report of a project on an earlier testkit. The adapter
+The adapter also wraps an `atc-verification-report/2` or `/1` report, the
+report of a project on an earlier testkit: `/1` has no `time_slack`, and
+neither has `inputs`, so no reader reuses the record. The adapter
 writes no record when the report is missing (`NO_REPORT`), is not a valid
 report (`INVALID_REPORT`), or the file cannot be written
 (`WRITE_FAILED`); integration succeeds regardless. A recovered integration
@@ -72,24 +99,22 @@ writes none (`RECOVERED`). The result names the record path, or `NONE` with
 one of these reasons. After each write the adapter deletes records older than
 14 days. Readers never write or delete.
 
-A reader accepts `atc-verification-evidence/1` as well: its records carry
-`authority_reference`, the string supplied to the adapter, in place of `tasks`,
-`task` and `authority`. No reuse check reads these keys.
-
 ## Reuse
 
-A gate about to run tests for a pushed commit reuses the record in place of
-its test stage only when every row holds, checked in this order. The first
-row that fails gives the verdict `RUN: <reason>`; all rows holding gives
-`REUSE`.
+A gate about to run tests for a pushed commit reads the record for that
+commit, or when there is none, the newest record (by `verified_at`) that
+passes the schema row and whose run's inputs equal the pushed commit's. It
+reuses the record in place of its test stage only when every row holds,
+checked in this order. The first row that fails gives the verdict
+`RUN: <reason>`; all rows holding gives `REUSE`, and the gate's line names
+the run's commit (`reused_from ran_on <sha>`).
 
 | Check | Reason |
 | --- | --- |
-| The record for the pushed commit exists | `NO_RECORD` |
+| A record exists | `NO_RECORD` |
 | It is readable JSON holding an object | `UNREADABLE` |
-| `schema` is `atc-verification-evidence/2` or `/1`, `report.schema` is `atc-verification-report/2`, and every field the reuse checks read has its type | `SCHEMA_MISMATCH` |
-| `candidate_sha` equals the pushed commit | `COMMIT_MISMATCH` |
-| `tree` equals the pushed commit's tree | `TREE_MISMATCH` |
+| `schema` is `atc-verification-evidence/3`, `report.schema` is `atc-verification-report/3` with `inputs` set, and every field the reuse checks read has its type | `SCHEMA_MISMATCH` |
+| The pushed commit has the run's inputs (§ Input set) | `INPUTS_MISMATCH` |
 | `clean` is `true` | `NOT_CLEAN` |
 | `platform` equals the gate's platform | `PLATFORM_MISMATCH` |
 | `report.dependency_inputs` equals the digests of the gate's dependency files in its checkout | `DEPENDENCY_MISMATCH` |
@@ -135,30 +160,33 @@ resolves the target and checks no authority, so the record names `task` and
 ## Integration reuse
 
 Within the active slot, after the pre-checks, authority and the main read-back,
-`atc integrate` reads the candidate record under its own key. It reuses the
-record in place of running the verifier only when every row holds, checked in
-this order. The first row that fails gives the reason, and the verifier runs.
+`atc integrate` reads the candidate record under its own key, or when there is
+none, the newest passed `verify` record (by `verified_at`) with a valid report
+whose run's inputs equal the candidate tree's. The candidate tree is the
+reviewed tree for FF and the `git merge-tree --write-tree` result for NO_FF.
+It reuses the record in place of running the verifier only when every row
+holds, checked in this order. The first row that fails gives the reason, and
+the verifier runs.
 
 | Check | Reason |
 | --- | --- |
-| The record exists | `NO_RECORD` |
+| A record exists | `NO_RECORD` |
 | It is readable JSON holding an object | `UNREADABLE` |
-| `schema` is `atc-verification-evidence/2`, `kind` is `verify`, and every field the checks read has its type | `SCHEMA_MISMATCH` |
+| `schema` is `atc-verification-evidence/3`, `kind` is `verify`, and every field the checks read has its type | `SCHEMA_MISMATCH` |
 | `result` is `PASS` | `NOT_PASS` |
 | `report` is a valid report | `SCHEMA_MISMATCH` |
 | `clean` is `true` | `NOT_CLEAN` |
-| `expected_main`, `reviewed` and `carried_over_from` equal the slot's main tip, reviewed SHA and carried-over source | `BASE_MISMATCH` |
-| `verdict` matches, and `tree` equals the candidate tree: the reviewed tree for FF, the `git merge-tree --write-tree` result for NO_FF | `TREE_MISMATCH` |
+| The candidate tree has the run's inputs (§ Input set); a report without `inputs` never does | `INPUTS_MISMATCH` |
 | `verify_argv` equals the resolved verifier argv | `ARGV_MISMATCH` |
 | `timeout` equals the resolved timeout | `TIMEOUT_MISMATCH` |
 | `platform` equals the integrating host's platform | `PLATFORM_MISMATCH` |
 | `report.dependency_inputs` equals the digests of those files as a checkout of the candidate tree writes them, `absent` for a missing one | `DEPENDENCY_MISMATCH` |
 | When the candidate tree holds `vendor/atc-testkit.json`, `report.selector.version` equals its version | `SELECTOR_MISMATCH` |
-| `report.time_slack` equals the integrating process's time slack; a `/1` report has none | `TIME_SLACK_MISMATCH` |
+| `report.time_slack` equals the integrating process's time slack | `TIME_SLACK_MISMATCH` |
 
 On reuse an FF integration builds no candidate worktree. A NO_FF integration
 builds the merge and stops with `CANDIDATE_CHANGED` when its tree differs
-from the record's. The integration record then carries `reused`. Its
+from the candidate tree the check compared. The integration record then carries `reused`. Its
 `integrations.jsonl` line carries `verification_evidence`, which is the same
 note, or `null` when the verifier ran. The result reports
 `verification_reuse`, which is `REUSED` or the reason, and on reuse

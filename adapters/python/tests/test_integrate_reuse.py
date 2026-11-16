@@ -1,5 +1,5 @@
-"""`atc integrate` reuses a passing `atc verify` record of the same candidate (GIT_WORKFLOW.md § Integrate;
-shared/conformance/verification-evidence/README.md § Candidate record)."""
+"""`atc integrate` reuses a passing `atc verify` record whose run's inputs equal the candidate's
+(GIT_WORKFLOW.md § Integrate; shared/conformance/verification-evidence/README.md § Integration reuse)."""
 from __future__ import annotations
 
 import json
@@ -17,16 +17,21 @@ from test_git_integrate import (  # noqa: F401  (repo is a fixture)
 
 pytestmark = pytest.mark.integration
 
+# The inputs a verifier reports: the candidate's tree, with every path under docs/ outside the input set.
+INPUTS = ("from atc_testkit import inputs; sha=os.environ['ATC_INTEGRATION_SHA']; "
+          "tree=inputs.entries(inputs.git_reader(pathlib.Path.cwd()), sha); "
+          "report['inputs']=inputs.summary(tree, [p for _m, _b, p in tree if p.startswith('docs/')], sha); ")
+
 
 def counting_verifier(tmp_path: Path) -> tuple[str, Path, Path]:
-    """A verifier that writes a /2 report, counts its runs in one file and fails while another exists."""
+    """A verifier that writes a /3 report, counts its runs in one file and fails while another exists."""
     runs, failing = tmp_path / "runs.txt", tmp_path / "fail.flag"
     script = (
         "import json,os,pathlib,sys; "
         f"runs=pathlib.Path({str(runs)!r}); runs.write_text(runs.read_text() + 'x' if runs.exists() else 'x'); "
-        "report={'schema': 'atc-verification-report/2', 'selector': {'name': 'atc-testkit', 'version': '0.10.0'}, "
+        "report={'schema': 'atc-verification-report/3', 'selector': {'name': 'atc-testkit', 'version': '0.10.0'}, "
         "'selection': {'full': True, 'paths': []}, 'stages': [], 'dependency_inputs': {'uv.lock': 'absent'}, "
-        "'time_slack': float(os.environ.get('ATC_TEST_TIME_SLACK') or 2)}; "
+        "'time_slack': float(os.environ.get('ATC_TEST_TIME_SLACK') or 2)}; " + INPUTS +
         "pathlib.Path(os.environ['ATC_VERIFICATION_REPORT']).write_text(json.dumps(report), encoding='utf-8'); "
         f"sys.exit(1 if pathlib.Path({str(failing)!r}).exists() else 0)"
     )
@@ -86,7 +91,8 @@ def test_integrate_reuses_a_passing_verify_of_the_same_candidate(
     assert f"verify: candidate {tip} REUSED {out['candidate_record']} (verified {record['verified_at']})" in \
         captured.err.splitlines()
     evidence = json.loads(Path(data["evidence"]).read_text(encoding="utf-8"))
-    note = {"record": out["candidate_record"], "candidate_sha": tip, "verified_at": record["verified_at"]}
+    note = {"record": out["candidate_record"], "candidate_sha": tip, "verified_at": record["verified_at"],
+            "reused_from": {"ran_on": tip, "inputs": record["report"]["inputs"]["digest"]}}
     assert evidence.get("reused") == note and evidence["report"] == record["report"]
     line = json.loads((repo / ".git" / "atc" / "integrations.jsonl").read_text(encoding="utf-8").splitlines()[-1])
     assert line["verification_evidence"] == note
@@ -120,12 +126,12 @@ def tamper(repo: Path, base: str, tip: str, change) -> None:
     (lambda r: r.update(kind="integrate"), "SCHEMA_MISMATCH"),
     (lambda r: r.update(report={"schema": "x"}), "SCHEMA_MISMATCH"),
     (lambda r: r.update(clean=False), "NOT_CLEAN"),
-    (lambda r: r.update(carried_over_from="f" * 40), "BASE_MISMATCH"),
-    (lambda r: r.update(tree="0" * 40), "TREE_MISMATCH"),
+    (lambda r: r["report"]["inputs"].update(digest="0" * 64), "INPUTS_MISMATCH"),
+    (lambda r: r["report"].update(inputs=None), "INPUTS_MISMATCH"),
     (lambda r: r.update(verify_argv=["other"]), "ARGV_MISMATCH"),
     (lambda r: r.update(platform={"system": "other", "machine": "x"}), "PLATFORM_MISMATCH"),
     (lambda r: r["report"]["dependency_inputs"].update({"uv.lock": "0" * 64}), "DEPENDENCY_MISMATCH"),
-    (lambda r: r["report"].update(schema="atc-verification-report/1", time_slack=None), "TIME_SLACK_MISMATCH"),
+    (lambda r: r["report"].update(schema="atc-verification-report/2"), "INPUTS_MISMATCH"),
 ])
 def test_a_mismatched_record_runs_the_verifier(repo: Path, counted: tuple[Path, Path],
                                                capsys: pytest.CaptureFixture[str], change, reason: str) -> None:
@@ -139,6 +145,25 @@ def test_a_mismatched_record_runs_the_verifier(repo: Path, counted: tuple[Path, 
     captured = capsys.readouterr()
     assert run_count(runs) == 2 and json.loads(captured.out)["verification_reuse"] == reason
     assert f"verify: candidate {tip} RUN (evidence: {reason}) timeout 300s (default)" in captured.err.splitlines()
+
+
+def test_a_change_outside_the_input_set_reuses_the_record_of_the_run_before_it(
+        repo: Path, counted: tuple[Path, Path], capsys: pytest.CaptureFixture[str]) -> None:
+    """A run's input set leaves out the non-input paths its candidate held, so both edits are to existing files."""
+    runs, _failing = counted
+    commit(repo, "docs/main.md", "main notes\n")
+    tip = topic(repo, {"a.txt": "a2\n", "docs/notes.md": "notes\n"})
+    assert verify(repo, tip, capsys=capsys) == 0
+    run_git(repo, "switch", "-q", "topic")
+    amended = commit(repo, "docs/notes.md", "notes 2\n")
+    run_git(repo, "switch", "-q", "main")
+    publish(repo, "topic")
+    commit(repo, "docs/main.md", "main notes 2\n")
+    assert integrate(repo, "topic", amended, "--json") == 0
+    data = json.loads(capsys.readouterr().out)
+    assert run_count(runs) == 1 and data["verification_reuse"] == "REUSED" and data["verdict"] == "NO_FF"
+    evidence = json.loads(Path(data["evidence"]).read_text(encoding="utf-8"))
+    assert evidence["reused"]["reused_from"]["ran_on"] == tip
 
 
 def test_an_unreadable_record_runs_the_verifier(repo: Path, counted: tuple[Path, Path],
@@ -236,9 +261,9 @@ def test_a_verify_under_another_worker_grant_is_still_reused(
         "grant = budget.acquire('parallel', 4, 1)\n"
         f"grants = pathlib.Path({str(grants)!r})\n"
         "grants.write_text((grants.read_text() if grants.exists() else '') + str(grant.count))\n"
-        "report = {'schema': 'atc-verification-report/2', 'selector': {'name': 'atc-testkit', 'version': '0.11.0'},"
+        "report = {'schema': 'atc-verification-report/3', 'selector': {'name': 'atc-testkit', 'version': '0.11.0'},"
         " 'selection': {'full': True, 'paths': []}, 'stages': [], 'dependency_inputs': {'uv.lock': 'absent'},"
-        " 'time_slack': 2.0}\n"
+        " 'time_slack': 2.0}\n" + INPUTS.replace("; ", "\n") +
         "pathlib.Path(os.environ['ATC_VERIFICATION_REPORT']).write_text(json.dumps(report), encoding='utf-8')\n"
         "budget.release(grant)\n", encoding="utf-8")
     declare_verifier(repo, json.dumps([sys.executable, str(script)]))

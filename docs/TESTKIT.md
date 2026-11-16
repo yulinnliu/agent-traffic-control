@@ -349,8 +349,9 @@ prints the selection for those paths and runs nothing.
    and print the selection. A selection failure aborts the push (exit 2).
 3. Run the project's static checks that the changed paths select.
 4. For each pushed commit, decide whether an `atc integrate` evidence record
-   covers this push's selection and stages. When every pushed commit is
-   covered, print `tests REUSED` for each and finish.
+   of a run on the same inputs covers this push's selection and stages
+   (§ Input evidence). When every pushed commit is covered, print
+   `tests REUSED` for each and finish.
 5. Otherwise print `tests RUN` with the reason and run the stages.
 
 A record covers a push only when its selector name and stage list are the
@@ -483,8 +484,9 @@ working-directory rules bind it as they bind a project's verifier.
   `state/`, so the checks read the committed tree only, as CI does.
 - A pass writes the verification report, as a consumer's does
   (`shared/conformance/verification-evidence/README.md` § Report), so
-  `atc integrate` reuses the reviewer's `atc test ID --candidate` record of the same
-  candidate in place of running the verifier again (§ Integration reuse).
+  `atc integrate` reuses the reviewer's `atc test ID --candidate` record of a
+  run on the same inputs in place of running the verifier again
+  (`shared/conformance/verification-evidence/README.md` § Integration reuse).
   Its `dependency_inputs` are the adapter toolchain's dependency files,
   named from the root (`adapters/python/uv.lock`,
   `adapters/python/.python-version`); its `classification` is
@@ -494,6 +496,57 @@ working-directory rules bind it as they bind a project's verifier.
   a manually dispatched run of `.github/workflows/validate.yml`
   (`VERIFICATION.md` § Full regression timing and evidence reuse); the
   Owner starts it.
+
+## Input evidence
+
+A passed test file is recorded against the inputs it ran on, so a later run
+on the same inputs takes the record in place of running the file again.
+A run's input set and input digest are
+`shared/conformance/verification-evidence/README.md` § Input set: the
+commit's files less the paths the project's verifier classifies as no
+check's input (`atc_testkit.verifier.non_input`: for the workspace root its
+documentation-only paths, for a consumer its managed files and the Markdown
+the selection maps to no test). The candidate and gate records of that
+README carry the same digest (`report.inputs`).
+
+- **Record.** `<git-common-dir>/atc/verification-evidence/inputs/<name>-<key>.json`,
+  schema `atc-input-evidence/1`, written once and never changed:
+  `identity`, `inputs` (the digest), `excluded` (the SHA-256 of the run's
+  excluded list, which is stored once as `inputs/excluded/<hash>.json`),
+  `ran_on` (the commit), `result` `PASS` and `recorded_at`. `<name>` is a
+  hash of the identity and `<key>` a hash of the identity and the digest.
+- **Identity.** `{"kind": "test-file", "file", "marker", "selector",
+  "platform", "time_slack", "dependency_inputs"}`: the test file by its path
+  from the repository's top, the category expression it ran under, and what
+  else decides its outcome. The verifier argv is not part of it, so a run of
+  `atc test` and a verifier's stage share records.
+- **Lookup.** A reader lists the records of the identity's name and takes
+  the newest whose digest equals the digest of its own commit's tree with
+  that record's excluded list left out (`atc_testkit.inputs.Finder`).
+- **Coverage.** A record under the expression `R` serves a run under `W`
+  when every test `W` selects, `R` selects too (`stages.covers`). The
+  verifier looks for records under `""` (no expression), the private
+  desktop's exclusion (§ Private desktop) and the stage's own expression.
+- **Retention.** Every write deletes records and excluded lists older than
+  14 days. A failure while reading or writing evidence never changes a
+  verdict: the files run.
+
+The integration verifier, before each pytest stage of a candidate, collects
+the stage (`ATC_COLLECTED_FILES`) and runs only the files no record covers,
+printing `<stage>: REUSED <n> files, RUN <m> files`; a stage every file of
+which is covered does not run. After the final-state rows pass it records
+each file the stages ran whose every test passed (`ATC_FILE_OUTCOMES`). A
+non-Python toolchain runs its stages whole.
+
+`atc test ID` records too, when it runs the related tests or `--all` with no
+pytest arguments and the tree equals its commit before and after the run:
+the worktree's `HEAD` with a clean status, or an export still equal to its
+commit. It asks the project's verifier for the commit's input set by running
+the verifier argv file with `ATC_INPUTS_OF=<commit>`, which prints
+`{"commit", "excluded", "dependency_files"}` and runs no check, and records
+each file of the run whose every test passed under the expression the run
+used. It prints `EVIDENCE <n> test files recorded for <sha12> (inputs
+<digest12>)` or `NOTE input evidence: not recorded: <reason>`.
 
 ## Documentation check
 
@@ -747,7 +800,8 @@ scratch entries. In order:
    of a parallel run (§ Stages), and, with `-v`, the output too.
    A run of a registered project that used to be serial without `-n` is
    parallel once it upgrades to this testkit; `-n 0` keeps it serial.
-7. The run's stage-time line (§ Stage times; none after an interrupt), then one summary line, ends the command: `PASS`, `FAIL`, `NO_TESTS`,
+7. A run that may record input evidence prints its evidence line
+   (§ Input evidence). The run's stage-time line (§ Stage times; none after an interrupt), then one summary line, ends the command: `PASS`, `FAIL`, `NO_TESTS`,
    `INTERRUPTED` or `ERROR exit <code>`, pytest's counts, the failed and
    errored tests by node ID, and the log path. A run that the timeout ends
    prints the log's last fifteen lines and `TIMEOUT` (exit 124); one the

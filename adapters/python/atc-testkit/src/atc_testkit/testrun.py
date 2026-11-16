@@ -19,7 +19,8 @@ import threading
 import time
 import xml.etree.ElementTree as ElementTree
 
-from . import checkout, config, desktop, elapsed, isolation, lines, lint, locations, python_toolchain, scratch, stages
+from . import checkout, config, desktop, elapsed, evidence, inputs, isolation, lines, lint, locations, \
+    python_toolchain, scratch, stages
 from . import timing
 from . import toolchain as toolchains
 from . import workers as host_workers
@@ -33,7 +34,7 @@ LOCATION_EXIT = 9
 MUTANT_SECONDS = 900.0
 SUMMARY_WIDTH = 150
 PRIVATE_DESKTOP_VARIABLE = "ATC_PRIVATE_DESKTOP"
-INTERACTIVE_EXCLUSION = "not interactive_desktop"
+INTERACTIVE_EXCLUSION = stages.PRIVATE_EXCLUSION
 EXCLUSION_NOTE = (f"NOTE private desktop: interactive_desktop tests are excluded; {PRIVATE_DESKTOP_VARIABLE}=0 "
                   "runs on the interactive desktop with them")
 KILLED, SURVIVED, INCONCLUSIVE, NOT_COVERED = "KILLED", "SURVIVED", "INCONCLUSIVE", "NOT_COVERED"
@@ -953,6 +954,9 @@ def run(argv: Sequence[str], environ: MutableMapping[str, str] | None = None) ->
     parser.add_argument("--lint", metavar="SHA",
                         help="first run the lint stage over the files changed since SHA; a failure ends the run")
     parser.add_argument("--lint-only", action="store_true", help="run the lint stage of --lint and no test")
+    parser.add_argument("--verifier-argv", metavar="FILE",
+                        help="the project's verifier argv file, which classifies the input set; with it a clean run "
+                             "of whole test files records each passed file (docs/TESTKIT.md § Input evidence)")
     parser.add_argument("--label", default="run", metavar="NAME", help="name of the run, in its log's file name")
     parser.add_argument("--timeout", type=float, metavar="SECONDS", help="seconds before the run is ended and reported as TIMEOUT")
     parser.add_argument("--progress", action="store_true", help="also stream pytest's output to the console")
@@ -980,6 +984,7 @@ def run(argv: Sequence[str], environ: MutableMapping[str, str] | None = None) ->
         if code or args.lint_only:
             return code
     items = None
+    source = RunSource.of(tree, place, row) if args.verifier_argv and not pytest_arguments else None
     if paths is not None:
         chosen = touched(tree, python, paths, child)
         head = f"RELATED {args.related}: {len(paths)} changed paths, {len(chosen)} test paths"
@@ -1017,6 +1022,9 @@ def run(argv: Sequence[str], environ: MutableMapping[str, str] | None = None) ->
             environ[stages.WORKERS_LINE] = workers_line
         budget.annotate(log=str(log), limit=workers_line)
         child = child_environment(tree, place, environ)
+        outcomes = log.with_suffix(".outcomes.json")
+        if source is not None:
+            child[inputs.OUTCOMES] = str(outcomes)
         command = _pytest_command(python, tree, place, child, private, pytest_arguments, xdist=xdist)
         started = time.monotonic()
         try:
@@ -1031,6 +1039,9 @@ def run(argv: Sequence[str], environ: MutableMapping[str, str] | None = None) ->
         for line in lines[-TAIL_LINES:]:
             print(line, flush=True)
     line, code = summary(result, log)
+    if source is not None and result is not None and result.code in (0, 1):
+        print(record_inputs(source, Path(args.verifier_argv), outcomes, private,
+                            {key: value for key, value in child.items() if key != inputs.OUTCOMES}), flush=True)
     if result is not None:
         clock = elapsed.Clock(args.task, tree_commit(tree, row), RUN_COMMAND, stages.pool_directory(environ))
         clock.stage(label, seconds, _run_workers(pytest_arguments), line.split(" ", 1)[0].rstrip(";"))
@@ -1038,6 +1049,78 @@ def run(argv: Sequence[str], environ: MutableMapping[str, str] | None = None) ->
     return code
 
 
+@dataclass(frozen=True)
+class RunSource:
+    """Where a run's commit lives: the repository's top in the tree, the commit, a Git reader that holds it and
+    whether the tree equals it, read before the run (docs/TESTKIT.md § Input evidence)."""
+    top: Path
+    commit: str
+    repository: Path
+    clean: str | None
+    worktree: bool
+
+    @classmethod
+    def of(cls, tree: Path, place: Path, row: scratch.Row | None) -> RunSource | None:
+        top = _git_lines(tree, "rev-parse", "--show-toplevel")
+        if top is not None:
+            commit = (_git_lines(tree, "rev-parse", "HEAD") or [""])[0]
+            return cls(Path(top[0]), commit, tree, worktree_unclean(tree), True)
+        if row is None or not row.source or not row.commit:
+            return None
+        export = repository_top(tree, place)
+        touched = [path for path in _touched_before(place) if (export / path).is_file()]
+        try:
+            check_pristine(export, row.source, row.commit, touched)
+            unclean = None
+        except Refusal as refusal:
+            unclean = refusal.detail
+        return cls(export, row.commit, Path(row.source), unclean, False)
+
+    def unclean_after(self) -> str | None:
+        """A worktree's state after the run; an export stays its commit while the scratch is held."""
+        return worktree_unclean(self.top) if self.worktree else None
+
+
+def worktree_unclean(tree: Path) -> str | None:
+    """Why a Git working tree is not its ``HEAD``: its first changed or untracked path; ``None`` when it is."""
+    status = _git_lines(tree, "status", "--porcelain", "--untracked-files=all")
+    if status is None:
+        return "git status failed"
+    return f"changed: {status[0].strip()}" if status else None
+
+
+def record_inputs(source: RunSource, argv_file: Path, outcomes: Path, private: bool, env: Mapping[str, str]) -> str:
+    """Write an input record for each test file the run passed, when the tree equalled its commit before and after
+    the run; the line that says what was recorded or why nothing was."""
+    unclean = source.clean or source.unclean_after()
+    if unclean:
+        return f"{INPUTS_NOT_RECORDED} the tree is not {source.commit[:12]} ({unclean})"
+    passed = inputs.repository_files(outcomes, source.top, "passed")
+    if not passed:
+        return f"{INPUTS_NOT_RECORDED} no test file passed whole"
+    try:
+        argv = json.loads(argv_file.read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError):
+        return f"{INPUTS_NOT_RECORDED} the verifier argv file {argv_file} cannot be read"
+    classified = inputs.classify(argv, source.top, env, source.commit)
+    if classified is None:
+        return f"{INPUTS_NOT_RECORDED} the verifier did not classify {source.commit[:12]}'s input set"
+    excluded, dependency_files = classified
+    try:
+        common = inputs.common_directory(source.repository)
+        tree = inputs.entries(inputs.git_reader(source.repository), source.commit)
+        dependencies = evidence.dependency_digests(source.top, dependency_files)
+        marker = stages.PRIVATE_EXCLUSION if private else ""
+        for file in passed:
+            inputs.write(common, evidence.test_file_identity(file, marker, dependencies, timing.slack(env)), tree,
+                         excluded, source.commit)
+        inputs.prune(common)
+    except (OSError, subprocess.CalledProcessError) as error:
+        return f"{INPUTS_NOT_RECORDED} {type(error).__name__}: {error}"
+    return f"EVIDENCE {len(passed)} test files recorded for {source.commit[:12]} (inputs {inputs.digest(tree, excluded)[:12]})"
+
+
+INPUTS_NOT_RECORDED = "NOTE input evidence: not recorded:"
 RUN_COMMAND = "test"
 LINT_LABEL = "lint"
 CHILD_STAGE = "tests"

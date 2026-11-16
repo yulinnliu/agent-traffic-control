@@ -7,12 +7,13 @@ windows of tests not marked ``interactive_desktop`` (docs/TESTKIT.md § Private 
 """
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
 import pytest
 
-from . import children, config as project_config, desktop_guard, locations
+from . import children, config as project_config, desktop_guard, inputs, locations
 from .markers import MARKER_DESCRIPTIONS, load_unmarked_baseline, marker_contract_violations
 
 TEMP_ROOT_VARIABLE = "PYTEST_DEBUG_TEMPROOT"
@@ -20,6 +21,9 @@ REAP_OPTION = "atc_testkit_reap_seconds"
 REAP_INVALID = "REAP_SECONDS_INVALID"
 GROUP_MARK = "xdist_group"
 FIXTURE_INFO_MISSING = "FIXTURE_INFO_MISSING"
+OUTCOMES_VARIABLE = inputs.OUTCOMES
+COLLECTED_VARIABLE = inputs.COLLECTED
+_outcomes: dict[str, str] = {}
 
 
 def pytest_addoption(parser):
@@ -99,6 +103,41 @@ def _atc_reap_children():
     children.reap()
 
 
+def _note(nodeid: str, failed: bool) -> None:
+    file = nodeid.split("::", 1)[0]
+    if file:
+        _outcomes[file] = "failed" if failed or _outcomes.get(file) == "failed" else "passed"
+
+
+def pytest_runtest_logreport(report):
+    _note(report.nodeid, report.failed)
+
+
+def pytest_collectreport(report):
+    if report.failed:
+        _note(report.nodeid, True)
+
+
+def pytest_collection_finish(session):
+    """The files of the selected tests, where ``ATC_COLLECTED_FILES`` names (docs/TESTKIT.md § Input evidence)."""
+    target = os.environ.get(COLLECTED_VARIABLE)
+    if target and not hasattr(session.config, "workerinput"):
+        files = sorted({item.nodeid.split("::", 1)[0] for item in session.items})
+        Path(target).write_text(json.dumps({"rootdir": str(session.config.rootpath), "files": files}, indent=1),
+                                encoding="utf-8")
+
+
+def write_outcomes(config, exitstatus) -> None:
+    """Each test file's outcome, where ``ATC_FILE_OUTCOMES`` names (docs/TESTKIT.md § Input evidence): a file
+    passed when every report of its tests passed or skipped. A run that ended other than passed or failed writes
+    none."""
+    target = os.environ.get(OUTCOMES_VARIABLE)
+    if not target or int(exitstatus) not in (pytest.ExitCode.OK, pytest.ExitCode.TESTS_FAILED):
+        return
+    Path(target).write_text(json.dumps({"rootdir": str(config.rootpath), "files": dict(sorted(_outcomes.items()))},
+                                       indent=1), encoding="utf-8")
+
+
 def _base_directory(config) -> Path | None:
     factory = getattr(config, "_tmp_path_factory", None)
     base = getattr(factory, "_basetemp", None) or getattr(factory, "_given_basetemp", None)
@@ -107,8 +146,11 @@ def _base_directory(config) -> Path | None:
 
 def pytest_sessionfinish(session, exitstatus):
     config = session.config
+    if hasattr(config, "workerinput"):
+        return
     base = _base_directory(config)
-    if hasattr(config, "workerinput") or base is None:
+    if base is None:
+        write_outcomes(config, session.exitstatus)
         return
     try:
         alive = [f"{process.pid} {process.command}" for process in children.lasting_survivors(base, reap_seconds(config))]
@@ -124,3 +166,5 @@ def pytest_sessionfinish(session, exitstatus):
             reporter.write_sep("=", "child processes still running", red=True)
             for line in lines:
                 reporter.write_line(line)
+        return
+    write_outcomes(config, session.exitstatus)

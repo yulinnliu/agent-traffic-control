@@ -1,4 +1,4 @@
-"""Evidence reuse refuses everything except the exact verified commit, environment and selection."""
+"""Evidence reuse refuses everything except the verified inputs, environment and selection."""
 from __future__ import annotations
 
 import json
@@ -48,13 +48,17 @@ def verifier_argv() -> list[str]:
         "import os, subprocess, sys; "
         f"sys.path.insert(0, {str(TESTKIT_SRC)!r}); "
         "from pathlib import Path; "
-        "from atc_testkit import evidence as ev; "
+        "from atc_testkit import evidence as ev, inputs; "
         "changed = subprocess.check_output(['git', 'diff', '--name-only', "
         "os.environ['ATC_EXPECTED_MAIN_SHA'] + '..' + os.environ['ATC_INTEGRATION_SHA']], text=True).split(); "
         "paths = sorted({'/'.join(p.split('/')[:2]) + '/tests' for p in changed if p.startswith('packages/')}); "
         "stages = (ev.Stage('parallel', 'not slow and not serial'), "
         "ev.Stage('serial', 'serial and not slow', ('tests/x.py',))); "
-        "ev.write_report(os.environ, Path.cwd(), paths or None, stages, classification='impact-selected')"
+        "sha = os.environ['ATC_INTEGRATION_SHA']; "
+        "tree = inputs.entries(inputs.git_reader(Path.cwd()), sha); "
+        "excluded = [path for _mode, _blob, path in tree if path.startswith('docs/')]; "
+        "ev.write_report(os.environ, Path.cwd(), paths or None, stages, classification='impact-selected', "
+        "inputs=inputs.summary(tree, excluded, sha))"
     )
     return [sys.executable, "-c", script]
 
@@ -93,6 +97,7 @@ def build(root: Path) -> Path:
     run_git(root, "init", "-q", "-b", "main")
     commit(root, "uv.lock", "lock 1\n")
     commit(root, ".python-version", "3.13\n")
+    commit(root, "docs/notes.md", "notes\n")
     commit(root, ARGV_FILE, json.dumps(verifier_argv()))
     commit(root, "AGENTS.md", f"# AGENTS.md\n\n## Task records\n\n- Task prefix: ATC\n\n"
                               f"## Integration verification\n\n- Verifier argv file: {ARGV_FILE}\n")
@@ -191,26 +196,38 @@ def test_merge_result_does_not_reuse_the_reviewed_tip_record(repo: Path) -> None
     assert merged != tip and decide(repo, merged, [A]).reuse
     assert decide(repo, tip, [A]).reason == "NO_RECORD"
     record_path(repo, tip).write_bytes(record_path(repo, merged).read_bytes())
-    assert decide(repo, tip, [A]).reason == "COMMIT_MISMATCH"
-    # A record of the reviewed tip, were one written, names a different commit and tree than the merge.
+    assert decide(repo, tip, [A]).reason == "INPUTS_MISMATCH"
+    # The commit and tree a record names are for audit; its run's inputs decide.
     rewrite(repo, merged, lambda record: record.update(
         candidate_sha=tip, tree=run_git(repo, "rev-parse", f"{tip}^{{tree}}")))
-    assert decide(repo, merged, [A]).reason == "COMMIT_MISMATCH"
+    assert decide(repo, merged, [A]).reuse
 
 
-def test_amended_commit_with_the_same_tree_does_not_reuse(repo: Path, verified: str) -> None:
+@pytest.mark.integration
+def test_an_amended_commit_with_the_same_tree_reuses_the_record_by_its_inputs(repo: Path, verified: str) -> None:
     run_git(repo, "commit", "-q", "--amend", "-m", "reworded")
     amended = run_git(repo, "rev-parse", "HEAD")
     assert amended != verified
-    assert run_git(repo, "rev-parse", "HEAD^{tree}") == run_git(repo, "rev-parse", f"{verified}^{{tree}}")
-    assert decide(repo, amended, [A]).reason == "NO_RECORD"
-    record_path(repo, amended).write_bytes(record_path(repo, verified).read_bytes())
-    assert decide(repo, amended, [A]).reason == "COMMIT_MISMATCH"
+    decision = decide(repo, amended, [A])
+    assert (decision.reuse, decision.path) == (True, record_path(repo, verified))
+    assert ev.describe(decision).endswith(f"reused_from ran_on {verified})")
 
 
-def test_record_with_another_tree_does_not_reuse(repo: Path, verified: str) -> None:
-    rewrite(repo, verified, lambda record: record.update(tree=run_git(repo, "rev-parse", "HEAD~1^{tree}")))
-    assert decide(repo, verified, [A]).reason == "TREE_MISMATCH"
+@pytest.mark.integration
+def test_a_change_outside_the_input_set_reuses_and_one_inside_does_not(repo: Path, verified: str) -> None:
+    documented = commit(repo, "docs/notes.md", "notes 2\n")
+    assert decide(repo, documented, [A]).path == record_path(repo, verified)
+    assert decide(repo, documented, [A]).reuse
+    changed = commit(repo, "packages/a/src/x.py", "x = 2\n")
+    assert decide(repo, changed, [A]).reason == "NO_RECORD"
+
+
+@pytest.mark.integration
+def test_record_with_other_inputs_does_not_reuse(repo: Path, verified: str) -> None:
+    rewrite(repo, verified, lambda record: record["report"]["inputs"].update(digest="0" * 64))
+    assert decide(repo, verified, [A]).reason == "INPUTS_MISMATCH"
+    rewrite(repo, verified, lambda record: record["report"]["inputs"].update(excluded=[]))
+    assert decide(repo, verified, [A]).reason == "INPUTS_MISMATCH"
 
 
 def test_two_unpushed_integrations_do_not_reuse_the_last_record(repo: Path, verified: str) -> None:
@@ -317,10 +334,10 @@ def test_damaged_record_does_not_reuse(repo: Path, verified: str, damage, reason
 
 
 @pytest.mark.parametrize("change", [
-    lambda record: record.update(schema="atc-verification-evidence/3"),
+    lambda record: record.update(schema="atc-verification-evidence/2"),
     lambda record: record.pop("schema"),
-    lambda record: record.pop("candidate_sha"),
-    lambda record: record.pop("tree"),
+    lambda record: record["report"].pop("inputs"),
+    lambda record: record["report"]["inputs"].pop("excluded"),
     lambda record: record.pop("clean"),
     lambda record: record.update(clean="true"),
     lambda record: record.pop("verify_argv"),
@@ -336,7 +353,7 @@ def test_damaged_record_does_not_reuse(repo: Path, verified: str, damage, reason
     lambda record: record["report"].pop("time_slack"),
     lambda record: record["report"].update(time_slack=True),
     lambda record: record["report"].update(time_slack="2"),
-], ids=["schema-version", "no-schema", "no-sha", "no-tree", "no-clean", "clean-type", "no-argv", "no-platform",
+], ids=["schema-version", "no-schema", "no-run-inputs", "no-excluded", "no-clean", "clean-type", "no-argv", "no-platform",
         "no-report", "no-selector", "no-selection", "no-full", "paths-type", "no-stages", "no-inputs",
         "report-schema-1", "no-slack", "slack-bool", "slack-text"])
 def test_record_of_another_shape_does_not_reuse(repo: Path, verified: str, change) -> None:
@@ -361,7 +378,7 @@ def test_git_failure_while_checking_does_not_reuse(repo: Path, verified: str) ->
     assert (decision.reuse, decision.reason) == (False, "CHECK_FAILED")
 
     def no_tree(*args: str) -> str:
-        if args[-1].endswith("^{tree}"):
+        if args[0] == "ls-tree":
             raise SelectionError("bad object")
         return run_git(repo, *args)
     decision = ev.check(no_tree, repo, verified, [A], STAGES, repo / ARGV_FILE)
@@ -410,7 +427,7 @@ def test_report_carries_the_compared_fields(tmp_path: Path) -> None:
     report = json.loads(target.read_text(encoding="utf-8"))
     assert report.pop("python").count(".") == 2
     assert report == {
-        "schema": "atc-verification-report/2",
+        "schema": "atc-verification-report/3",
         "selector": {"name": "atc-testkit", "version": atc_testkit.__version__},
         "selection": {"full": False, "paths": [A]},
         "stages": [{"name": "parallel", "marker": "not slow and not serial", "ignore": []},
@@ -420,9 +437,14 @@ def test_report_carries_the_compared_fields(tmp_path: Path) -> None:
             ".python-version": "absent",
         },
         "time_slack": 2.0,
+        "inputs": None,
         "checks": ["RUFF"],
     }
     assert gi._valid_report(report)
+    ran = {"ran_on": "a" * 40, "digest": "d" * 64, "excluded": ["docs/x.md"]}
+    ev.write_report({ev.REPORT_ENV: str(target)}, tmp_path, [A], STAGES, inputs=ran)
+    report = json.loads(target.read_text(encoding="utf-8"))
+    assert report["inputs"] == ran and gi._valid_report(report)
 
 
 @pytest.mark.unit
