@@ -55,7 +55,7 @@ may fail a task whose diff exceeds its level. CI after the push still runs.
 | Level | Means |
 | --- | --- |
 | `none` | text-only changes; the reviewer reads the diff, and the record carries an Owner decision line saying so |
-| `standard` | the writer runs `atc test ID`; the reviewer runs `atc test ID --sha SHA` and `atc test ID --candidate` |
+| `standard` | the writer runs `atc test ID`; the reviewer runs `atc test ID --lint --sha SHA` and `atc test ID --candidate` |
 | `strict` | changes to guards (refusal, deletion, authority, safety boundary, data integrity): `standard` plus `atc test ID --mutants FILE`, written and run by the reviewer from the guard list in the writer's step report |
 
 A project with `atc-testkit` defaults to `standard`; a project without it
