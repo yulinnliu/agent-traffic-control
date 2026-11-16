@@ -468,13 +468,17 @@ nothing by itself; only the coordinator, who hears the Owner, writes it.
 In a paste-only setup with no coordinator session, the user runs the
 command themself.
 
-Each `integrations.jsonl` line carries `task`, `records_only` and
+Each integration line of `integrations.jsonl`, the lines with a
+`candidate_sha`, carries `task`, `records_only` and
 `authority`: `{"kind": "owner_words", "quote": ...}` or `{"kind": "sync"}`
 for a governance sync commit; `{"kind": "record", "task_id": ...}` and
 `{"kind": "unclassified"}` remain values readers accept in existing logs. A squash
 line also carries `kind: squash` (§ Explicitly authorized squash). A records-only integration that binds several tasks
 writes one line per task with the same candidate, and every records-only line
-carries `main_before`.
+carries `main_before`. The log's other lines are not integration lines and
+carry no `candidate_sha`, `records_only` or `authority`: supplement lines
+(`kind: commits`, § Integrate) and the `report` lines `atc task close`
+writes at close-out (`kind: report`).
 
 ### Owner-run commands
 
