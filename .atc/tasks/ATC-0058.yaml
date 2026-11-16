@@ -1,0 +1,25 @@
+task_id: ATC-0058
+title: 'Test layering: lint stage, behaviour tests, input-keyed evidence'
+repository: yulinnliu/agent-traffic-control
+base_sha: 368b285b7ee273e22252ed67dc045f1025ccf0c3
+scope: 'Redesign how ATC and its projects verify changes. Static rules run as a lint stage, pytest keeps only behaviour tests, and verification evidence is reused by input. This task is a design task: the writer''s design step first (atc-review "Writer: the design step"), then implementation once the design passes review and the Owner rules on anything it leaves open. ### Problems to solve, observed this month - Rules about code or doc text live as pytest tests; test_tooling.py alone has 41 doc-text assertions. A docs-only change runs them under pytest and its whole fixture cost. - The writer and the reviewer repeat runs. A reviewer finding a FAIL-level problem by reading after a long run wastes that run. - Mutant runs are slow: about 4 min per mutant on 1 worker, so 31 mutants take about 2 h (ATC-0057). The ATC-0055 sharded baseline does not reach the per-mutant runs. - Evidence is keyed by FF-<main>-<tip>. Any new tip re-runs the verifier even when only docs changed. ### Expected shape
+  The design confirms or replaces each point below with the industry-standard tool and the root-cause reason: - **Lint stage, run through pre-commit:** - ruff, including banned-api TID251 with per-file-ignores; for example `shutil.rmtree` only in scratch.py; - import-linter for layer contracts; - semgrep or ast-grep for structural rules ruff cannot express; - markdownlint-cli2, lychee for links, Vale for prose rules; - drift checks for generated files (`<generator> --check`). - **Shared configuration** is distributed to projects through manifest sync. Projects adopt it later through Hami-Coordinator. - **atc-testkit and the integration verifier** run the lint stage first; pytest keeps only behaviour tests. - **Doc-text assertions** are rewritten as one of: a single source plus a drift check, a schema, or a Vale rule. Each existing assertion is mapped to its replacement, or kept with a reason. - **Evidence is keyed by an input hash** (Bazel/Nx style): the files a check reads. A docs-only
+  change then reuses behaviour-test evidence. - **Reviewer order:** lint → read → candidate + mutants. There is no run after a FAIL-level finding from reading. - **Strict level:** the writer lists guard → killing test. - **Mutant speed:** per-mutant runs use the worker budget and coverage-selected tests. The design measures where the 4 min per mutant goes before choosing. - **Known testkit defect:** mutant narrowing records truncated pytest node IDs (test_testkit_evidence.py::test_integrated_comm), so a mutant ends INCONCLUSIVE with exit 4. Fix it in this task. ### Governance The Owner authorized changes on 11-16 to these sections of shared/governance/VERIFICATION.md: - § Testing; - § Independent review; - § Full regression timing and evidence reuse. For a change any other governance section needs, such as § Documentation-only verification or § Verifier test budget, report it to the coordinator; do not make it.'
+tests: strict
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: 368b285b7ee273e22252ed67dc045f1025ccf0c3
+branch: claude+ATC-0058
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
+decisions:
+- 'Owner 11-16 「授權，先發0.7.0再開設計」: governance VERIFICATION.md § Testing, § Independent review and § Full regression timing and evidence reuse may change in this task.'
+- 'Owner 11-16: choose by industry-standard practice, root cause and long-term maintainability, never by cost, run time or tokens. Name the standard tool.'
+- 'Owner 11-16: total time first; a docs-only change may reuse verification evidence; CI is not considered.'
+- 'Owner 11-16: lint does not go into atc-maintain, which is for ATC-only tooling. It belongs in atc-testkit and pre-commit.'
+- 'Owner 11-16: running the full suite stays the reviewer''s job (`--candidate`). The writer''s runs must be reusable, not repeated.'
+- Version bumps are for a separate release task.
