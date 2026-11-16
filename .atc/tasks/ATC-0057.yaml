@@ -1,0 +1,21 @@
+task_id: ATC-0057
+title: atc push recognises integrated commits after a main reset
+repository: yulinnliu/agent-traffic-control
+base_sha: 5d523c12fd1d639e58b09413ddfaef3f81b3498f
+scope: '`atc push root --check` refuses `UNRECORDED_COMMITS: c0cd5f6`. - **How it happened.** `c0cd5f6` (chore(tasks): open ATC-0049) reached `main` inside ATC-0049''s integration `a785fb1` on 11-14. That integration''s line in `integrations.jsonl` has `main_before` c1de26a and `candidate_sha` a785fb1. - On 11-15 the Owner reset `main` to `c0cd5f6` to withdraw ATC-0050. ATC-0049 was then integrated again from there, with `main_before` c0cd5f6 and candidate 76eedde. - **Why push refuses it.** The push preflight (`adapters/python/src/atc_cli/scripts/push.py` `assess`, `git_preflight.push_preflight`) maps each commit in `origin/main..main` to an integration line. `c0cd5f6` lies in no live line''s range: it is the `main_before` of the second line, and the first line''s candidate is no longer on `main`. Goal: a commit on `main` that an Owner-approved integration recorded is recognised as recorded, also after the Owner resets `main`. A commit that no integration ever covered still refuses. - **Design
+  first.** Choose the industry-standard, root-cause fix and state why. The candidates are: - (a) Recognise a commit inside any recorded line''s `main_before..candidate_sha` range, whether or not that candidate is still on `main`. - (b) Make a `main` reset leave its own record. - (c) Something better. Cover how each choice keeps an unrecorded commit refused, and the `--json` output. - **Documentation.** The push section of docs/WORKFLOW.md and the CLI help; GIT_WORKFLOW.md only if its text states the rule. Governance changes need the Owner''s authorization, so report one rather than make it.'
+tests: strict
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: 5d523c12fd1d639e58b09413ddfaef3f81b3498f
+branch: claude+ATC-0057
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
+decisions:
+- 'Owner 11-16 「先修工具」: the push block is fixed in the tool, not bypassed with a plain git push. `main` and tag v0.7.0 are pushed after this task integrates.'
+- 'Owner rule 11-16: choose by industry practice and root cause, never by cost.'
+- No version bump.
