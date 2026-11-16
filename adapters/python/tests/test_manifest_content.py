@@ -26,7 +26,10 @@ def test_the_repository_manifest_names_what_sync_delivers() -> None:
     found = mf.load(sync_project.ROOT)
     assert found.governance_modules()[0] == "INDEX.md"
     assert found.skills_source() == "shared/skills"
-    assert found.files(mf.CREATE_ONLY) == [("CLAUDE.md", "CLAUDE.md")]
+    assert found.files(mf.CREATE_ONLY) == [("CLAUDE.md", "CLAUDE.md"),
+                                           ("shared/templates/pre-commit-config.yaml", ".pre-commit-config.yaml")]
+    assert {target for _source, target in found.files(mf.OWNED)} >= {".atc/lint/ruff.toml",
+                                                                      ".atc/lint/markdownlint.jsonc"}
     assert [entry.id for entry in found.entries("workspace")] == ["workspace-policy", "workspace-skills"]
 
 

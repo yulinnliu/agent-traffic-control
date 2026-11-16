@@ -13,6 +13,11 @@ project:
             GOVERNANCE_CHANGES.md, PROJECT_RUNTIME.md]
     target: .atc/governance/
     mode: owned
+  - id: lint
+    source: shared/lint/
+    files: [ruff.toml, markdownlint.jsonc]
+    target: .atc/lint/
+    mode: owned
   - id: pointer
     source: shared/templates/PROJECT_AGENTS.md
     target: AGENTS.md
@@ -20,6 +25,10 @@ project:
   - id: entrypoint
     source: CLAUDE.md
     target: CLAUDE.md
+    mode: create-only
+  - id: lint-stage
+    source: shared/templates/pre-commit-config.yaml
+    target: .pre-commit-config.yaml
     mode: create-only
   - id: skills
     source: shared/skills/

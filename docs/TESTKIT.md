@@ -394,6 +394,14 @@ Its rules:
   file when pre-commit ends, so the tree is again the export of its commit.
 - `atc_testkit.lint` holds the commands: `range_argv` is the verifier's,
   `run_paths` the run over a set of paths.
+- `atc sync` delivers the shared rules to a project's `.atc/lint/`
+  (`ruff.toml`, `markdownlint.jsonc`) and keeps them current; the project's
+  ruff settings extend them with `extend = ".atc/lint/ruff.toml"`, its
+  `.markdownlint-cli2.jsonc` with
+  `"config": {"extends": ".atc/lint/markdownlint.jsonc"}`. pre-commit has no
+  include, so sync creates `.pre-commit-config.yaml` once from
+  `shared/templates/pre-commit-config.yaml` and the project owns it from
+  then on (`docs/LAYOUT.md` § The manifest).
 
 ## Integration verifier
 

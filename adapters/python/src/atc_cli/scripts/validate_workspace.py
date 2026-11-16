@@ -870,7 +870,7 @@ def check_atc_dir(project_path: Path, label: str, source: Path | None = None) ->
     tree by default), nothing else but `tasks/`."""
     source = source or content_tree()
     for stray in atc_strays(project_path, tree=source):
-        fail(f"{label}: {stray.as_posix()} is not a file sync writes; .atc/ holds README.md, atc.lock, governance/ and the project's tasks/")
+        fail(f"{label}: {stray.as_posix()} is not a file sync writes; .atc/ holds README.md, atc.lock, governance/, lint/ and the project's tasks/")
     try:
         lock = read_lock(project_path)
     except ValueError as exc:

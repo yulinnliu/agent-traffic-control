@@ -178,7 +178,7 @@ def atc_plan(project_path: Path, root: Path, found: mf.Manifest | None = None) -
     found = found or mf.load(root)
     plan: list[PlanItem] = []
     for stray in validator.atc_strays(project_path, tree=root):
-        plan.append(PlanItem("collision", project_path / stray, "not a file sync writes; .atc/ holds README.md, atc.lock, governance/ and tasks/"))
+        plan.append(PlanItem("collision", project_path / stray, "not a file sync writes; .atc/ holds README.md, atc.lock, governance/, lint/ and tasks/"))
     try:
         validator.read_lock(project_path)
     except ValueError as exc:

@@ -1,0 +1,5 @@
+# The shared ruff rules (docs/TESTKIT.md § Lint stage). `atc sync` delivers this file to `.atc/lint/ruff.toml`;
+# a project extends it with `extend = ".atc/lint/ruff.toml"` under `[tool.ruff]` and adds its own rules with
+# `extend-select`, so this file stays the one source of the shared set.
+[lint]
+select = ["E4", "E7", "E9", "F"]

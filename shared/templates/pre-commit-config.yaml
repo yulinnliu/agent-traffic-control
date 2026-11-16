@@ -1,0 +1,25 @@
+# The lint stage (atc-testkit, docs/TESTKIT.md § Lint stage): the commit hook, `atc test ID --lint` and the
+# integration verifier run this one list. `atc sync` creates this file once; from then on the project owns it.
+# The shared rules are in .atc/lint/, which sync keeps current: a project's ruff and markdownlint settings extend
+# them (`extend = ".atc/lint/ruff.toml"`; "extends": ".atc/lint/markdownlint.jsonc").
+default_install_hook_types: [pre-commit]
+# Files sync delivers are linted at their source.
+exclude: ^(\.atc/|\.claude/skills/|\.agents/skills/|\.dsh/skills/)
+repos:
+  - repo: https://github.com/DavidAnson/markdownlint-cli2
+    rev: v0.24.1
+    hooks:
+      - id: markdownlint-cli2
+
+  - repo: local
+    hooks:
+      - id: ruff
+        name: ruff
+        entry: uv run --quiet --locked ruff check --no-cache --force-exclude
+        language: system
+        types: [python]
+      - id: whitespace
+        name: no trailing whitespace, space before tab or conflict marker (git diff --check)
+        entry: '[ \t]+$|^ +\t|^(<<<<<<<|>>>>>>>)( |$)'
+        language: pygrep
+        types: [text]

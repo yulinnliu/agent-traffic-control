@@ -1,0 +1,6 @@
+// The shared markdownlint rules (docs/TESTKIT.md § Lint stage). `atc sync` delivers this file to
+// `.atc/lint/markdownlint.jsonc`; a project's `.markdownlint-cli2.jsonc` extends it with
+// "config": {"extends": ".atc/lint/markdownlint.jsonc"} and turns rules off below that line, each with its reason.
+{
+  "default": true
+}

@@ -1,7 +1,7 @@
-// markdownlint-cli2 for this repository: every default rule, less the ones below.
+// markdownlint-cli2 for this repository: the shared rules sync delivers to projects, less the ones below.
 {
   "config": {
-    "default": true,
+    "extends": "shared/lint/markdownlint.jsonc",
     // One paragraph or list item per source line is this repository's prose form.
     "MD013": false,
     // Skill overlays, release-note bodies and the pointer-line template are fragments without a title.
