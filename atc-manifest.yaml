@@ -1,7 +1,7 @@
 # What `atc sync` delivers from this revision and where it goes (docs/LAYOUT.md § The manifest).
 # The fields and the modes are the tool's format; this file names only sources, targets and modes.
 manifest: 1
-min_atc: 0.6.0
+min_atc: 0.7.0
 project:
   - id: bootloader
     source: shared/templates/ATC_README.md
