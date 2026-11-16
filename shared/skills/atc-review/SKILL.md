@@ -78,9 +78,10 @@ End every completed step with a step report in the shape governance
    § Testing, Test levels): `atc test <task>` for the related tests; the
    report gives each command with its summary line. Under `strict` you write
    and run no mutant: the report lists every guard the change adds or alters,
-   launchers and scripts included, each as `file:line` and what it blocks,
-   the reviewer's starting point for its mutants. Under `none` no test
-   runs.
+   launchers and scripts included, each as `file:line` → what it blocks →
+   the test node ID expected to kill its mutant, the reviewer's starting
+   point for its mutants; a guard with no such test is a test gap the report
+   names. Under `none` no test runs.
 2. Run `atc integrate <task> --check` on the tip (governance
    `GIT_WORKFLOW.md` § Mainline check before final self-verification) and
    report the verdict it gives. On `REBASE_REQUIRED` or
@@ -163,6 +164,10 @@ diff against your last round's findings, after a FAIL amend the
 `git range-diff` of the old and the new tip, and runs
 `atc test <task> --candidate` on the new tip.
 
+The steps run lint first, then reading, then execution: 1, 2, 3, 5, 6, then
+4 (governance `VERIFICATION.md` § Independent review). A FAIL-level finding
+from reading is sent as a FAIL with no test or mutant run after it.
+
 1. **Pin the revision.** First confirm the previous topic's closure read-only:
    the `main` position and `atc task list -v`. Then review exactly the tip
    SHA the request names, against its stated base. If a check shows its
@@ -170,10 +175,11 @@ diff against your last round's findings, after a FAIL amend the
    was renamed, or a count changed), re-check against current state and
    continue; do not stop to ask the holder to verify a premise you can check
    yourself. Done when the branch tip equals that SHA.
-2. **Build a scratch copy.** `atc test <task> --sha <sha>` exports that
-   exact tree to `<tmp>/<task>-<sha7>/tree`, builds its environment and runs
-   the related tests there, which points imports at the copy and isolates
-   data roots; strip ambient credentials from the shell that runs it. Tests and
+2. **Build a scratch copy and lint it.** `atc test <task> --lint --sha <sha>`
+   exports that exact tree to `<tmp>/<task>-<sha7>/tree`, builds its
+   environment and runs the lint stage there, which points imports at the
+   copy and isolates data roots; strip ambient credentials from the shell
+   that runs it. `LINT_FAILED` is a FAIL with nothing read or run after it. Tests and
    mutants never run in a live worktree. Prepare and delete a `.venv` in the
    copy as "Writer: the step report" says. An exported tree can differ only
    in line endings, so compare files with carriage returns ignored. Done when
@@ -189,11 +195,15 @@ diff against your last round's findings, after a FAIL amend the
    § Independent review assigns a reviewer, and name them in the verified
    line. Run a project gate in the command form the project's `AGENTS.md`
    gives, from the scratch copy's root; never with `python -I`, which
-   drops the script's directory from the import path. Before a PASS on a
+   drops the script's directory from the import path. Under `strict` run the
+   mutants (below) first; a surviving mutant not argued equivalent is a FAIL
+   finding, which saves the candidate run. Before a PASS on a
    `standard` or `strict` task, run `atc test <task> --candidate --sha <sha>`:
    it runs the integration verifier on the candidate `atc integrate` would
    build, without a slot, a ref update or the Owner's run, and records a PASS
-   that `atc integrate` reuses in place of rerunning the verifier. Run it while no integration runs. Quote its last line
+   that `atc integrate` reuses in place of rerunning the verifier. Its stages
+   skip each test file a clean run on the same inputs passed, the writer's
+   included, and print `REUSED <n> files, RUN <m> files`. Run it while no integration runs. Quote its last line
    in the verified line; a refusal is a blocker finding, except
    `WORKER_WAIT_TIMEOUT`. A `WAIT host workers` line means the run is queued
    for the host's test workers, not stuck; the queue is outside the timeout,

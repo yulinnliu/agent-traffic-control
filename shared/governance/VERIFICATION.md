@@ -14,7 +14,8 @@ It defines these invariants:
    silently weaken, omit, or reclassify them; changing a required verification
    gate is a policy/requirement change and needs the corresponding authority;
 3. every **formal delivery-verification result** names the exact revision it
-   checked;
+   checked; a result reused by input digest also names the revision it ran
+   on;
 4. the executor must have the capability required by that verification;
 5. evidence is checkable and reproducible enough for the risk involved;
 6. changing the delivered revision invalidates evidence that no longer applies;
@@ -34,7 +35,8 @@ Development feedback
     -> cannot by itself support PASS @ <target_sha>
 
 Delivery verification
-    -> runs against the exact delivered revision
+    -> runs against the exact delivered revision, or reuses a run whose
+       recorded inputs equal that revision's
     -> is recorded as evidence @ target_sha
     -> may run in any capable authorized executor
     -> supports formal review
@@ -171,10 +173,12 @@ When a project requires a local full regression before advancing the mainline:
   and review, and verify the final integration revision. Apply the evidence
   reuse conditions below rather than repeating an unchanged check.
 - Before starting, check existing results and active runs. Reuse successful
-  evidence for the same clean revision, checks, dependency environment and
-  relevant configuration; continue waiting for an equivalent active run.
-  Evidence records the revision, clean-tree state, command or checks,
-  environment and result location. An explicitly authorized squash follows
+  evidence of a clean run with the same check identity (checks, dependency
+  environment and relevant configuration) and the same input digest; continue
+  waiting for an equivalent active run. A run's inputs are its revision's
+  files less the paths the project's documentation-only classification holds
+  no check reads. Evidence records the revision it ran on, its input digest,
+  clean-tree state, command or checks, environment and result location. An explicitly authorized squash follows
   the recorded same-tree evidence exception in `GIT_WORKFLOW.md`.
 - Fixes or test-relevant environment/configuration changes invalidate affected
   evidence. Run impact-selected checks first, then complete full regression on
@@ -214,6 +218,16 @@ declares no timeout keeps the default `GIT_WORKFLOW.md` states.
 Tests are one means of verification. Full-suite venue and timing follow the
 section above; this section covers the rest of the test workflow.
 
+Verification runs in three layers, in this order:
+
+1. The lint stage: the static rules that read files and syntax trees and run
+   no product code. It runs first, and a failure stops the run before any
+   test.
+2. Behaviour tests: tests that run product code and assert what it does. A
+   rule about a file's text or structure belongs to the lint stage, not to a
+   test that reads the file.
+3. Mutants, under the `strict` level (Test levels below).
+
 - While iterating, run the touched test files.
 - Before a commit or push, run the project's impact-selected `not slow` tests
   (its pre-push gate, where it has one).
@@ -233,10 +247,10 @@ publication. Each project owns its path-to-test mapping in code, and clone setup
 installs the hook once per clone.
 
 The gate may reuse an `atc integrate` evidence record in place of its test
-stage when the record names the pushed commit and its tree, a clean
-candidate, the same platform, dependency inputs, verifier argv, selector
-version and test stages, and an executed selection that covers the gate's
-own selection. Static checks still run. A missing, unreadable or mismatched
+stage when the record's run had the pushed commit's input digest (§ Full
+regression timing and evidence reuse), a clean candidate, the same platform,
+dependency inputs, verifier argv, selector version and test stages, and an
+executed selection that covers the gate's own selection. Static checks still run. A missing, unreadable or mismatched
 record runs the tests. The gate prints whether it reused evidence or ran.
 
 Every new or substantively changed test has exactly one semantic category and,
@@ -266,13 +280,15 @@ Each task record carries `tests: none | standard | strict`, set by
 - `none`: a text-only change. The reviewer reads the diff; no test runs. The
   record carries an Owner decision line for it.
 - `standard`, the default: the writer runs the related tests
-  (`atc test <task>`); the reviewer runs `atc test <task> --sha <sha>` and
-  `atc test <task> --candidate`.
+  (`atc test <task>`); the reviewer runs `atc test <task> --lint --sha <sha>`
+  and `atc test <task> --candidate`.
 - `strict`: a change to a guard (a refusal, a deletion, authority, a safety
   boundary, data integrity). `standard`, plus `atc test <task> --mutants
   <file>`, which the reviewer writes and runs. The writer writes and runs no
   mutant; its step report lists the guards the change adds or alters, each
-  as `file:line` and what it blocks, as the reviewer's starting point.
+  as `file:line`, what it blocks and the test node ID expected to kill its
+  mutant, as the reviewer's starting point. A guard with no such test is a
+  test gap the report names.
 
 A project with `atc-testkit` defaults to `standard`; a project without it has
 only `none`. A reviewer may FAIL a task whose diff exceeds its level. The
@@ -330,13 +346,20 @@ formal review, the `git range-diff`); new design or new files get a fresh
 reviewer. No rule requires the
 final round to be fresh.
 
+A review runs in this order: the lint stage on the reviewed SHA, reading the
+diff, the mutants a `strict` task needs, then the candidate. A lint failure
+is a FAIL with nothing read or run after it, and a FAIL-level finding from
+reading is sent as a FAIL with no test run after it.
+
 A reviewer's targeted tests are its own choice: the tests that settle its own
 doubts, such as a finding, a suspected gap or a test it adds in its scratch,
 named in its verdict. Before a PASS it runs what the task's test level
 (§ Testing, Test levels) names; `atc test <task> --candidate` runs the
 integration verifier's own checks and selection on the candidate
 `atc integrate` would build, and its last line is quoted in the verified line;
-a refusal is a blocker finding. Apart from that run it does
+a refusal is a blocker finding. The candidate reuses the evidence of each
+test file a clean run on the same inputs passed, the writer's included
+(§ Full regression timing and evidence reuse). Apart from that run it does
 not rerun the selection the writer ran at the reviewed SHA. The full
 regression of § Full regression timing and evidence reuse, by default the
 project's manually dispatched remote CI, is the safety net.

@@ -268,9 +268,10 @@ are defined in `shared/conformance/verification-evidence/README.md`.
 `atc test <task> --candidate` writes a record of its own candidate, passed or failed, apart from the
 records the pre-push gate reads; within the active slot `atc integrate`
 reuses its latest passing one in place of rerunning the verifier when the
-candidate tree, expected main, reviewed SHA, verifier argv and timeout,
-platform, dependency inputs, selector and time slack all match, and names
-the reused record in its evidence and integration record.
+candidate tree's input digest, verifier argv and timeout, platform,
+dependency inputs, selector and time slack all match, and names the reused
+record and the revision it ran on in its evidence and integration record.
+The record's expected main and reviewed SHA stay in it for audit.
 
 Apart from that evidence, the adapter records every integration that updates
 `main`, with or without a verification report, as one JSON line in
@@ -436,7 +437,8 @@ flipping `core.bare` in a shared config and breaking every linked worktree.
 Test evidence identifies the checked commit SHA and whether the tree was
 clean. Verification scope, full regression timing and evidence reuse follow
 `VERIFICATION.md`. Complete required integration checks on the integration
-revision before advancing `main`. A fast-forward to that exact verified
+revision, or reuse a run whose recorded inputs equal its own under
+`VERIFICATION.md`, before advancing `main`. A fast-forward to that exact verified
 revision preserves its evidence and requires no duplicate run solely because
 it is now on `main`. Failed verification blocks the update; correct the
 candidate under the applicable review rules before verifying again.
