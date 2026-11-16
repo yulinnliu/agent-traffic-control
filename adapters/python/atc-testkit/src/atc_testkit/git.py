@@ -95,7 +95,7 @@ def baseline_deltas(push_lines: Iterable[str], git: Callable[..., str], baseline
         for name in names:
             out = git("diff", "--unified=0", "--no-renames", f"{base}..{local_oid}", "--", name)
             for line in out.splitlines():
-                if line.startswith(("+++", "---")) or not line[:1] in {"+", "-"}:
+                if line.startswith(("+++", "---")) or line[:1] not in {"+", "-"}:
                     continue
                 entry = line[1:].strip()
                 if not entry or entry.startswith("#"):

@@ -70,7 +70,7 @@ stay in the canonical body so they exist once.
 Adapters are generated. From the checkout (`atc-maintain` runs as
 `uv run --locked atc-maintain` from an ATC worktree's `adapters/python`):
 
-```
+```text
 atc-maintain sync --root                # this checkout's own .claude/ .agents/ .dsh/, no commit
 atc sync <project>                      # one registered project, committed on its main
 atc sync                                # every registered project, committed on its main

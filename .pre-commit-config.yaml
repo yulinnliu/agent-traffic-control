@@ -1,0 +1,77 @@
+# The lint stage (docs/TESTKIT.md § Lint stage): the commit hook, `atc test ID --lint` and the integration verifier
+# all run this one list. Local hooks run tools pinned by adapters/python/uv.lock (dependency group `lint`).
+default_install_hook_types: [pre-commit]
+repos:
+  - repo: https://github.com/DavidAnson/markdownlint-cli2
+    rev: v0.24.1
+    hooks:
+      - id: markdownlint-cli2
+
+  - repo: local
+    hooks:
+      - id: ruff
+        name: ruff
+        entry: uv run --quiet --locked --project adapters/python --group lint ruff check --no-cache --force-exclude
+        language: system
+        types: [python]
+        files: ^adapters/python/
+      - id: import-linter
+        name: import-linter
+        entry: uv run --quiet --locked --project adapters/python --group lint lint-imports --config adapters/python/pyproject.toml
+        language: system
+        pass_filenames: false
+        files: ^adapters/python/(src|atc-testkit/src)/
+      - id: ast-grep
+        name: ast-grep
+        entry: uv run --quiet --locked --project adapters/python --group lint ast-grep scan --config adapters/python/sgconfig.yml
+        language: system
+        types: [python]
+        files: ^adapters/python/
+      - id: ast-grep-rule-cases
+        name: ast-grep rule cases
+        entry: uv run --quiet --locked --project adapters/python --group lint ast-grep test --config adapters/python/sgconfig.yml --skip-snapshot-tests
+        language: system
+        pass_filenames: false
+        files: ^adapters/python/(sgconfig\.yml|lint/ast-grep/)
+
+      # A shipped file works as a self-contained copy in any repository (validate_workspace.py's text rules).
+      - id: no-checkout-environment-variable
+        name: shipped files do not locate this checkout through ATC_ROOT
+        entry: '\$\{?ATC_ROOT\b|\$env:ATC_ROOT\b'
+        language: pygrep
+        files: ^shared/(skills/|governance/|templates/ATC_README\.md$)
+      - id: no-hami-path
+        name: shipped files do not hard-code a ~/Hami path
+        entry: '~[\/]hami([\/]|\b)'
+        args: [--ignore-case]
+        language: pygrep
+        files: ^shared/(skills/|templates/ATC_README\.md$)
+      - id: no-hard-coded-governance-source
+        name: governance is named by governance_source, never by repository
+        entry: '[A-Za-z0-9_.-]+/agent-traffic-control\b'
+        language: pygrep
+        files: ^(AGENTS\.md|shared/governance/CORE\.md|shared/templates/ATC_README\.md)$
+
+      - id: managed-skill-copies
+        name: managed skill copies equal their render (atc-maintain sync --root --check)
+        entry: uv run --quiet --locked --project adapters/python atc-maintain sync --root --check
+        language: system
+        pass_filenames: false
+        files: ^(shared/skills/|\.claude/|\.agents/|\.dsh/)
+      - id: packaged-schemas
+        name: packaged policy schemas equal shared/policies/schemas
+        entry: uv run --quiet --locked --project adapters/python python adapters/python/scripts/drift.py schemas
+        language: system
+        pass_filenames: false
+        files: ^(shared/policies/schemas/|adapters/python/src/atc_cli/schemas/)
+      - id: testkit-version
+        name: atc-testkit has one version and its README names it
+        entry: uv run --quiet --locked --project adapters/python python adapters/python/scripts/drift.py testkit-version
+        language: system
+        pass_filenames: false
+        files: ^adapters/python/atc-testkit/(pyproject\.toml|README\.md|src/atc_testkit/__init__\.py)$
+      - id: markdown-links
+        name: Markdown relative links and anchors (atc_testkit.docs)
+        entry: uv run --quiet --locked --project adapters/python python -m atc_testkit.docs --anchors
+        language: system
+        types: [markdown]

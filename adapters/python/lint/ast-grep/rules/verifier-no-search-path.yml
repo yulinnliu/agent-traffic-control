@@ -1,0 +1,8 @@
+id: verifier-no-search-path
+language: python
+severity: error
+message: the verifier imports atc_testkit from the environment uv builds; it never edits sys.path
+note: docs/TESTKIT.md § Integration verifier
+files: [scripts/integration_verify.py]
+rule:
+  pattern: sys.path

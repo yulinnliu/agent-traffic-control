@@ -1,6 +1,6 @@
 # `atc test --mutants`
 
-```
+```text
 atc test <task> --mutants <mutants.json> [--sha <sha>] [-- <test>...]
 ```
 

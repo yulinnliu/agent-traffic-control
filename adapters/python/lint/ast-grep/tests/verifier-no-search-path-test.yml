@@ -1,0 +1,6 @@
+id: verifier-no-search-path
+valid:
+  - from atc_testkit import locations
+invalid:
+  - sys.path.insert(0, "atc-testkit/src")
+  - paths = list(sys.path)

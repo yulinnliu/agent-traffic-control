@@ -29,7 +29,6 @@ dev = [
 # The lint stage's tools (docs/design/ATC-0058.md § 3), run through pre-commit's local hooks.
 lint = [
     "ast-grep-cli==0.51.3",
-    "check-jsonschema==0.39.0",
     "import-linter==2.16",
     "pre-commit==4.7.0",
     "ruff==0.17.5",
@@ -72,3 +71,12 @@ select = ["E4", "E7", "E9", "F", "TID251", "PLC0415"]
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 "shutil.rmtree".msg = "delete through atc_testkit.scratch.remove_tree, which rescans the tree for links first"
+
+[tool.importlinter]
+root_packages = ["atc_cli", "atc_testkit"]
+
+[[tool.importlinter.contracts]]
+name = "atc_testkit imports no product code (docs/TESTKIT.md § Child processes)"
+type = "forbidden"
+source_modules = ["atc_testkit"]
+forbidden_modules = ["atc_cli"]

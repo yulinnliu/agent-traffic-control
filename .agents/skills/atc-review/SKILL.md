@@ -94,7 +94,7 @@ End every completed step with a step report in the shape governance
    else: no summary before or after it. Write it plainly in the Owner's
    language with no tokens, the role terms writer, reviewer, coordinator and
    Owner kept in English, for example
-   「報告已送 coordinator（tip <sha>），等審查與你核准；尚未整合、未 push。」.
+   「報告已送 coordinator（tip `<sha>`），等審查與你核准；尚未整合、未 push。」.
    When there is a problem the line names it plainly instead (for example,
    a rebase is needed). Every detail and token stays in the step report and
    the coordinator message.
@@ -147,6 +147,7 @@ its stated criterion:
 The task record's `tests` level bounds the class: a diff that needs more
 than its level allows is a FAIL finding (governance `VERIFICATION.md`
 § Testing, Test levels).
+
 - tests only: steps 1, 2 and 4.
 - behaviour: every step; step 3 when the change lies on a path to an
   external effect, step 6 when it reads or writes host state.

@@ -62,7 +62,7 @@ Only `Edit` is rendered. Claude Code checks path rules only for `Edit(path)`
 and `Read(path)`; `Write(path)`, `NotebookEdit(path)` and `MultiEdit(path)`
 rules are accepted but never match, and an `Edit` deny already covers
 `Write` and `NotebookEdit` (see "Write(path), NotebookEdit(path), and
-Glob(path) rules never match" in https://code.claude.com/docs/en/permissions).
+Glob(path) rules never match" in <https://code.claude.com/docs/en/permissions>).
 
 On Windows, Claude Code loads `.claude/settings.local.json` from the current
 working directory, not the repository root, so a session inside a worktree
@@ -84,13 +84,13 @@ no machine-local block.
 `Bash` deny alone silently turns off the PowerShell tool, and the `PowerShell`
 rule both keeps that tool on and binds it to the same deny (see "Bash deny
 rules also turn off the PowerShell tool" in
-https://code.claude.com/docs/en/tools-reference). Each filesystem rule becomes one
+<https://code.claude.com/docs/en/tools-reference>). Each filesystem rule becomes one
 entry per tool, in the order `Read(<glob>)`, `Edit(<glob>)`: `read` renders
 `Read`, and `edit` or `write` renders one `Edit`, not repeated when both are
 present. Claude Code checks path rules only for `Read(path)` and `Edit(path)`,
 and an `Edit` deny covers `Write` and `NotebookEdit`, so a `Write(<glob>)`
 entry would never match (see "Write(path), NotebookEdit(path), and Glob(path)
-rules never match" in https://code.claude.com/docs/en/permissions).
+rules never match" in <https://code.claude.com/docs/en/permissions>).
 JSON, two-space indent, trailing newline.
 
 **Codex.** Codex rules are user-global and key on a tokenised argv, so only

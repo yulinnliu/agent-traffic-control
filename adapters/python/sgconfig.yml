@@ -1,0 +1,4 @@
+# ast-grep: structural rules ruff cannot express. `sg test` runs the cases under lint/ast-grep/tests.
+ruleDirs: [lint/ast-grep/rules]
+testConfigs:
+  - testDir: lint/ast-grep/tests

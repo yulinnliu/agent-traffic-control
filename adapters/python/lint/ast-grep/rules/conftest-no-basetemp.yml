@@ -1,0 +1,10 @@
+id: conftest-no-basetemp
+language: python
+severity: error
+message: the suite's temporary directories come from atc-testkit's scratch; conftest sets no basetemp
+note: docs/TESTKIT.md § Running and logging
+files: [tests/conftest.py]
+rule:
+  any:
+    - { kind: identifier, regex: basetemp }
+    - { kind: string, regex: basetemp }

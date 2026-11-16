@@ -1,0 +1,6 @@
+id: conftest-no-basetemp
+valid:
+  - pytest_plugins = ("atc_testkit.plugin",)
+invalid:
+  - config.option.basetemp = tmp
+  - 'addopts = ["--basetemp", "x"]'

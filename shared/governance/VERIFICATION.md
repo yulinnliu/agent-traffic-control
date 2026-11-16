@@ -312,7 +312,6 @@ production connectivity. Runner privilege, secret exposure, and allowed
 commands must be constrained by the project/host policy appropriate to that
 environment.
 
-
 ## Verification commands are data
 
 A verification step is described as an executable plus a literal argument

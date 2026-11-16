@@ -1,0 +1,14 @@
+// markdownlint-cli2 for this repository: every default rule, less the ones below.
+{
+  "config": {
+    "default": true,
+    // One paragraph or list item per source line is this repository's prose form.
+    "MD013": false,
+    // Skill overlays, release-note bodies and the pointer-line template are fragments without a title.
+    "MD041": false,
+    // A code span quotes literal output prefixes that end in a space, such as `FAILED `.
+    "MD038": false
+  },
+  // Managed copies rendered from shared/skills; the source is what is linted.
+  "ignores": [".claude/**", ".agents/**", ".dsh/**"]
+}

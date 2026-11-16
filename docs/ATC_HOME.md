@@ -180,7 +180,7 @@ so `atc test ID --clean` and `atc task close` remove it.
 `<tmp>/scratch-dirs.tsv` lists every scratch that exists, one per line.
 
 - Encoding UTF-8 without BOM, LF line ends, tab-separated, first line the
-  header `project	scratch	tree	created_utc	task	source	commit`.
+  header row `project`, `scratch`, `tree`, `created_utc`, `task`, `source`, `commit`.
 - `project`: `[project].name` from `<tree>/pyproject.toml`, or from the
   test directory of an export; the directory's name when that file
   or key is absent.
