@@ -29,3 +29,4 @@ decisions:
 - 'Owner 11-16 O3: verify every install route and rule on this Windows host first; stop and report any failure.'
 - 'Owner 11-16: the design is not integrated alone; implement in design § 10 order at test level strict; an early review may follow steps 1-2.'
 - 'Owner 11-16: Vale installs through pre-commit language: golang (go install github.com/errata-ai/vale/v3/cmd/vale at a pinned version), Go pinned by language_version; no PyPI vale wrapper'
+- 'Owner 11-17: the blank line removed in VERIFICATION.md § Windows verification is authorized, whitespace only (「補授權空行刪除」)'
