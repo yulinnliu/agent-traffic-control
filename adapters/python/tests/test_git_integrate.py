@@ -14,6 +14,7 @@ import pytest
 from atc_testkit import locations
 import atc_cli
 import git_integrate as gi
+import git_preflight as gp
 
 SETTLE = 20.0  # seconds a process gets to reach a state on a loaded host
 
@@ -414,6 +415,8 @@ def test_crash_after_main_update_is_reconciled_without_reset(repo: Path, monkeyp
     assert main_tip(repo) == tip
     assert run_git(repo, "status", "--porcelain") == ""
     assert run_git(repo, "for-each-ref", "--format=%(refname)", "refs/atc/integration-candidates") == ""
+    recovery = json.loads((repo / ".git" / "atc" / "integrations.jsonl").read_text(encoding="utf-8").splitlines()[-1])
+    assert (recovery["candidate_sha"], recovery["main_before"], "commits" in recovery) == (tip, None, False)
 
 
 
@@ -904,7 +907,7 @@ def test_failed_merge_is_aborted(repo: Path, monkeypatch: pytest.MonkeyPatch, ca
 
 
 def test_json_fields(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    keys = {"command", "project", "task", "tasks", "authority", "records_only", "verdict", "reason", "main_before", "main_after", "reviewed", "source_before", "candidate_sha", "first_parent", "second_parent", "message", "verification", "verification_seconds", "evidence", "evidence_reason", "candidate_ref", "integration_record", "warnings", "push", "verification_reuse", "hint"}
+    keys = {"command", "project", "task", "tasks", "authority", "records_only", "verdict", "reason", "main_before", "main_after", "reviewed", "source_before", "candidate_sha", "first_parent", "second_parent", "message", "verification", "verification_seconds", "evidence", "evidence_reason", "candidate_ref", "integration_record", "ledger_backfill", "warnings", "push", "verification_reuse", "hint"}
     before = main_tip(repo)
     tip = topic(repo, {"a.txt": "a2\n"})
     assert integrate(repo, "topic", tip, "--json") == 0
@@ -920,6 +923,7 @@ def test_json_fields(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
         "main_after": tip, "reviewed": tip, "source_before": tip, "candidate_sha": tip,
         "first_parent": None, "second_parent": None, "message": None, "verification": "PASS",
         "evidence": None, "evidence_reason": "NO_REPORT", "candidate_ref": None, "verification_reuse": "NO_RECORD",
+        "ledger_backfill": {"added": 0, "unresolvable": 0},
     }
 
     second = topic(repo, {"b.txt": "b2\n"}, branch="next")
@@ -1236,8 +1240,12 @@ def test_every_integration_appends_its_record(repo: Path) -> None:
     lines = (repo / ".git" / "atc" / "integrations.jsonl").read_text(encoding="utf-8").splitlines()
     records = [json.loads(line) for line in lines]
     assert [set(record) for record in records] == [
-        {"candidate_sha", "reviewed", "main_before", "task", "authority", "records_only", "verifier",
+        {"candidate_sha", "reviewed", "main_before", "commits", "task", "authority", "records_only", "verifier",
          "verification_evidence", "integrated_at"}] * 2
+    assert records[0]["commits"] == run_git(repo, "rev-list", "--reverse", f"{records[0]['main_before']}..{first}").split()
+    assert records[0]["commits"] == [first]
+    assert records[1]["commits"] == run_git(repo, "rev-list", "--reverse", "main^1..main").split()
+    assert records[1]["commits"][-1] == main_tip(repo) and second in records[1]["commits"]
     assert [record["verification_evidence"] for record in records] == [None, None]
     assert [record["verifier"] for record in records] == [
         {"argv_file": "verify.json", "timeout": 300.0}] * 2
@@ -1671,3 +1679,70 @@ def test_no_sha_and_no_pass_review_stops_with_no_pass_review(repo: Path, tmp_pat
     assert "--sha" in caught.value.next
     assert "NO_REVIEWED_SHA" not in str(caught.value.token)
     assert close_out.latest_pass_review("ATC-0001", dict(os.environ)) is None
+
+
+# Ledger backfill (design ATC-0057 § 3.2)
+
+def ledger_lines(repo: Path) -> list[dict]:
+    path = repo / ".git" / "atc" / "integrations.jsonl"
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()] if path.exists() else []
+
+
+def legacy_ledger(repo: Path) -> tuple[str, str]:
+    """Older lines without `commits`: an off-main candidate of two commits (twice, a binding of two tasks), one
+    whose candidate is gone, one already carrying `commits` and a recovery line. Returns (base, candidate)."""
+    base = main_tip(repo)
+    run_git(repo, "switch", "-q", "-c", "withdrawn")
+    commit(repo, "w.txt", "1\n")
+    candidate = commit(repo, "w.txt", "2\n")
+    run_git(repo, "switch", "-q", "main")
+    run_git(repo, "branch", "-q", "-D", "withdrawn")
+    old = {"reviewed": candidate, "records_only": False, "integrated_at": "2026-11-01T00:00:00+00:00"}
+    lines = [
+        {"candidate_sha": candidate, "main_before": base, "task": "OLD-0001", **old},
+        {"candidate_sha": candidate, "main_before": base, "task": "OLD-0002", **old},
+        {"candidate_sha": "f" * 40, "main_before": base, "task": "OLD-0003", **old},
+        {"candidate_sha": "e" * 40, "main_before": base, "commits": ["e" * 40], "task": "OLD-0004", **old},
+        {"candidate_sha": base, "main_before": None, "task": "OLD-0005", **old},
+    ]
+    path = repo / ".git" / "atc" / "integrations.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("".join(json.dumps(line) + "\n" for line in lines), encoding="utf-8")
+    return base, candidate
+
+
+@pytest.mark.integration
+def test_an_integration_backfills_older_lines_once_before_its_own(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    base, candidate = legacy_ledger(repo)
+    first = topic(repo, {"a.txt": "a2\n"})
+    assert integrate(repo, "topic", first) == 0
+    assert "ledger: backfilled 1 lines" in capsys.readouterr().err
+    lines = ledger_lines(repo)
+    assert len(lines) == 7
+    supplement, own = lines[5], lines[6]
+    assert set(supplement) == {"kind", "of", "main_before", "commits", "recorded_at"}
+    assert (supplement["kind"], supplement["of"], supplement["main_before"]) == ("commits", candidate, base)
+    assert supplement["commits"] == run_git(repo, "rev-list", "--reverse", f"{base}..{candidate}").split()
+    assert len(supplement["commits"]) == 2 and supplement["commits"][-1] == candidate
+    assert supplement["recorded_at"] == own["integrated_at"]
+    assert own["candidate_sha"] == first
+    assert [r["candidate_sha"] for r in gp.read_integrations(repo)] == [
+        candidate, candidate, "f" * 40, "e" * 40, base, first]
+
+    second = topic(repo, {"b.txt": "b2\n"}, branch="second")
+    assert integrate(repo, "second", second, "--json") == 0
+    assert json.loads(capsys.readouterr().out)["ledger_backfill"] == {"added": 0, "unresolvable": 1}
+    assert [r.get("kind") for r in ledger_lines(repo)].count("commits") == 1
+
+
+@pytest.mark.integration
+def test_a_check_or_a_refused_integration_writes_no_backfill(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    declare_verifier(repo, json.dumps([sys.executable, "-c", "raise SystemExit(4)"]))
+    legacy_ledger(repo)
+    before = ledger_lines(repo)
+    tip = topic(repo, {"a.txt": "a2\n"})
+    assert integrate(repo, "topic", tip, "--check") == 0
+    assert ledger_lines(repo) == before
+    assert integrate(repo, "topic", tip) == 3
+    assert "VERIFICATION_FAILED" in capsys.readouterr().err
+    assert ledger_lines(repo) == before

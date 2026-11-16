@@ -32,8 +32,9 @@ REFUSE_HINTS = {
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="atc push", allow_abbrev=False, **cli_conventions.form(
         "Push main of registered repositories to origin after checking every commit it carries.",
-        "Every commit in origin/main..main must come from a recorded integration or sync (the integration\n"
-        "ledger in the repository's Git directory). NAME is a project in workspace.yaml, or root. Bare\n"
+        "Every commit in origin/main..main must be one an integration or sync recorded in the integration\n"
+        "ledger in the repository's Git directory, also after main was reset below that integration's\n"
+        "candidate (listed as 'candidate off main'). NAME is a project in workspace.yaml, or root. Bare\n"
         "atc push checks every repository; --all lists each and asks y/N before pushing it. The Owner runs it;\n"
         "agents run only --check.",
         exit="0 pushed, current or checked; 1 STOP (fetch failed, main behind or diverged, an unrecorded commit, "

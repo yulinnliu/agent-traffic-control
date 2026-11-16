@@ -24,6 +24,8 @@ from pathlib import Path
 SCRUBBED_ENV = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY")
 REMOTE = "origin"
 INTEGRATIONS = ("atc", "integrations.jsonl")
+# The `kind` of a line that records the commits of an earlier integration line written without them.
+SUPPLEMENT = "commits"
 
 # A review binds to an object ID, never to a ref or revision expression that
 # can move after the review.
@@ -31,6 +33,7 @@ REVIEWED_SHA = re.compile(r"[0-9a-fA-F]{12,40}")
 SHORT_SHA = 12
 AUTHORITY_ENDING = re.compile(r"\s@\s+\S+$")
 FULL_SHA_WORD = re.compile(r"\b([0-9a-f]{12})[0-9a-f]{28}\b")
+FULL_SHA = re.compile(r"[0-9a-f]{40}")
 
 REASONS = {
     "NO_REVIEWED_SHA": "no reviewed SHA given; integration requires a formal review bound to a commit",
@@ -365,8 +368,8 @@ def cleanup_preflight(repo: Path, worktree: Path, main: str = "main") -> Report:
     return report("REMOVABLE", "SAFE_TO_REMOVE")
 
 
-def read_integrations(repo: Path) -> list[dict]:
-    """The records `atc integrate` appended to `<git common dir>/atc/integrations.jsonl`."""
+def _ledger(repo: Path) -> list[dict]:
+    """Every JSON object line of `<git common dir>/atc/integrations.jsonl`, in order."""
     common = Path(git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip())
     try:
         lines = common.joinpath(*INTEGRATIONS).read_text(encoding="utf-8").splitlines()
@@ -378,9 +381,61 @@ def read_integrations(repo: Path) -> list[dict]:
             record = json.loads(line)
         except json.JSONDecodeError:
             continue
-        if isinstance(record, dict) and isinstance(record.get("candidate_sha"), str):
+        if isinstance(record, dict):
             records.append(record)
     return records
+
+
+def read_integrations(repo: Path) -> list[dict]:
+    """The integration lines of `<git common dir>/atc/integrations.jsonl`; supplement lines carry no
+    `candidate_sha` and are left out."""
+    return [record for record in _ledger(repo) if isinstance(record.get("candidate_sha"), str)]
+
+
+def _sha_list(value: object) -> list[str] | None:
+    if isinstance(value, list) and all(isinstance(sha, str) and FULL_SHA.fullmatch(sha) for sha in value):
+        return value
+    return None
+
+
+def recorded_range(repo: Path, candidate: str, base: object) -> list[str] | None:
+    """Every commit of ``base..candidate``, oldest first; ``None`` when ``base`` is not a commit ID or either
+    commit is missing, since a range without its lower bound would be the candidate's whole history."""
+    if not isinstance(base, str) or rev(repo, base) != base or rev(repo, candidate) != candidate:
+        return None
+    return git(repo, "rev-list", "--reverse", f"{base}..{candidate}").stdout.split()
+
+
+def _supplements(ledger: list[dict]) -> dict[tuple[str, str], list[str]]:
+    """The commits of each supplement line, by the (candidate, main_before) of the line it completes."""
+    found: dict[tuple[str, str], list[str]] = {}
+    for record in ledger:
+        commits = _sha_list(record.get("commits"))
+        if (record.get("kind") == SUPPLEMENT and "candidate_sha" not in record and commits is not None
+                and isinstance(record.get("of"), str) and isinstance(record.get("main_before"), str)):
+            found.setdefault((record["of"], record["main_before"]), commits)
+    return found
+
+
+def ledger_backfill(repo: Path, ledger: list[dict], at: str) -> tuple[list[dict], int]:
+    """Supplement lines for the integration lines that record no `commits`, one per (candidate, main_before)
+    not yet supplemented, and how many of those lines no longer have both commits."""
+    done = set(_supplements(ledger))
+    lines, unresolvable = [], 0
+    for record in ledger:
+        candidate, base = record.get("candidate_sha"), record.get("main_before")
+        if not isinstance(candidate, str) or not isinstance(base, str) or "commits" in record:
+            continue
+        if (candidate, base) in done:
+            continue
+        done.add((candidate, base))
+        commits = recorded_range(repo, candidate, base)
+        if commits is None:
+            unresolvable += 1
+            continue
+        lines.append({"kind": SUPPLEMENT, "of": candidate, "main_before": base, "commits": commits,
+                      "recorded_at": at})
+    return lines, unresolvable
 
 
 def integration_view(record: dict) -> tuple[str | None, dict]:
@@ -402,12 +457,13 @@ def short(sha: str | None) -> str:
 def push_listing(repo: Path, main: str = "main", own: set[str] | str | None = None) -> dict:
     """Every commit in origin/main..main, oldest first, with the integration that brought it in.
 
-    An integration owns the commits from its recorded ``main_before`` to its
-    candidate; a record without ``main_before`` owns those its candidate reaches
-    that origin/main and every earlier integration in the range do not. Ownership
-    stays with the earliest integration. ``own`` is the commits that
-    carry this run's push approval, or the candidate SHA of the integration
-    that owns them; every other commit is flagged.
+    A line owns the commits it records, whether or not its candidate is still on main: its ``commits``,
+    else its supplement line's, else ``main_before..candidate`` while both commits exist. A line without
+    ``main_before`` owns, only while its candidate is in the range, those its candidate reaches that
+    origin/main and every earlier such candidate do not. Lines whose candidate is in the range go first, in
+    main's order, then the rest in ledger order; a commit stays with the first. ``own`` is the commits that
+    carry this run's push approval, or the candidate SHA of the integration that owns them; every other
+    commit is flagged.
     """
     main_tip = rev(repo, main)
     if main_tip is None:
@@ -418,24 +474,65 @@ def push_listing(repo: Path, main: str = "main", own: set[str] | str | None = No
         out = git(repo, "log", "--reverse", "--format=%H %s", f"{remote}..{main_tip}").stdout
         commits = [tuple(line.split(" ", 1)) if " " in line else (line, "") for line in out.splitlines() if line]
     position = {sha: index for index, (sha, _) in enumerate(commits)}
+    ledger = _ledger(repo)
+    supplements = _supplements(ledger)
     records: dict[str, dict] = {}
     tasks: dict[str, list[str | None]] = {}
-    for record in read_integrations(repo):
-        if record["candidate_sha"] in position:
-            records.setdefault(record["candidate_sha"], record)
-            # A records-only binding of several tasks writes one line per task with one candidate.
-            task = integration_view(record)[0]
-            named = tasks.setdefault(record["candidate_sha"], [])
-            if task is not None and task not in named:
-                named.append(task)
+    for record in ledger:
+        if not isinstance(record.get("candidate_sha"), str):
+            continue
+        records.setdefault(record["candidate_sha"], record)
+        # A records-only binding of several tasks writes one line per task with one candidate.
+        task = integration_view(record)[0]
+        named = tasks.setdefault(record["candidate_sha"], [])
+        if task is not None and task not in named:
+            named.append(task)
     owner: dict[str, dict] = {}
+    source: dict[str, str] = {}
+
+    def claim(record: dict, shas: list[str], how: str) -> None:
+        for sha in shas:
+            if sha in position and sha not in owner:
+                owner[sha], source[sha] = record, how
+
+    def recorded(record: dict) -> tuple[list[str] | None, str]:
+        listed = _sha_list(record.get("commits"))
+        if listed is not None:
+            return listed, "line"
+        key = (record["candidate_sha"], record.get("main_before"))
+        if key in supplements:
+            return supplements[key], "backfill"
+        return None, "graph"
+
     excluded = [remote] if remote else []
-    for candidate in sorted(records, key=position.__getitem__):
-        base = records[candidate].get("main_before")
-        bounds = [base] if isinstance(base, str) and rev(repo, base) == base else []
-        for sha in git(repo, "rev-list", candidate, "--not", *excluded, *bounds).stdout.split():
-            owner.setdefault(sha, records[candidate])
+    for candidate in sorted((c for c in records if c in position), key=position.__getitem__):
+        listed, how = recorded(records[candidate])
+        if listed is None:
+            base = records[candidate].get("main_before")
+            bounds = [base] if isinstance(base, str) and rev(repo, base) == base else []
+            listed = git(repo, "rev-list", candidate, "--not", *excluded, *bounds).stdout.split()
+        claim(records[candidate], listed, how)
         excluded.append(candidate)
+    rest = [c for c in records if c not in position]
+    reachable: set[str] | None = None
+    for candidate in rest:
+        if len(owner) == len(position):
+            break
+        record = records[candidate]
+        listed, how = recorded(record)
+        if listed is not None:
+            claim(record, listed, how)
+            continue
+        if not isinstance(record.get("main_before"), str):
+            continue
+        if reachable is None:
+            # One walk from every candidate left to compute; one outside it reaches no listed commit.
+            pending = [c for c in rest if FULL_SHA.fullmatch(c) and recorded(records[c])[0] is None
+                       and isinstance(records[c].get("main_before"), str)]
+            stdin = "".join(f"{c}\n" for c in pending) + (f"^{remote}\n" if remote else "")
+            reachable = set(git(repo, "rev-list", "--ignore-missing", "--stdin", input=stdin).stdout.split())
+        if candidate in reachable:
+            claim(record, recorded_range(repo, candidate, record["main_before"]) or [], "graph")
     if isinstance(own, str):
         own = {sha for sha, record in owner.items() if record["candidate_sha"] == own}
     entries = []
@@ -454,6 +551,8 @@ def push_listing(repo: Path, main: str = "main", own: set[str] | str | None = No
             "task": named[0] if len(named) == 1 else None,
             "tasks": named,
             "authority": authority,
+            "candidate_on_main": record["candidate_sha"] in position if record else None,
+            "recorded_by": source.get(sha),
             "push_approval": None if own is None else sha in own,
         })
     return {"main": main, "main_tip": main_tip, "origin_main_tip": remote, "commits": entries}
@@ -482,6 +581,8 @@ def render_push(listing: dict) -> list[str]:
                 task = json.dumps(named, ensure_ascii=False) if named else "-"
                 source = (f"integration {short(entry['integration'])} task={task} "
                           f"authority={authority.get('kind', '-')}")
+                if entry.get("candidate_on_main") is False:
+                    source += " candidate off main"
             else:
                 source = "no integration record"
             if entry["push_approval"] is True:

@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+import git_preflight as gp
 import push
 from test_git_integrate import (  # noqa: F401  (repo is a fixture)
     add_origin, commit, main_tip, publish, repo, run_git,
@@ -182,3 +183,131 @@ def test_check_with_names_or_all_lists_and_never_pushes(ws: Path, argv: list[str
     else:
         assert out.splitlines()[0].startswith("CHECK root") and f"integration {integrated[:12]}" in out
     assert origin_main(ws) == base
+
+
+# A main reset below a recorded candidate (design ATC-0057)
+
+MISSING = "f" * 40  # a well-formed commit ID no repository here holds
+
+
+def write_ledger(repo: Path, *lines: dict) -> None:
+    path = repo / ".git" / "atc" / "integrations.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("".join(json.dumps(line) + "\n" for line in lines), encoding="utf-8")
+
+
+def line(candidate: str, base: str | None, task: str = "ATC-0001", **extra) -> dict:
+    return {"candidate_sha": candidate, "reviewed": candidate, "main_before": base, "task": task,
+            "authority": {"kind": "owner_words", "quote": "Owner run: approve integration"},
+            "records_only": False, "integrated_at": "2026-11-01T00:00:00+00:00", **extra}
+
+
+def reset_below(ws: Path) -> tuple[str, str, str, str]:
+    """origin/main at base; L1 brought c1 and c2; main reset to c1; c3 integrated on c1. Returns the four SHAs."""
+    publish(ws, "main")
+    base = main_tip(ws)
+    c1 = commit(ws, "a.txt", "one\n")
+    c2 = commit(ws, "a.txt", "two\n")
+    run_git(ws, "reset", "-q", "--hard", c1)
+    c3 = commit(ws, "b.txt", "three\n")
+    return base, c1, c2, c3
+
+
+def owners(listing: dict) -> list[tuple]:
+    return [(e["sha"], e["integration"], e["candidate_on_main"], e["recorded_by"]) for e in listing["commits"]]
+
+
+def test_a_commit_kept_by_a_reset_below_its_candidate_is_recorded(ws: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    base, c1, c2, c3 = reset_below(ws)
+    write_ledger(ws, line(c2, base), line(c3, c1, task="ATC-0002"))
+    assert push.main(["root", "--check"], root=ws) == 0
+    out = capsys.readouterr().out
+    assert out.splitlines()[0].startswith("CHECK root")
+    assert f'integration {c2[:12]} task="ATC-0001" authority=owner_words candidate off main' in out
+    assert f'integration {c3[:12]} task="ATC-0002" authority=owner_words\n' in out
+    assert owners(gp.push_listing(ws)) == [(c1, c2, False, "graph"), (c3, c3, True, "graph")]
+    assert origin_main(ws) == base
+
+
+def test_a_recorded_commit_list_needs_no_commit_object(ws: Path) -> None:
+    base, c1, _c2, c3 = reset_below(ws)
+    write_ledger(ws, line(MISSING, MISSING, commits=[c1, MISSING]), line(c3, c1, commits=[c3]))
+    assert owners(gp.push_listing(ws)) == [(c1, MISSING, False, "line"), (c3, c3, True, "line")]
+
+
+def test_a_supplement_line_records_a_line_whose_objects_are_gone(ws: Path) -> None:
+    base, c1, _c2, c3 = reset_below(ws)
+    write_ledger(ws, line(MISSING, base), {"kind": "commits", "of": MISSING, "main_before": base,
+                                           "commits": [c1, MISSING], "recorded_at": "2026-11-16T00:00:00+00:00"},
+                 line(c3, c1))
+    assert owners(gp.push_listing(ws)) == [(c1, MISSING, False, "backfill"), (c3, c3, True, "graph")]
+    assert [r["candidate_sha"] for r in gp.read_integrations(ws)] == [MISSING, c3]
+
+
+def test_a_supplement_for_another_main_before_records_nothing(ws: Path) -> None:
+    base, c1, _c2, c3 = reset_below(ws)
+    write_ledger(ws, line(MISSING, base), {"kind": "commits", "of": MISSING, "main_before": c3,
+                                           "commits": [c1], "recorded_at": "2026-11-16T00:00:00+00:00"},
+                 line(c3, c1))
+    assert owners(gp.push_listing(ws))[0] == (c1, None, None, None)
+
+
+def test_an_unrecorded_commit_after_a_reset_still_refuses(ws: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    base, c1, c2, c3 = reset_below(ws)
+    stray = commit(ws, "c.txt", "stray\n")
+    write_ledger(ws, line(c2, base), line(c3, c1))
+    assert push.main(["root"], root=ws) == 1
+    out = capsys.readouterr().out
+    assert out.splitlines()[0].startswith("REFUSED root")
+    assert f"UNRECORDED_COMMITS: root: {stray[:12]}" in out
+    assert c1[:12] not in out.split("UNRECORDED_COMMITS", 1)[1]
+    assert origin_main(ws) == base
+
+
+@pytest.mark.parametrize("first", ["main_before missing", "no main_before", "main_before null", "candidate missing",
+                                   "commits malformed"])
+def test_an_off_main_line_without_both_commits_claims_nothing(ws: Path, first: str,
+                                                              capsys: pytest.CaptureFixture[str]) -> None:
+    base, c1, c2, c3 = reset_below(ws)
+    l1 = {"main_before missing": line(c2, MISSING), "no main_before": {k: v for k, v in line(c2, base).items()
+                                                                        if k != "main_before"},
+          "main_before null": line(c2, None), "candidate missing": line(MISSING, base),
+          "commits malformed": line(MISSING, base, commits=[c1[:12]])}[first]
+    write_ledger(ws, l1, line(c3, c1))
+    assert owners(gp.push_listing(ws))[0] == (c1, None, None, None)
+    assert push.main(["root", "--check"], root=ws) == 1
+    assert f"UNRECORDED_COMMITS: root: {c1[:12]}" in capsys.readouterr().out
+
+
+def test_a_live_line_keeps_a_commit_an_off_main_line_also_records(ws: Path) -> None:
+    base, c1, c2, c3 = reset_below(ws)
+    write_ledger(ws, line(c2, base), line(MISSING, base, commits=[c1]), line(c3, base, task="ATC-0002"))
+    assert owners(gp.push_listing(ws)) == [(c1, c3, True, "graph"), (c3, c3, True, "graph")]
+
+
+def test_the_earlier_off_main_line_keeps_a_commit_two_record(ws: Path) -> None:
+    base, c1, c2, c3 = reset_below(ws)
+    other = "e" * 40
+    write_ledger(ws, line(other, base, commits=[c1]), line(c2, base), line(c3, c1))
+    assert owners(gp.push_listing(ws))[0] == (c1, other, False, "line")
+    write_ledger(ws, line(c2, base), line(other, base, commits=[c1]), line(c3, c1))
+    assert owners(gp.push_listing(ws))[0] == (c1, c2, False, "graph")
+
+
+def test_an_off_main_binding_names_every_task(ws: Path) -> None:
+    base, c1, c2, c3 = reset_below(ws)
+    write_ledger(ws, line(c2, base, task="ATC-0001"), line(c2, base, task="ATC-0003"), line(c3, c1))
+    entry = gp.push_listing(ws)["commits"][0]
+    assert (entry["task"], entry["tasks"]) == (None, ["ATC-0001", "ATC-0003"])
+
+
+def test_an_unrecorded_commit_lists_null_provenance_in_json(ws: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    publish(ws, "main")
+    stray = commit(ws, "a.txt", "stray\n")
+    entry = gp.push_listing(ws)["commits"][0]
+    assert (entry["sha"], entry["integration"], entry["candidate_on_main"], entry["recorded_by"]) == (
+        stray, None, None, None)
+    assert push.main(["root", "--check", "--json"], root=ws) == 1
+    row = json.loads(capsys.readouterr().out)["repositories"][0]
+    assert set(row) == {"name", "repo", "commits", "main_tip", "verdict", "reason", "detail", "hint"}
+    assert (row["reason"], row["detail"]) == ("UNRECORDED_COMMITS", f"root: {stray[:12]}")

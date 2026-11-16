@@ -275,13 +275,26 @@ the reused record in its evidence and integration record.
 Apart from that evidence, the adapter records every integration that updates
 `main`, with or without a verification report, as one JSON line in
 `<git common dir>/atc/integrations.jsonl`: the candidate SHA, the reviewed
-SHA, the `main` it was integrated onto (`main_before`), the task, its
-authority, whether the range is records-only, and the time (the keys are in
-`Task and authority`). For a carried-over review, `reviewed` holds the
-rebased tip and `carried_over_from` the SHA the review named; the evidence
-record carries the same pair. The pre-push gate reads only the verification
-evidence of `Test evidence` below, never this record; `atc push` reads it
-to check every commit of a push (`Publication boundary`).
+SHA, the `main` it was integrated onto (`main_before`), the commits the
+integration brought onto `main` (`commits`, every SHA of
+`main_before..candidate`, oldest first), the task, its authority, whether the
+range is records-only, and the time (the keys are in `Task and authority`).
+For a carried-over review, `reviewed` holds the rebased tip and
+`carried_over_from` the SHA the review named; the evidence record carries the
+same pair. The pre-push gate reads only the verification evidence of `Test
+evidence` below, never this record; `atc push` reads it to check every commit
+of a push (`Publication boundary`): a commit is recorded when a line's
+`commits` names it, whether or not that line's candidate is still on `main`.
+
+The log is append-only. A line written without `commits` gains a supplement
+line `{"kind": "commits", "of": <candidate SHA>, "main_before", "commits",
+"recorded_at"}`, which `atc integrate` appends while both commits still exist
+in the repository; until then `atc push` computes the same range from Git. A
+line with neither `commits` nor a supplement line, whose `main_before` or
+candidate no longer exists, records no commits, and a push that carries one of
+its commits refuses. A line without `main_before` records no `commits`; its
+commits count only while its candidate is in `origin/main..main`, as those its
+candidate reaches that `origin/main` and earlier such candidates do not.
 
 The verifier must test the candidate identified by `ATC_INTEGRATION_SHA`, not
 resolve a moving branch name. A nonzero result, changed candidate HEAD, dirty
@@ -391,7 +404,8 @@ a new integration.
 The coordinator, who hears the Owner, records the squash as one
 `integrations.jsonl` line: `kind: squash`, the `task`, `records_only: false`,
 the squash commit as `candidate_sha`, the recorded target tip as
-`main_before`, the source tip as `reviewed`, and the Owner's words as
+`main_before`, the one squash commit as `commits`, the source tip as
+`reviewed`, and the Owner's words as
 `authority` `{"kind": "owner_words", "quote": ...}`. Matching trees or patches
 never establish authorization or completeness by themselves. `atc task close`
 counts the task as integrated, with no flag, only when that line is the task's

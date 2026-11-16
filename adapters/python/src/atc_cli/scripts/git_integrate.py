@@ -691,24 +691,20 @@ def _verify_candidate(
     return warning, log
 
 
-def _record_integration(repo: Path, records: list[dict]) -> Path:
-    """Append one integration, a line per task, to `<git common dir>/atc/integrations.jsonl`."""
+def _record_integration(repo: Path, records: list[dict]) -> tuple[Path, dict | None]:
+    """Append one integration, a line per task, to `<git common dir>/atc/integrations.jsonl`, after the
+    supplement lines that record the commits of earlier lines written without them; the backfill count is
+    `None` when the integration was already recorded and nothing was appended."""
     common = Path(_git_ok(repo, "rev-parse", "--path-format=absolute", "--git-common-dir"))
     path = common.joinpath(*INTEGRATIONS)
     path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        lines = path.read_text(encoding="utf-8").splitlines()
-    except FileNotFoundError:
-        lines = []
-    for line in lines:
-        try:
-            if json.loads(line).get("candidate_sha") == records[0]["candidate_sha"]:
-                return path  # a run that stopped for recovery already recorded it
-        except (json.JSONDecodeError, AttributeError):
-            continue
+    ledger = gp._ledger(repo)
+    if any(line.get("candidate_sha") == records[0]["candidate_sha"] for line in ledger):
+        return path, None  # a run that stopped for recovery already recorded it
+    supplements, unresolvable = gp.ledger_backfill(repo, ledger, records[0]["integrated_at"])
     with path.open("a", encoding="utf-8", newline="\n") as handle:
-        handle.write("".join(json.dumps(record, sort_keys=True) + "\n" for record in records))
-    return path
+        handle.write("".join(json.dumps(record, sort_keys=True) + "\n" for record in [*supplements, *records]))
+    return path, {"added": len(supplements), "unresolvable": unresolvable}
 
 
 NOT_CHECKED = {"kind": "not_checked"}
@@ -737,16 +733,28 @@ def _note_integration(
     carried_from: str | None = None, main_before: str | None = None, verifier: dict | None = None,
     verification_evidence: dict | None = None,
 ) -> None:
-    """One line per task; `main_before` is present on every line, `None` only after a recovery.
+    """One line per task; `main_before` is present on every line, `None` only after a recovery, and
+    `commits` is every commit of `main_before..candidate` on every line that has a `main_before`.
 
     `verifier` names the source the candidate was verified with (`None` for a range of task records only).
     """
     at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    commits = None
+    if main_before is not None:
+        try:
+            commits = gp.recorded_range(repo, candidate_sha, main_before)
+        except GitError as exc:
+            result["integration_record_warning"] = f"could not list the integration's commits: {exc}"
+        else:
+            if commits is None:
+                result["integration_record_warning"] = (
+                    f"could not list the integration's commits: {main_before}..{candidate_sha} does not resolve")
     try:
-        result["integration_record"] = str(_record_integration(repo, [{
+        path, backfill = _record_integration(repo, [{
             "candidate_sha": candidate_sha,
             "reviewed": reviewed,
             "main_before": main_before,
+            **({"commits": commits} if commits is not None else {}),
             **({"carried_over_from": carried_from} if carried_from else {}),
             "task": task,
             "authority": binding.authority,
@@ -754,7 +762,10 @@ def _note_integration(
             "verifier": verifier,
             "verification_evidence": verification_evidence,
             "integrated_at": at,
-        } for task in binding.tasks]))
+        } for task in binding.tasks])
+        result["integration_record"] = str(path)
+        if backfill is not None:
+            result["ledger_backfill"] = backfill
     except (OSError, GitError) as exc:
         result["integration_record"] = None
         result["integration_record_warning"] = f"could not append the integration record: {exc}"
@@ -1792,6 +1803,8 @@ def _main(args: argparse.Namespace, root: Path, cwd: str | None) -> int:
                 f" ({', '.join(entry['candidate_refs'])})",
                 file=sys.stderr,
             )
+        if (result.get("ledger_backfill") or {}).get("added"):
+            print(f"ledger: backfilled {result['ledger_backfill']['added']} lines", file=sys.stderr)
     if report is not None:
         _print_stop_report(report, result, args.json)
     elif refusal is not None:

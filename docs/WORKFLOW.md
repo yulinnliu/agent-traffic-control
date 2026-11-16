@@ -162,7 +162,11 @@ atc push <project>
 The coordinator runs `--check`, which fetches `origin` and lists each commit
 of `origin/main..main`, and gives the Owner the second command. `atc push`
 refuses a commit that no integration or sync recorded, pushes exactly the
-checked `main` tip and reads `origin/main` back. `atc push --all` asks y/N
+checked `main` tip and reads `origin/main` back. A commit counts as recorded
+when a line of the integration ledger names it in its `commits`, also after
+the Owner reset `main` below that integration's candidate; the listing marks
+such a group `candidate off main`. `atc integrate` adds the `commits` of
+older ledger lines while their commits still exist. `atc push --all` asks y/N
 per repository. The coordinator then archives the task's sessions
 (`DELIVERY.md` § Close-out and § 10).
 

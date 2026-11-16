@@ -747,6 +747,7 @@ def commit_sync(project_path: Path, plan: list[PlanItem], source: str, revision:
         handle.write(json.dumps({
             "authority": {"kind": "sync"},
             "candidate_sha": sha,
+            "commits": [sha],
             "integrated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "kind": "sync",
             "main_before": before,

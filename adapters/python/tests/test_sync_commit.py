@@ -45,6 +45,7 @@ def test_sync_commits_on_main_and_records_it(tmp_path: Path, capsys: pytest.Capt
     assert (project / ".atc/atc.lock").read_text(encoding="utf-8").endswith(f'revision = "{revision}"\n')
     [record] = records(project)
     assert (record["kind"], record["candidate_sha"], record["main_before"], record["source_revision"]) == ("sync", head, before, revision)
+    assert record["commits"] == [head]
     assert sync_project.main(["demo"], root=root) == 0
     assert git_out(project, "rev-parse", "HEAD") == head
     assert capsys.readouterr().out == "demo current\n"
