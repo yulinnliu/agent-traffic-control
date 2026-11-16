@@ -115,6 +115,28 @@ def test_a_merge_candidate_is_reused_when_its_tree_matches(
     assert (evidence.get("reused") or {}).get("candidate_sha") == record["candidate_sha"] != data["candidate_sha"]
 
 
+def test_a_built_merge_whose_tree_is_not_the_one_the_reuse_check_read_stops(
+        repo: Path, counted: tuple[Path, Path], capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    runs, _failing = counted
+    second = topic(repo, {"b.txt": "b2\n"}, branch="topic/next")
+    publish(repo, "topic/next")
+    commit(repo, "c.txt", "c\n")
+    assert verify(repo, second, capsys=capsys) == 0
+    before = main_tip(repo)
+    checked = gi.reuse_check
+
+    def other_tree(*args, **kwargs):
+        record, reason, path = checked(*args, **kwargs)
+        return ({**record, "candidate_tree": "0" * 40} if record else record), reason, path
+
+    monkeypatch.setattr(gi, "reuse_check", other_tree)
+    assert integrate(repo, "topic/next", second, "--json") != 0
+    captured = capsys.readouterr()
+    assert "CANDIDATE_CHANGED" in captured.out + captured.err
+    assert run_count(runs) == 1 and main_tip(repo) == before
+
+
 def tamper(repo: Path, base: str, tip: str, change) -> None:
     path = gi.candidate_record_path(repo, "FF", base, tip)
     record = json.loads(path.read_text(encoding="utf-8"))

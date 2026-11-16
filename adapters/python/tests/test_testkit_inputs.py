@@ -167,6 +167,23 @@ def test_the_plugin_writes_each_files_outcome_and_the_collected_files(tmp_path: 
 
 
 @pytest.mark.integration
+def test_a_run_that_ends_other_than_passed_or_failed_writes_no_outcomes(tmp_path: Path) -> None:
+    """A collection error interrupts the session before every file ran: the files that did run say nothing about
+    a whole file's outcome."""
+    (tmp_path / "conftest.py").write_text('pytest_plugins = ("atc_testkit.plugin",)\n', encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text("[tool.pytest.ini_options]\n", encoding="utf-8")
+    (tmp_path / "test_good.py").write_text("import pytest\n\n\n@pytest.mark.unit\ndef test_one():\n    pass\n",
+                                           encoding="utf-8")
+    (tmp_path / "test_broken.py").write_text("def test_one(:\n", encoding="utf-8")
+    outcomes = tmp_path / "outcomes.json"
+    env = {**os.environ, inputs.OUTCOMES: str(outcomes), "PYTEST_DEBUG_TEMPROOT": str(tmp_path)}
+    run = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "-p", "no:xdist",
+                          "--basetemp", str(tmp_path / "bt")], cwd=tmp_path, env=env, capture_output=True, text=True)
+    assert run.returncode == pytest.ExitCode.INTERRUPTED, run.stdout
+    assert not outcomes.exists()
+
+
+@pytest.mark.integration
 def test_a_run_records_each_passed_file_only_when_the_tree_is_its_commit(repository: Path, tmp_path: Path) -> None:
     argv_file = tmp_path / "verify.json"
     script = ("import json, os; print(json.dumps({'commit': os.environ['ATC_INPUTS_OF'], "
