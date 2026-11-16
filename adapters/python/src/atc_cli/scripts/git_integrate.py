@@ -605,12 +605,14 @@ def _read_candidate(path: Path) -> dict | None:
 
 
 def _matching_record(t: "Target", tree: str) -> Path | None:
-    """The newest passed candidate record of another key whose run's inputs equal ``tree``'s."""
+    """The newest passed candidate record of another key that ran on ``tree`` itself: a reuse stands in for the
+    whole verifier, whose lint and reference rows read the paths outside the input set too."""
     found = []
     for path in _evidence_dir(t.repo).joinpath(CANDIDATE_RECORDS).glob("*.json"):
         record = _read_candidate(path)
         if (record is not None and record.get("schema") == EVIDENCE_SCHEMA and record.get("kind") == "verify"
-                and record.get("result") == PASS and isinstance(record.get("report"), dict)
+                and record.get("result") == PASS and record.get("tree") == tree
+                and isinstance(record.get("report"), dict)
                 and _valid_report(record["report"]) and inputs_match(t.repo, tree, record["report"])):
             found.append((str(record.get("verified_at", "")), path))
     return max(found)[1] if found else None
@@ -618,7 +620,7 @@ def _matching_record(t: "Target", tree: str) -> Path | None:
 
 def reuse_check(t: "Target", verdict: str, expected_main: str) -> tuple[dict | None, str, Path | None]:
     """The candidate record `atc integrate` reuses in place of the verifier, or the first reason it cannot: the record
-    under the candidate's own key, else the newest passed one whose run's inputs equal the candidate's."""
+    under the candidate's own key, else the newest passed one that ran on the candidate tree."""
     tree = candidate_tree(t.repo, verdict, expected_main, t.reviewed)
     try:
         path = candidate_record_path(t.repo, verdict, expected_main, t.reviewed)
@@ -649,6 +651,10 @@ def reuse_check(t: "Target", verdict: str, expected_main: str) -> tuple[dict | N
         return None, "NOT_CLEAN", path
     if tree is None or not inputs_match(t.repo, tree, report):
         return None, "INPUTS_MISMATCH", path
+    # The input digest keys the test stages, which the verifier itself reuses file by file; a reuse here skips
+    # the lint and reference rows as well, and they read the excluded paths, so the record ran on this tree.
+    if record["tree"] != tree:
+        return None, "TREE_MISMATCH", path
     if record["verify_argv"] != t.verify_argv:
         return None, "ARGV_MISMATCH", path
     if record["timeout"] != t.timeout:

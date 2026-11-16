@@ -103,7 +103,9 @@ one of these reasons. After each write the adapter deletes records older than
 
 A gate about to run tests for a pushed commit reads the record for that
 commit, or when there is none, the newest record (by `verified_at`) that
-passes the schema row and whose run's inputs equal the pushed commit's. It
+passes the schema row and whose run's inputs equal the pushed commit's. The
+input digest suffices here because the record replaces only the gate's test
+stage: the gate's static checks still run. It
 reuses the record in place of its test stage only when every row holds,
 checked in this order. The first row that fails gives the verdict
 `RUN: <reason>`; all rows holding gives `REUSE`, and the gate's line names
@@ -162,8 +164,13 @@ resolves the target and checks no authority, so the record names `task` and
 Within the active slot, after the pre-checks, authority and the main read-back,
 `atc integrate` reads the candidate record under its own key, or when there is
 none, the newest passed `verify` record (by `verified_at`) with a valid report
-whose run's inputs equal the candidate tree's. The candidate tree is the
-reviewed tree for FF and the `git merge-tree --write-tree` result for NO_FF.
+that ran on the candidate tree itself. The candidate tree is the reviewed
+tree for FF and the `git merge-tree --write-tree` result for NO_FF. A reuse
+stands in for the whole verifier, whose lint and reference rows read the
+paths outside the input set as well, so it needs the record's own tree; a
+candidate that differs only outside the input set runs the verifier, whose
+test stages then reuse each file by its inputs (`docs/TESTKIT.md` § Input
+evidence).
 It reuses the record in place of running the verifier only when every row
 holds, checked in this order. The first row that fails gives the reason, and
 the verifier runs.
@@ -177,6 +184,7 @@ the verifier runs.
 | `report` is a valid report | `SCHEMA_MISMATCH` |
 | `clean` is `true` | `NOT_CLEAN` |
 | The candidate tree has the run's inputs (§ Input set); a report without `inputs` never does | `INPUTS_MISMATCH` |
+| `tree` equals the candidate tree | `TREE_MISMATCH` |
 | `verify_argv` equals the resolved verifier argv | `ARGV_MISMATCH` |
 | `timeout` equals the resolved timeout | `TIMEOUT_MISMATCH` |
 | `platform` equals the integrating host's platform | `PLATFORM_MISMATCH` |

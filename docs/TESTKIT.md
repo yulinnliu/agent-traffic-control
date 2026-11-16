@@ -507,7 +507,7 @@ working-directory rules bind it as they bind a project's verifier.
 - A pass writes the verification report, as a consumer's does
   (`shared/conformance/verification-evidence/README.md` § Report), so
   `atc integrate` reuses the reviewer's `atc test ID --candidate` record of a
-  run on the same inputs in place of running the verifier again
+  run on the same tree in place of running the verifier again
   (`shared/conformance/verification-evidence/README.md` § Integration reuse).
   Its `dependency_inputs` are the adapter toolchain's dependency files,
   named from the root (`adapters/python/uv.lock`,

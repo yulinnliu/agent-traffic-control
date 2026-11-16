@@ -132,6 +132,7 @@ def tamper(repo: Path, base: str, tip: str, change) -> None:
     (lambda r: r.update(platform={"system": "other", "machine": "x"}), "PLATFORM_MISMATCH"),
     (lambda r: r["report"]["dependency_inputs"].update({"uv.lock": "0" * 64}), "DEPENDENCY_MISMATCH"),
     (lambda r: r["report"].update(schema="atc-verification-report/2"), "INPUTS_MISMATCH"),
+    (lambda r: r.update(tree="0" * 40), "TREE_MISMATCH"),
 ])
 def test_a_mismatched_record_runs_the_verifier(repo: Path, counted: tuple[Path, Path],
                                                capsys: pytest.CaptureFixture[str], change, reason: str) -> None:
@@ -147,23 +148,38 @@ def test_a_mismatched_record_runs_the_verifier(repo: Path, counted: tuple[Path, 
     assert f"verify: candidate {tip} RUN (evidence: {reason}) timeout 300s (default)" in captured.err.splitlines()
 
 
-def test_a_change_outside_the_input_set_reuses_the_record_of_the_run_before_it(
+def test_a_reworded_tip_reuses_the_record_of_the_same_tree(
         repo: Path, counted: tuple[Path, Path], capsys: pytest.CaptureFixture[str]) -> None:
-    """A run's input set leaves out the non-input paths its candidate held, so both edits are to existing files."""
     runs, _failing = counted
+    tip = topic(repo, {"a.txt": "a2\n"})
+    assert verify(repo, tip, capsys=capsys) == 0
+    run_git(repo, "switch", "-q", "topic")
+    run_git(repo, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "--amend", "-m", "reworded")
+    reworded = run_git(repo, "rev-parse", "HEAD")
+    run_git(repo, "switch", "-q", "main")
+    assert integrate(repo, "topic", reworded, "--json") == 0
+    data = json.loads(capsys.readouterr().out)
+    assert run_count(runs) == 1 and data["verification_reuse"] == "REUSED" and main_tip(repo) == reworded
+    evidence = json.loads(Path(data["evidence"]).read_text(encoding="utf-8"))
+    assert evidence["reused"]["reused_from"]["ran_on"] == tip
+
+
+def test_a_change_only_outside_the_input_set_runs_the_verifier_whose_lint_can_refuse_it(
+        repo: Path, counted: tuple[Path, Path], capsys: pytest.CaptureFixture[str]) -> None:
+    """The input digest leaves docs/ out, but the verifier's lint and reference rows read it: a record of another
+    tree stands in for no row, so the verifier runs, and its failure (here the lint row's) keeps main where it was."""
+    runs, failing = counted
     commit(repo, "docs/main.md", "main notes\n")
     tip = topic(repo, {"a.txt": "a2\n", "docs/notes.md": "notes\n"})
     assert verify(repo, tip, capsys=capsys) == 0
     run_git(repo, "switch", "-q", "topic")
-    amended = commit(repo, "docs/notes.md", "notes 2\n")
+    amended = commit(repo, "docs/notes.md", "a broken [link](#nowhere)\n")
     run_git(repo, "switch", "-q", "main")
-    publish(repo, "topic")
-    commit(repo, "docs/main.md", "main notes 2\n")
-    assert integrate(repo, "topic", amended, "--json") == 0
+    before = main_tip(repo)
+    failing.write_text("lint")
+    assert integrate(repo, "topic", amended, "--json") != 0
     data = json.loads(capsys.readouterr().out)
-    assert run_count(runs) == 1 and data["verification_reuse"] == "REUSED" and data["verdict"] == "NO_FF"
-    evidence = json.loads(Path(data["evidence"]).read_text(encoding="utf-8"))
-    assert evidence["reused"]["reused_from"]["ran_on"] == tip
+    assert run_count(runs) == 2 and data["verification_reuse"] == "NO_RECORD" and main_tip(repo) == before
 
 
 def test_an_unreadable_record_runs_the_verifier(repo: Path, counted: tuple[Path, Path],
