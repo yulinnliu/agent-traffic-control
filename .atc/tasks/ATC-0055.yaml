@@ -20,3 +20,4 @@ decisions:
 - 'Owner 11-16 「照建議做，但第二點不要併入，先收尾0054」: baseline sharding and same-SHA reuse form this task, after ATC-0054. Parallel mutant runs are dropped. Suite speed (subprocess start) stays queued and is measured first.'
 - 'Design first: the shard split, how line records merge, the reuse key, and where the records live are reviewed before implementation.'
 - No version bump; no governance change.
+- 'Owner 11-16 「只補4個測試，13個發版後補跑」: this round adds the four tests only; the 13 reviewer mutants the review did not reach run after the release is installed.'
