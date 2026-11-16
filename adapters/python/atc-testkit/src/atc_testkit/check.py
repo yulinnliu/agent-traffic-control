@@ -23,8 +23,9 @@ CHECK_COMMAND = f"uv run python -m {MODULE}.check --installed"
 PLUGIN = "atc_testkit.plugin"
 REQUIRED_STRINGS = ("gate", "hook", "workflow", "ci_job", "unmarked_baseline", "slow_ci_job")
 REQUIRED_LISTS = ("product_module_prefixes",)
-OPTIONAL_LISTS = ("credential_variables", "data_root_variables", "automation_markdown_prefixes", "lint_scope",
-                  "hook_uv_options", "ci_platforms")
+OPTIONAL_LISTS = ("credential_variables", "data_root_variables", "automation_markdown_prefixes", "hook_uv_options",
+                  "ci_platforms")
+LINT_CONFIG = ".pre-commit-config.yaml"
 TOOLCHAINS = ("python",)  # the names atc_testkit.toolchain registers; this file also loads outside the package
 INITIALIZATION = re.compile(r"[A-Za-z_][\w.]*:[A-Za-z_]\w*")
 
@@ -68,6 +69,12 @@ def _data_problems(root: Path, project: dict, config: dict, workflow: dict) -> l
     dev = project.get('dependency-groups', {}).get('dev', [])
     if not any(isinstance(item, str) and re.match(r'pytest-xdist\b', item) for item in dev):
         problems.append('development dependencies must include pytest-xdist')
+    if not any(isinstance(item, str) and re.match(r'pre-commit\b', item) for item in dev):
+        problems.append('development dependencies must include pre-commit, which runs the lint stage')
+    if not (root / LINT_CONFIG).is_file():
+        problems.append(f'the lint stage needs {LINT_CONFIG} at the repository root')
+    if 'lint_scope' in config:
+        problems.append(f'[tool.atc-testkit] lint_scope is no key: {LINT_CONFIG} names what the lint stage reads')
     conftest = root / 'conftest.py'
     plugins = [node.value for node in ast.walk(ast.parse(conftest.read_text(encoding='utf-8')))
                if isinstance(node, ast.Constant)] if conftest.is_file() else []

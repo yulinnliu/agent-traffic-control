@@ -73,6 +73,7 @@ whole directory loses nothing that a tool cannot recreate; the installed
     uv/                         UV_CACHE_DIR
     python/                     UV_PYTHON_INSTALL_DIR
     ruff/                       RUFF_CACHE_DIR
+    pre-commit/                 PRE_COMMIT_HOME
 ```
 
 ## Host settings
@@ -359,8 +360,8 @@ the verifier.
   `UV_PYTHON_INSTALL_DIR` to `~/.atc/cache/python` when the caller has not set
   them.
 - The gate and the verifier give the processes they start the same two
-  values and `RUFF_CACHE_DIR` as `~/.atc/cache/ruff`
-  (`TESTKIT.md` § Isolated environment), and so do the runs of `atc test ID`
+  values, `RUFF_CACHE_DIR` as `~/.atc/cache/ruff` and `PRE_COMMIT_HOME` as
+  `~/.atc/cache/pre-commit` (`TESTKIT.md` § Isolated environment), and so do the runs of `atc test ID`
   and the `uv sync` that builds the environment of its export (§ Checkout).
 - A cache entry is safe to delete at any time; the next run downloads it again.
 

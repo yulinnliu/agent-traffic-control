@@ -127,8 +127,11 @@ diagnostics. A project supplies data.
   builder of pytest's options (`docs/TESTKIT.md` § Toolchain).
 - `timing` resolves `ATC_TEST_TIME_SLACK`, 0 to 30 seconds, 2 by default
   (`docs/TESTKIT.md` § Time slack).
-- `docs` checks the relative links of Markdown; `docs.DOCUMENTATION_CHECK` is
-  the verifier's documentation check (`docs/TESTKIT.md` § Documentation check).
+- `docs` checks the relative links of Markdown, run by the lint stage's hook
+  (`docs/TESTKIT.md` § Documentation check).
+- `lint` holds the lint stage's pre-commit commands: the verifier's range and
+  the run over a set of paths, an export included (`docs/TESTKIT.md`
+  § Lint stage).
 
 ## Distribution
 
@@ -171,7 +174,6 @@ The rows down to `product_module_prefixes` are required; the others are optional
 | `credential_variables` | further variables the isolated environment removes |
 | `data_root_variables` | the variables that get one data directory per stage |
 | `automation_markdown_prefixes` | Markdown paths that are not documentation; files ATC manages there (a skill copy whose `SKILL.md` carries `managed-by: agent-traffic-control`) still count as documentation-only (`docs/TESTKIT.md` § Verifier) |
-| `lint_scope` | the paths `ruff check` reads |
 | `hook_uv_options` | the options the hook's `uv run --frozen` carries |
 | `ci_platforms` | the platforms the CI job covers |
 | `ci_init` | the `module:function` the CI runner calls first |

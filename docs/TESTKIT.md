@@ -245,8 +245,8 @@ environment built from the caller's by these rules:
   `LOCALAPPDATA`, `XDG_CACHE_HOME`, `XDG_CONFIG_HOME`, `XDG_DATA_HOME`,
   the toolchain's bytecode variable, pytest's `cache_dir`, and each
   data-root variable the project names, one directory per stage.
-- Shared across runs: `UV_CACHE_DIR`, `UV_PYTHON_INSTALL_DIR` and
-  `RUFF_CACHE_DIR`, under `~/.atc/cache`. These stores are content-addressed
+- Shared across runs: `UV_CACHE_DIR`, `UV_PYTHON_INSTALL_DIR`,
+  `RUFF_CACHE_DIR` and `PRE_COMMIT_HOME`, under `~/.atc/cache`. These stores are content-addressed
   and safe to share.
 - `TEMP`, `TMP`, `TMPDIR` and `ATC_TMP` carry the values the entry point
   resolved before it redirected the profile, and `ATC_TEST_TIME_SLACK`
@@ -360,6 +360,40 @@ covers nothing, and a push with no other record runs the stages.
 The hook is one line: `exec uv run --frozen <project's uv options> python
 <gate> --run`.
 
+## Lint stage
+
+The lint stage runs the repository's `.pre-commit-config.yaml` through
+pre-commit before any test: the static rules that read files and syntax
+trees and run no product code. One list serves every entry:
+
+- the commit hook pre-commit installs;
+- `atc test ID`, over the files changed since the task's `base_sha` and the
+  untracked ones, before its tests, and `atc test ID --lint` alone
+  (§ Commands);
+- the integration verifier, over the range
+  (`pre-commit run --from-ref <ATC_EXPECTED_MAIN_SHA> --to-ref <ATC_INTEGRATION_SHA>`),
+  with the token `LINT_FAILED` (§ Integration verifier);
+- the CI job, over every file.
+
+Its rules:
+
+- pre-commit runs as `python -m pre_commit` with the interpreter the tests
+  run with, so a project pins `pre-commit` in its development dependencies
+  and keeps `.pre-commit-config.yaml` at its root (`atc_testkit.check`).
+  Hook environments live in `PRE_COMMIT_HOME`, `~/.atc/cache/pre-commit`
+  (`ATC_HOME.md` § Cache).
+- A failure ends the run before pytest. `atc test` prints pre-commit's last
+  lines, then `STOP LINT_FAILED: pre-commit exited <code> on <n> files; log
+  <path>`, and exits 1; the log is `<scratch>/runs/<UTC time>-lint.log`. A
+  run whose changed paths name no existing file prints `LINT no changed
+  file` and goes on.
+- An export (`--sha`) is no Git working tree, and pre-commit runs only in
+  one: the run gives the export a Git directory `<scratch>/lint.git` holding
+  an index of its files, and removes it with the export's `.git` pointer
+  file when pre-commit ends, so the tree is again the export of its commit.
+- `atc_testkit.lint` holds the commands: `range_argv` is the verifier's,
+  `run_paths` the run over a set of paths.
+
 ## Integration verifier
 
 The verifier runs with the candidate tree as its working directory. It
@@ -382,9 +416,8 @@ this order:
 | The selection for that range can be computed | `SELECTION_FAILED` |
 | The project's static checks that run first | the project's tokens |
 | The toolchain's lock check, `uv lock --check` | `UV_LOCK_CHECK_FAILED` |
-| `git diff --check` over the range | `DIFF_CHECK_FAILED` |
+| The lint stage over the range (§ Lint stage) | `LINT_FAILED` |
 | `python -m atc_testkit.check --installed` | `TESTKIT_CONTRACT_FAILED` |
-| `ruff check` over the project's lint scope | `RUFF_CHECK_FAILED` |
 | Repository-wide collection, when the range changes a test, test helper, fixture or `conftest.py` | `COLLECTION_FAILED` |
 | The project's other static checks | the project's tokens |
 | The stages | `TESTS_FAILED`, `NO_TESTS_COLLECTED`, `WORKER_WAIT_TIMEOUT` (§ Host worker budget) |
@@ -404,8 +437,8 @@ this order:
   `.dsh/skills/<name>/` whose `SKILL.md` carries
   `managed-by: agent-traffic-control` (read at the range's base when the
   range deletes it). A skill copy without that line is the project's own
-  and stays automation Markdown. Such a range skips the stages and runs the
-  project's documentation check (§ Documentation check).
+  and stays automation Markdown. Such a range ends after the lint stage,
+  which holds the link check (§ Documentation check).
 - After a pass the verifier writes the verification report to the path in
   `ATC_VERIFICATION_REPORT`. A report that cannot be written leaves the
   verdict a pass.
@@ -419,18 +452,18 @@ The workspace root builds the testkit and vendors no wheel. Root `AGENTS.md`
 `adapters/python/scripts/integration_verify.py` in the candidate's own
 `adapters/python/.venv/` built from `uv.lock`. That script supplies the
 root's data to the same skeleton, imported from the tree, with the rows a
-consumer's data feeds absent: no selection hook, lock, contract, lint or
+consumer's data feeds absent: no selection hook, lock, contract or
 collection row. § Isolated environment, § Running and logging and the
 working-directory rules bind it as they bind a project's verifier.
 
 - Its own rows carry its own tokens: after the ancestry rows it reads the
   range, and a range Git cannot read refuses with `RANGE_UNREADABLE`; its
   static checks follow, then the stages.
-- Static checks: `git diff --check` of the range and the static checks of
-  the `python-adapter` job in `.github/workflows/validate.yml`, run from
-  `adapters/python`: `uv run --locked atc-maintain validate` and
-  `uv run --locked atc-maintain policies check
-  ../../shared/policies/examples`.
+- Static checks: the lint stage over the range. The root's
+  `.pre-commit-config.yaml` holds its workspace checks as `local` hooks
+  (`atc-maintain validate`, `atc-maintain policies check`), with the drift
+  checks and the link check; the `python-adapter` job in
+  `.github/workflows/validate.yml` runs the same list over every file.
 - Selection: in place of the job's full run of the stages, `test_paths`
   maps the range through `select_tests.py` (`adapters/python/README.md`
   § Selected tests) to the pytest paths the stages run in `tests_dir`: `[]`
@@ -486,26 +519,25 @@ every project.
   broad glob such as `*.md` excludes every file and turns the check off:
   name the exact files or the narrowest directory pattern. A glob that
   matches no file is not an error, so a stale one stays in the project's
-  integration verifier until a reader removes it.
-- `python -m atc_testkit.docs --range` checks the range the verifier's
-  `ATC_EXPECTED_MAIN_SHA` and `ATC_INTEGRATION_SHA` name: the Markdown files
-  it adds or changes, or every tracked one when it deletes a path. It prints
-  one `path:line: message` per problem and exits 1 on any; `--anchors` and
-  `--allow-outside` turn on the two options, each repeatable
-  `--exclude GLOB` excludes the files it matches, and paths in place of
-  `--range` check those files. `docs.DOCUMENTATION_CHECK` is that command
-  as a `StaticCheck` with the token `DOCUMENTATION_REFERENCE_FAILED`, the
-  documentation check a project's verifier runs for a documentation-only
-  range.
-- The verifier runs `Project.documentation_check` and passes it no argv of
-  its own, so a project declares `--allow-outside`, `--anchors` and its
-  excludes in the integration verifier that builds its `Project`: it
-  extends `docs.DOCUMENTATION_CHECK`'s argv and sets the result as
-  `documentation_check`, for example:
+  lint hook until a reader removes it.
+- `python -m atc_testkit.docs --tracked` checks every Markdown file Git
+  tracks, so a deleted or renamed target breaks its links in any file;
+  paths in place of `--tracked` check those files. It prints one
+  `path:line: message` per problem and exits 1 on any; `--anchors` and
+  `--allow-outside` turn on the two options, and each repeatable
+  `--exclude GLOB` excludes the files it matches.
+- The lint stage runs it as a `local` hook of the repository's
+  `.pre-commit-config.yaml` with `--tracked`, `pass_filenames: false` and
+  `always_run: true`; the hook's `entry` carries the project's
+  `--allow-outside`, `--anchors` and excludes, for example:
 
-  ```python
-  documentation_check = dataclasses.replace(docs.DOCUMENTATION_CHECK, argv=(
-      *docs.DOCUMENTATION_CHECK.argv, "--exclude", "packages/hami-quant-research/hypotheses/H00[1-6]_*.md"))
+  ```yaml
+  - id: markdown-links
+    name: Markdown relative links and anchors
+    entry: uv run --frozen python -m atc_testkit.docs --anchors --tracked --exclude "packages/hami-quant-research/hypotheses/H00[1-6]_*.md"
+    language: system
+    pass_filenames: false
+    always_run: true
   ```
 
 ## Child processes
@@ -628,8 +660,8 @@ command of the root's `AGENTS.md`.
 
 ### `atc test ID [--sha SHA] [--all] [-v] [-- PYTEST_ARG...]`
 
-One isolated pytest run for the task `ID`, its output kept in a log. By
-default it runs the related tests, the test files changed since the record's
+One isolated pytest run for the task `ID` after the lint stage
+(§ Lint stage), its output kept in a log. By default it runs the related tests, the test files changed since the record's
 `base_sha` and the test files that import a changed module directly, one edge
 and no closure, in the task's worktree, in the scratch `<ID>`
 (`ATC_HOME.md` § Test scratch). `--sha SHA` runs them in an export of `SHA`,
@@ -697,6 +729,9 @@ scratch entries. In order:
    `HOME` and `USERPROFILE` name `<scratch>/home`, the uv, Python and ruff
    caches are those under `~/.atc/cache`, and the project's credential
    variables are removed. The data-root variables keep `<scratch>/qdr`.
+   The lint stage then runs over the changed paths step 2 lists, when the
+   record has a `base_sha`; a failure ends the command with exit 1 before
+   any test.
 6. Run pytest with `PYTHONUNBUFFERED=1`, `-q`, `-p no:cacheprovider`,
    `--basetemp <scratch>/bt` and, when xdist is installed, the run's worker
    option, its output written as it arrives to
@@ -723,6 +758,15 @@ Before step 6 the run takes its host worker tokens, and the timeout counts
 from then; a wait past its limit stops it with `WORKER_WAIT_TIMEOUT` (exit
 124) before pytest starts, and an interrupt during the wait stops it with
 `INTERRUPTED` (exit 130) before pytest starts (§ Host worker budget).
+
+### `atc test ID --lint [--sha SHA]`
+
+The lint stage alone (§ Lint stage), in the task's worktree or with `--sha`
+in the export of `SHA`, over the files changed since the record's
+`base_sha`: steps 1 to 5 of the run above, then the lint stage, and no test.
+It takes no tests and no `--all`. Exit 0 when it passes, 1 on
+`LINT_FAILED`. A reviewer runs it before reading the diff (atc-review
+skill).
 
 ### `atc test ID --mutants FILE [--sha SHA] [-- TEST...]`
 
@@ -914,8 +958,7 @@ In the project's Python file:
 
 - The selection policy: package dependencies, path prefixes, full-suite
   files, and how a missing remote baseline is read.
-- Its static checks with their tokens, path conditions and position, and the
-  documentation check.
+- Its static checks with their tokens, path conditions and position.
 
 In `[tool.atc-testkit]`; the first seven keys are required:
 
@@ -931,7 +974,6 @@ In `[tool.atc-testkit]`; the first seven keys are required:
 | `credential_variables` | extra credential variable names |
 | `data_root_variables` | data-root variable names |
 | `automation_markdown_prefixes` | automation-Markdown path prefixes |
-| `lint_scope` | the paths the lint check reads |
 | `hook_uv_options` | `uv` options for the hook |
 | `ci_platforms` | the CI platform matrix |
 | `ci_init` | the CI runner's initialization function, as `module:function` |
@@ -942,6 +984,8 @@ In `[tool.atc-testkit]`; the first seven keys are required:
 
 Elsewhere in the project:
 
+- `.pre-commit-config.yaml` at the repository root, the lint stage's list
+  (§ Lint stage), and `pre-commit` pinned in the development dependencies.
 - Test paths and pytest's search path, as `testpaths` and `pythonpath` in
   `[tool.pytest.ini_options]`.
 - The verifier argv file, which is a project file and carries the `uv`

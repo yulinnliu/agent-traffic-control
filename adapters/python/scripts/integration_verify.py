@@ -3,8 +3,9 @@
 The root's data for the verifier skeleton (docs/TESTKIT.md § The workspace root's verifier),
 imported from the candidate's own tree: the environment ``scripts/integration-verify.json`` builds from ``uv.lock``
 under the candidate's ignored ``adapters/python/.venv/`` installs ``atc_testkit`` from there. The skeleton runs the
-testkit's stages over ``select_tests.py``'s selection of the integration range; the full suite runs in a dispatched
-CI run.
+lint stage (``.pre-commit-config.yaml``, which holds ``atc-maintain validate`` and ``policies check``) over the
+integration range, then the testkit's stages over ``select_tests.py``'s selection of it; the full suite runs in a
+dispatched CI run.
 
     uv run --quiet --locked --project adapters/python python adapters/python/scripts/integration_verify.py
 """
@@ -17,7 +18,7 @@ import os
 import sys
 
 from atc_testkit import stages, toolchain, verifier
-from atc_testkit.project import Project, StaticCheck
+from atc_testkit.project import Project
 
 import select_tests
 
@@ -27,12 +28,6 @@ PRODUCT_PREFIXES = ("atc_cli", "atc_testkit")
 SOURCE_ROOTS = (f"{ADAPTER_DIR}/src", f"{ADAPTER_DIR}/atc-testkit/src")
 DOCUMENTATION_PREFIX = "docs/"
 TASK_RECORDS = ".atc/tasks/"
-
-WORKSPACE_CHECK = StaticCheck("workspace", "WORKSPACE_VALIDATION_FAILED",
-                              ("uv", "run", "--locked", "atc-maintain", "validate"), cwd=ADAPTER_DIR)
-POLICY_CHECK = StaticCheck("policies", "POLICY_CHECK_FAILED",
-                           ("uv", "run", "--locked", "atc-maintain", "policies", "check",
-                            "../../shared/policies/examples"), cwd=ADAPTER_DIR)
 
 
 @cache
@@ -73,7 +68,7 @@ def dependency_files(root: Path) -> tuple[str, ...]:
 
 def project(root: Path = ROOT) -> Project:
     return Project(root=root, argv_file=root / ADAPTER_DIR / "scripts/integration-verify.json",
-                   checks=(WORKSPACE_CHECK, POLICY_CHECK), source_roots=SOURCE_ROOTS,
+                   source_roots=SOURCE_ROOTS,
                    product_prefixes=PRODUCT_PREFIXES, credentials=(), data_roots=(),
                    test_paths=selection_predicate(root), tests_dir=ADAPTER_DIR,
                    documentation_only=documentation_predicate(root), dependency_files=dependency_files(root))

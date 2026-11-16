@@ -34,6 +34,12 @@ repos:
         pass_filenames: false
         files: ^adapters/python/(sgconfig\.yml|lint/ast-grep/)
 
+      - id: whitespace
+        name: no trailing whitespace, space before tab or conflict marker (git diff --check)
+        entry: '[ \t]+$|^ +\t|^(<<<<<<<|>>>>>>>)( |$)'
+        language: pygrep
+        types: [text]
+
       # A shipped file works as a self-contained copy in any repository (validate_workspace.py's text rules).
       - id: no-checkout-environment-variable
         name: shipped files do not locate this checkout through ATC_ROOT
@@ -52,6 +58,18 @@ repos:
         language: pygrep
         files: ^(AGENTS\.md|shared/governance/CORE\.md|shared/templates/ATC_README\.md)$
 
+      - id: workspace-contract
+        name: this checkout's contract (atc-maintain validate)
+        entry: uv run --quiet --locked --project adapters/python atc-maintain validate
+        language: system
+        pass_filenames: false
+        always_run: true
+      - id: policy-examples
+        name: policy examples match their schemas (atc-maintain policies check)
+        entry: uv run --quiet --locked --project adapters/python atc-maintain policies check shared/policies/examples
+        language: system
+        pass_filenames: false
+        files: ^(shared/policies/|adapters/python/src/atc_cli/(schemas/|scripts/policies\.py$))
       - id: managed-skill-copies
         name: managed skill copies equal their render (atc-maintain sync --root --check)
         entry: uv run --quiet --locked --project adapters/python atc-maintain sync --root --check
@@ -71,7 +89,8 @@ repos:
         pass_filenames: false
         files: ^adapters/python/atc-testkit/(pyproject\.toml|README\.md|src/atc_testkit/__init__\.py)$
       - id: markdown-links
-        name: Markdown relative links and anchors (atc_testkit.docs)
-        entry: uv run --quiet --locked --project adapters/python python -m atc_testkit.docs --anchors
+        name: Markdown relative links and anchors (atc_testkit.docs), every tracked file
+        entry: uv run --quiet --locked --project adapters/python python -m atc_testkit.docs --anchors --tracked
         language: system
-        types: [markdown]
+        pass_filenames: false
+        always_run: true

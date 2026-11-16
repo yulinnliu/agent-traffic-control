@@ -23,7 +23,6 @@ product_module_prefixes = ["fixture_prod"]
 automation_markdown_prefixes = [".claude/"]
 data_root_variables = ["QUANT_DATA_ROOT"]
 credential_variables = ["NAMED_CREDENTIAL"]
-lint_scope = ["src"]
 """
 
 
@@ -201,8 +200,7 @@ def test_a_range_git_cannot_read_is_selection_failed_for_a_consumer(candidate: C
 
 @pytest.mark.parametrize(("word", "token"), [
     ("lock", "UV_LOCK_CHECK_FAILED"), ("uv_lock_check_failed", "UV_LOCK_CHECK_FAILED"),
-    ("diff_check_failed", "DIFF_CHECK_FAILED"), ("testkit_contract_failed", "TESTKIT_CONTRACT_FAILED"),
-    ("ruff_check_failed", "RUFF_CHECK_FAILED")])
+    ("lint", "LINT_FAILED"), ("pre_commit", "LINT_FAILED"), ("testkit_contract_failed", "TESTKIT_CONTRACT_FAILED")])
 def test_each_shared_check_refuses_with_its_token(candidate: Candidate, capsys: pytest.CaptureFixture[str], word: str, token: str) -> None:
     candidate.advance()
     lines = refused(consumer(candidate.root), candidate.env(), capsys, Recorder(**{word: 1}))
@@ -211,16 +209,17 @@ def test_each_shared_check_refuses_with_its_token(candidate: Candidate, capsys: 
 
 
 def test_the_checks_run_in_the_order_of_the_table(candidate: Candidate, atc_tmp: Path) -> None:
-    candidate.advance("tests/test_x.py")
+    sha = candidate.advance("tests/test_x.py")
     checks = (StaticCheck("before", "BEFORE_FAILED", ("before-tool",), first=True),
               StaticCheck("after", "AFTER_FAILED", ("after-tool",)))
     recorder = Recorder()
     assert verifier.main(consumer(candidate.root, checks=checks), candidate.env(), recorder) == 0
-    assert recorder.logs == ["before.log", "uv_lock_check_failed.log", "diff_check_failed.log", "testkit_contract_failed.log",
-                             "ruff_check_failed.log", "collection_failed.log", "after.log",
+    assert recorder.logs == ["before.log", "uv_lock_check_failed.log", "lint.log", "testkit_contract_failed.log",
+                             "collection_failed.log", "after.log",
                              "pytest-parallel.log", "pytest-serial.log", "pytest-interactive.log"]
     assert [call[0] for call in recorder.calls][1] == ["uv", "lock", "--check"]
-    assert recorder.calls[4][0][-3:] == ["ruff", "check", "src"]
+    assert recorder.calls[2][0] == [sys.executable, "-m", "pre_commit", "run", "--show-diff-on-failure", "--color",
+                                    "never", "--from-ref", candidate.main, "--to-ref", sha]
     assert recorder.calls[3][0][-3:] == ["-m", "atc_testkit.check", "--installed"]
 
 
@@ -247,7 +246,7 @@ def test_a_failed_check_records_the_checks_as_failed(candidate: Candidate, capsy
     candidate.advance()
     pool = stages.pool_directory({})
     before = len(elapsed.records(pool))
-    assert refused(consumer(candidate.root), candidate.env(), capsys, Recorder(diff_check_failed=1))[0] == "DIFF_CHECK_FAILED"
+    assert refused(consumer(candidate.root), candidate.env(), capsys, Recorder(lint=1))[0] == "LINT_FAILED"
     added = elapsed.records(pool)[before:]
     assert [(r["task"], r["stage"], r["result"]) for r in added] == [("", "checks", "FAIL")]
 
@@ -334,13 +333,13 @@ def test_documentation_only(paths: list[str], selected: list[str] | None, expect
     assert verifier.documentation_only(paths, selected, (".claude/",)) is expected
 
 
-def test_a_documentation_range_skips_the_stages_and_runs_the_documentation_check(candidate: Candidate, tmp_path: Path) -> None:
+@pytest.mark.integration
+def test_a_documentation_range_ends_after_the_lint_stage(candidate: Candidate, tmp_path: Path) -> None:
     candidate.advance("docs/a.md")
     report = tmp_path / "report.json"
     recorder = Recorder()
-    project = consumer(candidate.root, documentation_check=StaticCheck("docs", "DOC_FAILED", ("doc-tool",)))
-    assert verifier.main(project, candidate.env(ATC_VERIFICATION_REPORT=str(report)), recorder) == 0
-    assert "docs.log" in recorder.logs and not any(log.startswith("pytest-") for log in recorder.logs)
+    assert verifier.main(consumer(candidate.root), candidate.env(ATC_VERIFICATION_REPORT=str(report)), recorder) == 0
+    assert recorder.logs == ["uv_lock_check_failed.log", "lint.log"]
     assert json.loads(report.read_text(encoding="utf-8"))["classification"] == "documentation-only"
 
 
@@ -348,7 +347,7 @@ def test_automation_markdown_is_not_documentation_only(candidate: Candidate) -> 
     candidate.advance(".claude/x.md")
     recorder = Recorder()
     assert verifier.main(consumer(candidate.root), candidate.env(), recorder) == 0
-    assert "docs.log" not in recorder.logs
+    assert "testkit_contract_failed.log" in recorder.logs
 
 
 MANAGED_SKILL = "---\nname: s\nmanaged-by: agent-traffic-control\ncanonical: s\n---\n\n# S\n"
@@ -359,17 +358,16 @@ OWN_SKILL = "---\nname: s\n---\n\n# S\n"
 @pytest.mark.parametrize("paths", [
     [".atc/tasks/T-0001.yaml", "docs/a.md"], [".atc/tasks/T-0001.yaml"],
     [".atc/atc.lock", ".atc/governance/CORE.md", ".atc/README.md", ".claude/skills/s/SKILL.md"]])
-def test_a_record_or_sync_range_is_documentation_only_and_runs_the_documentation_check(
+def test_a_record_or_sync_range_is_documentation_only_and_ends_after_the_lint_stage(
         candidate: Candidate, paths: list[str]) -> None:
     candidate.advance(".claude/skills/s/SKILL.md", MANAGED_SKILL)
     candidate.main = git(candidate.root, "rev-parse", "HEAD")
     for path in paths:
         candidate.advance(path, MANAGED_SKILL + "changed\n" if path.endswith("SKILL.md") else "x\n")
     recorder = Recorder()
-    project = consumer(candidate.root, documentation_check=StaticCheck("docs", "DOC_FAILED", ("doc-tool",)),
-                       automation_prefixes=(".atc/", ".claude/"))
+    project = consumer(candidate.root, automation_prefixes=(".atc/", ".claude/"))
     assert verifier.main(project, candidate.env(), recorder) == 0
-    assert "docs.log" in recorder.logs
+    assert recorder.logs == ["uv_lock_check_failed.log", "lint.log"]
 
 
 @pytest.mark.integration
@@ -399,10 +397,9 @@ def test_an_own_skill_beside_a_record_is_not_documentation_only(candidate: Candi
     candidate.advance(".atc/tasks/T-0001.yaml", "x\n")
     candidate.advance(".claude/skills/own/SKILL.md", OWN_SKILL)
     recorder = Recorder()
-    project = consumer(candidate.root, documentation_check=StaticCheck("docs", "DOC_FAILED", ("doc-tool",)),
-                       automation_prefixes=(".atc/", ".claude/"))
+    project = consumer(candidate.root, automation_prefixes=(".atc/", ".claude/"))
     assert verifier.main(project, candidate.env(), recorder) == 0
-    assert "docs.log" not in recorder.logs
+    assert "testkit_contract_failed.log" in recorder.logs
 
 
 def test_a_pass_writes_the_report_and_removes_the_working_directory(candidate: Candidate, tmp_path: Path, atc_tmp: Path,
@@ -460,7 +457,7 @@ def test_the_root_form_has_no_consumer_rows_and_runs_the_stages(candidate: Candi
     recorder = Recorder()
     project = root_form(candidate.root, checks=checks)
     assert verifier.main(project, candidate.env(ATC_VERIFICATION_REPORT=str(report)), recorder) == 0
-    assert recorder.logs == ["diff_check_failed.log", "workspace.log", *STAGE_LOGS]
+    assert recorder.logs == ["lint.log", "workspace.log", *STAGE_LOGS]
     written = json.loads(report.read_text(encoding="utf-8"))
     assert written["classification"] == "impact-selected" and written["selection"] == {"full": True, "paths": []}
     for (command, _log, env, private), stage in zip(recorder.calls[-3:], project.stage_list()):
@@ -504,7 +501,7 @@ def test_a_root_selection_of_no_test_runs_no_stage(candidate: Candidate, capsys:
     candidate.advance()
     recorder = Recorder()
     assert verifier.main(root_form(candidate.root, test_paths=lambda paths: None), candidate.env(), recorder) == 0
-    assert recorder.logs == ["diff_check_failed.log"]
+    assert recorder.logs == ["lint.log"]
     assert "selection: no test selected" in capsys.readouterr().out
 
 
@@ -535,7 +532,7 @@ def test_a_root_range_of_markdown_under_docs_skips_the_selection_and_the_stages(
     def unused(_paths):
         raise AssertionError("a documentation-only range selects nothing")
     assert verifier.main(root_form(candidate.root, test_paths=unused), candidate.env(), recorder) == 0
-    assert recorder.logs == ["diff_check_failed.log"]
+    assert recorder.logs == ["lint.log"]
 
 
 @pytest.mark.integration
@@ -645,6 +642,7 @@ def integration_repo(tmp_path: Path, atc_tmp: Path, monkeypatch: pytest.MonkeyPa
     (root / "verify.py").write_text(VERIFIER_SCRIPT, encoding="utf-8")
     (root / ".gitignore").write_text("__pycache__/\n", encoding="utf-8")
     (root / ".gitattributes").write_text("* text=auto eol=lf\n", encoding="utf-8")
+    (root / ".pre-commit-config.yaml").write_text("repos: []\n", encoding="utf-8")
     (root / "pyproject.toml").write_text('[tool.pytest.ini_options]\npythonpath = ["src"]\n', encoding="utf-8")
     (root / "verify.json").write_text(json.dumps([sys.executable, "verify.py"]), encoding="utf-8")
     (root / "AGENTS.md").write_text(

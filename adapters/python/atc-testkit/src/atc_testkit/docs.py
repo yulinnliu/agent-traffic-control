@@ -1,15 +1,14 @@
-"""Relative links of Markdown files: the documentation check a verifier runs (docs/TESTKIT.md § Documentation check).
+"""Relative links of Markdown files, a hook of the lint stage (docs/TESTKIT.md § Documentation check).
 
-``python -m atc_testkit.docs --range`` checks the range the verifier's ``ATC_*`` inputs name;
-``python -m atc_testkit.docs [--anchors] <path>...`` checks the files given.
+``python -m atc_testkit.docs --tracked`` checks every Markdown file Git tracks, so a deleted or renamed target
+breaks its links in any file; ``python -m atc_testkit.docs [--anchors] <path>...`` checks the files given.
 """
 from __future__ import annotations
 
 import argparse
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from fnmatch import fnmatchcase
-import os
 from pathlib import Path, PurePosixPath
 import re
 import subprocess
@@ -17,7 +16,6 @@ import sys
 from urllib.parse import unquote, urlsplit
 
 from .git import git_env
-from .project import StaticCheck
 
 FENCE = re.compile(r"(?ms)^ {0,3}(`{3,}|~{3,}).*?(?:^ {0,3}\1[^\n]*$|\Z)")
 INLINE_CODE = re.compile(r"(`+)(?!`).+?(?<!`)\1(?!`)", re.S)
@@ -28,11 +26,6 @@ HEADING = re.compile(r"(?m)^ {0,3}#{1,6}[ \t]+(.+?)[ \t]*#*[ \t]*$")
 HTML_ANCHOR = re.compile(r"""<a\s[^>]*?\b(?:id|name)\s*=\s*["']([^"']+)["']""", re.I)
 SLUG_DROP = re.compile(r"[^\w\- ]", re.U)
 MARKDOWN_SUFFIX = ".md"
-TOKEN = "DOCUMENTATION_REFERENCE_FAILED"
-RANGE_VARIABLES = ("ATC_EXPECTED_MAIN_SHA", "ATC_INTEGRATION_SHA")
-
-# The verifier's documentation check: the relative links of the range's Markdown.
-DOCUMENTATION_CHECK = StaticCheck("documentation", TOKEN, (sys.executable, "-m", "atc_testkit.docs", "--range"))
 
 
 @dataclass(frozen=True)
@@ -151,50 +144,31 @@ def _nul(raw: bytes) -> list[str]:
     return [item.decode("utf-8", "surrogateescape") for item in raw.split(b"\0") if item]
 
 
-def markdown_to_check(root: Path, base: str, head: str) -> list[str]:
-    """The Markdown files whose links the range can break: the ones it adds or changes, or every tracked one when it
-    deletes a path."""
-    fields = _nul(_git(root, "diff", "--name-status", "-z", "--no-renames", f"{base}..{head}"))
-    changes = list(zip(fields[::2], fields[1::2]))
-    if any(status.startswith("D") for status, _path in changes):
-        return sorted(_nul(_git(root, "ls-files", "-z", "--", "*.md", "*.MD")))
-    return sorted(path for status, path in changes if path.lower().endswith(MARKDOWN_SUFFIX))
+def tracked_markdown(root: Path) -> list[str]:
+    """Every Markdown file Git tracks under ``root``, sorted."""
+    return sorted(_nul(_git(root, "ls-files", "-z", "--", "*.md", "*.MD")))
 
 
-def documentation_problems(root: Path, base: str, head: str, *, anchors: bool = False,
-                           allow_outside: bool = False, exclude: Sequence[str] = ()) -> list[str]:
-    return relative_link_problems(root, markdown_to_check(root, base, head), anchors=anchors,
-                                  allow_outside=allow_outside, exclude=exclude)
-
-
-def main(argv: Sequence[str] | None = None, environ: Mapping[str, str] | None = None) -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m atc_testkit.docs", allow_abbrev=False,
                                      description="Check the relative links of Markdown files.",
                                      epilog="Exit: 0 when every link resolves, 1 for a problem, 2 for a usage error.")
-    parser.add_argument("--range", action="store_true",
-                        help="the Markdown the range ATC_EXPECTED_MAIN_SHA..ATC_INTEGRATION_SHA can break")
+    parser.add_argument("--tracked", action="store_true", help="every Markdown file Git tracks")
     parser.add_argument("--anchors", action="store_true", help="also check #fragments against headings")
     parser.add_argument("--allow-outside", action="store_true", help="leave links that leave the tree unchecked")
     parser.add_argument("--exclude", action="append", default=[], metavar="GLOB",
                         help="never read a Markdown file whose repo-relative POSIX path matches GLOB as a link "
                              "source; links into it are still checked; repeatable; * also matches /, so a broad GLOB "
                              "such as *.md turns the check off: name exact files or the narrowest directory; a GLOB "
-                             "that matches no file is not an error, so a stale one stays until a reader removes it; "
-                             "a project's integration verifier appends it to docs.DOCUMENTATION_CHECK's argv")
+                             "that matches no file is not an error, so a stale one stays until a reader removes it")
     parser.add_argument("paths", nargs="*", help="Markdown files relative to the working directory")
     args = parser.parse_args(argv)
-    environ = os.environ if environ is None else environ
     root = Path.cwd()
-    if args.range == bool(args.paths):
-        parser.error("give --range or paths, not both")
-    rules = {"anchors": args.anchors, "allow_outside": args.allow_outside, "exclude": args.exclude}
-    if args.range:
-        missing = [name for name in RANGE_VARIABLES if not environ.get(name)]
-        if missing:
-            parser.error(f"--range needs {', '.join(missing)}")
-        problems = documentation_problems(root, *(environ[name] for name in RANGE_VARIABLES), **rules)
-    else:
-        problems = relative_link_problems(root, args.paths, **rules)
+    if args.tracked == bool(args.paths):
+        parser.error("give --tracked or paths, not both")
+    paths = tracked_markdown(root) if args.tracked else args.paths
+    problems = relative_link_problems(root, paths, anchors=args.anchors, allow_outside=args.allow_outside,
+                                      exclude=args.exclude)
     out = "".join(f"{problem}\n" for problem in problems)
     sys.stdout.buffer.write(out.encode("utf-8"))
     sys.stdout.flush()

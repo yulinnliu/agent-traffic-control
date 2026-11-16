@@ -51,7 +51,6 @@ class Project:
     baseline_files: frozenset[str] = frozenset()
     missing_remote: str = "full"
     checks: tuple[StaticCheck, ...] = ()
-    documentation_check: StaticCheck | None = None
     runner: tuple[str, ...] | None = None
     toolchain: Toolchain | None = None
     source_roots: tuple[str, ...] = ("packages/*/src", "src")
@@ -59,7 +58,6 @@ class Project:
     credentials: tuple[str, ...] | None = None
     data_roots: tuple[str, ...] | None = None
     automation_prefixes: tuple[str, ...] | None = None
-    lint_scope: tuple[str, ...] | None = None
     ignore: tuple[str, ...] | None = None
     test_paths: Callable[[Sequence[str]], list[str] | None] | None = None
     tests_dir: str = "."
@@ -88,10 +86,6 @@ class Project:
     @property
     def automation_markdown_prefixes(self) -> tuple[str, ...]:
         return self._data(self.automation_prefixes, "automation_markdown_prefixes")
-
-    @property
-    def lint_paths(self) -> tuple[str, ...]:
-        return self._data(self.lint_scope, "lint_scope")
 
     def tests_toolchain(self) -> Toolchain:
         """The toolchain this project's tests run with; ``TOOLCHAIN_UNKNOWN`` for a name no toolchain has."""

@@ -96,7 +96,7 @@ from pathlib import Path
 
 def test_environment():
     names = ["HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "XDG_CACHE_HOME", "UV_CACHE_DIR",
-             "UV_PYTHON_INSTALL_DIR", "RUFF_CACHE_DIR", "PYTHONIOENCODING", "GIT_X", "SOME_API_KEY", "MY_CRED",
+             "UV_PYTHON_INSTALL_DIR", "RUFF_CACHE_DIR", "PRE_COMMIT_HOME", "PYTHONIOENCODING", "GIT_X", "SOME_API_KEY", "MY_CRED",
              "QUANT_DATA_ROOT"]
     seen = {name: os.environ.get(name) for name in names}
     seen["gitconfig"] = (Path(os.environ["HOME"]) / ".gitconfig").is_file()

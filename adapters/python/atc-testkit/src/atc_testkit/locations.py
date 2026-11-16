@@ -53,7 +53,7 @@ def cache_directories(environ: MutableMapping[str, str] | None = None) -> dict[s
     """The shared cache variables of the gate and the verifier (docs/ATC_HOME.md § Cache)."""
     cache = atc_home(environ) / "cache"
     return {"UV_CACHE_DIR": str(cache / "uv"), "UV_PYTHON_INSTALL_DIR": str(cache / "python"),
-            "RUFF_CACHE_DIR": str(cache / "ruff")}
+            "RUFF_CACHE_DIR": str(cache / "ruff"), "PRE_COMMIT_HOME": str(cache / "pre-commit")}
 
 
 def is_link(status: os.stat_result) -> bool:

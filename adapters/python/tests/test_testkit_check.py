@@ -20,7 +20,7 @@ def repository(tmp_path):
         path.write_text(content, encoding='utf-8')
         return path
     write('pyproject.toml', '''[dependency-groups]
-dev = ["atc-testkit==0.2.0", "pytest-xdist==3.6.1"]
+dev = ["atc-testkit==0.2.0", "pytest-xdist==3.6.1", "pre-commit==4.7.0"]
 [tool.uv.sources]
 atc-testkit = { path = "vendor/atc_testkit-0.2.0-py3-none-any.whl" }
 [tool.pytest.ini_options]
@@ -35,6 +35,7 @@ slow_ci_job = "python"
 product_module_prefixes = ["fixture_"]
 ''')
     write('unmarked-baseline.txt', '')
+    write('.pre-commit-config.yaml', 'repos: []\n')
     write('conftest.py', 'pytest_plugins = ("atc_testkit.plugin",)\n')
     write('tests/test_case.py', 'def test_case(): pass\n')
     write('scripts/prepush_select.py', 'from atc_testkit import selection\n')
@@ -157,6 +158,7 @@ def test_onboarding_reports_testkit_drift_without_rewriting_project_config(repos
     ('pyproject.toml', 'product_module_prefixes = ["fixture_"]', ''),
     ('pyproject.toml', 'product_module_prefixes = ["fixture_"]', 'product_module_prefixes = []'),
     ('pyproject.toml', ', "pytest-xdist==3.6.1"', ''),
+    ('pyproject.toml', ', "pre-commit==4.7.0"', ''),
     ('pyproject.toml', 'testpaths = ["tests"]', 'testpaths = ["tests"]\nmarkers = ["x: y"]'),
     ('pyproject.toml', 'gate = "scripts/prepush_select.py"', 'gate = "scripts/prepush_select.py"\nci_init = "no function"'),
     ('pyproject.toml', 'gate = "scripts/prepush_select.py"', 'gate = "scripts/prepush_select.py"\nlint_scope = "src"'),
@@ -171,6 +173,12 @@ def test_the_supplied_data_is_checked(repository, relative, old, new):
     assert old in text
     path.write_text(text.replace(old, new), encoding='utf-8')
     assert repository_problems(repository)
+
+
+@pytest.mark.unit
+def test_the_lint_stage_needs_its_config(repository):
+    (repository / '.pre-commit-config.yaml').unlink()
+    assert repository_problems(repository) == ['the lint stage needs .pre-commit-config.yaml at the repository root']
 
 
 def test_the_hook_carries_the_named_uv_options(repository):
@@ -188,7 +196,6 @@ def test_optional_data_of_the_right_shape_passes(repository):
 credential_variables = ["X"]
 data_root_variables = ["Y"]
 automation_markdown_prefixes = [".claude/"]
-lint_scope = ["src"]
 ci_platforms = ["ubuntu-latest"]
 ci_init = "scripts.ci:prepare"
 ignore = { posix = ["tests/x.py"], nt = [] }'''), encoding='utf-8')

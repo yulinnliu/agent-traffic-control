@@ -124,8 +124,9 @@ jobs:
           enable-cache: true
       - run: uv run --locked python -m atc_testkit.ci --stages
       - run: uv run --locked python -m atc_testkit.ci --slow
-      - run: uv run --locked atc-maintain validate
-      - run: uv run --locked atc-maintain policies check ../../shared/policies/examples
+      - name: the lint stage over every file, the list the commit hook and the verifier run
+        working-directory: .
+        run: uv run --locked --project adapters/python pre-commit run --all-files --show-diff-on-failure --color never
 
   # The release is split so the write token never meets build code: release-build checks out, runs uv and builds
   # with a read-only token; release-draft runs no project code and hands the token only to its gh steps.

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """`atc test`: a task's tests in isolation (docs/TESTKIT.md § Commands).
 
-`atc test ID` runs the tests related to the task's changes since its record's `base_sha` in the task's own
-worktree; `--sha` runs them in an export of that commit, `--mutants` judges a mutant list there, and
+`atc test ID` runs the lint stage and then the tests related to the task's changes since its record's `base_sha`
+in the task's own worktree; `--lint` runs the lint stage alone; `--sha` runs either in an export of that commit, `--mutants` judges a mutant list there, and
 `--candidate` verifies the candidate `atc integrate ID` would build. Every run happens in a registered
 scratch named after the task, and every run prunes stale scratch entries first.
 """
@@ -40,8 +40,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="atc test", allow_abbrev=False, **cli_conventions.form(
         "Run a task's tests in isolation, its output kept in a log.",
         "atc test ID [--sha SHA] [--all] [-v] [-- PYTEST_ARG...]\n"
-        "    the tests related to the task's changes since its base_sha (--all: the full suite), in the task's\n"
-        "    worktree, or with --sha in an export of SHA (scratch ID-SHA7, its environment built once)\n"
+        "    the lint stage over the files changed since the task's base_sha, then the tests related to them\n"
+        "    (--all: the full suite), in the task's worktree, or with --sha in an export of SHA (scratch ID-SHA7,\n"
+        "    its environment built once); a lint failure runs no test\n"
+        "atc test ID --lint [--sha SHA]\n"
+        "    the lint stage alone: the repository's .pre-commit-config.yaml over those files\n"
         "atc test ID --mutants FILE [--sha SHA] [-- TEST...]\n"
         "    apply each mutant of FILE alone to an export of SHA (default: the branch tip) and run its tests:\n"
         "    the TESTs after --, else of the tests the tree's selector picks for its edited paths plus its own\n"
@@ -63,6 +66,7 @@ def build_parser() -> argparse.ArgumentParser:
     form.add_argument("--mutants", metavar="FILE", help="JSON list of mutants: {label, edits: [{path, old, new}], "
                                                         "tests?: [...], kill_rule?: failure|assertion}")
     form.add_argument("--candidate", action="store_true", help="verify the integration candidate")
+    form.add_argument("--lint", action="store_true", help="run the lint stage alone")
     form.add_argument("--clean", action="store_true", help="delete the task's scratches")
     form.add_argument("--list", action="store_true", help="list registered scratches")
     form.add_argument("--private", action="store_true", help="run the command after -- on a private desktop")
@@ -148,7 +152,11 @@ def run_tests(task: Task, args: argparse.Namespace, pytest_args: list[str], envi
         name, directory = task.id, test_dir(task.worktree, task)
     argv = ["--scratch", name, "--task", task.id, "--tree", str(directory), "--label", "all" if args.all else "related",
             *timeout_of(directory), *(["--progress"] if args.verbose else [])]
-    if not args.all and task.base:
+    if task.base:
+        argv += ["--lint", task.base]
+    if args.lint:
+        argv += ["--lint-only"]
+    elif not args.all and task.base:
         argv += ["--related", task.base]
     return testrun.run([*argv, *(["--", *pytest_args] if pytest_args else [])], environ)
 
@@ -247,8 +255,8 @@ def main(argv: list[str] | None = None, root: Path = ROOT, environ: dict[str, st
             return list_scratches(args.task, environ, args.json)
         if args.task is None:
             parser.error("an ID is required")
-        if (args.clean or args.candidate) and (rest or args.all):
-            parser.error("--clean and --candidate take no tests and no --all")
+        if (args.clean or args.candidate or args.lint) and (rest or args.all):
+            parser.error("--clean, --candidate and --lint take no tests and no --all")
         if args.clean and args.sha:
             parser.error("--clean takes no --sha")
         if args.clean:

@@ -112,7 +112,7 @@ def test_cache_directories_are_under_the_atc_home(atc_tmp: Path) -> None:
     env = environment(USERPROFILE=str(atc_tmp), HOME=str(atc_tmp))
     assert locations.cache_directories(env) == {
         "UV_CACHE_DIR": str(atc_tmp / ".atc/cache/uv"), "UV_PYTHON_INSTALL_DIR": str(atc_tmp / ".atc/cache/python"),
-        "RUFF_CACHE_DIR": str(atc_tmp / ".atc/cache/ruff")}
+        "RUFF_CACHE_DIR": str(atc_tmp / ".atc/cache/ruff"), "PRE_COMMIT_HOME": str(atc_tmp / ".atc/cache/pre-commit")}
 
 
 PLACES = ("tmp", "systmp", "candidates")

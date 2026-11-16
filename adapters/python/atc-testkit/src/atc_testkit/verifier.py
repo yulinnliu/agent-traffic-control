@@ -13,7 +13,7 @@ import subprocess
 import sys
 import time
 
-from . import elapsed, evidence, isolation, locations, scratch, stages, timing, workers as workers_module
+from . import elapsed, evidence, isolation, lint, locations, scratch, stages, timing, workers as workers_module
 from .git import SelectionError, baseline_deltas, changed_paths, git_env
 from .project import Project, StaticCheck
 from .selection import Selection, describe
@@ -310,6 +310,11 @@ def _write_report(environ: Mapping[str, str], project: Project, pytest_paths: li
         print(f"verification report: {path}", flush=True)
 
 
+def _lint_row(base: str, sha: str) -> _Row:
+    """The lint stage over the range, in the candidate's own environment (docs/TESTKIT.md § Lint stage)."""
+    return _Row(lint.TOKEN, tuple(lint.range_argv(sys.executable, base, sha)))
+
+
 def _consumer_checks(project: Project, checks: _Checks, base: str, sha: str, paths: list[str],
                      consumer_selection: Selection) -> bool:
     """The rows from the selection to the stages, for a project that carries the testkit; whether documentation-only."""
@@ -323,16 +328,14 @@ def _consumer_checks(project: Project, checks: _Checks, base: str, sha: str, pat
           f"repository-wide collection: {'check' if collect else 'skip'}", flush=True)
     checks.static((check for check in project.checks if check.first), paths)
     checks.row(_Row("UV_LOCK_CHECK_FAILED", checks.isolated.toolchain.lock_check_argv))
-    checks.row(_Row("DIFF_CHECK_FAILED", ("git", "diff", "--check", f"{base}..{sha}")))
+    checks.row(_lint_row(base, sha), "lint")
+    if doc_only:
+        return doc_only
     checks.row(_Row("TESTKIT_CONTRACT_FAILED", (sys.executable, "-m", "atc_testkit.check", "--installed")))
-    checks.row(_Row("RUFF_CHECK_FAILED", (sys.executable, "-m", "ruff", "check", *project.lint_paths)))
     if collect:
         checks.collection()
     checks.static((check for check in project.checks if not check.first), paths)
-    if doc_only:
-        if project.documentation_check is not None:
-            checks.row(project.documentation_check, project.documentation_check.name)
-    elif pytest_paths is not None:
+    if pytest_paths is not None:
         checks.stages(pytest_paths)
     return doc_only
 
@@ -350,7 +353,7 @@ def _root_checks(project: Project, checks: _Checks, base: str, sha: str,
         except Exception as error:  # noqa: BLE001 - a selection failure refuses the candidate
             raise VerifyError("SELECTION_FAILED", f"{type(error).__name__}: {error}") from error
     checks.static((check for check in project.checks if check.first), paths)
-    checks.row(_Row("DIFF_CHECK_FAILED", ("git", "diff", "--check", f"{base}..{sha}")))
+    checks.row(_lint_row(base, sha), "lint")
     checks.static((check for check in project.checks if not check.first), paths)
     if pytest_paths is not None:
         checks.stages(pytest_paths, project.root / project.tests_dir)

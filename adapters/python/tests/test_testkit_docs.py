@@ -117,84 +117,41 @@ def repo(tmp_path: Path) -> tuple[Path, str]:
     return tmp_path, git(tmp_path, "rev-parse", "HEAD")
 
 
-@pytest.mark.integration
-def test_a_range_checks_its_changed_markdown(repo: tuple[Path, str]) -> None:
-    root, base = repo
-    write(root, {"a.md": "[gone](gone.md)\n", "code.py": "x = 2\n"})
-    git(root, "commit", "-qam", "edit")
-    assert docs.markdown_to_check(root, base, "HEAD") == ["a.md"]
-    assert docs.documentation_problems(root, base, "HEAD") == ["a.md:1: broken relative link: gone.md"]
+def docs_command(root: Path, *args: str) -> subprocess.CompletedProcess:
+    env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    return subprocess.run([sys.executable, "-m", "atc_testkit.docs", *args], cwd=root, capture_output=True, text=True,
+                          env=env)
 
 
 @pytest.mark.integration
-def test_a_range_that_deletes_a_path_checks_every_tracked_markdown(repo: tuple[Path, str]) -> None:
-    root, base = repo
+def test_tracked_reads_every_markdown_file_git_tracks(repo: tuple[Path, str]) -> None:
+    root, _base = repo
+    write(root, {"untracked.md": "[gone](gone.md)\n"})
     git(root, "rm", "-q", "old.txt")
     git(root, "commit", "-qm", "delete")
-    assert docs.markdown_to_check(root, base, "HEAD") == ["a.md", "b.md", "c.md"]
-    assert docs.documentation_problems(root, base, "HEAD") == ["c.md:1: broken relative link: old.txt"]
-
-
-@pytest.mark.integration
-def test_the_command_reads_the_verifiers_range(repo: tuple[Path, str]) -> None:
-    root, base = repo
-    git(root, "rm", "-q", "old.txt")
-    git(root, "commit", "-qm", "delete")
-    env = {key: value for key, value in os.environ.items()
-           if not key.startswith("GIT_") and key not in docs.RANGE_VARIABLES}
-    head = git(root, "rev-parse", "HEAD")
-    run = subprocess.run([*docs.DOCUMENTATION_CHECK.argv], cwd=root, capture_output=True, text=True,
-                         env={**env, "ATC_EXPECTED_MAIN_SHA": base, "ATC_INTEGRATION_SHA": head})
+    assert docs.tracked_markdown(root) == ["a.md", "b.md", "c.md"]
+    run = docs_command(root, "--tracked")
     assert (run.returncode, run.stdout) == (1, "c.md:1: broken relative link: old.txt\n")
-    files = subprocess.run([sys.executable, "-m", "atc_testkit.docs", "a.md", "b.md"], cwd=root, capture_output=True,
-                           text=True, env=env)
-    assert (files.returncode, files.stdout) == (0, "")
-    usage = subprocess.run([sys.executable, "-m", "atc_testkit.docs", "--range"], cwd=root, capture_output=True,
-                           text=True, env=env)
-    assert usage.returncode == 2 and "ATC_EXPECTED_MAIN_SHA" in usage.stderr
-    assert docs.DOCUMENTATION_CHECK.token == "DOCUMENTATION_REFERENCE_FAILED"
 
 
 @pytest.mark.integration
-def test_a_range_skips_excluded_markdown_it_changes(repo: tuple[Path, str]) -> None:
-    root, base = repo
-    write(root, {"a.md": "[gone](gone.md)\n", "hyp/H001_a.md": "[gone](gone.md)\n"})
-    git(root, "add", ".")
-    git(root, "commit", "-qm", "edit")
-    assert docs.documentation_problems(root, base, "HEAD", exclude=[FROZEN]) == [
-        "a.md:1: broken relative link: gone.md"]
-
-
-@pytest.mark.integration
-def test_a_range_that_deletes_a_path_skips_excluded_markdown(repo: tuple[Path, str]) -> None:
-    root, base = repo
-    write(root, {"hyp/H002_a.md": "[old](../old.txt)\n", "d.md": "[h](hyp/H002_a.md)\n"})
-    git(root, "add", ".")
-    git(root, "commit", "-qm", "frozen")
-    middle = git(root, "rev-parse", "HEAD")
-    git(root, "rm", "-q", "old.txt")
-    git(root, "commit", "-qm", "delete")
-    assert "hyp/H002_a.md" in docs.markdown_to_check(root, middle, "HEAD")
-    assert docs.documentation_problems(root, middle, "HEAD", exclude=[FROZEN]) == [
-        "c.md:1: broken relative link: old.txt"]
-    assert docs.documentation_problems(root, base, "HEAD") == [
-        "c.md:1: broken relative link: old.txt", "hyp/H002_a.md:1: broken relative link: ../old.txt"]
+def test_the_command_takes_tracked_or_paths(repo: tuple[Path, str]) -> None:
+    root, _base = repo
+    assert docs_command(root, "a.md", "b.md").returncode == 0
+    both = docs_command(root, "--tracked", "a.md")
+    neither = docs_command(root)
+    assert both.returncode == neither.returncode == 2 and "--tracked or paths" in both.stderr
 
 
 @pytest.mark.integration
 def test_the_command_passes_each_exclusion_in_both_modes(repo: tuple[Path, str]) -> None:
-    root, base = repo
+    root, _base = repo
     write(root, {"hyp/H001_a.md": "[gone](gone.md)\n"})
     git(root, "add", ".")
     git(root, "rm", "-q", "old.txt")
     git(root, "commit", "-qm", "delete")
-    env = {key: value for key, value in os.environ.items()
-           if not key.startswith("GIT_") and key not in docs.RANGE_VARIABLES}
-    command = [*docs.DOCUMENTATION_CHECK.argv, "--exclude", FROZEN, "--exclude", "c.md", "--exclude", "stale/*.md"]
-    ranged = subprocess.run(command, cwd=root, capture_output=True, text=True,
-                            env={**env, "ATC_EXPECTED_MAIN_SHA": base, "ATC_INTEGRATION_SHA": git(root, "rev-parse",
-                                                                                                    "HEAD")})
-    assert (ranged.returncode, ranged.stdout) == (0, "")
-    files = subprocess.run([sys.executable, "-m", "atc_testkit.docs", "--exclude", FROZEN, "a.md", "hyp/H001_a.md"],
-                           cwd=root, capture_output=True, text=True, env=env)
+    tracked = docs_command(root, "--tracked", "--exclude", FROZEN, "--exclude", "c.md", "--exclude", "stale/*.md")
+    assert (tracked.returncode, tracked.stdout) == (0, "")
+    assert docs_command(root, "--tracked", "--exclude", "c.md").stdout == "hyp/H001_a.md:1: broken relative link: gone.md\n"
+    files = docs_command(root, "--exclude", FROZEN, "a.md", "hyp/H001_a.md")
     assert (files.returncode, files.stdout) == (0, "")

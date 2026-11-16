@@ -19,7 +19,8 @@ import threading
 import time
 import xml.etree.ElementTree as ElementTree
 
-from . import config, desktop, elapsed, isolation, lines, locations, python_toolchain, scratch, stages, timing
+from . import checkout, config, desktop, elapsed, isolation, lines, lint, locations, python_toolchain, scratch, stages
+from . import timing
 from . import toolchain as toolchains
 from . import workers as host_workers
 from .git import git_env
@@ -949,10 +950,15 @@ def run(argv: Sequence[str], environ: MutableMapping[str, str] | None = None) ->
     parser.add_argument("--related", metavar="SHA",
                         help="run only the changed test files and the test files that import a changed module "
                              "directly, for the paths changed since SHA")
+    parser.add_argument("--lint", metavar="SHA",
+                        help="first run the lint stage over the files changed since SHA; a failure ends the run")
+    parser.add_argument("--lint-only", action="store_true", help="run the lint stage of --lint and no test")
     parser.add_argument("--label", default="run", metavar="NAME", help="name of the run, in its log's file name")
     parser.add_argument("--timeout", type=float, metavar="SECONDS", help="seconds before the run is ended and reported as TIMEOUT")
     parser.add_argument("--progress", action="store_true", help="also stream pytest's output to the console")
     args = parser.parse_args(argv)
+    if args.lint_only and (args.lint is None or pytest_arguments or args.related):
+        parser.error("--lint-only takes --lint and no tests")
     check_task(args.task)
     environ = os.environ if environ is None else environ
     root, place = locate_scratch(args.scratch, environ)
@@ -969,6 +975,10 @@ def run(argv: Sequence[str], environ: MutableMapping[str, str] | None = None) ->
     environ["PYTHONUNBUFFERED"] = "1"
     private = isolate(tree, place, python, environ)
     child = child_environment(tree, place, environ)
+    if args.lint:
+        code = run_lint(tree, place, python, changed_paths(tree, args.lint, row), child)
+        if code or args.lint_only:
+            return code
     items = None
     if paths is not None:
         chosen = touched(tree, python, paths, child)
@@ -1029,8 +1039,34 @@ def run(argv: Sequence[str], environ: MutableMapping[str, str] | None = None) ->
 
 
 RUN_COMMAND = "test"
+LINT_LABEL = "lint"
 CHILD_STAGE = "tests"
 MUTANTS_COMMAND = "mutants"
+
+
+def repository_top(tree: Path, place: Path) -> Path:
+    """The top of the repository ``tree`` belongs to: its Git working tree, or the export ``<place>/tree``."""
+    found = _git_lines(tree, "rev-parse", "--show-toplevel")
+    return Path(found[0]) if found else place / checkout.TREE
+
+
+def run_lint(tree: Path, place: Path, python: str, paths: Sequence[str], env: Mapping[str, str]) -> int:
+    """The lint stage over ``paths`` (docs/TESTKIT.md § Lint stage): 0 when it passes or has no file, else 1."""
+    top = repository_top(tree, place)
+    files = lint.existing(top, paths)
+    if not files:
+        print("LINT no changed file", flush=True)
+        return 0
+    (place / RUNS).mkdir(exist_ok=True)
+    log = place / RUNS / f"{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}-{LINT_LABEL}.log"
+    code = lint.run_paths(top, place, python, files, env, log)
+    if code == 0:
+        print(f"LINT PASS {len(files)} files; log {log}", flush=True)
+        return 0
+    for line in log.read_text(encoding="utf-8", errors="replace").splitlines()[-TAIL_LINES:]:
+        print(line, flush=True)
+    print(f"STOP {lint.TOKEN}: pre-commit exited {code} on {len(files)} files; log {log}", flush=True)
+    return 1
 
 
 def tree_commit(tree: Path, row: scratch.Row | None) -> str:

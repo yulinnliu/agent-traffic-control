@@ -35,6 +35,10 @@ lint = [
     "vale==3.27.0.0",
 ]
 
+[tool.uv]
+# The lint stage runs in the same environment as the tests (.pre-commit-config.yaml).
+default-groups = ["dev", "lint"]
+
 [tool.uv.sources]
 atc-testkit = { path = "atc-testkit", editable = true }
 
