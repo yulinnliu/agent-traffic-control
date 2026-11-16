@@ -603,7 +603,7 @@ def test_a_red_baseline_applies_no_mutant_names_its_failures_and_leaves_nothing_
     run = export.run(tmp_path, [KILLED])
     lines = mutant_lines(run)
     assert run.returncode == 1 and "K one" not in run.stdout + run.stderr
-    assert lines[:2] == ["NOTE baseline: not reused: sha", lines[1]] and lines[1].startswith("BASELINE-RED ")
+    assert lines[:2] == ["NOTE baseline: not reused: inputs", lines[1]] and lines[1].startswith("BASELINE-RED ")
     assert lines[1].endswith("; failed: tests/test_value.py::test_value"), lines
     assert [line.split()[1] for line in elapsed_lines(run.stdout)] == ["baseline"]
     assert elapsed_lines(run.stdout)[0].endswith(" FAIL")
@@ -661,6 +661,7 @@ def test_a_run_on_the_same_key_reuses_the_baseline_and_judges_alike(lines_export
     stored = json.loads((lines_export.place / testrun.BASELINE_RECORD).read_text(encoding="utf-8"))
     assert stored["recorded"] is True and stored["files"] == ["src/fixture_pkg/__init__.py"]
     assert stored["sha"] == lines_export.sha and stored["testkit"] == testrun.package_digest()
+    assert stored["inputs"] == f"commit {lines_export.sha}" and stored["python"] == sys.executable
     second = lines_export.run(tmp_path, BY_LINES[:1], "--lines")
     shown = mutant_lines(second)
     assert re.fullmatch(rf"BASELINE-OK reused \S+Z \({stored['seconds']}s, workers {stored['workers']}\) "
@@ -727,11 +728,11 @@ def test_a_sharded_baseline_records_what_a_single_process_one_does(lines_export:
 
 @pytest.mark.unit
 def test_a_baseline_is_reused_only_on_its_whole_key(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    key = {"sha": "a" * 40, "tests": ["tests"], "lines": False, "files": ["a.py", "b.py"], "recorder": "r",
+    key = {"inputs": "inputs a", "tests": ["tests"], "lines": False, "files": ["a.py", "b.py"], "recorder": "r",
            "testkit": "t", "python": "py", "private": True}
     (tmp_path / testrun.BASELINE_RECORD).write_text(json.dumps({**key, "recorded": False}), encoding="utf-8")
     assert testrun.reusable(tmp_path, {**key, "files": ["b.py"]}, None) is not None
-    changes = {"sha": "b" * 40, "tests": ["tests", "x"], "lines": True, "files": ["c.py"], "recorder": "r2",
+    changes = {"inputs": "inputs b", "tests": ["tests", "x"], "lines": True, "files": ["c.py"], "recorder": "r2",
                "testkit": "t2", "python": "py2", "private": False}
     for name, value in changes.items():
         assert testrun.reusable(tmp_path, {**key, name: value}, None) is None
@@ -742,6 +743,153 @@ def test_a_baseline_is_reused_only_on_its_whole_key(tmp_path: Path, capsys: pyte
     assert capsys.readouterr().out == "NOTE baseline: not reused: the line records are gone\n"
     (tmp_path / testrun.BASELINE_RECORD).unlink()
     assert testrun.reusable(tmp_path, key, None) is None and capsys.readouterr().out == ""
+
+
+# A verifier that classifies every Markdown file of the commit ATC_INPUTS_OF names as outside its input set.
+MARKDOWN_VERIFIER = ("import json, os, subprocess\n"
+                     "commit = os.environ['ATC_INPUTS_OF']\n"
+                     "paths = subprocess.run(['git', 'ls-tree', '-r', '--name-only', commit], capture_output=True,\n"
+                     "                       text=True, check=True).stdout.split()\n"
+                     "print(json.dumps({'commit': commit, 'excluded': [p for p in paths if p.endswith('.md')],\n"
+                     "                  'dependency_files': []}))\n")
+
+
+def markdown_verifier(directory: Path) -> Path:
+    argv_file = directory / "verify-argv.json"
+    argv_file.write_text(json.dumps([sys.executable, "-c", MARKDOWN_VERIFIER]), encoding="utf-8")
+    return argv_file
+
+
+def commit_in(worktree: Path, files: dict[str, str]) -> str:
+    env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+
+    def git(*args: str) -> str:
+        return subprocess.run(["git", *GIT_IDENTITY, *args], cwd=worktree, env=env, capture_output=True, text=True,
+                              check=True).stdout.strip()
+    if not (worktree / ".git").exists():
+        git("init", "-q", "-b", "main")
+    for path, text in files.items():
+        (worktree / path).parent.mkdir(parents=True, exist_ok=True)
+        (worktree / path).write_text(text, encoding="utf-8")
+    git("add", ".")
+    git("commit", "-q", "-m", "y")
+    return git("rev-parse", "HEAD")
+
+
+@pytest.mark.unit
+def test_a_baseline_is_keyed_by_the_inputs_of_its_commit(tmp_path: Path) -> None:
+    worktree = tmp_path / "w"
+    worktree.mkdir()
+    first = commit_in(worktree, {"a.py": "x = 1\n", "notes.md": "one\n"})
+    docs = commit_in(worktree, {"notes.md": "two\n"})
+    added = commit_in(worktree, {"more.md": "three\n"})
+    code = commit_in(worktree, {"a.py": "x = 2\n"})
+    argv_file = str(markdown_verifier(tmp_path))
+
+    def tree(commit: str) -> list | None:
+        return testrun.commit_tree(str(worktree), commit)
+
+    def classified(argv: str | None = argv_file) -> dict | None:
+        return testrun.classified_inputs(str(worktree), first, tree(first), argv, dict(os.environ))
+    stored = classified()
+    assert stored is not None and stored["excluded"] == ["notes.md"]
+    assert testrun._same_inputs(stored, f"commit {docs}", tree(docs))
+    # a path the record does not list as excluded counts as an input, so an added Markdown file reruns the baseline
+    assert [testrun._same_inputs(stored, f"commit {c}", tree(c)) for c in (first, added, code)] == [True, False, False]
+    assert not testrun._same_inputs(stored, f"commit {first}", None)
+    assert not testrun._same_inputs({**stored, "excluded": "notes.md"}, f"commit {docs}", tree(docs))
+    assert testrun._same_inputs(f"commit {first}", f"commit {first}", None)
+    assert not testrun._same_inputs(f"commit {first}", f"commit {docs}", tree(docs))
+    assert tree("0" * 40) is None and classified(None) is None
+    (tmp_path / "silent.json").write_text(json.dumps([sys.executable, "-c", "pass"]), encoding="utf-8")
+    (tmp_path / "broken.json").write_text("{", encoding="utf-8")
+    assert classified(str(tmp_path / "silent.json")) is None and classified(str(tmp_path / "broken.json")) is None
+    place = tmp_path / "s"
+    assert testrun.scratch_relative(str(place / "tree/.venv/python.exe"), place) == "<scratch>/tree/.venv/python.exe"
+    assert testrun.scratch_relative(sys.executable, place) == sys.executable
+
+
+def lent_baseline(root: Path, name: str, task: str, key: dict, record: dict | None = None) -> Path:
+    """A registered scratch of ``task`` holding a passed, recorded baseline of ``key`` whose one line row names
+    ``src/m.py`` of its own tree."""
+    place = root / name
+    (place / "tree").mkdir(parents=True)
+    scratch.register(root, place, place / "tree", task=task)
+    data = place / lines.DIRECTORY / lines.DATA
+    data.mkdir(parents=True)
+    (data / f"{lines.STARTED}1").write_text("", encoding="utf-8")
+    (data / f"{lines.LOADED}1").write_text("", encoding="utf-8")
+    (data / "1.tsv").write_text(f"tests/t.py::test\t{lines.real(place / 'tree/src/m.py')}\t3\n", encoding="utf-8")
+    stored = record or {**key, "sha": "a" * 40, "recorded": True, "time": "2026-11-17T00:00:00Z", "summary": "1 passed",
+                        "seconds": 1.0, "workers": 1}
+    (place / testrun.BASELINE_RECORD).write_text(json.dumps(stored), encoding="utf-8")
+    return place
+
+
+@pytest.mark.unit
+def test_another_scratch_of_the_task_lends_a_matching_baseline_with_its_line_paths_moved(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    key = {"inputs": "inputs d", "tests": ["tests"], "lines": True, "files": ["src/m.py"], "recorder": "r",
+           "testkit": "t", "python": "<scratch>/tree/.venv/python", "private": False}
+    lender = lent_baseline(tmp_path, "lender", TASK, key)
+    lent_baseline(tmp_path, "foreign", "ATC-0001", key, {**key, "sha": "f" * 40, "recorded": False,
+                                                         "time": "2026-11-18T00:00:00Z"})
+    place = tmp_path / "own"
+    (place / "tree").mkdir(parents=True)
+    scratch.register(tmp_path, place, place / "tree", task=TASK)
+
+    def adopt(wanted: dict) -> dict | None:
+        return testrun.adopt_baseline(tmp_path, place, TASK, wanted, "b" * 40, lines.prepare(place, place / "tree", []),
+                                      None)
+    for name, value in {"inputs": "inputs e", "tests": ["x"], "testkit": "t2", "python": "py"}.items():
+        assert adopt({**key, name: value}) is None and not (place / testrun.BASELINE_RECORD).exists()
+    adopted = adopt(key)
+    assert adopted is not None and adopted["sha"] == "b" * 40
+    assert adopted["reused_from"] == {"scratch": "lender", "sha": "a" * 40}
+    assert json.loads((place / testrun.BASELINE_RECORD).read_text(encoding="utf-8")) == adopted
+    record = lines.read(place / lines.DIRECTORY / lines.DATA)
+    assert record is not None and record.files == {lines.real(place / "tree/src/m.py")}
+    (place / testrun.BASELINE_RECORD).unlink()
+    # a lender whose line records no longer read back, or whose record changed during the copy, lends nothing
+    (lender / lines.DIRECTORY / lines.DATA / f"{lines.STARTED}1").unlink()
+    assert adopt(key) is None
+    (lender / lines.DIRECTORY / lines.DATA / f"{lines.STARTED}1").write_text("", encoding="utf-8")
+    copy = testrun._copy_lines
+
+    def copy_while_rerun(source: Path, own: Path, recording: lines.Prepared) -> bool:
+        (source / testrun.BASELINE_RECORD).write_text("{}", encoding="utf-8")
+        return copy(source, own, recording)
+    monkeypatch.setattr(testrun, "_copy_lines", copy_while_rerun)
+    assert adopt(key) is None and not (place / testrun.BASELINE_RECORD).exists()
+
+
+@pytest.mark.integration
+def test_a_commit_that_differs_only_outside_its_inputs_reuses_another_scratchs_baseline(
+        lines_export: Export, tmp_path: Path) -> None:
+    argv_file = str(markdown_verifier(tmp_path))
+
+    def export_of(name: str, notes: str) -> Export:
+        commit = commit_in(lines_export.worktree, {"notes.md": notes})
+        made = Export(lines_export.worktree, commit, lines_export.place.parent / name)
+        shutil.copytree(lines_export.place / "tree", made.place / "tree")
+        (made.place / "tree/notes.md").write_text(notes, encoding="utf-8")
+        return made
+    added, edited = export_of("m2", "added\n"), export_of("m3", "edited\n")
+    lines_export.run(tmp_path, BY_LINES, "--lines", "--verifier-argv", argv_file)
+    # the Markdown file the lender's commit lacks is no excluded path of its record, so it counts as an input
+    first = added.run(tmp_path, BY_LINES, "--lines", "--verifier-argv", argv_file)
+    assert mutant_lines(first)[0].startswith("BASELINE-OK ") and " reused" not in first.stdout, first.stdout
+    stored = json.loads((added.place / testrun.BASELINE_RECORD).read_text(encoding="utf-8"))
+    assert stored["inputs"]["excluded"] == ["notes.md"] and stored["sha"] == added.sha, stored
+    second = edited.run(tmp_path, BY_LINES, "--lines", "--verifier-argv", argv_file)
+    shown = mutant_lines(second)
+    assert shown[0].startswith(f"BASELINE-OK reused from m2 {stored['time']} "), second.stdout + second.stderr
+    # the lines the lender recorded under its own tree judge each mutant here alike
+    def judged(run_lines: list[str]) -> list[str]:
+        return [re.sub(r" in \d+\.\d+s", "", line) for line in run_lines[1:]]
+    assert judged(shown) == judged(mutant_lines(first)), second.stdout
+    adopted = json.loads((edited.place / testrun.BASELINE_RECORD).read_text(encoding="utf-8"))
+    assert adopted["sha"] == edited.sha and adopted["reused_from"] == {"scratch": "m2", "sha": added.sha}
 
 
 @pytest.mark.unit

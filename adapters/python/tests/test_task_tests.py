@@ -208,6 +208,21 @@ def test_tests_after_dashes_judge_every_mutant_from_the_given_file(
     [(argv, entries)] = calls["mutants"]
     assert Path(argv[3]) == listing.resolve() and "tests" not in entries[0]
     assert argv[argv.index("--tests") + 1:] == ["tests/test_value.py"] and "--lines" not in argv
+    assert "--verifier-argv" not in argv  # the worktree's AGENTS.md names no verifier
+
+
+def test_the_mutant_baseline_takes_the_verifier_of_the_repository_that_holds_the_commit(
+        workspace: Workspace, calls: dict[str, list], tmp_path: Path) -> None:
+    """The verifier argv file the worktree's AGENTS.md names classifies the commit's input set for the baseline key:
+    the export is no Git checkout (docs/TESTKIT.md § ``atc test ID --mutants FILE``)."""
+    put(workspace.worktree, {"AGENTS.md": "# AGENTS.md\n\n## Integration verification\n\n"
+                                          "- Verifier argv file: verify.json\n- Verifier timeout: 60\n",
+                             "verify.json": "[]\n"}, "name the verifier")
+    listing = write_mutants(tmp_path, [{"label": "a", "edits": DEMO_EDIT}])
+    assert workspace.run(TASK, "--mutants", str(listing), "--", "tests/test_value.py") == 0
+    [(argv, _entries)] = calls["mutants"]
+    assert Path(argv[argv.index("--verifier-argv") + 1]) == workspace.worktree / "verify.json"
+    assert argv.index("--verifier-argv") < argv.index("--tests")
 
 
 def test_a_candidate_is_verified_at_the_branch_tip_or_the_given_sha(workspace: Workspace,

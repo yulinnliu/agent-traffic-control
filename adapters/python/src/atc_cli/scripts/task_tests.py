@@ -225,8 +225,12 @@ def run_mutants(task: Task, args: argparse.Namespace, tests: list[str], environ:
     with scratch.mutants_lock(place):
         if narrow:
             listing, tests = selected_mutants(entries, directory, place, environ)
+        # The repository that holds the commit classifies its input set: an export is no Git checkout.
+        argv_file = verifier_argv_file(task.source())
         return testrun.mutants([name, commit, str(task.source()), str(listing), "--task", task.id,
-                                *(["--lines"] if narrow else []), "--tests", *tests], environ)
+                                *(["--lines"] if narrow else []),
+                                *(["--verifier-argv", str(argv_file)] if argv_file is not None else []),
+                                "--tests", *tests], environ)
 
 
 def clean(task_id: str, environ: dict[str, str]) -> int:

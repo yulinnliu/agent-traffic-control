@@ -428,9 +428,126 @@ def mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None = None
 BASELINE_RECORD = "baseline.json"
 TOUCHED = "mutants-touched.txt"
 # The fields of a reused baseline's key (docs/TESTKIT.md § ``atc test ID --mutants FILE``); ``files`` need only
-# hold the files this run records.
-KEY_FIELDS = ("sha", "tests", "lines", "files", "recorder", "testkit", "python", "private")
+# hold the files this run records. ``inputs`` holds the input digest and excluded paths of the commit the baseline
+# ran on, so a commit with the same inputs, in any scratch of the task, reuses it.
+KEY_FIELDS = ("inputs", "tests", "lines", "files", "recorder", "testkit", "python", "private")
 NOT_REUSED = "NOTE baseline: not reused:"
+SCRATCH_PREFIX = "<scratch>/"
+
+
+def commit_tree(repository: str, commit: str) -> list[inputs.Entry] | None:
+    """The ``(mode, blob, path)`` entries of ``commit``'s tree; ``None`` when Git cannot list them."""
+    try:
+        return inputs.entries(inputs.git_reader(Path(repository)), commit)
+    except (OSError, subprocess.CalledProcessError):
+        return None
+
+
+def classified_inputs(repository: str, commit: str, tree: Sequence[inputs.Entry] | None, argv_file: str | None,
+                      environ: Mapping[str, str]) -> dict | None:
+    """A baseline's ``inputs``: the input digest of ``commit`` and its excluded paths, as the verifier of the
+    repository that holds the commit classifies them; ``None`` without a classification."""
+    if tree is None or not argv_file:
+        return None
+    try:
+        argv = json.loads(Path(argv_file).read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(argv, list) or not all(isinstance(item, str) for item in argv):
+        return None
+    classified = inputs.classify(argv, Path(repository), environ, commit)
+    if classified is None:
+        return None
+    excluded = sorted(classified[0])
+    return {"digest": inputs.digest(tree, excluded), "excluded": excluded}
+
+
+def scratch_relative(path: str, place: Path) -> str:
+    """An interpreter inside the scratch by its path from the scratch, so another scratch's equal one matches."""
+    try:
+        return SCRATCH_PREFIX + Path(path).resolve().relative_to(place.resolve()).as_posix()
+    except (OSError, ValueError):
+        return path
+
+
+def _same_inputs(stored: object, key: object, tree: Sequence[inputs.Entry] | None) -> bool:
+    """Whether the commit of ``tree`` has the stored baseline's inputs: a classified record's digest equals the
+    tree's with that record's excluded paths left out (shared/conformance/verification-evidence/README.md § Input
+    set); an unclassified record matches its own commit only."""
+    if isinstance(stored, dict):
+        digest, excluded = stored.get("digest"), stored.get("excluded")
+        return (tree is not None and isinstance(digest, str) and isinstance(excluded, list)
+                and all(isinstance(path, str) for path in excluded) and inputs.digest(tree, excluded) == digest)
+    return stored == key
+
+
+def _mismatch(stored: Mapping, key: Mapping[str, object], tree: Sequence[inputs.Entry] | None) -> str | None:
+    """The first key field ``stored`` does not match, ``None`` when it matches."""
+    for name in KEY_FIELDS:
+        if name == "files":
+            have = stored.get(name)
+            matches = isinstance(have, list) and set(key[name]) <= set(have)
+        elif name == "inputs":
+            matches = _same_inputs(stored.get(name), key[name], tree)
+        else:
+            matches = stored.get(name) == key[name]
+        if not matches:
+            return name
+    return None
+
+
+def _copy_lines(source: Path, place: Path, recording: lines.Prepared) -> bool:
+    """Copy another scratch's line records into the freshly prepared ``recording``, each recorded file's path moved
+    from that scratch's tree to this one's; whether the copy reads back as a record."""
+    data = source / lines.DIRECTORY / lines.DATA
+    old, new = lines.real(source / "tree"), lines.real(place / "tree")
+    for path in recording.data.iterdir():
+        path.unlink()
+    for path in data.iterdir():
+        if not path.is_file():
+            continue
+        text = path.read_bytes()
+        if path.suffix == ".tsv":
+            rows = []
+            for row in text.decode("utf-8", errors="replace").split("\n"):
+                parts = row.split("\t")
+                if len(parts) == 3 and parts[1].startswith(old):
+                    parts[1] = new + parts[1][len(old):]
+                rows.append("\t".join(parts))
+            text = "\n".join(rows).encode("utf-8")
+        (recording.data / path.name).write_bytes(text)
+    return lines.read(recording.data) is not None
+
+
+def adopt_baseline(root: Path, place: Path, task: str, key: Mapping[str, object], commit: str,
+                   recording: lines.Prepared | None, tree: Sequence[inputs.Entry] | None) -> dict | None:
+    """The newest passed baseline of another scratch of ``task`` whose key matches, kept as this scratch's record with
+    its line records copied here; ``None`` when there is none."""
+    found = []
+    for row in scratch.registered(root):
+        other = Path(row.scratch)
+        if row.task != task or lines.real(other) == lines.real(place):
+            continue
+        try:
+            stored = json.loads((other / BASELINE_RECORD).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(stored, dict) and _mismatch(stored, key, tree) is None:
+            found.append((str(stored.get("time", "")), str(other), stored))
+    for _time, name, stored in sorted(found, reverse=True):
+        other = Path(name)
+        try:
+            if stored.get("recorded") and (recording is None or not _copy_lines(other, place, recording)):
+                continue
+            # A baseline of that scratch that started meanwhile deleted its record before touching its lines.
+            if json.loads((other / BASELINE_RECORD).read_text(encoding="utf-8")) != stored:
+                continue
+        except (OSError, ValueError):
+            continue
+        adopted = {**stored, "sha": commit, "reused_from": {"scratch": other.name, "sha": stored.get("sha")}}
+        _keep_record(place, adopted)
+        return adopted
+    return None
 
 
 @functools.cache
@@ -473,7 +590,8 @@ def check_pristine(tree: Path, worktree: str, sha: str, paths: Sequence[str]) ->
             raise Refusal("TREE_NOT_PRISTINE", f"{path} differs from {sha[:7]}")
 
 
-def reusable(place: Path, key: Mapping[str, object], recording: lines.Prepared | None) -> dict | None:
+def reusable(place: Path, key: Mapping[str, object], recording: lines.Prepared | None,
+             tree: Sequence[inputs.Entry] | None = None) -> dict | None:
     """The record of the scratch's last passed baseline when it matches ``key``; ``None`` otherwise, after a
     ``NOTE baseline: not reused:`` line naming the first mismatch when a record exists."""
     try:
@@ -485,15 +603,10 @@ def reusable(place: Path, key: Mapping[str, object], recording: lines.Prepared |
     if not isinstance(stored, dict):
         print(f"{NOT_REUSED} {BASELINE_RECORD} cannot be read", flush=True)
         return None
-    for name in KEY_FIELDS:
-        if name == "files":
-            have = stored.get(name)
-            matches = isinstance(have, list) and set(key[name]) <= set(have)
-        else:
-            matches = stored.get(name) == key[name]
-        if not matches:
-            print(f"{NOT_REUSED} {name}", flush=True)
-            return None
+    name = _mismatch(stored, key, tree)
+    if name is not None:
+        print(f"{NOT_REUSED} {name}", flush=True)
+        return None
     if stored.get("recorded"):
         try:
             found = recording is not None and lines.read(recording.data) is not None
@@ -524,8 +637,8 @@ def _mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None,
         prog="atc test --mutants", allow_abbrev=False,
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description="Apply each mutant alone to <scratch>/tree and run the tests on it, after a baseline run in\n"
-                    "parallel on the host's workers, or reused from the scratch's last passed baseline of the\n"
-                    "same commit, tests, recorder and testkit.",
+                    "parallel on the host's workers, or reused from the last passed baseline of the same inputs,\n"
+                    "tests, recorder and testkit, in this scratch or another of the task.",
         epilog="Exit: 0 when every mutant ran and was killed and every file is restored; 1 for a survivor (named\n"
                "on the last line), a red baseline, an aborted run or a restore mismatch; 9 for a refusal before the\n"
                "baseline (MUTANTS_RUNNING while another run holds the scratch, TREE_NOT_PRISTINE for a file left\n"
@@ -554,6 +667,9 @@ def _mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None,
     parser.add_argument("--kill-rule", choices=(KILL_FAILURE, KILL_ASSERTION), default=KILL_FAILURE,
                         help="failure (default): any failed test kills; assertion: only a run whose every failure "
                              "is an assertion, with no test errored, kills")
+    parser.add_argument("--verifier-argv", metavar="FILE",
+                        help="the project's verifier argv file, which classifies the commit's input set: the baseline "
+                             "is then keyed by the input digest, else by the commit")
     args = parser.parse_args(argv)
     environ = os.environ if environ is None else environ
     check_task(args.task)
@@ -576,10 +692,14 @@ def _mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None,
         print(EXCLUSION_NOTE, flush=True)
     baseline_tests = list(dict.fromkeys([*args.tests, *(test for entry in entries for test in entry.get("tests", ()))]))
     recording = lines.pristine(place, tree, entries) if args.lines else None
-    key = {"sha": commit, "tests": baseline_tests, "lines": bool(args.lines),
-           "files": lines.watched(recording) if recording is not None else [], "recorder": lines.RECORDER_DIGEST,
-           "testkit": package_digest(), "python": python, "private": private}
-    stored = reusable(place, key, recording)
+    isolate(tree, place, python, environ)
+    child = child_environment(tree, place, environ)
+    commit_entries = commit_tree(worktree, commit)
+    key = {"inputs": f"commit {commit}", "tests": baseline_tests,
+           "lines": bool(args.lines), "files": lines.watched(recording) if recording is not None else [],
+           "recorder": lines.RECORDER_DIGEST, "testkit": package_digest(), "python": scratch_relative(python, place),
+           "private": private}
+    stored = reusable(place, key, recording, commit_entries)
     budget = stages.open_budget(f"atc test --mutants {args.scratch}", environ, root=Path(worktree),
                                 max_wait=MUTANT_SECONDS)
     want = floor = 1
@@ -587,9 +707,10 @@ def _mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None,
         (place / BASELINE_RECORD).unlink(missing_ok=True)
         if recording is not None:
             recording = lines.prepare(place, tree, entries)
+        stored = adopt_baseline(root, place, args.task, key, commit, recording, commit_entries)
+        if stored is None and recording is not None:
+            recording = lines.prepare(place, tree, entries)
     # One grant, sized for the baseline's tests, serves the baseline and every mutant: a mutant's tests are among them.
-    isolate(tree, place, python, environ)
-    child = child_environment(tree, place, environ)
     xdist = xdist_installed(python, tree, child)
     workers, arguments = _worker_request(baseline_tests, tree, environ, xdist)
     if workers is not None and workers.source == stages.SOURCE_DEFAULT and budget.active:
@@ -633,7 +754,9 @@ def _mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None,
         print(workers_line, flush=True)
         budget.annotate(limit=workers_line)
     if stored is not None:
-        print(f"BASELINE-OK reused {stored.get('time', '')} ({stored.get('seconds', 0):.1f}s, workers "
+        source = stored.get("reused_from")
+        origin = f" from {source.get('scratch')}" if isinstance(source, dict) else ""
+        print(f"BASELINE-OK reused{origin} {stored.get('time', '')} ({stored.get('seconds', 0):.1f}s, workers "
               f"{stored.get('workers', 1)}) {stored.get('summary', '')}", flush=True)
     else:
         if _run_workers(arguments) > 1 and not any(item.startswith("--dist") for item in arguments):
@@ -646,7 +769,9 @@ def _mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None,
         print(f"BASELINE-OK {summary}", flush=True)
     choices = _choices(entries, args.tests, tree, place, recording)
     if stored is None:
-        _keep_record(place, {**key, "recorded": bool(choices),
+        classified = classified_inputs(worktree, commit, commit_entries, args.verifier_argv,
+                                       {name: value for name, value in child.items() if not name.upper().startswith("GIT_")})
+        _keep_record(place, {**key, "inputs": classified or key["inputs"], "sha": commit, "recorded": bool(choices),
                              "time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "summary": summary,
                              "seconds": round(float(ran["seconds"]), 1), "workers": _run_workers(arguments)})
 

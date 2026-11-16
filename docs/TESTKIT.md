@@ -912,22 +912,37 @@ clamp.
   rerun settles it, never a wrong verdict. A failing baseline prints
   `BASELINE-RED <first FAILED line>; failed: <node ID>, ...`, naming every
   failed and errored test, and exits 1 before any mutant is applied.
-- A passed baseline writes `<scratch>/baseline.json`: the export's commit,
-  the baseline's test arguments, whether it recorded lines and which files,
-  the digest of the recorder's files, the digest of the running
-  atc-testkit package's `.py` sources, the interpreter and whether the runs
-  are private, with its time, summary, seconds and workers. A later run of
-  the same scratch whose commit, test arguments (in order), recording,
-  recorder, package, interpreter and privacy are equal, and whose recorded
-  files include those it would record, reuses it: it runs no baseline,
-  prints no stage-time line for it, prints
+- A passed baseline writes `<scratch>/baseline.json`: the export's commit
+  (`sha`), its inputs, the baseline's test arguments, whether it recorded
+  lines and which files, the digest of the recorder's files, the digest of
+  the running atc-testkit package's `.py` sources, the interpreter (by its
+  path from the scratch when it lies inside it) and whether the runs are
+  private, with its time, summary, seconds and workers. `inputs` is
+  `{"digest", "excluded"}`, the commit's input digest and the paths outside
+  its input set (§ Input evidence), as the verifier argv file of the
+  repository that holds the commit classifies them, since an export is no
+  Git checkout; without a classification it is `commit <sha>`. A later run
+  reuses the record when its commit has those inputs
+  (`shared/conformance/verification-evidence/README.md` § Input set; a
+  `commit <sha>` record only its own commit), its test arguments (in order),
+  recording, recorder, package, interpreter and privacy are equal, and the
+  recorded files include those it would record. It runs no baseline, prints
+  no stage-time line for it, prints
   `BASELINE-OK reused <time> (<seconds>s, workers <n>) <summary>` and judges
   the mutants by the lines the baseline recorded. A record that differs
-  prints `NOTE baseline: not reused: <field>` first, and the baseline runs.
-  Every baseline deletes the record before it starts and writes it only
-  after it passed, so a failed, timed-out or interrupted baseline leaves
-  none. A hand edit of the export outside the edit paths is not part of
-  the key.
+  prints `NOTE baseline: not reused: <field>` first. A scratch with no
+  matching record of its own takes the newest matching record of another
+  scratch registered to the task, so an amend that changes only excluded
+  paths, under a new `<ID>-<sha7>`, runs no baseline: it copies that
+  scratch's line records with each recorded path moved to its own tree,
+  keeps the record as its own with its own `sha` and
+  `reused_from {scratch, sha}`, and prints
+  `BASELINE-OK reused from <scratch> ...`. A record whose line records do
+  not read back, or which changed during the copy, is not taken, and the
+  baseline runs. Every baseline deletes the record before it starts and
+  writes it only after it passed, so a failed, timed-out or interrupted
+  baseline leaves none. A hand edit of the export outside the edit paths is
+  not part of the key.
 - Without `TEST...`, the baseline also records the lines each test executes
   in the `.py` files the mutants edit, in the pytest process and in every
   process it starts that keeps `PYTHONPATH` (a nested testkit run keeps the
