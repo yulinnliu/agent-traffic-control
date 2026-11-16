@@ -23,3 +23,8 @@ decisions:
 - 'Owner 11-16: lint does not go into atc-maintain, which is for ATC-only tooling. It belongs in atc-testkit and pre-commit.'
 - 'Owner 11-16: running the full suite stays the reviewer''s job (`--candidate`). The writer''s runs must be reusable, not repeated.'
 - Version bumps are for a separate release task.
+- 'Owner 11-16: design ATC-0058 c55b9f33 PASS. Authorized outside the earlier authority: the 4 governance rewordings of design § 8.2, in the design''s wording (VERIFICATION.md § Verification semantics invariant 3 and the Delivery verification first line; GIT_WORKFLOW.md § Integrate reuse match list and § Test evidence second sentence). Nothing else outside the three original sections. Design step 6 includes verifier, gate and atc integrate reuse.'
+- 'Owner 11-16 O1: keep atc_testkit.docs as a lint-stage local hook; no lychee.'
+- 'Owner 11-16 O2: Vale ships both rule groups (role terms, final-state wording) in this task; existing violations are fixed here.'
+- 'Owner 11-16 O3: verify every install route and rule on this Windows host first; stop and report any failure.'
+- 'Owner 11-16: the design is not integrated alone; implement in design § 10 order at test level strict; an early review may follow steps 1-2.'
