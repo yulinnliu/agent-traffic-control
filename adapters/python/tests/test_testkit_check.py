@@ -130,6 +130,7 @@ def test_onboarding_reports_testkit_drift_without_rewriting_project_config(repos
     (workspace/'shared/templates').mkdir(parents=True)
     (workspace/'shared/templates/PROJECT_AGENTS.md').write_text('<!-- atc:governance -->pointer')
     (workspace/'shared/templates/ATC_README.md').write_text('bootloader')
+    (workspace/'shared/templates/pre-commit-config.yaml').write_text('repos: [workspace template]\n')
     (workspace/'CLAUDE.md').write_text('workspace entrypoint')
     (repository/'CLAUDE.md').write_text('project-owned guidance')
     monkeypatch.setattr(sync_project,'canonical_skills',lambda root:{})
