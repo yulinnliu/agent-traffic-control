@@ -1,0 +1,21 @@
+task_id: ATC-0056
+title: Release atc 0.7.0
+repository: yulinnliu/agent-traffic-control
+base_sha: 4d1914bc1311385a3e6d55fd1f5a0a6ffcd2afce
+scope: 'Batch release atc 0.7.0 and atc-testkit 0.14.0, carrying ATC-0049, ATC-0051, ATC-0052, ATC-0053, ATC-0054 and ATC-0055: everything on main since v0.6.0 (c1de26a). - **Version bump.** Bump both packages, and every place the version is pinned. Set `min_atc` in `atc-manifest.yaml` to 0.7.0. - **Release notes.** Write `docs/releases/v0.7.0.md` in the shape of `docs/releases/v0.6.0.md`. - **Breaking section, complete.** List every removed or renamed command, flag, output token, exit code, record field, skill contract and governance rule. Give each its replacement and its task. This includes ATC-0053''s change that a doctor NOTE now exits 1. - **For each atc-testkit change,** say whether a project upgrade is required or skippable. Projects pin older testkits. - **Upgrade section, for the host:** - add `governance_checkout: .` to the workspace''s `workspace.yaml` first; - `uv tool install --force` from the tag (`docs/WORKFLOW.md` § Installing a release); - `atc guard --install`; - `atc
+  sync`; - `atc doctor`, which reads `direct_url.json`. - **Upgrade section, for projects:** re-sync on 0.7.0. The tag itself, its push, the install and each project''s re-sync are the Owner''s steps after integration, not this task.'
+tests: standard
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: 4d1914bc1311385a3e6d55fd1f5a0a6ffcd2afce
+branch: claude+ATC-0056
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
+decisions:
+- 'Owner 11-16: release waits for ATC-0052 to ATC-0055, then opens. Version numbers by the Owner 11-16: atc 0.6.0 -> 0.7.0, atc-testkit 0.13.0 -> 0.14.0, `min_atc` = 0.7.0.'
+- Release notes describe the final state and what a user must change. They name no competitor and claim nothing the code does not do.
+- No code changes beyond version strings and their pinned tests. A defect found while writing the notes is reported to the coordinator, not fixed here.
