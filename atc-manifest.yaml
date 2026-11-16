@@ -15,8 +15,13 @@ project:
     mode: owned
   - id: lint
     source: shared/lint/
-    files: [ruff.toml, markdownlint.jsonc]
+    files: [ruff.toml, markdownlint.jsonc, vale.ini]
     target: .atc/lint/
+    mode: owned
+  - id: lint-vale-style
+    source: shared/lint/vale/ATC/
+    files: [RoleTerms.yml, OwnerCase.yml, FinalState.yml]
+    target: .atc/lint/vale/ATC/
     mode: owned
   - id: pointer
     source: shared/templates/PROJECT_AGENTS.md

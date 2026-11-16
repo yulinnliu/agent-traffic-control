@@ -1,0 +1,11 @@
+# The role terms stay in English in every language: writer, reviewer, coordinator and Owner.
+extends: existence
+message: "Write the role term in English (writer, reviewer, coordinator, Owner), not '%s'."
+level: error
+nonword: true
+tokens:
+  - 撰寫者
+  - 審查者
+  - 審閱者
+  - 協調者
+  - 擁有者

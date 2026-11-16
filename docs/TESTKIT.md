@@ -383,6 +383,19 @@ Its rules:
   and keeps `.pre-commit-config.yaml` at its root (`atc_testkit.check`).
   Hook environments live in `PRE_COMMIT_HOME`, `~/.atc/cache/pre-commit`
   (`ATC_HOME.md` § Cache).
+- Vale runs as the `vale` hook of its own repository, pinned by `rev`, with
+  `language: golang`: pre-commit downloads the Go its `language_version`
+  pins and builds Vale from source, so a host needs no Go of its own. The
+  first run on a host downloads that Go and Vale's modules and builds the
+  binary, about 35 seconds and 300 MB in the hook cache on the workspace's
+  Windows host; later runs reuse the environment. A new `rev` or
+  `language_version` builds again. The build reports `vale version master`,
+  since `go install` sets no version; the `rev` is the version.
+- Vale reads `shared/lint/vale.ini` (in a project `.atc/lint/vale.ini`),
+  whose `ATC` style holds the role-term rule (`error`: a role term written
+  in another language) and two that only report (`warning`): `the owner`
+  in lower case, and wording that may narrate a change (`previously`,
+  `used to be`, `no longer`).
 - A failure ends the run before pytest. `atc test` prints pre-commit's last
   lines, then `STOP LINT_FAILED: pre-commit exited <code> on <n> files; log
   <path>`, and exits 1; the log is `<scratch>/runs/<UTC time>-lint.log`. A
@@ -395,7 +408,8 @@ Its rules:
 - `atc_testkit.lint` holds the commands: `range_argv` is the verifier's,
   `run_paths` the run over a set of paths.
 - `atc sync` delivers the shared rules to a project's `.atc/lint/`
-  (`ruff.toml`, `markdownlint.jsonc`) and keeps them current; the project's
+  (`ruff.toml`, `markdownlint.jsonc`, `vale.ini` with `vale/ATC/`) and
+  keeps them current; the project's
   ruff settings extend them with `extend = ".atc/lint/ruff.toml"`, its
   `.markdownlint-cli2.jsonc` with
   `"config": {"extends": ".atc/lint/markdownlint.jsonc"}`. pre-commit has no
@@ -806,8 +820,8 @@ scratch entries. In order:
    so the run's option wins. The console shows `LOG <path>` first, then the
    private desktop's exclusion line (§ Private desktop), the `workers:` line
    of a parallel run (§ Stages), and, with `-v`, the output too.
-   A run of a registered project that used to be serial without `-n` is
-   parallel once it upgrades to this testkit; `-n 0` keeps it serial.
+   A run without `-n` is parallel under this testkit; `-n 0` keeps it
+   serial.
 7. A run that may record input evidence prints its evidence line
    (§ Input evidence). The run's stage-time line (§ Stage times; none after an interrupt), then one summary line, ends the command: `PASS`, `FAIL`, `NO_TESTS`,
    `INTERRUPTED` or `ERROR exit <code>`, pytest's counts, the failed and

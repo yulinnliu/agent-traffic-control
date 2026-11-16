@@ -1,0 +1,10 @@
+# A spec describes the final state; the history lives in Git. These words often narrate a change, but also have
+# present-tense uses ("evidence that no longer applies"), so this only reports.
+extends: existence
+message: "'%s' may narrate a change; describe the final state."
+level: warning
+ignorecase: true
+tokens:
+  - previously
+  - used to be
+  - no longer

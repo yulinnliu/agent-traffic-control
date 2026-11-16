@@ -32,7 +32,6 @@ lint = [
     "import-linter==2.16",
     "pre-commit==4.7.0",
     "ruff==0.17.5",
-    "vale==3.27.0.0",
 ]
 
 [tool.uv]

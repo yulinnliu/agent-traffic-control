@@ -11,6 +11,15 @@ repos:
     hooks:
       - id: markdownlint-cli2
 
+  # Vale builds from source with Go; pre-commit downloads the pinned Go itself.
+  - repo: https://github.com/vale-cli/vale
+    rev: v3.27.0
+    hooks:
+      - id: vale
+        language_version: 1.27.4
+        args: [--config=.atc/lint/vale.ini]
+        types: [markdown]
+
   - repo: local
     hooks:
       - id: ruff

@@ -28,8 +28,9 @@ def test_the_repository_manifest_names_what_sync_delivers() -> None:
     assert found.skills_source() == "shared/skills"
     assert found.files(mf.CREATE_ONLY) == [("CLAUDE.md", "CLAUDE.md"),
                                            ("shared/templates/pre-commit-config.yaml", ".pre-commit-config.yaml")]
-    assert {target for _source, target in found.files(mf.OWNED)} >= {".atc/lint/ruff.toml",
-                                                                      ".atc/lint/markdownlint.jsonc"}
+    assert {target for _source, target in found.files(mf.OWNED)} >= {
+        ".atc/lint/ruff.toml", ".atc/lint/markdownlint.jsonc", ".atc/lint/vale.ini",
+        ".atc/lint/vale/ATC/RoleTerms.yml", ".atc/lint/vale/ATC/OwnerCase.yml", ".atc/lint/vale/ATC/FinalState.yml"}
     assert [entry.id for entry in found.entries("workspace")] == ["workspace-policy", "workspace-skills"]
 
 

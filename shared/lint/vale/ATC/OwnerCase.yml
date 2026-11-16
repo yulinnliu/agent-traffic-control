@@ -1,0 +1,8 @@
+# The role is "Owner", capitalized; a lowercase "owner" is often another owner (of a file, a process), so this
+# only reports.
+extends: substitution
+message: "Is this the Owner role? Write '%s'."
+level: warning
+ignorecase: false
+swap:
+  the owner: the Owner
