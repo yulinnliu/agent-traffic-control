@@ -643,7 +643,7 @@ def test_g26_g27_the_deadline_denies_and_the_timeout_is_cached(workspace, home, 
     assert install(workspace, home) == 0
     sleeper = tmp_path / "sleeper.py"
     sleeper.write_text(SLEEPER, encoding="utf-8")
-    counter = Counter(monkeypatch, sleeper)
+    Counter(monkeypatch, sleeper)
     monkeypatch.setattr(hook_state, "DEADLINE", 2.5)
     monkeypatch.setattr(hook, "STARTED", time.monotonic())
     payload_file = tmp_path / "payload.json"

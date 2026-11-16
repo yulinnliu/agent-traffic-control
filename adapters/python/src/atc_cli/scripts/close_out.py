@@ -14,7 +14,6 @@ import re
 import subprocess
 import sys
 
-import yaml
 
 from atc_testkit import locations, scratch
 import cli_conventions

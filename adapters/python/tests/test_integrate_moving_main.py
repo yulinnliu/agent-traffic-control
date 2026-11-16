@@ -5,7 +5,6 @@ Each test runs a sandbox repository with a bare `origin` beside it.
 from __future__ import annotations
 
 import json
-import re
 import subprocess
 import sys
 from pathlib import Path
@@ -284,7 +283,7 @@ def test_a_conflicting_replay_is_refused_even_when_the_patch_ids_match(
     reviewed = topic(repo, {"a.txt": "topic\n"})
     commit(repo, "a.txt", "main\n")
     run_git(repo, "switch", "-q", "-C", "topic", "main")
-    rebased = commit_with_record(repo, "a.txt", "topic\n", "topic")
+    commit_with_record(repo, "a.txt", "topic\n", "topic")
     run_git(repo, "switch", "-q", "main")
     monkeypatch.setattr(gi, "_patch_ids", lambda _repo, commits: ["same"] * len(commits))
     assert run(repo, reviewed) == 1

@@ -4,7 +4,6 @@ sys.path.insert(0, str(Path(__file__).parents[1] / 'atc-testkit/src'))
 
 from dataclasses import dataclass
 
-import pytest
 
 from atc_testkit.markers import definition_nodeid, marker_contract_violations
 

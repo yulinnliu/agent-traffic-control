@@ -32,7 +32,7 @@ import managed_worktree as hw
 import task_authority as ta
 import task_records
 import verification_section
-from git_preflight import GitError, git, is_ancestor, merge_preflight, render, rev, same_path
+from git_preflight import GitError, git, is_ancestor, merge_preflight, rev, same_path
 from integration_slot import IntegrationSlot
 
 FULL_SHA = re.compile(r"[0-9a-f]{40}")

@@ -142,7 +142,7 @@ def test_powershell_location_change_to_a_literal_variable_is_refused(command):
 
 @pytest.mark.parametrize("command", [
     f'$env:W = "{WIN}"; Set-Location $env:W',
-    f'$w = "$(Get-Location)\\worktrees"; Set-Location $w',
+    '$w = "$(Get-Location)\\worktrees"; Set-Location $w',
     f'$w = "{WIN}"; $w = "$HOME"; Set-Location $w',
     f'$w = "{ROOT}" + "\\worktrees"; Set-Location $w',
     f'$w = "{WIN}$suffix"; Set-Location $w',

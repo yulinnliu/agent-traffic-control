@@ -49,3 +49,26 @@ selector = ["scripts/select_tests.py", "--json", "--paths"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-p no:cacheprovider"
+
+# The lint stage's Python rules (docs/design/ATC-0058.md § 3.2). The selection is named, so a ruff upgrade
+# changes no rule.
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "TID251", "PLC0415"]
+
+[tool.ruff.lint.per-file-ignores]
+# A pytest fixture imported from a helper module is redefined as the parameter of the test that uses it.
+"tests/**" = ["F811"]
+# It puts atc-testkit/src on sys.path before importing the package from it.
+"tests/test_testkit_evidence.py" = ["E402"]
+# Every import of children.py sits at module level, so importing it proves it needs only the standard library
+# (docs/TESTKIT.md § Child processes).
+"!atc-testkit/src/atc_testkit/children.py" = ["PLC0415"]
+# atc_testkit deletes a tree only through scratch.remove_tree, which rescans for links first.
+"!atc-testkit/src/**" = ["TID251"]
+"atc-testkit/src/atc_testkit/scratch.py" = ["TID251"]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"shutil.rmtree".msg = "delete through atc_testkit.scratch.remove_tree, which rescans the tree for links first"

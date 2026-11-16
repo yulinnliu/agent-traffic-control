@@ -87,13 +87,20 @@ def test_ci_check_cannot_be_conditional_or_run_before_sync(repository, mutation)
     path=repository/'.github/workflows/ci.yml'
     doc=yaml.safe_load(path.read_text())
     job=doc['jobs']['python']
-    if mutation=='job_if':job['if']='false'
-    elif mutation=='step_if':job['steps'][1]['if']='false'
-    elif mutation=='job_if_boolean':job['if']=False
-    elif mutation=='step_if_boolean':job['steps'][1]['if']=False
-    elif mutation=='job_continue':job['continue-on-error']=True
-    elif mutation=='step_continue':job['steps'][1]['continue-on-error']=True
-    else:job['steps'].reverse()
+    if mutation=='job_if':
+        job['if']='false'
+    elif mutation=='step_if':
+        job['steps'][1]['if']='false'
+    elif mutation=='job_if_boolean':
+        job['if']=False
+    elif mutation=='step_if_boolean':
+        job['steps'][1]['if']=False
+    elif mutation=='job_continue':
+        job['continue-on-error']=True
+    elif mutation=='step_continue':
+        job['steps'][1]['continue-on-error']=True
+    else:
+        job['steps'].reverse()
     path.write_text(yaml.safe_dump(doc),encoding='utf-8')
     assert repository_problems(repository)
 

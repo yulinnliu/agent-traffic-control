@@ -336,12 +336,12 @@ def supporting_plan(root: Path, skill: str, adapter_dir: Path) -> list[PlanItem]
     content, which sync removes."""
     plan: list[PlanItem] = []
     expected = validator.supporting_files(root, skill)
-    for relative, content in expected.items():
+    for relative, text in expected.items():
         target = adapter_dir / relative
         if not target.exists():
-            plan.append(PlanItem("create", target, "supporting file", content))
-        elif validator.normalise(target.read_text(encoding="utf-8")) != content:
-            plan.append(PlanItem("update", target, "supporting file drift", content))
+            plan.append(PlanItem("create", target, "supporting file", text))
+        elif validator.normalise(target.read_text(encoding="utf-8")) != text:
+            plan.append(PlanItem("update", target, "supporting file drift", text))
         else:
             plan.append(PlanItem("skip", target, "supporting file is current"))
     if adapter_dir.is_dir():

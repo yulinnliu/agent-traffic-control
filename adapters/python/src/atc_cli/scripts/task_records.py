@@ -347,7 +347,7 @@ def read_task_file(path: Path) -> dict:
 def check_tests_level(level: str, decisions: list, testkit: bool, task: str = "<ID>") -> None:
     """A project with the testkit takes every level, `none` only with a decision line; one without takes none."""
     if not testkit and level != "none":
-        raise Refusal("TESTS_UNAVAILABLE", f"the project has no [tool.atc-testkit]; its tasks take tests: none",
+        raise Refusal("TESTS_UNAVAILABLE", "the project has no [tool.atc-testkit]; its tasks take tests: none",
                       "pass --tests none")
     if testkit and level == "none" and not decisions:
         raise Refusal("TESTS_NONE_UNDECIDED", "tests: none needs the Owner's decision line in the record",

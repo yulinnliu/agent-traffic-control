@@ -17,7 +17,7 @@ from pathlib import Path
 import cli_conventions
 import generate_enforcement as ge
 import hook_state
-from hook_report import (HARNESSES, INSTALL_HINT, RESET_HINT, _table_of, compose, entries, groups, report,
+from hook_report import (_table_of, compose, entries, groups, report,
                          settings_files, stop_of, warnings)
 
 ROOT = Path(__file__).resolve().parents[5]

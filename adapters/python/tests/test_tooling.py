@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 import shutil
 import subprocess
@@ -1227,7 +1226,6 @@ def test_run_syncs_root_adapters_before_projects(tmp_path: Path, capsys: pytest.
     captured = capsys.readouterr()
     assert captured.out.splitlines()[0].startswith("root ~")
     assert not captured.err
-    out = captured.out
     for tool in (".agents", ".claude"):
         text = (project / tool / "skills/demo-skill/SKILL.md").read_text(encoding="utf-8")
         assert "description: sharper trigger" in text

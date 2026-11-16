@@ -74,9 +74,12 @@ def test_reference_scanner_excludes_prose_and_selector_examples(tmp_path):
 @pytest.mark.parametrize(('mode', 'expected'), [('full', None), ('merge-base', ['changed.py'])])
 def test_missing_remote_is_explicit_policy(mode, expected):
     def git(*args):
-        if args[0] == 'cat-file': raise SelectionError('missing')
-        if args[0] == 'merge-base': return 'base'
-        if args[0] == 'diff': return 'changed.py\n'
+        if args[0] == 'cat-file':
+            raise SelectionError('missing')
+        if args[0] == 'merge-base':
+            return 'base'
+        if args[0] == 'diff':
+            return 'changed.py\n'
         raise AssertionError(args)
     assert changed_paths(['refs/heads/x local refs/heads/x remote'], git, missing_remote=mode) == expected
 
@@ -90,8 +93,10 @@ def test_git_hook_environment_is_scrubbed(monkeypatch):
 @pytest.mark.parametrize(('head', 'status'), [('different', ''), ('commit', ' M file')])
 def test_checkout_identity_and_cleanliness_are_required(head, status):
     def git(*args):
-        if args[0] == 'status': return status
-        if args == ('rev-parse', 'HEAD'): return head
+        if args[0] == 'status':
+            return status
+        if args == ('rev-parse', 'HEAD'):
+            return head
         return 'commit'
     with pytest.raises(SelectionError):
         verify_push_checkout(['refs/heads/x commit refs/heads/x old'], git)

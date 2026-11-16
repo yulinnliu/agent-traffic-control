@@ -13,7 +13,6 @@ Exit codes and output: shared/conformance/CLI.md. Run `atc-maintain <command> --
 
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 
