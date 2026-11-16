@@ -106,6 +106,19 @@ def test_a_mutant_runs_the_tests_that_ran_its_statement_in_baseline_order(tree: 
 
 
 @pytest.mark.unit
+def test_a_mutants_named_tests_run_first_then_the_rest_fastest_first(tree: Path, tmp_path: Path) -> None:
+    prepared = lines.prepare(tmp_path, tree, [mutant("or _within(link, directory))")])
+    durations = f"{A2}\t3.5\n{B1}\t0.25\nnested\t1\n{B1}\t0.5\nno time\tx\n{A1}\t9"  # the last row was cut short
+    (tmp_path / lines.DIRECTORY / lines.DATA / f"{lines.DURATIONS}1").write_text(durations, encoding="utf-8")
+    record = record_of(tree, tmp_path, [(B1, 7), (A2, 8), (A1, 7)], [A1, A2, B1])
+    assert record.seconds == {A2: 3.5, B1: 0.5, "nested": 1.0}  # a name seen twice keeps its longer time
+    choice = lines.choose(mutant("or _within(link, directory))"), [*FILES, A2, "--deselect", A1], tree, prepared,
+                          record)
+    # the named test first, then B1 (0.5 s) before A1 (no time), and an option's value stays after its option
+    assert choice.tests == [A2, B1, A1, "--deselect", A1]
+
+
+@pytest.mark.unit
 def test_a_mutant_no_test_ran_is_not_covered_and_a_named_test_still_runs(tree: Path, tmp_path: Path) -> None:
     edit = "        return False"
     prepared = lines.prepare(tmp_path, tree, [mutant(edit)])

@@ -450,15 +450,16 @@ def test_each_mutant_and_the_baseline_print_and_record_their_elapsed_time(export
     shown = elapsed_lines(run.stdout)
     assert [line.split()[1] for line in shown] == ["baseline", "mutant:K", "mutant:S"], run.stdout
     assert [line.split()[-1] for line in shown] == ["PASS", "KILLED", "SURVIVED"]
-    # the baseline runs the workers it was granted; the mutants run in process
+    # the baseline runs the workers it was granted, and so does each mutant judged by its file-level tests
     baseline = re.fullmatch(r"ELAPSED baseline \d+\.\d+s workers (\d+) PASS", shown[0])
     assert baseline is not None, shown
-    assert all(re.fullmatch(r"ELAPSED \S+ \S+ \d+\.\d+s workers 1 \S+", line) for line in shown[1:]), shown
+    granted = int(baseline.group(1))
+    assert all(re.fullmatch(rf"ELAPSED \S+ \S+ \d+\.\d+s workers {granted} \S+", line) for line in shown[1:]), shown
     added = pool_records()[before:]
     assert [(r["task"], r["sha"], r["command"], r["stage"], r["workers"], r["result"]) for r in added] == [
-        (TASK, export.sha, "mutants", "baseline", int(baseline.group(1)), "PASS"),
-        (TASK, export.sha, "mutants", "mutant:K one", 1, "KILLED"),
-        (TASK, export.sha, "mutants", "mutant:S two", 1, "SURVIVED"),
+        (TASK, export.sha, "mutants", "baseline", granted, "PASS"),
+        (TASK, export.sha, "mutants", "mutant:K one", granted, "KILLED"),
+        (TASK, export.sha, "mutants", "mutant:S two", granted, "SURVIVED"),
     ]
     assert all(isinstance(r["seconds"], float) and r["seconds"] >= 0 for r in added)
 
@@ -665,9 +666,41 @@ def test_a_run_on_the_same_key_reuses_the_baseline_and_judges_alike(lines_export
     assert re.fullmatch(rf"BASELINE-OK reused \S+Z \({stored['seconds']}s, workers {stored['workers']}\) "
                         r"3 passed.*", shown[0]), second.stdout
     assert [line.split()[1] for line in elapsed_lines(second.stdout)] == ["mutant:K"]
-    assert shown[1] == mutant_lines(first)[1] and "workers: " not in second.stdout
+    # a reused baseline still takes the grant its tests ask for: the mutants run on it
+    assert shown[1] == mutant_lines(first)[1] and re.search(r"^workers: \d+", second.stdout, re.MULTILINE)
     assert json.loads(covered)[0] == json.loads(
         (lines_export.place / "mutants-covered.json").read_text(encoding="utf-8"))[0]
+
+
+@pytest.mark.integration
+def test_a_mutant_with_more_tests_than_one_worker_takes_runs_on_workers_of_the_held_grant(
+        lines_export: Export, tmp_path: Path) -> None:
+    (lines_export.place / "tree/tests/test_value.py").write_text(
+        "import pytest\nimport fixture_pkg\n\n\n@pytest.mark.parametrize('case', range(9))\n"
+        "def test_value(case):\n    assert fixture_pkg.value() == 1\n", encoding="utf-8")
+    run = lines_export.run(tmp_path, BY_LINES[:2], "--lines")
+    assert run.returncode == 1, run.stdout + run.stderr
+    granted = int(re.search(r"^workers: (\d+)", run.stdout, re.MULTILINE).group(1))
+    assert granted >= 2, run.stdout
+    shown = elapsed_lines(run.stdout)
+    # nine tests ran the edited line: two workers of the grant the baseline took, with no wait for tokens between
+    assert re.fullmatch(r"ELAPSED mutant:K value \d+\.\d+s workers 2 KILLED", shown[1]), shown
+    assert mutant_lines(run)[1].startswith("KILLED   K value -> FAILED tests/test_value.py::test_value[")
+    assert list((lines_export.place / "lines" / "data").glob(f"{lines.DURATIONS}*"))
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(("tests", "kind", "granted", "count"), [
+    ([f"t.py::test_{n}" for n in range(9)], lines.BY_LINES, 6, 2),
+    ([f"t.py::test_{n}" for n in range(8)], lines.BY_LINES, 6, 1),
+    ([f"t.py::test_{n}" for n in range(40)], lines.BY_LINES, 3, 3),
+    ([f"t.py::test_{n}" for n in range(40)], lines.BY_LINES, 1, 1),
+    (["tests/test_a.py", "tests/test_b.py"], lines.FALLBACK, 4, 4),
+    ([*(f"t.py::test_{n}" for n in range(40)), "-n", "3"], lines.BY_LINES, 6, 1),
+])
+def test_a_mutant_takes_one_worker_per_eight_named_tests_within_the_grant(tests: list[str], kind: str, granted: int,
+                                                                          count: int) -> None:
+    assert testrun.mutant_workers(tests, lines.Choice(kind, tests), granted) == count
 
 
 @pytest.mark.integration
@@ -795,6 +828,11 @@ def test_a_file_that_differs_from_its_object_is_a_restore_mismatch(export: Expor
     (testrun.Result(1, ["ERROR tests/a.py::t - PermissionError"]), testrun.INCONCLUSIVE),
     (testrun.Result(1, ["no summary"]), testrun.INCONCLUSIVE),
     (testrun.Result(2, ["FAILED looks like a failure"]), testrun.INCONCLUSIVE),
+    # pytest-xdist ends a run at -x's first failure as an interrupt (exit 2)
+    (testrun.Result(2, ["!!! xdist.dsession.Interrupted: stopping after 1 failures !!!", "FAILED tests/a.py::t"]),
+     testrun.KILLED),
+    (testrun.Result(2, ["!!! xdist.dsession.Interrupted: stopping after 1 failures !!!"]), testrun.INCONCLUSIVE),
+    (testrun.Result(2, ["!!! KeyboardInterrupt !!!", "FAILED tests/a.py::t"]), testrun.INCONCLUSIVE),
     (testrun.Result(3, []), testrun.INCONCLUSIVE),
     (testrun.Result(4, []), testrun.INCONCLUSIVE),
     (testrun.Result(5, []), testrun.INCONCLUSIVE),
@@ -807,14 +845,15 @@ def test_only_a_failed_test_is_a_kill(result: testrun.Result, verdict: str) -> N
 @pytest.mark.parametrize(("old", "new", "expected"), [
     ("import fixture_pkg\n", "raise RuntimeError('at collection')\nimport fixture_pkg\n", "pytest exit 2"),
     ("def test_value():", "import pytest\n@pytest.fixture(autouse=True)\ndef broken():\n    raise RuntimeError('at setup')\n"
-                          "def test_value():", "pytest exit 1: ERROR"),
+                          # 1 in process; on workers pytest-xdist stops at -x's first error as an interrupt, 2
+                          "def test_value():", r"pytest exit [12]: ERROR"),
 ])
 def test_a_run_no_test_failed_in_is_inconclusive_and_ends_the_list(export: Export, tmp_path: Path, old: str, new: str,
                                                                     expected: str) -> None:
     edit = {"label": "odd", "edits": [{"path": "tests/test_value.py", "old": old, "new": new}]}
     run = export.run(tmp_path, [edit, KILLED])
     assert run.returncode == 1, run.stdout + run.stderr
-    assert f"INCONCLUSIVE odd -> {expected}" in run.stdout and "K one" not in run.stdout
+    assert re.search(f"INCONCLUSIVE odd -> {expected}", run.stdout) and "K one" not in run.stdout
     assert "KILLED" not in run.stdout and "restored-ok tests/test_value.py" in run.stdout
     assert run.stdout.splitlines()[-1] == "done: 1 of 2 mutants, 0 survived"
 

@@ -22,7 +22,7 @@ COVERED = "mutants-covered.json"
 PLUGIN = "atc_lines_plugin"
 DIR_VARIABLE, FILES_VARIABLE = "ATC_LINES_DIR", "ATC_LINES_FILES"
 CONTEXT_VARIABLE, HOOK_VARIABLE = "ATC_LINES_CONTEXT", "ATC_LINES_HOOK"
-STARTED, LOADED, COLLECTED = "started-", "loaded-", "collected-"
+STARTED, LOADED, COLLECTED, DURATIONS = "started-", "loaded-", "collected-", "durations-"
 # Past this many characters of test arguments a run passes them in a pytest argfile.
 ARGFILE_THRESHOLD = 30_000
 FALLBACK, BY_LINES, UNCOVERED = "file-level", "lines", "not covered"
@@ -149,8 +149,9 @@ def _hand_over():
 _hand_over()
 '''
 
-PLUGIN_SOURCE = r'''"""Gives each test its own line-recorder context, also in the processes it starts."""
+PLUGIN_SOURCE = r'''"""Gives each test its own line-recorder context, also in the processes it starts, and records its time."""
 import os
+import time
 
 import pytest
 
@@ -196,11 +197,17 @@ def pytest_collection_finish(session):
 
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_protocol(item, nextitem):
-    recorder.enter(_name(item))
+    name = _name(item)
+    recorder.enter(name)
+    started = time.perf_counter()
     try:
         yield
     finally:
         recorder.leave()
+        data = os.environ.get("ATC_LINES_DIR")
+        if data:
+            with open(os.path.join(data, f"durations-{os.getpid()}"), "a", encoding="utf-8") as sink:
+                sink.write(f"{name}\t{time.perf_counter() - started:.6f}\n")
 '''
 
 HOOK_FILES = {"sitecustomize.py": SITECUSTOMIZE, "atc_lines_recorder.py": RECORDER, f"{PLUGIN}.py": PLUGIN_SOURCE}
@@ -288,11 +295,23 @@ def keep_hook(environ: Mapping[str, str], pythonpath: str) -> str:
 @dataclass
 class Record:
     """What a baseline recorded: per (file, line) the tests that ran it, the lines run outside a test, the files
-    seen at all and the tests in collection order, the order a single-process baseline runs them."""
+    seen at all, the tests in collection order, the order a single-process baseline runs them, and the seconds each
+    test took."""
     tests: dict[tuple[str, int], set[str]] = field(default_factory=dict)
     outside: set[tuple[str, int]] = field(default_factory=set)
     files: set[str] = field(default_factory=set)
     order: list[str] = field(default_factory=list)
+    seconds: dict[str, float] = field(default_factory=dict)
+
+
+def _durations(text: str) -> Iterable[tuple[str, float]]:
+    """The complete rows of a durations file."""
+    for row in text.split("\n")[:-1]:
+        name, _, seconds = row.rpartition("\t")
+        try:
+            yield name, float(seconds)
+        except ValueError:
+            continue
 
 
 def _rows(text: str) -> Iterable[tuple[str, str, int]]:
@@ -326,6 +345,9 @@ def read(data: Path) -> Record | None:
     if collected:  # every xdist worker collects the same tests in the same order
         record.order = list(dict.fromkeys(
             name for name in collected[0].read_text(encoding="utf-8").splitlines() if name))
+    for path in sorted(data.glob(f"{DURATIONS}*")):  # a nested run's test under the same name keeps the longer time
+        for name, seconds in _durations(path.read_text(encoding="utf-8", errors="replace")):
+            record.seconds[name] = max(seconds, record.seconds.get(name, 0.0))
     return record
 
 
@@ -472,7 +494,19 @@ def choose(mutant: Mapping, tests: Sequence[str], tree: Path, prepared: Prepared
     narrowed = [name for name in record.order if name in running and any(_within(name, place) for place in places)]
     if not narrowed and not any("::" in item for item in kept):
         return Choice(UNCOVERED, [], "", shown)
-    return Choice(BY_LINES, [*narrowed, *kept], "", shown)
+    return Choice(BY_LINES, ordered(narrowed, kept, record.seconds), "", shown)
+
+
+def ordered(narrowed: Sequence[str], kept: Sequence[str], seconds: Mapping[str, float]) -> list[str]:
+    """A mutant's tests in the order that reaches a kill soonest under ``-x``: the node IDs named among its own tests
+    first, then the narrowed tests fastest first (collection order among equals, a test without a time last), then
+    the other kept items, an option and its value in place."""
+    leading = {index for index, item in enumerate(kept) if "::" in item and not item.startswith("-")
+               and not (index > 0 and kept[index - 1].startswith("-") and "=" not in kept[index - 1])}
+    named = [kept[index] for index in sorted(leading)]
+    rest = [item for index, item in enumerate(kept) if index not in leading]
+    fastest = sorted(range(len(narrowed)), key=lambda index: (seconds.get(narrowed[index], float("inf")), index))
+    return [*named, *(narrowed[index] for index in fastest if narrowed[index] not in named), *rest]
 
 
 def uncovered(choice: Choice) -> str:

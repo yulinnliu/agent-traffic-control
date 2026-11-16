@@ -299,6 +299,9 @@ def _unasserted(junit: Path) -> str | None:
     return None
 
 
+XDIST_STOPPED = re.compile(r"xdist\.dsession\.Interrupted: stopping after \d+ failures?\b")
+
+
 def _verdict(result: Result, junit: Path | None = None) -> tuple[str, str]:
     """``SURVIVED`` on a pass, ``KILLED`` on a failed test, and ``INCONCLUSIVE`` on any other ending of the run.
 
@@ -308,7 +311,10 @@ def _verdict(result: Result, junit: Path | None = None) -> tuple[str, str]:
     if result.code is None:
         return INCONCLUSIVE, f"timed out after {MUTANT_SECONDS:.0f} seconds"
     failed = next((line for line in result.lines if line.startswith("FAILED")), None)
-    if result.code == 1 and failed:
+    code = result.code
+    if code == PYTEST_INTERRUPTED and any(XDIST_STOPPED.search(line) for line in result.lines):
+        code = 1  # pytest-xdist ends a run that reached -x's one failure as an interrupt
+    if code == 1 and failed:
         why = _unasserted(junit) if junit is not None else None
         if why is not None:
             return INCONCLUSIVE, why[:SUMMARY_WIDTH]
@@ -574,21 +580,20 @@ def _mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None,
     stored = reusable(place, key, recording)
     budget = stages.open_budget(f"atc test --mutants {args.scratch}", environ, root=Path(worktree),
                                 max_wait=MUTANT_SECONDS)
-    arguments: list[str] = baseline_tests
     want = floor = 1
-    workers: stages.Workers | None = None
     if stored is None:
         (place / BASELINE_RECORD).unlink(missing_ok=True)
         if recording is not None:
             recording = lines.prepare(place, tree, entries)
-        isolate(tree, place, python, environ)
-        child = child_environment(tree, place, environ)
-        workers, arguments = _worker_request(baseline_tests, tree, environ,
-                                             xdist_installed(python, tree, child))
-        if workers is not None and workers.source == stages.SOURCE_DEFAULT and budget.active:
-            workers = workers.capped(_count(python, tree, place, child, private, arguments))
-        if workers is not None:
-            want, floor = max(1, workers.count), max(1, workers.floor())
+    # One grant, sized for the baseline's tests, serves the baseline and every mutant: a mutant's tests are among them.
+    isolate(tree, place, python, environ)
+    child = child_environment(tree, place, environ)
+    xdist = xdist_installed(python, tree, child)
+    workers, arguments = _worker_request(baseline_tests, tree, environ, xdist)
+    if workers is not None and workers.source == stages.SOURCE_DEFAULT and budget.active:
+        workers = workers.capped(_count(python, tree, place, child, private, arguments))
+    if workers is not None:
+        want, floor = max(1, workers.count), max(1, workers.floor())
     try:
         grant = budget.acquire("mutants", want, floor)
     except KeyboardInterrupt:
@@ -603,7 +608,7 @@ def _mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None,
     ran: dict[str, object] = {}
 
     def attempt(label: str, tests: Sequence[str], rule: str = KILL_FAILURE, stage: str = BASELINE_STAGE,
-                recorded: lines.Prepared | None = None) -> tuple[str, str]:
+                recorded: lines.Prepared | None = None, options: Sequence[str] = ()) -> tuple[str, str]:
         nonlocal attempts
         junit = None
         if rule == KILL_ASSERTION:
@@ -612,29 +617,26 @@ def _mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None,
             junit.unlink(missing_ok=True)
         attempts += 1
         started = time.monotonic()
-        result = execute(str(tree), str(place), python, ["-x", *lines.arguments(tests, place, f"{attempts:03d}")],
+        result = execute(str(tree), str(place), python,
+                         ["-x", *options, *lines.arguments(tests, place, f"{attempts:03d}")],
                          environ, task=args.task, timeout=MUTANT_SECONDS, junit=junit, recording=recorded)
         verdict = _verdict(result, junit)
         word = verdict[0] if stage != BASELINE_STAGE else ("PASS" if verdict[0] == SURVIVED else "FAIL")
         ran.update(result=result, seconds=time.monotonic() - started)
-        clock.stage(stage, ran["seconds"], _run_workers(tests), word)
+        clock.stage(stage, ran["seconds"], _run_workers([*options, *tests]), word)
         return verdict
 
+    arguments, workers_line = _granted_arguments(arguments, grant, want, workers)
+    if workers_line:
+        print(workers_line, flush=True)
+        budget.annotate(limit=workers_line)
     if stored is not None:
         print(f"BASELINE-OK reused {stored.get('time', '')} ({stored.get('seconds', 0):.1f}s, workers "
               f"{stored.get('workers', 1)}) {stored.get('summary', '')}", flush=True)
     else:
-        arguments, workers_line = _granted_arguments(arguments, grant, want, workers)
-        if workers_line:
-            print(workers_line, flush=True)
-            budget.annotate(limit=workers_line)
         if _run_workers(arguments) > 1 and not any(item.startswith("--dist") for item in arguments):
             arguments = [*arguments, "--dist", "loadgroup"]
-        try:
-            verdict, summary = attempt("baseline", arguments, recorded=recording)
-        finally:
-            if grant.count > 1:
-                held[-1] = (budget, budget.shrink(grant, 1))
+        verdict, summary = attempt("baseline", arguments, recorded=recording)
         if verdict != SURVIVED:
             failed = failed_tests(ran["result"])
             print(f"BASELINE-RED {summary}" + (f"; failed: {', '.join(failed)}" if failed else ""), flush=True)
@@ -669,7 +671,9 @@ def _mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None,
                     raise Refusal("MUTANT_INVALID", f"{mutant['label']}: kill_rule {rule!r} is not "
                                                     f"{KILL_FAILURE} or {KILL_ASSERTION}")
                 tests = choice.tests if choice is not None else mutant.get("tests") or args.tests
-                verdict, summary = attempt(mutant["label"], tests, rule, f"{MUTANT_STAGE}{mutant['label']}")
+                count = mutant_workers(tests, choice, grant.count) if xdist else 1
+                verdict, summary = attempt(mutant["label"], tests, rule, f"{MUTANT_STAGE}{mutant['label']}",
+                                           options=["-n", str(count), "--dist", "loadgroup"] if count > 1 else ())
                 print(f"{verdict:<8} {mutant['label']} -> {summary}", flush=True)
                 finished += 1
                 if verdict == SURVIVED:
@@ -698,6 +702,18 @@ def _mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None,
     counted = f"{finished} of {len(entries)}" if aborted else finished
     print(f"done: {counted} mutants, {len(survivors)} survived", *survivors, flush=True)
     return aborted or (1 if mismatched or survivors else 0)
+
+
+def mutant_workers(tests: Sequence[str], choice: lines.Choice | None, granted: int) -> int:
+    """The workers a mutant runs on, within the command's grant: one per ``stages.ITEMS_PER_WORKER`` tests its line
+    record names, the whole grant for file-level tests; 1 runs in process, as does a mutant whose own tests carry
+    ``-n``, which then decides its workers."""
+    if _worker_option(tests) is not None:
+        return 1
+    if choice is not None and choice.kind == lines.BY_LINES:
+        named = sum(1 for test in tests if "::" in test and not test.startswith("-"))
+        return max(1, min(granted, -(-named // stages.ITEMS_PER_WORKER)))
+    return max(1, granted)
 
 
 def _choices(entries: Sequence[Mapping], tests: Sequence[str], tree: Path, place: Path,
