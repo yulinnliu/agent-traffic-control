@@ -427,8 +427,12 @@ NOT_REUSED = "NOTE baseline: not reused:"
 
 @functools.cache
 def package_digest() -> str:
-    """The sha256 of every ``.py`` file of the running atc_testkit package, carriage returns dropped."""
-    base = Path(__file__).resolve().parent
+    """The sources digest of the running atc_testkit package."""
+    return sources_digest(Path(__file__).resolve().parent)
+
+
+def sources_digest(base: Path) -> str:
+    """The sha256 of every ``.py`` file under ``base``, each with its relative path, carriage returns dropped."""
     digest = hashlib.sha256()
     for path in sorted(base.rglob("*.py"), key=lambda path: path.relative_to(base).as_posix()):
         digest.update(path.relative_to(base).as_posix().encode("utf-8") + b"\0")

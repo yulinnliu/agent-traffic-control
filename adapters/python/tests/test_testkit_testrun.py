@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import types
@@ -707,8 +708,19 @@ def test_a_baseline_is_reused_only_on_its_whole_key(tmp_path: Path, capsys: pyte
 
 
 @pytest.mark.unit
-def test_the_testkit_key_is_a_digest_of_the_running_package_sources() -> None:
+def test_the_testkit_key_is_a_digest_of_the_running_package_sources(tmp_path: Path) -> None:
+    """A copy of the package digests alike, a changed byte of one of its files differs, carriage returns do not."""
+    package = Path(testrun.__file__).resolve().parent
+    copy = tmp_path / "atc_testkit"
+    shutil.copytree(package, copy, ignore=shutil.ignore_patterns("__pycache__"))
     assert re.fullmatch(r"[0-9a-f]{64}", testrun.package_digest()) and testrun.package_digest() != lines.RECORDER_DIGEST
+    assert testrun.sources_digest(copy) == testrun.package_digest()
+    source = copy / "lines.py"
+    text = source.read_bytes().replace(b"\r", b"")
+    source.write_bytes(text.replace(b"\n", b"\r\n"))
+    assert testrun.sources_digest(copy) == testrun.package_digest()
+    source.write_bytes(text + b"#\n")
+    assert testrun.sources_digest(copy) != testrun.package_digest()
 
 
 @pytest.mark.parametrize("old", ["absent text", "\n"])

@@ -193,9 +193,15 @@ def pytest_runtest_protocol(item, nextitem):
 '''
 
 HOOK_FILES = {"sitecustomize.py": SITECUSTOMIZE, "atc_lines_recorder.py": RECORDER, f"{PLUGIN}.py": PLUGIN_SOURCE}
+
+
+def recorder_digest(files: Mapping[str, str]) -> str:
+    """The sha256 of the recorder's hook files, each name with its text."""
+    return hashlib.sha256("\0".join(f"{name}\0{text}" for name, text in files.items()).encode("utf-8")).hexdigest()
+
+
 # The recorder's version in a reused baseline's key: any change to its files makes an earlier record unusable.
-RECORDER_DIGEST = hashlib.sha256("\0".join(f"{name}\0{text}" for name, text in HOOK_FILES.items())
-                                 .encode("utf-8")).hexdigest()
+RECORDER_DIGEST = recorder_digest(HOOK_FILES)
 
 
 def real(path: str | os.PathLike[str]) -> str:

@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -332,3 +333,55 @@ def test_the_testkit_runner_reads_the_file_with_the_same_check(tmp_path: Path) -
     with pytest.raises(testrun.Refusal) as raised:
         testrun.read_mutants(listing)
     assert raised.value.token == "MUTANTS_INVALID"
+
+
+def hold_mutants_lock(place: Path) -> subprocess.Popen[str]:
+    """Another process holding ``place``'s mutants lock until its stdin closes."""
+    holder = subprocess.Popen([sys.executable, "-c", "import sys\nfrom pathlib import Path\n"
+                               "from atc_testkit import scratch\nwith scratch.mutants_lock(Path(sys.argv[1])):\n"
+                               "    print('held', flush=True)\n    sys.stdin.read()\n", str(place)],
+                              stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+    assert holder.stdout is not None and holder.stdout.readline() == "held\n"
+    return holder
+
+
+def test_a_held_scratch_refuses_before_the_mutant_selection_is_written(
+        workspace: Workspace, calls: dict[str, list], tmp_path: Path, atc_tmp: Path,
+        capsys: pytest.CaptureFixture[str]) -> None:
+    listing = write_mutants(tmp_path, [{"label": "a", "edits": DEMO_EDIT, "tests": ["tests/test_value.py"]}])
+    assert workspace.run(TASK, "--mutants", str(listing)) == 0
+    [(argv, _entries)] = calls["mutants"]
+    selected = atc_tmp / argv[0] / task_tests.SELECTED_MUTANTS
+    before = selected.read_bytes()
+    listing = write_mutants(tmp_path, [{"label": "b", "edits": DEMO_EDIT, "tests": ["tests/test_other.py"]}])
+    capsys.readouterr()
+    holder = hold_mutants_lock(atc_tmp / argv[0])
+    try:
+        code = workspace.run(TASK, "--mutants", str(listing))
+    finally:
+        holder.communicate("")
+    err = capsys.readouterr().err
+    assert code == 9 and "MUTANTS_RUNNING" in err, err
+    assert selected.read_bytes() == before and len(calls["mutants"]) == 1
+
+
+def test_a_real_mutants_run_takes_the_scratch_lock_it_already_holds(
+        workspace: Workspace, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str]) -> None:
+    """run_mutants holds the scratch's lock and the real testrun.mutants takes it again in this process: the run
+    goes on instead of refusing itself with MUTANTS_RUNNING. Only the environment build is a stand-in; the tests
+    run on this interpreter."""
+    def sync(directory, environ, run=None) -> Path:
+        return Path(directory) / ".venv"
+    monkeypatch.setattr(checkout, "sync", sync)
+    monkeypatch.setattr(testrun, "copy_interpreter", lambda root, place: sys.executable)
+    listing = write_mutants(tmp_path, [{"label": "a", "edits": DEMO_EDIT}])
+    here = os.getcwd()
+    try:  # the run enters its tree before the baseline, and the scratch's teardown deletes that tree
+        code = task_tests.main([TASK, "--mutants", str(listing), "--", "tests/test_value.py"], root=workspace.root,
+                               environ=dict(os.environ, **HARNESS))
+    finally:
+        os.chdir(here)
+    out, err = capsys.readouterr()
+    assert "MUTANTS_RUNNING" not in err, err
+    assert code == 1 and "BASELINE-OK" in out and out.splitlines()[-1] == "done: 1 mutants, 1 survived a", out + err

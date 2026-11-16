@@ -330,3 +330,13 @@ def test_pytest_runs_nodeids_with_spaces_and_quotes_from_an_argfile(tmp_path: Pa
                          env={key: value for key, value in os.environ.items() if not key.startswith("PYTEST_")})
     assert run.returncode == 0 and "2 passed" in run.stdout, run.stdout + run.stderr
     assert "RAN 1" in run.stdout and "RAN 2" in run.stdout and "RAN 3" not in run.stdout
+
+
+@pytest.mark.unit
+def test_the_recorder_key_is_a_digest_of_its_hook_files() -> None:
+    """The key covers each hook file's name and text: a change to either makes an earlier record unusable."""
+    assert lines.RECORDER_DIGEST == lines.recorder_digest(lines.HOOK_FILES) != lines.recorder_digest({})
+    for name, text in lines.HOOK_FILES.items():
+        assert lines.recorder_digest({**lines.HOOK_FILES, name: text + "#\n"}) != lines.RECORDER_DIGEST
+        renamed = {("x" + key if key == name else key): value for key, value in lines.HOOK_FILES.items()}
+        assert lines.recorder_digest(renamed) != lines.RECORDER_DIGEST
