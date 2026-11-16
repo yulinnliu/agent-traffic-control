@@ -164,17 +164,28 @@ def _write(name, text=""):
             sink.write(text)
 
 
+_NODEID = pytest.StashKey[str]()
+
+
 def pytest_configure(config):
     _write("loaded-")
     recorder.mark_started()
 
 
+@pytest.hookimpl(tryfirst=True)
+def pytest_collection_modifyitems(items):
+    # The node ID as collected, before pytest-xdist's loadgroup appends "@<group>", which no pytest argument names.
+    for item in items:
+        item.stash[_NODEID] = item.nodeid
+
+
 def _name(item):
-    rest = item.nodeid.split("::", 1)
+    nodeid = item.stash.get(_NODEID, item.nodeid)
+    rest = nodeid.split("::", 1)
     try:
         path = os.path.relpath(str(item.path), str(item.config.invocation_params.dir)).replace(os.sep, "/")
     except ValueError:
-        return item.nodeid
+        return nodeid
     return path + ("::" + rest[1] if len(rest) == 2 else "")
 
 

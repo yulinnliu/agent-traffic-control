@@ -672,6 +672,10 @@ def test_a_run_on_the_same_key_reuses_the_baseline_and_judges_alike(lines_export
 
 @pytest.mark.integration
 def test_a_sharded_baseline_records_what_a_single_process_one_does(lines_export: Export, tmp_path: Path) -> None:
+    # Under loadgroup pytest-xdist appends "@<group>" to a grouped test's node ID in each worker.
+    (lines_export.place / "tree/tests/test_value.py").write_text(
+        "import pytest\nimport fixture_pkg\n\n\n@pytest.mark.xdist_group('value')\n"
+        "def test_value():\n    assert fixture_pkg.value() == 1\n", encoding="utf-8")
     single = lines_export.run(tmp_path, BY_LINES, "--lines", **{workers.HELD: "outer"})
     assert "workers: 1 (nested" in single.stdout and " workers 1 PASS" in elapsed_lines(single.stdout)[0], single.stdout
     alone = (lines_export.place / "mutants-covered.json").read_text(encoding="utf-8")

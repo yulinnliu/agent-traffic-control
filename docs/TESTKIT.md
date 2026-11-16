@@ -811,7 +811,9 @@ the pool and its memory clamp.
   recorder). The recorder is a `sys.monitoring` tool the command writes to
   `<scratch>/lines/hook` (a `sitecustomize` that hands over to the one it
   shadows, and a pytest plugin that gives each test its own context, passed
-  to its child processes in `ATC_LINES_CONTEXT`); each process appends its
+  to its child processes in `ATC_LINES_CONTEXT`); a test's context and its
+  collected name are its node ID as collected, without the `@<group>` that
+  pytest-xdist's `loadgroup` appends in a worker; each process appends its
   rows to its own file in `<scratch>/lines/data`, which every baseline
   starts empty. Each pytest process that loads the plugin, the xdist
   controller and every worker, marks that it loaded it and, when its
