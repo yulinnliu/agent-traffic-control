@@ -146,7 +146,9 @@ set) use no pool.
   ID` takes its pytest `-n K` (cut by the memory ceiling and the pool size
   and rewritten when cut), one token for `-n 0`, and otherwise the default
   count down to 2 (§ Commands), its `-n` becoming the granted count;
-  `atc test ID --mutants FILE` takes one token for the whole command. Static checks
+  `atc test ID --mutants FILE` takes for its baseline what `atc test ID`
+  takes, then gives back all but one token, which it holds to its end
+  (one token from the start when it reuses a baseline). Static checks
   take none. A flag
   above the pool size runs the pool size, and its line names the pool,
   `workers: 2 (flag 8, host pool: 2)`; on CI, outside the pool, only the
@@ -311,7 +313,7 @@ verifier time each stage they run and report it in one place.
   | Command | Stage | Workers | Result |
   | --- | --- | --- | --- |
   | `atc test ID` | its log label, `related` or `all` | the pytest `-n` it ran, 1 in process | the summary line's first word |
-  | `atc test ID --mutants` | `baseline`, then `mutant:<label>` per mutant | the `-n` among its tests, else 1 | `PASS` or `FAIL` for the baseline, the mutant's verdict |
+  | `atc test ID --mutants` | `baseline` (none when reused), then `mutant:<label>` per mutant | the baseline's granted `-n`, 1 in process; for a mutant the `-n` among its tests, else 1 | `PASS` or `FAIL` for the baseline, the mutant's verdict |
   | the verifier, through `atc test ID --candidate` and `atc integrate` | `checks` (every static check before the stages, or up to the first that fails), then each stage of § Stages | 1 for `checks`, the granted count for `parallel`, 1 for the others | `PASS`, `FAIL`, `NO_TESTS` or `TIMEOUT` |
 
 - `atc test ID` prints its line just before the summary line. A mutant run
@@ -733,13 +735,16 @@ every mutant. Without them, each mutant is judged by the tests the tree's
 stops the command with `NO_TESTS` before the baseline. That list goes to
 `<scratch>/mutants-selected.json` with each mutant's `tests` filled in, and
 the baseline runs their union, never the task's related tests. Each run is pytest with `-x` and a
-900-second timeout. The command holds one host worker token from before the
-baseline to its end; a wait for it past 900 seconds stops the command with
-`WORKER_WAIT_TIMEOUT` (exit 124) before the baseline, and an interrupt
-during the wait stops it with `INTERRUPTED` (exit 130) (§ Host worker
-budget). That one token covers every run of the command: an `-n K` among
-the tests arguments runs K workers on it, outside the pool and its
-memory clamp.
+900-second timeout. Before the baseline the command takes the host worker
+tokens `atc test ID` takes for those tests (§ Commands, `atc test ID` step
+6: the default count, at most one worker per 8 collected tests and at
+least 2, or an `-n K` among them as a flag), and after it gives back all
+but one, which it holds to its end; a reused baseline takes one token. A
+wait past 900 seconds stops the command with `WORKER_WAIT_TIMEOUT` (exit
+124) before the baseline, and an interrupt during the wait stops it with
+`INTERRUPTED` (exit 130) (§ Host worker budget). Every mutant run uses
+that one token: an `-n K` among its tests runs K workers on it, outside
+the pool and its memory clamp.
 
 - `ID` is checked as `atc test ID` checks it: `TASK_INVALID`. `SHA` must name
   a commit in the task's worktree (`git rev-parse --verify`): `SHA_NOT_FOUND`
@@ -764,9 +769,42 @@ memory clamp.
   command with `STOP MUTANTS_INVALID` and a `hint:` showing the shape, before
   the export or the scratch is touched. An `old` that does not occur exactly
   once in its file aborts the run. Edits follow the file's line endings.
+- One `--mutants` run uses a scratch at a time. After the scratch's
+  registry line, before the export's mutants list is written and before
+  any other check, the command locks `<scratch>/mutants.lock` and holds it
+  to its last line; a scratch another run holds stops the command at once
+  with `MUTANTS_RUNNING` and that run's pid and start time (exit 9), and
+  `atc test ID --clean` refuses such a scratch whole. Then every edit path
+  of the mutants and every path an earlier run of the scratch mutated
+  (`<scratch>/mutants-touched.txt`, appended before each mutant is
+  applied) must equal its Git object at `SHA`, carriage returns ignored:
+  a file that differs stops the command with
+  `TREE_NOT_PRISTINE <path> differs from <sha7>` (exit 9) before any
+  baseline; `atc test ID --clean` and a new run export the tree anew.
 - The tests run once unmutated first, `--tests` together with every
-  mutant's own `tests`; a failing baseline prints `BASELINE-RED` and exits
-  1 before any mutant is applied.
+  mutant's own `tests`, as one pytest run on the granted workers with
+  `--dist loadgroup` (`-n 0` in process on a grant of 1). As in `atc test
+  ID`, `serial` tests run in that one parallel run, unlike the stages'
+  `serial` stage; one that fails under that load gives `BASELINE-RED`, and a
+  rerun settles it, never a wrong verdict. A failing baseline prints
+  `BASELINE-RED <first FAILED line>; failed: <node ID>, ...`, naming every
+  failed and errored test, and exits 1 before any mutant is applied.
+- A passed baseline writes `<scratch>/baseline.json`: the export's commit,
+  the baseline's test arguments, whether it recorded lines and which files,
+  the digest of the recorder's files, the digest of the running
+  atc-testkit package's `.py` sources, the interpreter and whether the runs
+  are private, with its time, summary, seconds and workers. A later run of
+  the same scratch whose commit, test arguments (in order), recording,
+  recorder, package, interpreter and privacy are equal, and whose recorded
+  files include those it would record, reuses it: it runs no baseline,
+  prints no stage-time line for it, prints
+  `BASELINE-OK reused <time> (<seconds>s, workers <n>) <summary>` and judges
+  the mutants by the lines the baseline recorded. A record that differs
+  prints `NOTE baseline: not reused: <field>` first, and the baseline runs.
+  Every baseline deletes the record before it starts and writes it only
+  after it passed, so a failed, timed-out or interrupted baseline leaves
+  none. A hand edit of the export outside the edit paths is not part of
+  the key.
 - Without `TEST...`, the baseline also records the lines each test executes
   in the `.py` files the mutants edit, in the pytest process and in every
   process it starts that keeps `PYTHONPATH` (a nested testkit run keeps the
@@ -774,7 +812,14 @@ memory clamp.
   `<scratch>/lines/hook` (a `sitecustomize` that hands over to the one it
   shadows, and a pytest plugin that gives each test its own context, passed
   to its child processes in `ATC_LINES_CONTEXT`); each process appends its
-  rows to `<scratch>/lines/data`, which every baseline starts empty. Only
+  rows to its own file in `<scratch>/lines/data`, which every baseline
+  starts empty. Each pytest process that loads the plugin, the xdist
+  controller and every worker, marks that it loaded it and, when its
+  recorder started, that it started; each that collects writes the
+  collected tests in order. The records of all processes are merged; the
+  baseline counts as recorded only when every process that loaded the
+  plugin started its recorder, and its order is the collection order, the
+  order a single-process baseline runs. Only
   the baseline records. The tests of a mutant are then, in baseline order,
   the tests that executed a line it changes: the lines where `old` and `new`
   differ, each widened to its innermost statement, a compound statement by

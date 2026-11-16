@@ -8,6 +8,7 @@ stale. The rows feed the lines a run prints and ``atc doctor``; the locks alone 
 from __future__ import annotations
 
 import atexit
+import dataclasses
 import errno
 import json
 import os
@@ -581,6 +582,19 @@ class Budget:
             if self.row is not None:
                 self.row.update(tokens=[], reserved=0, log="", limit="")
             self._record(grant.count)
+
+    def shrink(self, grant: Grant, keep: int) -> Grant:
+        """Give back every token of ``grant`` past the first ``keep`` and record the stage that just ended as
+        ``release`` does; the grant of the ``keep`` tokens still held."""
+        keep = max(1, keep)
+        if self.pool is None or len(grant.tokens) <= keep:
+            return dataclasses.replace(grant, count=min(grant.count, keep))
+        kept, given = grant.tokens[:keep], grant.tokens[keep:]
+        self.pool.give(given)
+        if self.row is not None:
+            self.row.update(tokens=list(kept), reserved=len(kept) * self.per_worker, log="", limit="")
+        self._record(grant.count)
+        return dataclasses.replace(grant, count=len(kept), tokens=kept)
 
     def _record(self, count: int) -> None:
         """Record the per-worker memory of the stage that just ended, when it ran at least

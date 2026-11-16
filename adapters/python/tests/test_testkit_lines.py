@@ -82,7 +82,7 @@ def record_of(tree: Path, place: Path, rows: list[tuple[str, int]], order: list[
     text += "".join(f"\t{module}\t{line}\n" for line in outside)
     (data / "1-a.tsv").write_text(text + f"cut\t{module}\t1", encoding="utf-8")  # the last row was cut short
     (data / "started-1").write_text("", encoding="utf-8")
-    (data / "order-1.txt").write_text("".join(f"{name}\n" for name in order), encoding="utf-8")
+    (data / "collected-1").write_text("".join(f"{name}\n" for name in order), encoding="utf-8")
     found = lines.read(data)
     assert found is not None
     return found
@@ -165,6 +165,37 @@ def test_without_a_started_mark_there_is_no_record_and_a_rerun_starts_empty(tree
     prepared = lines.prepare(tmp_path, tree, [mutant("import os")])
     assert sorted(path.name for path in prepared.data.iterdir()) == []
     assert sorted(path.name for path in prepared.hook.iterdir()) == sorted(lines.HOOK_FILES)
+
+
+@pytest.mark.unit
+def test_every_process_that_loaded_the_plugin_must_have_started_its_recorder(tree: Path, tmp_path: Path) -> None:
+    """An xdist worker whose recorder did not start ran tests without rows: the whole record is void."""
+    prepared = lines.prepare(tmp_path, tree, [mutant("import os")])
+    for name in ("loaded-1", "started-1", "loaded-2", "loaded-3", "started-3"):
+        (prepared.data / name).write_text("", encoding="utf-8")
+    assert lines.read(prepared.data) is None
+    (prepared.data / "started-2").write_text("", encoding="utf-8")
+    assert lines.read(prepared.data) is not None
+
+
+@pytest.mark.unit
+def test_the_order_is_the_collection_order_every_worker_wrote_and_not_the_run_order(tree: Path,
+                                                                                    tmp_path: Path) -> None:
+    prepared = lines.prepare(tmp_path, tree, [mutant("import os")])
+    (prepared.data / "started-7").write_text("", encoding="utf-8")
+    for pid in ("7", "8"):
+        (prepared.data / f"collected-{pid}").write_text(f"{B1}\n{A1}\n{A2}\n", encoding="utf-8")
+    (prepared.data / "1-a.tsv").write_text(f"{A1}\t{lines.real(tree / 'src/mod.py')}\t7\n", encoding="utf-8")
+    assert lines.read(prepared.data).order == [B1, A1, A2]
+
+
+@pytest.mark.unit
+def test_a_reused_recording_keeps_its_records_and_rereads_the_pristine_texts(tree: Path, tmp_path: Path) -> None:
+    prepared = lines.prepare(tmp_path, tree, [mutant("import os"), mutant("a", path="README.md")])
+    (prepared.data / "started-1").write_text("", encoding="utf-8")
+    again = lines.pristine(tmp_path, tree, [mutant("import os")])
+    assert (again.root, again.texts) == (prepared.root, {"src/mod.py": prepared.texts["src/mod.py"]})
+    assert (again.data / "started-1").exists() and lines.watched(prepared) == ["src/mod.py"]
 
 
 @pytest.mark.unit

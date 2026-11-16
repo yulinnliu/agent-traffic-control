@@ -52,8 +52,15 @@ mutant.
   `SHA_NOT_FOUND` (exit 9) before the scratch is touched, then the scratch
   refusals, `TIME_SLACK_INVALID` and `PRIVATE_DESKTOP_INVALID` (exit 9).
 - The tests run once unmutated first, the default tests together with every
-  mutant's own `tests`. A red unmutated run prints `BASELINE-RED`, applies no
-  mutant and exits 1.
+  mutant's own `tests`, in parallel on the host's workers. A red unmutated
+  run prints `BASELINE-RED` naming every failed test, applies no mutant and
+  exits 1. A rerun on the same SHA, tests, recorder and testkit (a fix-only
+  re-review, an added mutant in a file already recorded) prints
+  `BASELINE-OK reused ...` and runs no baseline; `NOTE baseline: not
+  reused: <field>` says why one did not.
+- One run uses a scratch at a time: a second stops with `MUTANTS_RUNNING`
+  (exit 9). A file a killed run left mutated stops the command with
+  `TREE_NOT_PRISTINE` (exit 9); `atc test <task> --clean` then exports anew.
 - Each mutant prints one line: `KILLED` with the `FAILED` line of a run the
   kill rule counts, `SURVIVED` with the summary of a run that exits 0, or
   `NOT_COVERED` with the edited lines no test executed. A `NOTE <label>:`

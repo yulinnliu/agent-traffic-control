@@ -103,6 +103,94 @@ def _locked(root: Path) -> Iterator[None]:
             yield
 
 
+MUTANTS_LOCK = "mutants.lock"
+# The scratches whose mutants lock this process holds, with how many holders nest inside it.
+_HELD_MUTANTS: dict[str, tuple[int, object]] = {}
+
+
+def _try_lock(handle) -> bool:
+    """Take byte 0 of ``handle`` without waiting; whether it was free."""
+    handle.seek(0)
+    try:
+        if os.name == "nt":
+            import msvcrt
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        return False
+    return True
+
+
+def _unlock(handle) -> None:
+    handle.seek(0)
+    if os.name == "nt":
+        import msvcrt
+        msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+    else:
+        import fcntl
+        fcntl.flock(handle, fcntl.LOCK_UN)
+
+
+def _holder(handle) -> str:
+    """The pid and start time the holder wrote after the locked byte, as `` (pid P, since T)``; empty if unread."""
+    try:
+        handle.seek(1)
+        pid, since = handle.read(200).decode("ascii").split()[:2]
+    except (OSError, UnicodeError, ValueError):
+        return ""
+    return f" (pid {pid}, since {since})"
+
+
+@contextmanager
+def mutants_lock(place: Path) -> Iterator[None]:
+    """Hold ``<scratch>/mutants.lock`` for one ``atc test --mutants`` run, nesting within this process; another
+    holder refuses at once with ``MUTANTS_RUNNING`` (docs/TESTKIT.md § ``atc test ID --mutants FILE``)."""
+    key = os.path.normcase(os.path.abspath(place))
+    if key in _HELD_MUTANTS:
+        count, handle = _HELD_MUTANTS[key]
+        _HELD_MUTANTS[key] = (count + 1, handle)
+        try:
+            yield
+        finally:
+            count, handle = _HELD_MUTANTS[key]
+            _HELD_MUTANTS[key] = (count - 1, handle)
+        return
+    handle = os.fdopen(os.open(place / MUTANTS_LOCK, os.O_RDWR | os.O_CREAT | getattr(os, "O_BINARY", 0)), "r+b")
+    try:
+        if not _try_lock(handle):
+            raise Refusal("MUTANTS_RUNNING", f"another atc test --mutants runs on {place.name}{_holder(handle)}")
+        try:
+            handle.seek(1)
+            handle.write(f"{os.getpid()} {datetime.now(UTC).strftime(TIME_FORMAT)}\n".encode("ascii"))
+            handle.truncate()
+            handle.flush()
+            _HELD_MUTANTS[key] = (1, handle)
+            yield
+        finally:
+            _HELD_MUTANTS.pop(key, None)
+            _unlock(handle)
+    finally:
+        handle.close()
+
+
+def mutants_running(directory: str | os.PathLike[str]) -> str | None:
+    """Why ``directory`` is in use by a ``--mutants`` run (its lock held), or ``None``."""
+    path = Path(directory) / MUTANTS_LOCK
+    if os.path.normcase(os.path.abspath(directory)) in _HELD_MUTANTS:
+        return "an atc test --mutants run of this process holds it"
+    try:
+        handle = open(path, "r+b")
+    except OSError:
+        return None
+    with handle:
+        if _try_lock(handle):
+            _unlock(handle)
+            return None
+        return f"an atc test --mutants run holds it{_holder(handle)}"
+
+
 def _registry_lines(root: Path) -> list[str]:
     """The lines below the header."""
     try:
@@ -330,6 +418,10 @@ def _clean_one(directory: str, root: Path, say: Callable[[str], None], check: st
                 return 1
             say(f"DELETED {directory} ({check})")
             return 0
+        running = mutants_running(directory)
+        if running:
+            say(f"REFUSED {directory} ({running})")
+            return 1
         why = remove_tree(directory, scratch_links(directory), say)
         if why:
             say(f"REFUSED {directory} ({why})")

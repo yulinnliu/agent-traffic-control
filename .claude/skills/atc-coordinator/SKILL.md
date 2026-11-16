@@ -194,6 +194,9 @@ the map from task ID to session and nothing a record, Git or
      managed worktrees remove the topic branch with
      `git -C <main checkout> branch -d <topic branch>`; `-d` deletes only a
      branch `main` already contains.
+   - Stop each reviewer subagent of the task. Until its last re-review it
+     stays alive for fix re-reviews; left running after it, it stays in
+     the background list.
    - Archive the task's sessions, then run `atc task close <task>` again
      for what a session's working directory held. A refused archive is read through the session's state:
      a running session's writer ends its work; a pinned or idle one goes to
@@ -249,7 +252,8 @@ For a status question, read `atc task list --all`.
 - Subscribe to the writer's idle notice where the harness offers it,
   instead of polling.
 - Sessions are archived at close-out (step 6) through the session
-  management tools.
+  management tools, and each reviewer subagent of the task is stopped there
+  with TaskStop, after its last re-review.
 - After a task's close-out and archive, when this session's context is
   about 200K tokens or more, the report to the Owner ends by suggesting
   they run `/compact`, which only the Owner can run. Never mid-task.

@@ -427,10 +427,10 @@ ERRORING = {"label": "E three", "edits": [{"path": "src/fixture_pkg/__init__.py"
 
 
 def mutant_lines(run: subprocess.CompletedProcess[str] | str) -> list[str]:
-    """The command's lines without the private-desktop note and the stage times."""
+    """The command's lines without the private-desktop note, the baseline's workers line and the stage times."""
     out = run if isinstance(run, str) else run.stdout
     return [line for line in out.splitlines()
-            if line != testrun.EXCLUSION_NOTE and not line.startswith(f"{elapsed.PREFIX} ")]
+            if line != testrun.EXCLUSION_NOTE and not line.startswith((f"{elapsed.PREFIX} ", "workers: "))]
 
 
 def elapsed_lines(out: str) -> list[str]:
@@ -449,10 +449,13 @@ def test_each_mutant_and_the_baseline_print_and_record_their_elapsed_time(export
     shown = elapsed_lines(run.stdout)
     assert [line.split()[1] for line in shown] == ["baseline", "mutant:K", "mutant:S"], run.stdout
     assert [line.split()[-1] for line in shown] == ["PASS", "KILLED", "SURVIVED"]
-    assert all(re.fullmatch(r"ELAPSED \S+(?: \S+)? \d+\.\d+s workers 1 \S+", line) for line in shown), shown
+    # the baseline runs the workers it was granted; the mutants run in process
+    baseline = re.fullmatch(r"ELAPSED baseline \d+\.\d+s workers (\d+) PASS", shown[0])
+    assert baseline is not None, shown
+    assert all(re.fullmatch(r"ELAPSED \S+ \S+ \d+\.\d+s workers 1 \S+", line) for line in shown[1:]), shown
     added = pool_records()[before:]
     assert [(r["task"], r["sha"], r["command"], r["stage"], r["workers"], r["result"]) for r in added] == [
-        (TASK, export.sha, "mutants", "baseline", 1, "PASS"),
+        (TASK, export.sha, "mutants", "baseline", int(baseline.group(1)), "PASS"),
         (TASK, export.sha, "mutants", "mutant:K one", 1, "KILLED"),
         (TASK, export.sha, "mutants", "mutant:S two", 1, "SURVIVED"),
     ]
@@ -484,6 +487,7 @@ def test_a_mutants_own_tests_judge_it_and_join_the_baseline(export: Export, tmp_
     run = export.run(tmp_path, [{**KILLED, "tests": ["tests/test_other.py"]}])
     assert run.returncode == 1 and mutant_lines(run)[1].startswith("SURVIVED K one"), run.stdout + run.stderr
     (export.place / "tree/tests/test_other.py").write_text("def test_other():\n    assert 0\n", encoding="utf-8")
+    (export.place / testrun.BASELINE_RECORD).unlink()  # a hand edit of the export is outside the reuse key
     run = export.run(tmp_path, [{**KILLED, "tests": ["tests/test_other.py"]}])
     assert run.returncode == 1 and mutant_lines(run)[0].startswith("BASELINE-RED")
 
@@ -588,14 +592,123 @@ def test_the_assertion_rule_reads_the_junit_report(tmp_path: Path, body: str, ve
     assert testrun._verdict(failed, tmp_path / "absent.xml") == (testrun.INCONCLUSIVE, "no junit report (FileNotFoundError)")
 
 
-def test_a_red_baseline_applies_no_mutant(export: Export, tmp_path: Path) -> None:
-    export.file.write_text("def value():\n    return 9\n", encoding="utf-8")
-    applicable = {"label": "K one", "edits": [{"path": "src/fixture_pkg/__init__.py", "old": "return 9", "new": "return 1"}]}
-    run = export.run(tmp_path, [applicable])
+@pytest.mark.integration
+def test_a_red_baseline_applies_no_mutant_names_its_failures_and_leaves_nothing_to_reuse(
+        export: Export, tmp_path: Path) -> None:
+    (export.place / "tree/tests/test_value.py").write_text(
+        "import fixture_pkg\ndef test_value():\n    assert fixture_pkg.value() == 9\n", encoding="utf-8")
+    (export.place / testrun.BASELINE_RECORD).write_text("{}", encoding="utf-8")
+    run = export.run(tmp_path, [KILLED])
     lines = mutant_lines(run)
-    assert run.returncode == 1 and lines[0].startswith("BASELINE-RED") and "K one" not in run.stdout + run.stderr
+    assert run.returncode == 1 and "K one" not in run.stdout + run.stderr
+    assert lines[:2] == ["NOTE baseline: not reused: sha", lines[1]] and lines[1].startswith("BASELINE-RED ")
+    assert lines[1].endswith("; failed: tests/test_value.py::test_value"), lines
     assert [line.split()[1] for line in elapsed_lines(run.stdout)] == ["baseline"]
     assert elapsed_lines(run.stdout)[0].endswith(" FAIL")
+    assert not (export.place / testrun.BASELINE_RECORD).exists()
+
+
+@pytest.mark.unit
+def test_the_failed_tests_of_a_run_are_its_failed_and_errored_node_ids() -> None:
+    result = testrun.Result(1, ["x", "FAILED tests/a.py::t - assert 0", "ERROR tests/b.py::u", "FAILED"])
+    assert testrun.failed_tests(result) == ["tests/a.py::t", "tests/b.py::u"]
+
+
+@pytest.mark.integration
+def test_a_file_left_mutated_is_refused_before_any_baseline(export: Export, tmp_path: Path) -> None:
+    export.file.write_text(export.file.read_text(encoding="utf-8") + "# drifted\n", encoding="utf-8")
+    run = export.run(tmp_path, [KILLED])
+    assert run.returncode == 9 and run.stderr.startswith(
+        f"TREE_NOT_PRISTINE src/fixture_pkg/__init__.py differs from {export.sha[:7]}"), run.stdout + run.stderr
+    assert "BASELINE" not in run.stdout and not (export.place / "lines").exists()
+
+
+@pytest.mark.integration
+def test_a_path_an_earlier_run_touched_is_checked_too(export: Export, tmp_path: Path) -> None:
+    (export.place / testrun.TOUCHED).write_text("tests/test_value.py\n", encoding="utf-8")
+    test_file = export.place / "tree/tests/test_value.py"
+    test_file.write_text(test_file.read_text(encoding="utf-8").replace("== 1", "== 2"), encoding="utf-8")
+    run = export.run(tmp_path, [KILLED])
+    assert run.returncode == 9 and run.stderr.startswith("TREE_NOT_PRISTINE tests/test_value.py "), run.stderr
+
+
+@pytest.mark.integration
+def test_a_run_records_the_paths_it_mutates_before_it_mutates_them(export: Export, tmp_path: Path) -> None:
+    run = export.run(tmp_path, [KILLED, SURVIVING])
+    assert run.returncode == 1, run.stdout + run.stderr
+    assert (export.place / testrun.TOUCHED).read_text(encoding="utf-8") == "src/fixture_pkg/__init__.py\n" * 2
+
+
+@pytest.mark.integration
+def test_a_second_run_on_a_held_scratch_is_refused_at_once(export: Export, tmp_path: Path) -> None:
+    with scratch.mutants_lock(export.place):
+        run = export.run(tmp_path, [KILLED])
+        assert scratch.mutants_running(export.place) is not None
+    assert run.returncode == 9, run.stdout + run.stderr
+    assert re.match(rf"MUTANTS_RUNNING another atc test --mutants runs on m \(pid {os.getpid()}, since \S+Z\)",
+                    run.stderr), run.stderr
+    assert "BASELINE" not in run.stdout and not (export.place / "lines").exists()
+    assert not (export.place / testrun.BASELINE_RECORD).exists()
+    assert scratch.mutants_running(export.place) is None
+
+
+@pytest.mark.integration
+def test_a_run_on_the_same_key_reuses_the_baseline_and_judges_alike(lines_export: Export, tmp_path: Path) -> None:
+    first = lines_export.run(tmp_path, BY_LINES, "--lines")
+    covered = (lines_export.place / "mutants-covered.json").read_text(encoding="utf-8")
+    stored = json.loads((lines_export.place / testrun.BASELINE_RECORD).read_text(encoding="utf-8"))
+    assert stored["recorded"] is True and stored["files"] == ["src/fixture_pkg/__init__.py"]
+    assert stored["sha"] == lines_export.sha and stored["testkit"] == testrun.package_digest()
+    second = lines_export.run(tmp_path, BY_LINES[:1], "--lines")
+    shown = mutant_lines(second)
+    assert re.fullmatch(rf"BASELINE-OK reused \S+Z \({stored['seconds']}s, workers {stored['workers']}\) "
+                        r"3 passed.*", shown[0]), second.stdout
+    assert [line.split()[1] for line in elapsed_lines(second.stdout)] == ["mutant:K"]
+    assert shown[1] == mutant_lines(first)[1] and "workers: " not in second.stdout
+    assert json.loads(covered)[0] == json.loads(
+        (lines_export.place / "mutants-covered.json").read_text(encoding="utf-8"))[0]
+
+
+@pytest.mark.integration
+def test_a_sharded_baseline_records_what_a_single_process_one_does(lines_export: Export, tmp_path: Path) -> None:
+    single = lines_export.run(tmp_path, BY_LINES, "--lines", **{workers.HELD: "outer"})
+    assert "workers: 1 (nested" in single.stdout and " workers 1 PASS" in elapsed_lines(single.stdout)[0], single.stdout
+    alone = (lines_export.place / "mutants-covered.json").read_text(encoding="utf-8")
+    (lines_export.place / testrun.BASELINE_RECORD).unlink()
+    sharded = lines_export.run(tmp_path, BY_LINES, "--lines")
+    count = int(re.search(r"^workers: (\d+)", sharded.stdout, re.MULTILINE).group(1))
+    assert count >= 2, sharded.stdout
+    data = lines_export.place / "lines" / "data"  # the controller and each worker loaded the plugin
+    assert len(list(data.glob(f"{lines.LOADED}*"))) == count + 1
+    assert len(list(data.glob(f"{lines.COLLECTED}*"))) == count
+    assert (lines_export.place / "mutants-covered.json").read_text(encoding="utf-8") == alone
+    def verdicts(run: subprocess.CompletedProcess[str]) -> list[str]:
+        return [line.split(" -> ")[0] for line in mutant_lines(run)[1:]]
+    assert verdicts(sharded) == verdicts(single), sharded.stdout + single.stdout
+
+
+@pytest.mark.unit
+def test_a_baseline_is_reused_only_on_its_whole_key(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    key = {"sha": "a" * 40, "tests": ["tests"], "lines": False, "files": ["a.py", "b.py"], "recorder": "r",
+           "testkit": "t", "python": "py", "private": True}
+    (tmp_path / testrun.BASELINE_RECORD).write_text(json.dumps({**key, "recorded": False}), encoding="utf-8")
+    assert testrun.reusable(tmp_path, {**key, "files": ["b.py"]}, None) is not None
+    changes = {"sha": "b" * 40, "tests": ["tests", "x"], "lines": True, "files": ["c.py"], "recorder": "r2",
+               "testkit": "t2", "python": "py2", "private": False}
+    for name, value in changes.items():
+        assert testrun.reusable(tmp_path, {**key, name: value}, None) is None
+        assert capsys.readouterr().out == f"NOTE baseline: not reused: {name}\n"
+    (tmp_path / testrun.BASELINE_RECORD).write_text(json.dumps({**key, "recorded": True}), encoding="utf-8")
+    gone = lines.Prepared(tmp_path / "lines", {})
+    assert testrun.reusable(tmp_path, key, gone) is None
+    assert capsys.readouterr().out == "NOTE baseline: not reused: the line records are gone\n"
+    (tmp_path / testrun.BASELINE_RECORD).unlink()
+    assert testrun.reusable(tmp_path, key, None) is None and capsys.readouterr().out == ""
+
+
+@pytest.mark.unit
+def test_the_testkit_key_is_a_digest_of_the_running_package_sources() -> None:
+    assert re.fullmatch(r"[0-9a-f]{64}", testrun.package_digest()) and testrun.package_digest() != lines.RECORDER_DIGEST
 
 
 @pytest.mark.parametrize("old", ["absent text", "\n"])
@@ -650,9 +763,14 @@ def test_an_import_guard_refusal_aborts_and_restores(export: Export, tmp_path: P
 
 
 def test_a_file_that_differs_from_its_object_is_a_restore_mismatch(export: Export, tmp_path: Path) -> None:
-    export.file.write_text(export.file.read_text(encoding="utf-8") + "# drifted\n", encoding="utf-8")
-    run = export.run(tmp_path, [KILLED])
-    assert run.returncode == 1 and "RESTORE-MISMATCH src/fixture_pkg/__init__.py" in run.stdout
+    drift = ("import pathlib\nimport fixture_pkg\ndef test_value():\n    assert fixture_pkg.value() == 1\n"
+             "def test_drift():\n    source = pathlib.Path(fixture_pkg.__file__)\n"
+             "    if '# drifted' not in source.read_text():\n        source.write_text(source.read_text() + '# drifted')\n")
+    (export.place / "tree/tests/test_value.py").write_text(drift, encoding="utf-8")
+    applies = {"label": "K one", "edits": [{"path": "src/fixture_pkg/__init__.py", "old": "return 1",
+                                            "new": "return 1  # mutated"}], "tests": ["tests/test_value.py::test_drift"]}
+    run = export.run(tmp_path, [applies])
+    assert run.returncode == 1 and "RESTORE-MISMATCH src/fixture_pkg/__init__.py" in run.stdout, run.stdout
 
 
 @pytest.mark.parametrize(("result", "verdict"), [
@@ -708,8 +826,12 @@ def test_an_exception_during_a_mutant_still_restores_and_reports(export: Export,
     monkeypatch.setattr(testrun, "execute", execute)
     listing = tmp_path / "mutants.json"
     listing.write_text(json.dumps([KILLED]), encoding="utf-8")
-    code = testrun.mutants([export.place.name, export.sha, str(export.worktree), str(listing), "--task", TASK, "--python",
-                            sys.executable, "--tests", "tests"])
+    here = os.getcwd()
+    try:  # the run enters its tree before the baseline, and the scratch's teardown deletes that tree
+        code = testrun.mutants([export.place.name, export.sha, str(export.worktree), str(listing), "--task", TASK,
+                                "--python", sys.executable, "--tests", "tests"])
+    finally:
+        os.chdir(here)
     captured = capsys.readouterr()
     assert code == 1 and captured.err.splitlines()[0] == "TimeoutError: CHILD_TREE_STILL_RUNNING"
     assert captured.out.splitlines()[-2:] == ["restored-ok src/fixture_pkg/__init__.py", "done: 0 of 1 mutants, 0 survived"]

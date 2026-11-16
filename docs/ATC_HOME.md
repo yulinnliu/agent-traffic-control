@@ -256,7 +256,10 @@ the same checks, and the single recursive delete in ATC's temporary tooling runs
    `REFUSED` with the reason, and the command exits 1 before anything is
    deleted.
 2. A missing `<dir>` prints `SKIPPED` and loses its registry line.
-3. A `<dir>` that is not a directory, or is itself a link, prints `REFUSED`.
+3. A `<dir>` that is not a directory, or is itself a link, prints `REFUSED`,
+   and so does one whose `mutants.lock` an `atc test ID --mutants` run holds
+   (`TESTKIT.md` § `atc test ID --mutants FILE`), naming that run, before
+   anything in it is deleted.
 4. Links found in the tree are sorted. Expected ones are `<dir>\.venv`,
    `<dir>\tree\.venv`, a `.venv` below `<dir>\tree` whose directory holds a
    `pyproject.toml` that is a regular file, such as a whole repository's

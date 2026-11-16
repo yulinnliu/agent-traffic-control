@@ -61,6 +61,33 @@ def registered_names(root: Path) -> list[str]:
     return [Path(row.scratch).name for row in scratch.registered(root)]
 
 
+@pytest.mark.integration
+def test_a_scratch_a_mutants_run_holds_is_refused_whole(atc_tmp: Path) -> None:
+    held, free = scratch_dir(atc_tmp, "held"), scratch_dir(atc_tmp, "free")
+    (free / scratch.MUTANTS_LOCK).write_bytes(b"\x00123 2026-01-01T00:00:00Z\n")  # left by a run that ended
+    add(atc_tmp, held, free)
+    with scratch.mutants_lock(held):
+        code, lines = clean(held, free)
+    assert code == 1 and lines == [f"REFUSED {held} (an atc test --mutants run of this process holds it)",
+                                   f"DELETED {free}"], lines
+    assert (held / "tree/src/pkg/__init__.py").exists() and not free.exists()
+    assert scratch.mutants_running(held) is None
+    holder = subprocess.Popen([sys.executable, "-c", "import sys\nfrom pathlib import Path\n"
+                               "from atc_testkit import scratch\nwith scratch.mutants_lock(Path(sys.argv[1])):\n"
+                               "    print('held', flush=True)\n    sys.stdin.read()\n", str(held)],
+                              stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+    try:
+        assert holder.stdout.readline() == "held\n"
+        code, lines = clean(held)
+        # the pid is the interpreter's own, which a venv launcher on Windows starts as a child of holder
+        assert code == 1 and len(lines) == 1, lines
+        assert lines[0].startswith(f"REFUSED {held} (an atc test --mutants run holds it (pid "), lines
+        assert lines[0].split(" (pid ")[1].split(", since ")[0].isdigit() and lines[0].endswith("Z))"), lines
+    finally:
+        holder.communicate("")
+    assert scratch.mutants_running(held) is None and clean(held)[0] == 0
+
+
 def test_expected_links_are_unlinked_and_their_targets_survive(tmp_path: Path, atc_tmp: Path) -> None:
     real = scratch_dir(atc_tmp, "real")
     write(real / ".venv/Lib/site.py")

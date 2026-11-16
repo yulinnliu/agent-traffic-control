@@ -294,6 +294,20 @@ def test_the_stages_take_tokens_per_stage_and_nest_their_children(tmp_path: Path
     assert budget.pool.free() == 6
 
 
+@pytest.mark.unit
+def test_a_shrunk_grant_gives_back_all_but_the_tokens_it_keeps(pool_dir: Path) -> None:
+    budget = workers.Budget(workers.Pool(pool_dir, 6), label="baseline")
+    grant = budget.acquire("mutants", 4, 2)
+    assert (grant.count, budget.pool.free()) == (4, 2)
+    kept = budget.shrink(grant, 1)
+    assert (kept.count, kept.tokens, budget.pool.free()) == (1, grant.tokens[:1], 5)
+    assert budget.shrink(kept, 1) == kept
+    budget.release(kept)
+    assert budget.pool.free() == 6
+    outside = workers.Budget(None, label="ci")
+    assert outside.shrink(outside.acquire("mutants", 3, 2), 1).count == 1
+
+
 @pytest.mark.integration
 @pytest.mark.skipif(os.name != "nt", reason="the stage Job is Windows only")
 def test_a_stage_tree_ends_with_the_process_holding_its_tokens(tmp_path: Path, pool_dir: Path) -> None:

@@ -9,6 +9,7 @@ from __future__ import annotations
 import ast
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
+import hashlib
 import os
 from pathlib import Path
 
@@ -21,7 +22,7 @@ COVERED = "mutants-covered.json"
 PLUGIN = "atc_lines_plugin"
 DIR_VARIABLE, FILES_VARIABLE = "ATC_LINES_DIR", "ATC_LINES_FILES"
 CONTEXT_VARIABLE, HOOK_VARIABLE = "ATC_LINES_CONTEXT", "ATC_LINES_HOOK"
-STARTED, ORDER = "started-", "order-"
+STARTED, LOADED, COLLECTED = "started-", "loaded-", "collected-"
 # Past this many characters of test arguments a run passes them in a pytest argfile.
 ARGFILE_THRESHOLD = 30_000
 FALLBACK, BY_LINES, UNCOVERED = "file-level", "lines", "not covered"
@@ -44,7 +45,6 @@ class _State:
         self.context = os.environ.get("ATC_LINES_CONTEXT", "")
         self.known = {}
         self.fd = None
-        self.order = None
 
     def write(self, text):
         if self.fd is None:
@@ -111,10 +111,6 @@ def enter(name):
         return
     state.context = name
     os.environ["ATC_LINES_CONTEXT"] = name
-    if state.order is None:
-        state.order = open(os.path.join(state.data, f"order-{os.getpid()}.txt"), "a", encoding="utf-8")
-    state.order.write(name + "\n")
-    state.order.flush()
     sys.monitoring.restart_events()
 
 
@@ -161,7 +157,15 @@ import pytest
 import atc_lines_recorder as recorder
 
 
+def _write(name, text=""):
+    data = os.environ.get("ATC_LINES_DIR")
+    if data:
+        with open(os.path.join(data, f"{name}{os.getpid()}"), "w", encoding="utf-8") as sink:
+            sink.write(text)
+
+
 def pytest_configure(config):
+    _write("loaded-")
     recorder.mark_started()
 
 
@@ -174,6 +178,11 @@ def _name(item):
     return path + ("::" + rest[1] if len(rest) == 2 else "")
 
 
+def pytest_collection_finish(session):
+    if session.items:
+        _write("collected-", "".join(_name(item) + "\n" for item in session.items))
+
+
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_protocol(item, nextitem):
     recorder.enter(_name(item))
@@ -184,6 +193,9 @@ def pytest_runtest_protocol(item, nextitem):
 '''
 
 HOOK_FILES = {"sitecustomize.py": SITECUSTOMIZE, "atc_lines_recorder.py": RECORDER, f"{PLUGIN}.py": PLUGIN_SOURCE}
+# The recorder's version in a reused baseline's key: any change to its files makes an earlier record unusable.
+RECORDER_DIGEST = hashlib.sha256("\0".join(f"{name}\0{text}" for name, text in HOOK_FILES.items())
+                                 .encode("utf-8")).hexdigest()
 
 
 def real(path: str | os.PathLike[str]) -> str:
@@ -216,6 +228,13 @@ def prepare(place: Path, tree: Path, entries: Sequence[Mapping]) -> Prepared:
     (root / HOOK).mkdir()
     for name, source in HOOK_FILES.items():
         (root / HOOK / name).write_text(source, encoding="utf-8")
+    return pristine(place, tree, entries)
+
+
+def pristine(place: Path, tree: Path, entries: Sequence[Mapping]) -> Prepared:
+    """The recording of ``<scratch>/lines`` as it stands, with the pristine text of every edited ``.py`` file: a
+    reused baseline's (docs/TESTKIT.md § ``atc test ID --mutants FILE``)."""
+    root = place / DIRECTORY
     texts: dict[str, str | None] = {}
     for entry in entries:
         for edit in entry["edits"]:
@@ -226,6 +245,11 @@ def prepare(place: Path, tree: Path, entries: Sequence[Mapping]) -> Prepared:
                 except (OSError, UnicodeError):
                     texts[path] = None
     return Prepared(root, texts)
+
+
+def watched(prepared: Prepared) -> list[str]:
+    """The edited ``.py`` files the recorder watches, relative to the tree."""
+    return sorted(path for path, text in prepared.texts.items() if text is not None)
 
 
 def environment(prepared: Prepared, tree: Path, child: Mapping[str, str]) -> dict[str, str]:
@@ -247,7 +271,7 @@ def keep_hook(environ: Mapping[str, str], pythonpath: str) -> str:
 @dataclass
 class Record:
     """What a baseline recorded: per (file, line) the tests that ran it, the lines run outside a test, the files
-    seen at all and the tests in the order they ran."""
+    seen at all and the tests in collection order, the order a single-process baseline runs them."""
     tests: dict[tuple[str, int], set[str]] = field(default_factory=dict)
     outside: set[tuple[str, int]] = field(default_factory=set)
     files: set[str] = field(default_factory=set)
@@ -262,9 +286,16 @@ def _rows(text: str) -> Iterable[tuple[str, str, int]]:
             yield parts[0], parts[1], int(parts[2])
 
 
+def _pids(names: Iterable[str], prefix: str) -> set[str]:
+    return {name[len(prefix):] for name in names if name.startswith(prefix)}
+
+
 def read(data: Path) -> Record | None:
-    """The baseline's record, or ``None`` when the recorder did not start in its pytest process."""
-    if not any(path.name.startswith(STARTED) for path in data.iterdir()):
+    """The baseline's record, merged from every process's files; ``None`` when the recorder started in no pytest
+    process, or not in every pytest process that loaded the plugin (an xdist worker among them)."""
+    names = [path.name for path in data.iterdir()]
+    started = _pids(names, STARTED)
+    if not started or not _pids(names, LOADED) <= started:
         return None
     record = Record()
     for path in sorted(data.glob("*.tsv")):
@@ -274,12 +305,10 @@ def read(data: Path) -> Record | None:
                 record.tests.setdefault((file, line), set()).add(context)
             else:
                 record.outside.add((file, line))
-    seen: set[str] = set()
-    for path in sorted(data.glob(f"{ORDER}*.txt")):
-        for name in path.read_text(encoding="utf-8").splitlines():
-            if name and name not in seen:
-                seen.add(name)
-                record.order.append(name)
+    collected = sorted(data.glob(f"{COLLECTED}*"))
+    if collected:  # every xdist worker collects the same tests in the same order
+        record.order = list(dict.fromkeys(
+            name for name in collected[0].read_text(encoding="utf-8").splitlines() if name))
     return record
 
 

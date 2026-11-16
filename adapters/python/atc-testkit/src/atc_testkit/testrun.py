@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 from collections.abc import Mapping, MutableMapping, Sequence
 from dataclasses import dataclass
+import functools
 import glob
 import hashlib
 import json
@@ -403,26 +405,119 @@ def read_mutants(path: str | os.PathLike[str]) -> list[dict]:
 def mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None = None) -> int:
     """``<scratch> <sha> <worktree> <mutants.json> --python <py> --tests <path>...``.
 
-    The command holds one host worker token from before its baseline to its end (docs/TESTKIT.md § Host worker
-    budget).
+    The command holds the scratch's mutants lock from before the pristine check to its end, the baseline's host
+    worker tokens for the baseline and one token from then to its end (docs/TESTKIT.md § Host worker budget).
     """
     held: list[tuple[host_workers.Budget, host_workers.Grant]] = []
+    with contextlib.ExitStack() as stack:
+        try:
+            return _mutants(argv, environ, held, stack)
+        finally:
+            for budget, grant in held:
+                budget.release(grant)
+
+
+BASELINE_RECORD = "baseline.json"
+TOUCHED = "mutants-touched.txt"
+# The fields of a reused baseline's key (docs/TESTKIT.md § ``atc test ID --mutants FILE``); ``files`` need only
+# hold the files this run records.
+KEY_FIELDS = ("sha", "tests", "lines", "files", "recorder", "testkit", "python", "private")
+NOT_REUSED = "NOTE baseline: not reused:"
+
+
+@functools.cache
+def package_digest() -> str:
+    """The sha256 of every ``.py`` file of the running atc_testkit package, carriage returns dropped."""
+    base = Path(__file__).resolve().parent
+    digest = hashlib.sha256()
+    for path in sorted(base.rglob("*.py"), key=lambda path: path.relative_to(base).as_posix()):
+        digest.update(path.relative_to(base).as_posix().encode("utf-8") + b"\0")
+        digest.update(path.read_bytes().replace(b"\r", b"") + b"\0")
+    return digest.hexdigest()
+
+
+def _touched_before(place: Path) -> list[str]:
     try:
-        return _mutants(argv, environ, held)
-    finally:
-        for budget, grant in held:
-            budget.release(grant)
+        return [line for line in (place / TOUCHED).read_text(encoding="utf-8").splitlines() if line]
+    except FileNotFoundError:
+        return []
+
+
+def check_pristine(tree: Path, worktree: str, sha: str, paths: Sequence[str]) -> None:
+    """Refuse with ``TREE_NOT_PRISTINE`` (exit 9) when a file of ``paths`` differs from its object at ``sha``,
+    carriage returns ignored; a path ``sha`` lacks, or a directory, is left to the mutant that names it."""
+    for path in sorted(set(paths)):
+        if (tree / path).is_dir():
+            continue
+        try:
+            blob = _blob(worktree, sha, path)
+        except subprocess.CalledProcessError:
+            continue
+        try:
+            same = _digest((tree / path).read_bytes()) == _digest(blob)
+        except OSError:
+            same = False
+        if not same:
+            raise Refusal("TREE_NOT_PRISTINE", f"{path} differs from {sha[:7]}")
+
+
+def reusable(place: Path, key: Mapping[str, object], recording: lines.Prepared | None) -> dict | None:
+    """The record of the scratch's last passed baseline when it matches ``key``; ``None`` otherwise, after a
+    ``NOTE baseline: not reused:`` line naming the first mismatch when a record exists."""
+    try:
+        stored = json.loads((place / BASELINE_RECORD).read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError):
+        stored = None
+    if not isinstance(stored, dict):
+        print(f"{NOT_REUSED} {BASELINE_RECORD} cannot be read", flush=True)
+        return None
+    for name in KEY_FIELDS:
+        if name == "files":
+            have = stored.get(name)
+            matches = isinstance(have, list) and set(key[name]) <= set(have)
+        else:
+            matches = stored.get(name) == key[name]
+        if not matches:
+            print(f"{NOT_REUSED} {name}", flush=True)
+            return None
+    if stored.get("recorded"):
+        try:
+            found = recording is not None and lines.read(recording.data) is not None
+        except OSError:
+            found = False
+        if not found:
+            print(f"{NOT_REUSED} the line records are gone", flush=True)
+            return None
+    return stored
+
+
+def _keep_record(place: Path, record: Mapping[str, object]) -> None:
+    """Write ``baseline.json`` whole or not at all."""
+    staged = place / f"{BASELINE_RECORD}.tmp"
+    staged.write_text(json.dumps(record, indent=1), encoding="utf-8")
+    os.replace(staged, place / BASELINE_RECORD)
+
+
+def failed_tests(result: Result) -> list[str]:
+    """The node IDs of the ``FAILED`` and ``ERROR`` lines of a run."""
+    return [line.split(" ", 1)[1].split(" - ", 1)[0] for line in result.lines
+            if line.startswith(("FAILED ", "ERROR ")) and " " in line]
 
 
 def _mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None,
-             held: list[tuple[host_workers.Budget, host_workers.Grant]]) -> int:
+             held: list[tuple[host_workers.Budget, host_workers.Grant]], stack: contextlib.ExitStack) -> int:
     parser = argparse.ArgumentParser(
         prog="atc test --mutants", allow_abbrev=False,
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        description="Apply each mutant alone to <scratch>/tree and run the tests on it.",
+        description="Apply each mutant alone to <scratch>/tree and run the tests on it, after a baseline run in\n"
+                    "parallel on the host's workers, or reused from the scratch's last passed baseline of the\n"
+                    "same commit, tests, recorder and testkit.",
         epilog="Exit: 0 when every mutant ran and was killed and every file is restored; 1 for a survivor (named\n"
                "on the last line), a red baseline, an aborted run or a restore mismatch; 9 for a refusal before the\n"
-               "baseline, 8 for an import-guard refusal; 124 when the wait for a host worker passes 900 seconds,\n"
+               "baseline (MUTANTS_RUNNING while another run holds the scratch, TREE_NOT_PRISTINE for a file left\n"
+               "mutated), 8 for an import-guard refusal; 124 when the wait for host workers passes 900 seconds,\n"
                "130 when that wait is interrupted.\n"
                "See: docs/TESTKIT.md § Commands")
     parser.add_argument("scratch", metavar="NAME", help="scratch name; NAME/tree holds the export of SHA")
@@ -452,6 +547,7 @@ def _mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None,
     check_task(args.task)
     worktree = os.path.abspath(args.worktree)
     verify_commit(worktree, args.sha)
+    commit = (_git_lines(worktree, "rev-parse", f"{args.sha}^{{commit}}") or [args.sha])[0]
     python = resolve_python(args.python) if args.python else None
     entries = read_mutants(args.mutants)
     root, place = locate_scratch(args.scratch, environ)
@@ -461,23 +557,46 @@ def _mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None,
     private = private_desktop(environ)
     claim_scratch(root, place, tree, args.task)
     tree = place / "tree"
+    stack.enter_context(scratch.mutants_lock(place))
+    check_pristine(tree, worktree, commit,
+                   [*_touched_before(place), *(edit["path"] for entry in entries for edit in entry["edits"])])
     if private:
         print(EXCLUSION_NOTE, flush=True)
+    baseline_tests = list(dict.fromkeys([*args.tests, *(test for entry in entries for test in entry.get("tests", ()))]))
+    recording = lines.pristine(place, tree, entries) if args.lines else None
+    key = {"sha": commit, "tests": baseline_tests, "lines": bool(args.lines),
+           "files": lines.watched(recording) if recording is not None else [], "recorder": lines.RECORDER_DIGEST,
+           "testkit": package_digest(), "python": python, "private": private}
+    stored = reusable(place, key, recording)
     budget = stages.open_budget(f"atc test --mutants {args.scratch}", environ, root=Path(worktree),
                                 max_wait=MUTANT_SECONDS)
+    arguments: list[str] = baseline_tests
+    want = floor = 1
+    workers: stages.Workers | None = None
+    if stored is None:
+        (place / BASELINE_RECORD).unlink(missing_ok=True)
+        if recording is not None:
+            recording = lines.prepare(place, tree, entries)
+        isolate(tree, place, python, environ)
+        child = child_environment(tree, place, environ)
+        workers, arguments = _worker_request(baseline_tests, tree, environ,
+                                             xdist_installed(python, tree, child))
+        if workers is not None and workers.source == stages.SOURCE_DEFAULT and budget.active:
+            workers = workers.capped(_count(python, tree, place, child, private, arguments))
+        if workers is not None:
+            want, floor = max(1, workers.count), max(1, workers.floor())
     try:
-        held.append((budget, budget.acquire("mutants", 1, 1)))
+        grant = budget.acquire("mutants", want, floor)
     except KeyboardInterrupt:
         print(QUEUE_INTERRUPTED, flush=True)
         return INTERRUPTED_EXIT
+    held.append((budget, grant))
     if budget.active:
         environ[host_workers.HELD] = budget.held_id()
-    baseline_tests = list(dict.fromkeys([*args.tests, *(test for entry in entries for test in entry.get("tests", ()))]))
     reports = place / JUNIT
     attempts = 0
     clock = elapsed.Clock(args.task, args.sha, MUTANTS_COMMAND, stages.pool_directory(environ))
-
-    recording = lines.prepare(place, tree, entries) if args.lines else None
+    ran: dict[str, object] = {}
 
     def attempt(label: str, tests: Sequence[str], rule: str = KILL_FAILURE, stage: str = BASELINE_STAGE,
                 recorded: lines.Prepared | None = None) -> tuple[str, str]:
@@ -493,15 +612,35 @@ def _mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None,
                          environ, task=args.task, timeout=MUTANT_SECONDS, junit=junit, recording=recorded)
         verdict = _verdict(result, junit)
         word = verdict[0] if stage != BASELINE_STAGE else ("PASS" if verdict[0] == SURVIVED else "FAIL")
-        clock.stage(stage, time.monotonic() - started, _run_workers(tests), word)
+        ran.update(result=result, seconds=time.monotonic() - started)
+        clock.stage(stage, ran["seconds"], _run_workers(tests), word)
         return verdict
 
-    verdict, summary = attempt("baseline", baseline_tests, recorded=recording)
-    passed = verdict == SURVIVED
-    print(f"{'BASELINE-OK' if passed else 'BASELINE-RED'} {summary}", flush=True)
-    if not passed:
-        return 1
+    if stored is not None:
+        print(f"BASELINE-OK reused {stored.get('time', '')} ({stored.get('seconds', 0):.1f}s, workers "
+              f"{stored.get('workers', 1)}) {stored.get('summary', '')}", flush=True)
+    else:
+        arguments, workers_line = _granted_arguments(arguments, grant, want, workers)
+        if workers_line:
+            print(workers_line, flush=True)
+            budget.annotate(limit=workers_line)
+        if _run_workers(arguments) > 1 and not any(item.startswith("--dist") for item in arguments):
+            arguments = [*arguments, "--dist", "loadgroup"]
+        try:
+            verdict, summary = attempt("baseline", arguments, recorded=recording)
+        finally:
+            if grant.count > 1:
+                held[-1] = (budget, budget.shrink(grant, 1))
+        if verdict != SURVIVED:
+            failed = failed_tests(ran["result"])
+            print(f"BASELINE-RED {summary}" + (f"; failed: {', '.join(failed)}" if failed else ""), flush=True)
+            return 1
+        print(f"BASELINE-OK {summary}", flush=True)
     choices = _choices(entries, args.tests, tree, place, recording)
+    if stored is None:
+        _keep_record(place, {**key, "recorded": bool(choices),
+                             "time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "summary": summary,
+                             "seconds": round(float(ran["seconds"]), 1), "workers": _run_workers(arguments)})
 
     touched: set[str] = set()
     survivors: list[str] = []
@@ -518,6 +657,8 @@ def _mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None,
                     continue
                 if choice is not None and choice.note:
                     print(f"NOTE {mutant['label']}: {choice.note}; judged by its file-level tests", flush=True)
+                with (place / TOUCHED).open("a", encoding="utf-8") as listing:
+                    listing.write("".join(edit["path"] + "\n" for edit in mutant["edits"]))
                 _apply(tree, mutant, touched, originals)
                 rule = mutant.get("kill_rule", args.kill_rule)
                 if rule not in (KILL_FAILURE, KILL_ASSERTION):

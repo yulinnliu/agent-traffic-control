@@ -29,6 +29,8 @@ TESTKIT_HINTS = {
     "TREE_NOT_FOUND": "the task's worktree is gone; pass --sha to test a commit",
     "SCRATCH_TREE_EXISTS": "atc test ID --clean deletes the task's scratches",
     "SHA_NOT_FOUND": "name a commit of the task's repository",
+    "MUTANTS_RUNNING": "wait for that run to end; one --mutants run uses a scratch at a time",
+    "TREE_NOT_PRISTINE": "atc test ID --clean, then run again to export the tree anew",
     "VENV_MISSING": "atc test ID --clean, then run again to rebuild the scratch",
 }
 SELECTED_MUTANTS = "mutants-selected.json"
@@ -44,7 +46,8 @@ def build_parser() -> argparse.ArgumentParser:
         "    apply each mutant of FILE alone to an export of SHA (default: the branch tip) and run its tests:\n"
         "    the TESTs after --, else of the tests the tree's selector picks for its edited paths plus its own\n"
         "    tests those the baseline saw run its edited lines (NOT_COVERED when none did); a mutant's kill_rule\n"
-        "    is failure or assertion\n"
+        "    is failure or assertion. The baseline runs on the host's workers, and a later run on the same SHA,\n"
+        "    tests, recorder and testkit reuses it; one --mutants run uses a scratch at a time\n"
         "atc test ID --candidate [--sha SHA]\n"
         "    the integration verifier on the candidate atc integrate ID would build (default SHA: the branch tip)\n"
         "atc test ID --clean      delete the task's scratches\n"
@@ -183,10 +186,12 @@ def run_mutants(task: Task, args: argparse.Namespace, tests: list[str], environ:
     name, commit, directory = export(task, args.sha or task.tip(), environ)
     listing = Path(args.mutants).resolve()
     narrow = not tests
-    if narrow:
-        listing, tests = selected_mutants(entries, directory, locations.locate(environ).tmp / name, environ)
-    return testrun.mutants([name, commit, str(task.source()), str(listing), "--task", task.id,
-                            *(["--lines"] if narrow else []), "--tests", *tests], environ)
+    place = locations.locate(environ).tmp / name
+    with scratch.mutants_lock(place):
+        if narrow:
+            listing, tests = selected_mutants(entries, directory, place, environ)
+        return testrun.mutants([name, commit, str(task.source()), str(listing), "--task", task.id,
+                                *(["--lines"] if narrow else []), "--tests", *tests], environ)
 
 
 def clean(task_id: str, environ: dict[str, str]) -> int:
