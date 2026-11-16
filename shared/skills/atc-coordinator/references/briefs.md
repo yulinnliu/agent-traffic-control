@@ -65,4 +65,8 @@ Verdict: ~/.atc/reports/<task ID>-<full SHA>-review.md
   The reviewer, subagent or session, writes this file itself, its first
   line the verdict token; its reply's first line is the conclusion plus
   this path.
+Budget: mutant runs total at most 30 minutes; judge a survivor by reading
+  the code first; past the 30 minutes, or before any extra run to judge a
+  survivor, stop and report to the coordinator.
+  Fixed text, the Owner's.
 ```
