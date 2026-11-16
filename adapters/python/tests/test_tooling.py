@@ -239,27 +239,6 @@ def test_differing_claude_entrypoint_is_reported_and_never_modified(tmp_path: Pa
     assert (project / "CLAUDE.md").read_text(encoding="utf-8") == content
 
 
-def test_validator_rejects_forbidden_fallback_in_canonical_skill(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    root, _ = make_workspace(tmp_path)
-    write(root / "shared/skills/demo-skill/SKILL.md", "---\nname: demo-skill\ndescription: test skill\n---\n\nRead ~/Hami/shared/skills/demo-skill/SKILL.md.\n")
-    monkeypatch.setattr(validator, "ROOT", root)
-    validator.FAILURES.clear()
-    validator.load_canonical_skills()
-    assert any("hardcodes a '~/Hami'-style path" in failure for failure in validator.FAILURES)
-    validator.FAILURES.clear()
-
-
-@pytest.mark.parametrize("reference", ["$ATC_ROOT/shared/skills/x/SKILL.md", "${ATC_ROOT}/shared", "$env:ATC_ROOT\\adapters"])
-def test_canonical_skill_must_not_point_back_at_the_checkout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reference: str) -> None:
-    root, _ = make_workspace(tmp_path)
-    write(root / "shared/skills/demo-skill/SKILL.md", f"---\nname: demo-skill\ndescription: test skill\n---\n\nRead {reference}.\n")
-    monkeypatch.setattr(validator, "ROOT", root)
-    validator.FAILURES.clear()
-    validator.load_canonical_skills()
-    assert any("through an environment variable" in failure for failure in validator.FAILURES)
-    validator.FAILURES.clear()
-
-
 def test_tool_overlay_is_appended_only_to_its_tool(tmp_path: Path) -> None:
     root, project = make_workspace(tmp_path)
     write(root / "shared/skills/demo-skill/adapters/codex.md", "## Codex constants\n\n- owner: codex\n")
@@ -322,6 +301,7 @@ def test_validate_reports_a_bad_record_of_the_root(tmp_path: Path, monkeypatch: 
     out = capsys.readouterr().out
     assert "workspace root: task records: id-mismatch: ATC-0002.yaml" in out
     assert "workspace root: task records: schema-violation: ATC-0002.yaml" in out
+    assert "workspace root: AGENTS.md has no '## Integration verification' section" in out
 
 @pytest.mark.unit
 def test_pointer_line_must_be_current_and_before_the_first_section(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -577,17 +557,14 @@ def test_registered_project_must_name_an_existing_integration_verifier(tmp_path:
     assert check_registered_projects(root, monkeypatch) == []
 
 
-def test_hardcoded_governance_source_is_rejected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.integration
+def test_a_project_agents_md_naming_a_governance_repository_is_rejected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root, project = make_workspace(tmp_path)
     write(project / "AGENTS.md", f"# AGENTS.md\n\n{POINTER}\n\nacme/agent-traffic-control\n")
-    write(root / "AGENTS.md", "# AGENTS.md\n\nacme/agent-traffic-control\n")
-    write(root / "shared/templates/ATC_README.md", BOOTLOADER + "acme/agent-traffic-control\n")
     monkeypatch.setattr(validator, "ROOT", root)
     validator.FAILURES.clear()
     validator.check_project_pointer(project, "projects.demo")
-    validator.check_templates()
-    validator.check_no_hardcoded_governance_source()
-    assert sum("hard-codes a governance source" in failure for failure in validator.FAILURES) == 3
+    assert sum("hard-codes a governance source" in failure for failure in validator.FAILURES) == 1
     validator.FAILURES.clear()
 
 
@@ -1153,23 +1130,22 @@ def test_adapter_line_endings_only_skip_but_content_drift_updates(tmp_path: Path
     assert next(item.action for item in plan if item.path == target) == "update"
 
 
-def test_opt_in_dsh_sync_carries_the_contract_and_the_dsh_constants(tmp_path: Path) -> None:
+@pytest.mark.integration
+def test_opt_in_dsh_sync_carries_the_contract_and_the_dsh_overlay(tmp_path: Path) -> None:
     root, project = make_workspace(tmp_path)
-    workspace = Path(__file__).resolve().parents[3]
-    relative = ".dsh/skills/atc-worktree/SKILL.md"
-    expected = (workspace / relative).read_text(encoding="utf-8")
-    write(root / relative, expected)
-    shutil.copytree(workspace / "shared/skills/atc-worktree", root / "shared/skills/atc-worktree")
-    target = project / relative
-    write(target, expected + "\nstale drift\n")
+    add_contract_skill(root, tools=())
+    write(root / "shared/skills/bound-skill/adapters/dsh.md", "dsh constant.\n")
+    write(root / "shared/skills/bound-skill/adapters/claude.md", "Claude constant.\n")
+    sync_project.apply_plan(sync_project.root_adapter_plan(root), "sync")
+    target = project / ".dsh/skills/bound-skill/SKILL.md"
+    write(target, validator.render_adapter(root, "bound-skill", ".dsh") + "\nstale drift\n")
     assert sync_project.run("sync", [("demo", project)], root) == 0
     actual = target.read_text(encoding="utf-8")
-    assert actual == expected
-    for constant in ("Windows PowerShell 5.1", "--no-cache"):
-        assert constant in actual
-    assert "$ATC_ROOT" not in actual
+    assert actual == (root / ".dsh/skills/bound-skill/SKILL.md").read_text(encoding="utf-8")
+    assert "requires-contract: 1" in actual and actual.endswith("# Bound\n\ndsh constant.\n")
+    assert "Claude constant." not in actual
     for tool in (".agents", ".claude"):
-        assert (project / tool / "skills/atc-worktree/SKILL.md").is_file()
+        assert (project / tool / "skills/bound-skill/SKILL.md").is_file()
 
 
 @pytest.mark.parametrize("original", ["# Local skill\n", "---\n[invalid\n---\n", "---\n- local\n---\n"])

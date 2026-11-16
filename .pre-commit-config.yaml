@@ -40,7 +40,7 @@ repos:
         language: pygrep
         types: [text]
 
-      # A shipped file works as a self-contained copy in any repository (validate_workspace.py's text rules).
+      # A shipped file works as a self-contained copy in any repository (adapters/python/README.md § validate).
       - id: no-checkout-environment-variable
         name: shipped files do not locate this checkout through ATC_ROOT
         entry: '\$\{?ATC_ROOT\b|\$env:ATC_ROOT\b'

@@ -346,3 +346,12 @@ def test_a_tree_ended_outside_the_hold_leaves_no_lasting_survivor(tmp_path: Path
         assert children.lasting_survivors(tmp_path) == []
     finally:
         children.reap()
+
+
+@pytest.mark.integration
+def test_the_module_imports_with_the_standard_library_alone() -> None:
+    """`python -I -S` loads no site-packages, so the import succeeds only when every import is stdlib."""
+    source = str(Path(children.__file__).parents[1])
+    script = f"import sys; sys.path.insert(0, {source!r}); import atc_testkit.children; print('ok')"
+    run = subprocess.run([sys.executable, "-I", "-S", "-c", script], capture_output=True, text=True, timeout=60)
+    assert (run.returncode, run.stdout, run.stderr) == (0, "ok\n", "")

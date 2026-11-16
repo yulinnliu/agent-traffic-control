@@ -1,7 +1,6 @@
 """The root's data for the verifier skeleton; the skeleton's own rows are tested in ``test_testkit_verifier.py``."""
 from __future__ import annotations
 
-import json
 import os
 import stat
 import subprocess
@@ -268,14 +267,8 @@ def test_the_adapter_suite_carries_the_plugin_from_its_tree_with_no_base_directo
         pytestconfig: pytest.Config) -> None:
     plugin = pytestconfig.pluginmanager.get_plugin("atc_testkit.plugin")
     assert plugin is not None and verifier.inside(plugin.__file__, ADAPTER / "atc-testkit/src")
-    assert "basetemp" not in (ADAPTER / "tests/conftest.py").read_text(encoding="utf-8")
     assert "--basetemp" not in pytestconfig.getini("addopts")
     assert "-q" not in pytestconfig.getini("addopts"), "the stages pass -q; a second one hides pytest's count line"
-
-
-def test_the_verifier_imports_the_package_without_a_search_path_insert() -> None:
-    source = Path(iv.__file__).read_text(encoding="utf-8")
-    assert "sys.path" not in source and "from atc_testkit import" in source
 
 
 def test_the_root_report_digests_the_adapters_dependency_files_by_their_root_paths() -> None:
@@ -293,16 +286,3 @@ def test_the_selection_gives_the_stages_adapter_paths_the_full_suite_or_none(cap
     unnamed = "docs/" + "NO_TEST_NAMES" + "_THIS.md"  # built at run time, so no test file names it
     assert iv.selected_tests([unnamed], WORKSPACE) is None
     assert "no test file selected" in capsys.readouterr().out
-
-
-def test_agents_section_names_the_argv_file_that_starts_the_verifier() -> None:
-    agents = (WORKSPACE / "AGENTS.md").read_text(encoding="utf-8")
-    section = agents[agents.index("\n## Integration verification\n"):]
-    named = next(line for line in section.splitlines() if line.startswith("- Verifier argv file: "))
-    argv_file = WORKSPACE / named.removeprefix("- Verifier argv file: ")
-    argv = json.loads(argv_file.read_text(encoding="utf-8"))
-    assert argv == ["uv", "run", "--quiet", "--locked", "--project", iv.ADAPTER_DIR, "python",
-                    f"{iv.ADAPTER_DIR}/scripts/integration_verify.py"]
-    assert (WORKSPACE / argv[-1]).samefile(iv.__file__)
-    timeout = next(line for line in section.splitlines() if line.startswith("- Verifier timeout: "))
-    assert int(timeout.removeprefix("- Verifier timeout: ")) >= 300

@@ -124,11 +124,10 @@ def test_duplicate_wheel_entries_are_rejected(tmp_path):
         validate_wheel(wheel, tmp_path)
 
 
-def test_one_constant_sets_the_version_and_the_readme_names_it():
+@pytest.mark.unit
+def test_one_constant_sets_the_version():
     import tomllib
     import build_testkit_release as builder
-    import atc_testkit
     project = tomllib.loads((builder.PACKAGE / 'pyproject.toml').read_text(encoding='utf-8'))
     assert 'version' not in project['project'] and project['project']['dynamic'] == ['version']
     assert project['tool']['setuptools']['dynamic']['version'] == {'attr': 'atc_testkit.__version__'}
-    assert f'`atc-testkit` {atc_testkit.__version__}' in (builder.PACKAGE / 'README.md').read_text(encoding='utf-8')

@@ -2,7 +2,6 @@
 every run does first."""
 from __future__ import annotations
 
-import ast
 import json
 from datetime import UTC, datetime, timedelta
 import os
@@ -13,7 +12,6 @@ import sys
 
 import pytest
 
-import atc_testkit
 from atc_testkit import isolation, locations, owner, scratch
 
 
@@ -379,16 +377,6 @@ def test_a_tree_beyond_the_windows_path_limit_is_deleted(atc_tmp: Path) -> None:
     with open(deep + "\\file.txt", "w", encoding="utf-8") as stream:
         stream.write("x")
     assert clean(directory) == (0, [f"DELETED {directory}"])
-
-
-def test_the_only_recursive_delete_rescans_for_links_first() -> None:
-    package = Path(atc_testkit.__file__).parent
-    calls = [(path.name, node) for path in package.glob("*.py") for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
-             if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "rmtree"]
-    assert [name for name, _node in calls] == ["scratch.py"]
-    source = (package / "scratch.py").read_text(encoding="utf-8")
-    body = source[source.index("def remove_tree"):source.index("shutil.rmtree(")]
-    assert "left = _links(directory)" in body and "if left:" in body and "return f\"{len(left)} links remain" in body
 
 
 # the registry

@@ -85,9 +85,10 @@ selector `select_tests.py` and `build_testkit_release.py`.
 and canonical skills against their managed adapters. An adapter is a managed
 copy rendered from its canonical skill (`render_adapter`): the same name and
 description, the canonical body, the harness's overlay, and the ownership fields
-`managed-by` and `canonical`. A canonical skill depends on no environment
-variable naming this checkout, and no adapter is left behind when its
-canonical skill goes. It also checks the task records under `.atc/tasks/` and
+`managed-by` and `canonical`. No adapter is left behind when its canonical
+skill goes. The text rules on shipped files (no environment variable naming
+this checkout, no `~/Hami` path, no hard-coded governance repository) are
+pygrep hooks of the lint stage (`docs/TESTKIT.md` § Lint stage). It also checks the task records under `.atc/tasks/` and
 their `## Task records` declaration (`docs/TASKS.md`). By default it covers
 this checkout's own `.claude/skills/`, `.agents/skills/` and `.dsh/skills/`,
 the ones CI sees; `atc sync --check` validates each project of the machine-local

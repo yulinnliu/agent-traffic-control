@@ -57,10 +57,7 @@ MANAGED_BY = "agent-traffic-control"
 ROOT_TOPICS_NAME = "root"
 ROOT_WORKTREES = f"worktrees/{ROOT_TOPICS_NAME}"
 FORBIDDEN_FALLBACK = re.compile(r"~[\\/]hami(?:[\\/]|\b)", re.IGNORECASE)
-# A canonical skill or a shipped file must not locate this checkout through
-# the environment; that is what makes the managed copies self-contained.
 SUPPORTING_PATH = re.compile(r"[A-Za-z0-9._/-]+")
-WORKSPACE_ENV_REFERENCE = re.compile(r"\$(?:\{)?ATC_ROOT\b|\$env:ATC_ROOT\b")
 HARDCODED_GOVERNANCE_SOURCE = re.compile(r"[A-Za-z0-9_.-]+/agent-traffic-control\b")
 POINTER_MARKER = "<!-- atc:governance -->"
 GOVERNANCE_INDEX_RELATIVE = Path("shared") / "governance" / "INDEX.md"
@@ -424,15 +421,6 @@ def load_canonical_skills() -> dict[str, dict]:
             )
         if fm.get("invocation") not in (None, "user"):
             fail(f"{canonical_file}: invocation must be 'user' or omitted, got {fm.get('invocation')!r}")
-        shipped = [(body, canonical_file)] + [(p.read_text(encoding="utf-8"), p) for p in overlay_files(canonical_dir)]
-        for text, where in shipped:
-            if WORKSPACE_ENV_REFERENCE.search(text):
-                fail(
-                    f"{where}: locates this checkout through an environment variable — a "
-                    "canonical skill must work as a self-contained copy in any repository"
-                )
-            if FORBIDDEN_FALLBACK.search(text):
-                fail(f"{where}: hardcodes a '~/Hami'-style path")
         try:
             supporting_files(ROOT, name)
         except ValueError as exc:
@@ -657,16 +645,6 @@ def check_templates() -> None:
         fail(f"{readme}: missing the vendored governance index reference {VENDORED_INDEX_REFERENCE}")
     if "governance revision" not in text.lower() or ATC_LOCK.as_posix() not in text:
         fail(f"{readme}: missing the exact governance revision lock ({ATC_LOCK.as_posix()})")
-    if HARDCODED_GOVERNANCE_SOURCE.search(text):
-        fail(f"{readme}: hard-codes a governance source instead of referring to the locked one")
-    if FORBIDDEN_FALLBACK.search(text) or WORKSPACE_ENV_REFERENCE.search(text):
-        fail(f"{readme}: locates governance through a machine-local path or environment variable")
-
-
-def check_no_hardcoded_governance_source() -> None:
-    for path in (ROOT / "AGENTS.md", ROOT / "shared" / "governance" / "CORE.md"):
-        if path.is_file() and HARDCODED_GOVERNANCE_SOURCE.search(path.read_text(encoding="utf-8")):
-            fail(f"{path}: hard-codes a governance source instead of referring to governance_source")
 
 
 def check_project_pointer(project_path: Path, label: str, source: Path | None = None) -> None:
@@ -1001,17 +979,6 @@ def check_manifest() -> None:
              f"{'.'.join(version.groups())}")
 
 
-def check_shipped_files_are_self_contained() -> None:
-    """Governance travels into other repositories; it cannot point back here."""
-    try:
-        sources = [ROOT / source for source, _ in delivery(ROOT).files(mf.OWNED)]
-    except mf.ManifestError:
-        return  # check_manifest reports it
-    for path in sources:
-        if path.is_file() and WORKSPACE_ENV_REFERENCE.search(path.read_text(encoding="utf-8")):
-            fail(f"{path}: locates this checkout through an environment variable; it is vendored into repositories that have none")
-
-
 def workspace_env_problems(root: Path, environ: Mapping[str, str]) -> dict[str, str | None]:
     """Check the optional ``ATC_ROOT`` override against the workspace directory ``root``.
 
@@ -1162,12 +1129,11 @@ def main(argv: list[str] | None = None) -> int:
     root_prefix = None
     if not args.adapters_only:
         root_prefix = check_task_records(ROOT, label="workspace root")
+        check_project_integration_verifier(ROOT, label="workspace root")
         check_manifest()
         check_templates()
         check_root_atc()
-        check_no_hardcoded_governance_source()
         check_rules_referenced_in_agents_md()
-        check_shipped_files_are_self_contained()
         check_workspace_env()
 
     if project_checkouts:
