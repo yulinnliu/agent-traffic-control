@@ -31,3 +31,4 @@ decisions:
 - 'Owner 11-16: Vale installs through pre-commit language: golang (go install github.com/errata-ai/vale/v3/cmd/vale at a pinned version), Go pinned by language_version; no PyPI vale wrapper'
 - 'Owner 11-17: the blank line removed in VERIFICATION.md § Windows verification is authorized, whitespace only (「補授權空行刪除」)'
 - 'Owner 11-17: GIT_WORKFLOW.md § Integrate''s added wording (and the revision it ran on; expected main and reviewed SHA stay for audit) is accepted as written (「接受」)'
+- 'Owner 11-17: the mutant baseline keyed by input digest (design § 5.2, § 10 step 6) is done in this task (「這個 task 內補做」)'
