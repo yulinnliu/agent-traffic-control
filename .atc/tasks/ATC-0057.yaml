@@ -21,3 +21,4 @@ decisions:
 - No version bump.
 - 'Owner 11-16 「授權並併入」: governance GIT_WORKFLOW.md § Integrate may change; the integration ledger stops depending on the object graph (a ref per integrated candidate, Gerrit/GitHub style, or a recorded commit list; the design chooses by industry practice), existing lines are backfilled while their objects exist (a785fb1 is reflog-only until about 12-15), and atc push judges recorded commits from it.'
 - 'Owner 11-16 「另開 release task」: no version bump here; a separate release task ships this fix before main and v0.7.0 are pushed.'
+- 'Owner 11-16: authorized GIT_WORKFLOW.md § Task and authority wording (finding 5), folded into ATC-0057'
