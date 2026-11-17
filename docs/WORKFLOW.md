@@ -187,9 +187,12 @@ output follows also has a line as it starts, `0.0s START <what>`:
 ```text
 STEP fetch hami-quant 2.5s OK
 STEP ledger hami-quant 0.1s 3 commits in origin/main..main, 3 recorded
+STEP gate hami-quant 0.0s START 1a2b3c4d5e6f
+<the pre-push hook's output, as it runs>
+STEP gate hami-quant 362.4s OK
 STEP push hami-quant 0.0s START 1a2b3c4d5e6f -> origin/main
-<git push's output and the pre-push hook's, as they run>
-STEP push hami-quant 41.0s OK
+<git push's output, as it runs>
+STEP push hami-quant 4.1s OK
 STEP read-back hami-quant 2.4s origin/main 1a2b3c4d5e6f
 PUSHED hami-quant 1a2b3c4 (3 commits)
 ```
@@ -197,13 +200,20 @@ PUSHED hami-quant 1a2b3c4 (3 commits)
 - `fetch` is `git fetch origin`; `ledger` checks each commit of
   `origin/main..main` against the integration ledger, and its result is the
   count and how many are recorded, or the stop that ends the run.
-- `push` streams `git push` as it runs: the pre-push hook's output and git's
-  own, with git's transfer progress when stderr is a terminal. A failed push
-  is `PUSH_FAILED`. Its refusal names git's exit code, with its meaning
+- `gate` runs the repository's pre-push hook with `git hook run`, giving it
+  what `git push` would: the remote's name and push URL as arguments and
+  `refs/heads/main <sha> refs/heads/main <origin/main>` on stdin. It runs
+  before git connects to origin: git runs the hook only after connecting,
+  and a remote drops a connection left idle through a long gate. A failing
+  hook is `GATE_FAILED` (exit 2), its output streamed once above, and
+  nothing connects.
+- `push` streams `git push --no-verify` as it runs, with git's transfer
+  progress when stderr is a terminal; the hook has run in `gate`. If origin
+  moved in between, git refuses the push as not a fast-forward. A failed
+  push is `PUSH_FAILED`. Its refusal names git's exit code, with its meaning
   when git prints nothing of its own (141: the connection closed), and
   repeats only git's and the transport's own lines (`error:`, `fatal:`,
-  `remote:`, `To`, `ssh:`, `Connection to … closed`), not the hook's
-  output, which streamed once.
+  `remote:`, `To`, `ssh:`, `Connection to … closed`).
 - `read-back` is `git ls-remote origin refs/heads/main`, the remote's own
   answer that it names the pushed SHA (governance `GIT_WORKFLOW.md`
   § Publication boundary). The push itself moves the remote-tracking

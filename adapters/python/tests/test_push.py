@@ -218,12 +218,15 @@ def test_a_push_reports_each_step_with_its_time_on_stderr(ws: Path, capsys: pyte
     assert [re.sub(r" \d+\.\ds ", " Ts ", line) for line in steps] == [
         "STEP fetch root Ts OK",
         "STEP ledger root Ts 1 commit in origin/main..main, 1 recorded",
+        f"STEP gate root Ts START {integrated[:12]}",
+        "STEP gate root Ts OK",
         f"STEP push root Ts START {integrated[:12]} -> origin/main",
         "STEP push root Ts OK",
         f"STEP read-back root Ts origin/main {integrated[:12]}",
     ]
-    assert err.index("gate: PASS") == err.index(steps[2]) + 1
-    assert steps[2].startswith("STEP push root 0.0s START ")
+    # The hook ran once, in the gate step before git connected; the push skipped it.
+    assert err.index("gate: PASS") == err.index(steps[2]) + 1 and err.count("gate: PASS") == 1
+    assert steps[4].startswith("STEP push root 0.0s START ")
     assert captured.out.splitlines()[0] == f"PUSHED root {integrated[:7]} (1 commit)"
     assert "gate: PASS" not in captured.out and not any(line in captured.out for line in steps)
     # The push moved origin/main's remote-tracking ref itself: one fetch, before the push.
@@ -231,19 +234,44 @@ def test_a_push_reports_each_step_with_its_time_on_stderr(ws: Path, capsys: pyte
     assert run_git(ws, "rev-parse", "refs/remotes/origin/main") == integrated
 
 
-def test_a_failing_pre_push_hook_streams_once_and_refuses_with_gits_own_message(
-        ws: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_a_failing_pre_push_hook_streams_once_and_stops_before_git_connects(
+        ws: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
     integrated_main(ws)
     base = run_git(ws, "rev-parse", "origin/main")
     pre_push(ws, "i=1; while [ $i -le 30 ]; do echo \"gate: line $i\"; i=$((i+1)); done\nexit 1\n")
+    pushes = []
+    monkeypatch.setattr(push, "publish", lambda *args: pushes.append(args))
     assert push.main(["root"], root=ws) == 2
     captured = capsys.readouterr()
     assert "gate: line 1\n" in captured.err and "gate: line 30\n" in captured.err  # streamed whole
-    assert re.search(r"^STEP push root \d+\.\ds FAILED exit 1$", captured.err, re.M)
+    assert re.search(r"^STEP gate root \d+\.\ds FAILED exit 1$", captured.err, re.M)
+    refusal = captured.out[captured.out.index("GATE_FAILED"):]
+    assert "gate: line" not in refusal and "the pre-push hook exited 1" in refusal
+    assert pushes == [] and origin_main(ws) == base
+
+
+def test_the_gate_gives_the_hook_what_git_push_gives_it(ws: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """githooks(5) § pre-push: the remote's name and URL as arguments, one line per pushed ref on stdin."""
+    integrated = integrated_main(ws)
+    base = run_git(ws, "rev-parse", "origin/main")
+    url = run_git(ws, "remote", "get-url", "--push", "origin")
+    pre_push(ws, 'echo "args $1 $2"\nwhile read line; do echo "stdin $line"; done\n')
+    assert push.main(["root"], root=ws) == 0
+    err = capsys.readouterr().err.splitlines()
+    assert f"args origin {url}" in err
+    assert f"stdin refs/heads/main {integrated} refs/heads/main {base}" in err
+
+
+def test_a_failed_push_after_a_passed_gate_names_gits_own_message(
+        ws: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
+    integrated_main(ws)
+    monkeypatch.setattr(gp, "git_streamed", lambda repo, *args, out, extra_env=None: (
+        (0, "") if args[0] == "hook" else (141, "Connection to github.com closed by remote host.\n")))
+    assert push.main(["root"], root=ws) == 2
+    captured = capsys.readouterr()
+    assert re.search(r"^STEP push root \d+\.\ds FAILED exit 141$", captured.err, re.M)
     refusal = captured.out[captured.out.index("PUSH_FAILED"):]
-    assert "gate: line" not in refusal
-    assert "git push exited 1" in refusal and "error: failed to push some refs" in refusal
-    assert origin_main(ws) == base
+    assert "git push exited 141 (SIGPIPE" in refusal and "Connection to github.com closed" in refusal
 
 
 def test_a_push_failure_names_the_exit_and_gits_and_the_transports_lines_once() -> None:

@@ -3,8 +3,9 @@
 
 Each repository is fetched, every commit in origin/main..main must come from a recorded integration or
 sync, and the checked SHA is pushed to origin/main and confirmed on the remote. Bare `atc push` checks
-every repository; `--all` lists each one and asks y/N before pushing it. Each step's progress line, and the
-push's own output with its pre-push hook's, go to stderr as they happen.
+every repository; `--all` lists each one and asks y/N before pushing it. The pre-push hook runs before git
+connects to origin, and the push skips it. Each step's progress line, and the hook's and git's own output, go
+to stderr as they happen.
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ import json
 import os
 import re
 import sys
+import tempfile
 from pathlib import Path
 
 import cli_conventions
@@ -27,6 +29,7 @@ REFUSE_HINTS = {
     "MAIN_BEHIND_ORIGIN": "fast-forward local main to origin/main (git merge --ff-only origin/main), then run again",
     "MAIN_DIVERGED_FROM_ORIGIN": "the Owner decides how the local-only main commits reach origin",
     "UNRECORDED_COMMITS": "only integrated or synced commits are pushed; integrate the topic with atc integrate ID",
+    "GATE_FAILED": "fix what the pre-push hook's output names, integrate the fix, then run again",
     "PUSH_FAILED": "read git's message, fix the remote or access, then run again",
     "REMOTE_MISMATCH": "origin/main is not at the pushed SHA; fetch and check again",
 }
@@ -56,11 +59,11 @@ def build_parser() -> argparse.ArgumentParser:
         "agents run only --check.\n\n"
         "Progress goes to stderr, also under --json: one line as each step of a repository ends,\n"
         "'STEP <step> <name> <seconds>s <result>', for fetch, ledger (the commits in origin/main..main and\n"
-        "how many are recorded), push and read-back (the SHA origin/main names); push also has a line as it\n"
-        "starts, '0.0s START <sha> -> origin/main'. git push's own output and the pre-push hook's stream to\n"
-        "stderr as the push runs.",
+        "how many are recorded), gate (the pre-push hook, run before git connects to origin), push (git push\n"
+        "--no-verify, the hook having run) and read-back (the SHA origin/main names); gate and push also have\n"
+        "a line as they start. The hook's and git push's own output stream to stderr as they run.",
         exit="0 pushed, current or checked; 1 STOP (fetch failed, main behind or diverged, an unrecorded commit, "
-             "declined); 2 ERROR",
+             "declined); 2 ERROR (the gate or the push failed)",
         see="GIT_WORKFLOW.md § Publication boundary"))
     parser.add_argument("names", nargs="*", metavar="NAME", help="registered project names, or root")
     parser.add_argument("--all", action="store_true", help="every registered repository, each after a y/N question")
@@ -116,16 +119,36 @@ def assess(name: str, repo: Path, steps: cli_conventions.Steps) -> tuple[cli_con
     return None, listing
 
 
-def publish(repo: Path, sha: str, steps: cli_conventions.Steps,
-            hook_env: dict[str, str] | None = None) -> cli_conventions.Refusal | None:
-    """Push ``sha`` to origin/main, with git's and the pre-push hook's output streamed to stderr, and confirm the
-    remote now names it. The push itself moves origin/main's remote-tracking ref, so no fetch follows. ``hook_env``
-    reaches the pre-push hook: the testkit inputs its stage-time records carry (docs/TESTKIT.md § Stage times)."""
+def gate(repo: Path, sha: str, remote_sha: str | None, steps: cli_conventions.Steps,
+         hook_env: dict[str, str] | None = None) -> cli_conventions.Refusal | None:
+    """Run the repository's pre-push hook for pushing ``sha`` over ``remote_sha`` before git connects to the remote,
+    with the arguments and stdin git push gives it (githooks(5) § pre-push), its output streamed to stderr. Git runs
+    the hook after it has connected, and a remote that drops the idle connection while a long gate runs fails the
+    push (docs/design/ATC-0063.md § 8)."""
+    steps.begin("gate", gp.short(sha))
+    url = gp.git(repo, "remote", "get-url", "--push", gp.REMOTE).stdout.strip()
+    line = f"refs/heads/main {sha} refs/heads/main {remote_sha or '0' * len(sha)}\n"
+    with tempfile.TemporaryDirectory(prefix="atc-push-") as directory:
+        stdin = Path(directory) / "pre-push.stdin"
+        stdin.write_text(line, encoding="utf-8", newline="\n")
+        code, _ = gp.git_streamed(repo, "hook", "run", "--ignore-missing", f"--to-stdin={stdin}", "pre-push", "--",
+                                  gp.REMOTE, url, out=sys.stderr, extra_env=hook_env)
+    steps.done("gate", "OK" if code == 0 else f"FAILED exit {code}")
+    if code != 0:
+        return cli_conventions.Refusal("GATE_FAILED", f"the pre-push hook exited {code}; its output is above",
+                                       REFUSE_HINTS["GATE_FAILED"], cli_conventions.ERROR)
+    return None
+
+
+def publish(repo: Path, sha: str, steps: cli_conventions.Steps) -> cli_conventions.Refusal | None:
+    """Push ``sha`` to origin/main, with git's output streamed to stderr, and confirm the remote now names it. The
+    pre-push hook already ran in ``gate``, so the push skips it. The push itself moves origin/main's remote-tracking
+    ref, so no fetch follows."""
     steps.begin("push", f"{gp.short(sha)} -> origin/main")
     # Git shows its transfer progress only on a terminal; its stderr here is a pipe.
     progress = ["--progress"] if sys.stderr.isatty() else []
-    code, output = gp.git_streamed(repo, "push", *progress, gp.REMOTE, f"{sha}:refs/heads/main", out=sys.stderr,
-                                   extra_env=hook_env)
+    code, output = gp.git_streamed(repo, "push", "--no-verify", *progress, gp.REMOTE, f"{sha}:refs/heads/main",
+                                   out=sys.stderr)
     steps.done("push", "OK" if code == 0 else f"FAILED exit {code}")
     if code != 0:
         return cli_conventions.Refusal("PUSH_FAILED", push_failure(code, output), REFUSE_HINTS["PUSH_FAILED"],
@@ -181,7 +204,9 @@ def main(argv: list[str] | None = None, root: Path = ROOT, answer=input) -> int:
                                                       f"atc push {name}")
             if refusal is None:
                 tasks = [task for entry in commits for task in entry.get("tasks") or ()]
-                refusal = publish(repo, listing["main_tip"], steps, cli_conventions.testkit_inputs(name, tasks))
+                refusal = (gate(repo, listing["main_tip"], listing["origin_main_tip"], steps,
+                                cli_conventions.testkit_inputs(name, tasks))
+                           or publish(repo, listing["main_tip"], steps))
             row["verdict"] = "PUSHED" if refusal is None else "REFUSED"
         else:
             row["verdict"] = "REFUSED"
