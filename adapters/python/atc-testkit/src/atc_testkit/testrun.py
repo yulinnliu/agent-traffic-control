@@ -1205,6 +1205,14 @@ class RunSource:
         """A worktree's state after the run; an export stays its commit while the scratch is held."""
         return worktree_unclean(self.top) if self.worktree else None
 
+    def classifier_top(self) -> Path:
+        """Where the verifier classifies the commit's input set: the worktree's top, or for an export, which is no
+        Git checkout, the top of the repository that holds the commit."""
+        if self.worktree:
+            return self.top
+        top = _git_lines(self.repository, "rev-parse", "--show-toplevel")
+        return Path(top[0]) if top else self.repository
+
 
 def worktree_unclean(tree: Path) -> str | None:
     """Why a Git working tree is not its ``HEAD``: its first changed or untracked path; ``None`` when it is."""
@@ -1227,7 +1235,7 @@ def record_inputs(source: RunSource, argv_file: Path, outcomes: Path, private: b
         argv = json.loads(argv_file.read_text(encoding="utf-8-sig"))
     except (OSError, ValueError):
         return f"{INPUTS_NOT_RECORDED} the verifier argv file {argv_file} cannot be read"
-    classified = inputs.classify(argv, source.top, env, source.commit)
+    classified = inputs.classify(argv, source.classifier_top(), env, source.commit)
     if classified is None:
         return f"{INPUTS_NOT_RECORDED} the verifier did not classify {source.commit[:12]}'s input set"
     excluded, dependency_files = classified

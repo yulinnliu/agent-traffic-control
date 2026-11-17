@@ -564,7 +564,8 @@ non-Python toolchain runs its stages whole.
 pytest arguments and the tree equals its commit before and after the run:
 the worktree's `HEAD` with a clean status, or an export still equal to its
 commit. It asks the project's verifier for the commit's input set by running
-the verifier argv file with `ATC_INPUTS_OF=<commit>`, which prints
+the verifier argv file with `ATC_INPUTS_OF=<commit>` in the repository that
+holds the commit, the worktree, since an export is no Git checkout; it prints
 `{"commit", "excluded", "dependency_files"}` and runs no check, and records
 each file of the run whose every test passed under the expression the run
 used. It prints `EVIDENCE <n> test files recorded for <sha12> (inputs

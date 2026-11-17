@@ -223,6 +223,11 @@ def test_the_mutant_baseline_takes_the_verifier_of_the_repository_that_holds_the
     [(argv, _entries)] = calls["mutants"]
     assert Path(argv[argv.index("--verifier-argv") + 1]) == workspace.worktree / "verify.json"
     assert argv.index("--verifier-argv") < argv.index("--tests")
+    # a run of an export of the commit records its input evidence with the same classifier
+    tip = git(workspace.worktree, "rev-parse", "HEAD")
+    assert workspace.run(TASK, "--sha", tip) == 0
+    run_argv = calls["run"][-1]
+    assert Path(run_argv[run_argv.index("--verifier-argv") + 1]) == workspace.worktree / "verify.json"
 
 
 def test_a_candidate_is_verified_at_the_branch_tip_or_the_given_sha(workspace: Workspace,

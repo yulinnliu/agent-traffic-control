@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from atc_testkit import evidence, inputs, stages, testrun, verifier
+from atc_testkit import evidence, inputs, scratch, stages, testrun, verifier
 from atc_testkit.project import Project
 
 ENTRIES = [("100644", "a" * 40, "src/x.py"), ("100644", "b" * 40, "docs/a.md")]
@@ -205,6 +205,32 @@ def test_a_run_records_each_passed_file_only_when_the_tree_is_its_commit(reposit
     dirty = testrun.RunSource.of(repository, tmp_path, None)
     assert testrun.record_inputs(dirty, argv_file, outcomes, True, {}).startswith(
         f"{testrun.INPUTS_NOT_RECORDED} the tree is not {sha[:12]} (changed: M tests/test_a.py)")
+
+
+@pytest.mark.integration
+def test_an_export_run_is_classified_in_the_repository_that_holds_its_commit(repository: Path, tmp_path: Path) -> None:
+    """An export is no Git checkout, so a verifier that reads the commit from Git classifies it from the source."""
+    argv_file = tmp_path / "verify.json"
+    script = ("import json, os, subprocess; commit = os.environ['ATC_INPUTS_OF']; "
+              "subprocess.run(['git', 'cat-file', '-e', commit], check=True); "
+              "print(json.dumps({'commit': commit, 'excluded': ['docs/notes.md'], 'dependency_files': []}))")
+    argv_file.write_text(json.dumps([sys.executable, "-c", script]), encoding="utf-8")
+    sha = git(repository, "rev-parse", "HEAD")
+    place = tmp_path / "scratch"
+    export = place / "tree"
+    (export / "tests").mkdir(parents=True)
+    (export / "tests/test_a.py").write_bytes((repository / "tests/test_a.py").read_bytes())
+    outcomes = tmp_path / "outcomes.json"
+    outcomes.write_text(json.dumps({"rootdir": str(export), "files": {"tests/test_a.py": "passed"}}), encoding="utf-8")
+    row = scratch.Row("p", str(place), str(export), "2026-11-17T00:00:00Z", "ATC-0001", str(repository), sha)
+    source = testrun.RunSource.of(export, place, row)
+    assert source is not None and not source.worktree and source.classifier_top() == Path(
+        git(repository, "rev-parse", "--show-toplevel"))
+    line = testrun.record_inputs(source, argv_file, outcomes, False, environment())
+    assert line.startswith(f"EVIDENCE 1 test files recorded for {sha[:12]} (inputs "), line
+    (record,) = [json.loads(path.read_text(encoding="utf-8"))
+                 for path in inputs.store(inputs.common_directory(repository)).glob("*.json")]
+    assert record["ran_on"] == sha and record["identity"]["file"] == "tests/test_a.py"
 
 
 @pytest.mark.integration
