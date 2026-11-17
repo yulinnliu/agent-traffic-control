@@ -14,7 +14,6 @@ import contextlib
 import json
 import os
 import sys
-import time
 from pathlib import Path
 
 import cli_conventions
@@ -74,32 +73,11 @@ def repositories(root: Path, names: list[str]) -> list[tuple[str, Path]]:
     return [(name, Path(known[name].repo)) for name in (names or known)]
 
 
-class Steps:
-    """The progress of one repository on stderr: a line `STEP <step> <name> <seconds>s <result>` as a step
-    starts (`0.0s START`, for a step whose own output follows) or ends, timed from its `begin`. Stderr keeps
-    stdout for the verdict lines and the `--json` object."""
-
-    TOKEN = "STEP"
-
-    def __init__(self, name: str) -> None:
-        self.name = name
-        self.started = time.monotonic()
-
-    def begin(self, step: str | None = None, what: str = "") -> None:
-        self.started = time.monotonic()
-        if step is not None:
-            self.done(step, f"START {what}".rstrip())
-
-    def done(self, step: str, result: str) -> None:
-        print(f"{self.TOKEN} {step} {self.name} {time.monotonic() - self.started:.1f}s {result}", file=sys.stderr,
-              flush=True)
-
-
 def count_commits(n: int) -> str:
     return f"{n} commit" if n == 1 else f"{n} commits"
 
 
-def assess(name: str, repo: Path, steps: Steps) -> tuple[cli_conventions.Refusal | None, dict | None]:
+def assess(name: str, repo: Path, steps: cli_conventions.Steps) -> tuple[cli_conventions.Refusal | None, dict | None]:
     """Fetch and list origin/main..main; a refusal when main cannot be pushed as it stands."""
     steps.begin()
     error = gp.fetch_origin(repo)
@@ -125,13 +103,16 @@ def assess(name: str, repo: Path, steps: Steps) -> tuple[cli_conventions.Refusal
     return None, listing
 
 
-def publish(repo: Path, sha: str, steps: Steps) -> cli_conventions.Refusal | None:
+def publish(repo: Path, sha: str, steps: cli_conventions.Steps,
+            hook_env: dict[str, str] | None = None) -> cli_conventions.Refusal | None:
     """Push ``sha`` to origin/main, with git's and the pre-push hook's output streamed to stderr, and confirm the
-    remote now names it. The push itself moves origin/main's remote-tracking ref, so no fetch follows."""
+    remote now names it. The push itself moves origin/main's remote-tracking ref, so no fetch follows. ``hook_env``
+    reaches the pre-push hook: the testkit inputs its stage-time records carry (docs/TESTKIT.md § Stage times)."""
     steps.begin("push", f"{gp.short(sha)} -> origin/main")
     # Git shows its transfer progress only on a terminal; its stderr here is a pipe.
     progress = ["--progress"] if sys.stderr.isatty() else []
-    code, output = gp.git_streamed(repo, "push", *progress, gp.REMOTE, f"{sha}:refs/heads/main", out=sys.stderr)
+    code, output = gp.git_streamed(repo, "push", *progress, gp.REMOTE, f"{sha}:refs/heads/main", out=sys.stderr,
+                                   extra_env=hook_env)
     steps.done("push", "OK" if code == 0 else f"FAILED exit {code}")
     if code != 0:
         tail = [line.rstrip() for line in output.splitlines() if line.strip()][-PUSH_FAILED_LINES:]
@@ -160,7 +141,7 @@ def main(argv: list[str] | None = None, root: Path = ROOT, answer=input) -> int:
     code = cli_conventions.OK
     rows = []
     for name, repo in targets:
-        steps = Steps(name)
+        steps = cli_conventions.Steps(name)
         try:
             refusal, listing = assess(name, repo, steps)
         except gp.GitError as exc:
@@ -187,7 +168,8 @@ def main(argv: list[str] | None = None, root: Path = ROOT, answer=input) -> int:
                     refusal = cli_conventions.Refusal("DECLINED", f"{name} was not pushed",
                                                       f"atc push {name}")
             if refusal is None:
-                refusal = publish(repo, listing["main_tip"], steps)
+                tasks = [task for entry in commits for task in entry.get("tasks") or ()]
+                refusal = publish(repo, listing["main_tip"], steps, cli_conventions.testkit_inputs(name, tasks))
             row["verdict"] = "PUSHED" if refusal is None else "REFUSED"
         else:
             row["verdict"] = "REFUSED"

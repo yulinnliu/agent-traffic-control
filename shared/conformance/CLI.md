@@ -90,6 +90,7 @@ option takes is named by its type in capitals:
 | `SHA` | a commit: full, or a unique prefix where the help says so |
 | `DIR`, `FILE`, `PATH` | a directory, a file, either or an interpreter |
 | `SECONDS` | a duration |
+| `DATE` | a UTC date or time, `YYYY-MM-DD` or longer |
 | `N` | a positive integer |
 | `TEXT` | free text |
 | `URL`, `OWNER/REPO`, `REF`, `TAG`, `KEY`, `ITEM`, `ARG` | as named |
@@ -139,9 +140,9 @@ stdout:
   `items`).
 
 Human lines stay on stderr, and `--json` never changes the exit code. A usage
-error is always text. `atc test` takes no `--json`: it leaves its evidence
-record and log for machines, and `--private` and `--mutants` pass their output
-through.
+error is always text. `atc test` takes `--json` only with `--list`,
+`--candidate` and `--timings`; otherwise it leaves its evidence record and log
+for machines, and `--private` and `--mutants` pass their output through.
 
 ## Flags and names
 

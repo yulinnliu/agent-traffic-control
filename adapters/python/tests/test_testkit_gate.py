@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from atc_testkit import evidence, gate, inputs, selection, stages
+from atc_testkit import elapsed, evidence, gate, inputs, selection, stages
 from atc_testkit.project import Project, StaticCheck
 
 ZERO = "0" * 40
@@ -428,3 +428,46 @@ def test_a_branch_push_to_a_published_commit_keeps_the_checkout_rule(repo: Path)
     publish(repo, sha)
     git(repo, "checkout", "-q", base)
     assert gate.main(project(repo), ["--run"], [push_line(repo, base, sha)], Recorder()) == 2
+
+
+def gate_records(sha: str) -> list[dict]:
+    """The stage-time records of the gate's run of ``sha`` (docs/TESTKIT.md § Stage times)."""
+    return [r for r in elapsed.records(stages.pool_directory(os.environ)) if r["sha"] == sha
+            and r["command"] == gate.CLOCK_COMMAND]
+
+
+@pytest.mark.integration
+def test_the_gate_records_its_checks_and_each_stage_with_the_task_atc_push_names(
+        repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(elapsed.TASK_VARIABLE, "ATC-0001,ATC-0002")
+    monkeypatch.setenv(elapsed.PROJECT_VARIABLE, "demo")
+    base = git(repo, "rev-parse", "HEAD")
+    sha = commit(repo, "a.py")
+    checks = (StaticCheck("lint", "LINT_FAILED", ("lint-tool",)),)
+    assert gate.main(project(repo, checks=checks), ["--run"], [push_line(repo, base, sha)], Recorder()) == 0
+    added = gate_records(sha)
+    assert [(r["task"], r["stage"], r["result"]) for r in added] == [
+        ("ATC-0001,ATC-0002", "checks", "PASS"), ("ATC-0001,ATC-0002", "parallel", "PASS"),
+        ("ATC-0001,ATC-0002", "serial", "PASS"), ("ATC-0001,ATC-0002", "interactive", "PASS")]
+    assert {(r["project"], r["selection"], r["selection_reason"]) for r in added} == {
+        ("demo", elapsed.RELATED, "1 changed paths")}
+
+
+@pytest.mark.integration
+def test_a_failing_check_is_recorded_and_runs_no_stage(repo: Path) -> None:
+    base = git(repo, "rev-parse", "HEAD")
+    sha = commit(repo, "a.py")
+    checks = (StaticCheck("lint", "LINT_FAILED", ("lint-tool",)), StaticCheck("doc", "DOC_FAILED", ("doc-tool",)))
+    assert gate.main(project(repo, checks=checks), ["--run"], [push_line(repo, base, sha)],
+                     Recorder(**{"lint-tool": 4})) == 4
+    assert [(r["stage"], r["result"]) for r in gate_records(sha)] == [("checks", "FAIL")]
+
+
+@pytest.mark.integration
+def test_a_push_its_evidence_covers_is_recorded_as_reused(repo: Path) -> None:
+    base = git(repo, "rev-parse", "HEAD")
+    sha = commit(repo, "a.py")
+    chosen = project(repo)
+    write_record(repo, sha, chosen.stage_list())
+    assert gate.main(chosen, ["--run"], [push_line(repo, base, sha)], Recorder()) == 0
+    assert [(r["stage"], r["result"], r["seconds"]) for r in gate_records(sha)] == [("reused", "REUSED", 0.0)]

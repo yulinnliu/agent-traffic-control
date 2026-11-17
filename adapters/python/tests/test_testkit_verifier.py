@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+import atc_testkit
 import git_integrate as gi
 from atc_testkit import elapsed, lint, selection, stages, verifier
 from atc_testkit.project import Project, StaticCheck
@@ -241,7 +242,8 @@ def test_the_checks_and_each_stage_print_and_record_their_elapsed_time(
     sha = candidate.advance()
     pool = stages.pool_directory({})
     before = len(elapsed.records(pool))
-    assert verifier.main(consumer(candidate.root), candidate.env(ATC_TASK="ATC-0009"), Recorder()) == 0
+    assert verifier.main(consumer(candidate.root), candidate.env(ATC_TASK="ATC-0009", ATC_PROJECT="demo",
+                                                                 ATC_VERSION="9.9.9"), Recorder()) == 0
     out = capsys.readouterr().out
     shown = [line for line in out.splitlines() if line.startswith("ELAPSED ")]
     granted = next(int(line.split()[1]) for line in out.splitlines() if line.startswith("workers: "))
@@ -250,6 +252,11 @@ def test_the_checks_and_each_stage_print_and_record_their_elapsed_time(
     added = elapsed.records(pool)[before:]
     assert [(r["task"], r["sha"], r["command"], r["stage"]) for r in added] == [
         ("ATC-0009", sha, "verify", stage) for stage in ("checks", "parallel", "serial", "interactive")]
+    # docs/TESTKIT.md § Stage times: the run's project, versions and selection ride on every record.
+    assert {(r["project"], r["atc_version"], r["testkit_version"], r["selection"]) for r in added} == {
+        ("demo", "9.9.9", atc_testkit.__version__, elapsed.FULL)}
+    assert all(r["selection_reason"].endswith(" changed paths") for r in added)
+    assert (added[0]["passed"], added[0]["failed"], added[0]["skipped"]) == (None, None, None)
     assert granted > 1 and [r["workers"] for r in added] == [1, granted, 1, 1] and f"workers {granted} " in shown[1]
 
 
@@ -731,10 +738,12 @@ def test_atc_verify_runs_the_verifier_on_the_candidate_without_the_slot_or_a_ref
     captured = capsys.readouterr()
     assert code == 0, captured
     lines = captured.out.splitlines()
-    last = lines[-1]
-    assert last.startswith("PASS candidate ") and " FF log " in last
-    shown = [line.split()[1] for line in lines[:-1] if line.startswith("ELAPSED ")]
-    assert shown == ["checks", "parallel", "serial", "interactive"], captured.out
+    assert len(lines) == 1 and lines[0].startswith("PASS candidate ") and " FF log " in lines[0], captured.out
+    # The verifier's ELAPSED lines appear once, on stderr as it prints them (docs/TESTKIT.md § Stage times).
+    echoed = [line.removeprefix(gi.ECHO_PREFIX) for line in captured.err.splitlines()
+              if line.startswith(gi.ECHO_PREFIX)]
+    shown = [line.split()[1] for line in echoed if line.startswith("ELAPSED ")]
+    assert shown == ["checks", "parallel", "serial", "interactive"], captured.err
     tip = (integration_repo / ".git/atc-test-tip").read_text(encoding="utf-8")
     added = elapsed.records(pool)[recorded:]
     assert [(r["task"], r["sha"], r["command"], r["stage"]) for r in added] == [
@@ -742,6 +751,12 @@ def test_atc_verify_runs_the_verifier_on_the_candidate_without_the_slot_or_a_ref
     assert git(integration_repo, "rev-parse", "main") == before and git(integration_repo, "for-each-ref") == refs
     assert git(integration_repo, "worktree", "list", "--porcelain").count("worktree ") == 1
     assert [path.suffix for path in (atc_tmp / "candidates").iterdir()] == [".log"]
+
+
+def parallel_result(capsys: pytest.CaptureFixture[str]) -> str:
+    """The result of the parallel stage's ELAPSED line the candidate echoed on stderr: REUSED when records covered it."""
+    return next(line.split()[-1] for line in capsys.readouterr().err.splitlines()
+                if line.startswith(f"{gi.ECHO_PREFIX}ELAPSED parallel "))
 
 
 def commit_on_topic(root: Path, files: dict[str, str]) -> str:
@@ -774,19 +789,18 @@ def test_a_candidate_reuses_each_test_file_a_run_on_the_same_inputs_passed(
         "verify.py": script, "notes.md": "notes\n", "tests/conftest.py": 'pytest_plugins = ("atc_testkit.plugin",)\n',
         "tests/test_a.py": "import pytest\n\n\n@pytest.mark.unit\ndef test_a(tmp_path):\n    assert tmp_path.is_dir()\n"})
     assert verify(integration_repo) == 0
-    assert "ELAPSED parallel" in capsys.readouterr().out
+    assert parallel_result(capsys) == "PASS"
     recorded = input_records(integration_repo)
     assert [(r["identity"]["file"], r["identity"]["marker"], r["ran_on"]) for r in recorded] == [
         ("tests/test_a.py", stages.PARALLEL.marker, first)]
 
     commit_on_topic(integration_repo, {"notes.md": "notes 2\n"})
     assert verify(integration_repo) == 0
-    out = capsys.readouterr().out
-    assert "ELAPSED parallel" not in out and len(input_records(integration_repo)) == 1
+    assert parallel_result(capsys) == "REUSED" and len(input_records(integration_repo)) == 1
 
     changed = commit_on_topic(integration_repo, {"src/fixture_prod/tool.py": "x = 2\n"})
     assert verify(integration_repo) == 0
-    assert "ELAPSED parallel" in capsys.readouterr().out
+    assert parallel_result(capsys) == "PASS"
     assert sorted(r["ran_on"] for r in input_records(integration_repo)) == sorted([first, changed])
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -88,8 +89,9 @@ def test_integrate_reuses_a_passing_verify_of_the_same_candidate(
     assert run_count(runs) == 1 and main_tip(repo) == tip
     assert (data["verification"], data["verification_reuse"]) == ("PASS", "REUSED")
     assert data["verification_reused"] == out["candidate_record"]
-    assert f"verify: candidate {tip} REUSED {out['candidate_record']} (verified {record['verified_at']})" in \
-        captured.err.splitlines()
+    assert re.fullmatch(rf"STEP verify repo \d+\.\ds REUSED {re.escape(out['candidate_record'])} "
+                        rf"\(verified {re.escape(record['verified_at'])}\)",
+                        next(line for line in captured.err.splitlines() if line.startswith("STEP verify ")))
     evidence = json.loads(Path(data["evidence"]).read_text(encoding="utf-8"))
     note = {"record": out["candidate_record"], "candidate_sha": tip, "verified_at": record["verified_at"],
             "reused_from": {"ran_on": tip, "inputs": record["report"]["inputs"]["digest"]}}
@@ -167,7 +169,7 @@ def test_a_mismatched_record_runs_the_verifier(repo: Path, counted: tuple[Path, 
     assert integrate(repo, "topic", tip, "--json") == 0
     captured = capsys.readouterr()
     assert run_count(runs) == 2 and json.loads(captured.out)["verification_reuse"] == reason
-    assert f"verify: candidate {tip} RUN (evidence: {reason}) timeout 300s (default)" in captured.err.splitlines()
+    assert f"STEP verify repo 0.0s START {tip} RUN (evidence: {reason}) timeout 300s (default) log " in captured.err
 
 
 def test_a_reworded_tip_reuses_the_record_of_the_same_tree(

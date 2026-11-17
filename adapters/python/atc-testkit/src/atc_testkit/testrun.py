@@ -727,7 +727,8 @@ def _mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None,
         environ[host_workers.HELD] = budget.held_id()
     reports = place / JUNIT
     attempts = 0
-    clock = elapsed.Clock(args.task, args.sha, MUTANTS_COMMAND, stages.pool_directory(environ))
+    clock = elapsed.Clock.create(args.task, args.sha, MUTANTS_COMMAND, stages.pool_directory(environ), environ, tree)
+    clock.select(elapsed.EXPLICIT, f"{len(baseline_tests)} tests")
     ran: dict[str, object] = {}
 
     def attempt(label: str, tests: Sequence[str], rule: str = KILL_FAILURE, stage: str = BASELINE_STAGE,
@@ -746,7 +747,7 @@ def _mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None,
         verdict = _verdict(result, junit)
         word = verdict[0] if stage != BASELINE_STAGE else ("PASS" if verdict[0] == SURVIVED else "FAIL")
         ran.update(result=result, seconds=time.monotonic() - started)
-        clock.stage(stage, ran["seconds"], _run_workers([*options, *tests]), word)
+        clock.stage(stage, ran["seconds"], _run_workers([*options, *tests]), word, summary=verdict[1])
         return verdict
 
     arguments, workers_line = _granted_arguments(arguments, grant, want, workers)
@@ -1100,6 +1101,12 @@ def run(argv: Sequence[str], environ: MutableMapping[str, str] | None = None) ->
     python = resolve_python(args.python) if args.python else toolchains.for_tree(tree).interpreter(tree)
     claim_scratch(root, place, tree, args.task)
     paths = changed_paths(tree, args.related, row) if args.related else None
+    if paths is not None:
+        selected = (elapsed.RELATED, f"{len(paths)} changed paths")
+    elif pytest_arguments:
+        selected = (elapsed.EXPLICIT, "pytest arguments")
+    else:
+        selected = (elapsed.FULL, "--all" if args.label == "all" else "no related selection")
     environ["PYTHONUNBUFFERED"] = "1"
     private = isolate(tree, place, python, environ)
     child = child_environment(tree, place, environ)
@@ -1167,8 +1174,10 @@ def run(argv: Sequence[str], environ: MutableMapping[str, str] | None = None) ->
         print(record_inputs(source, Path(args.verifier_argv), outcomes, private,
                             {key: value for key, value in child.items() if key != inputs.OUTCOMES}), flush=True)
     if result is not None:
-        clock = elapsed.Clock(args.task, tree_commit(tree, row), RUN_COMMAND, stages.pool_directory(environ))
-        clock.stage(label, seconds, _run_workers(pytest_arguments), line.split(" ", 1)[0].rstrip(";"))
+        clock = elapsed.Clock.create(args.task, tree_commit(tree, row), RUN_COMMAND, stages.pool_directory(environ),
+                                     environ, tree)
+        clock.select(*selected)
+        clock.stage(label, seconds, _run_workers(pytest_arguments), line.split(" ", 1)[0].rstrip(";"), summary=line)
     print(line, flush=True)
     return code
 

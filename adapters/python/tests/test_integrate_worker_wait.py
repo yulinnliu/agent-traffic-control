@@ -49,26 +49,55 @@ def test_a_verifier_that_waited_past_its_limit_is_not_a_failed_candidate(tmp_pat
     assert not list(tmp_path.glob("verify-wait-*"))
 
 
-@pytest.mark.parametrize(("task", "seen"), [("ATC-0007", "ATC-0007"), (None, "<none>")])
-def test_the_verifier_learns_the_task_only_from_its_caller(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-                                                           task: str | None, seen: str) -> None:
-    """docs/TESTKIT.md § Stage times: ``ATC_TASK`` names the candidate's one task, never one the caller inherited."""
-    monkeypatch.setenv("ATC_TASK", "ATC-9999")
+@pytest.mark.parametrize(("tasks", "seen"), [(["ATC-0007"], "ATC-0007"), (["ATC-0007", "ATC-0008"], "ATC-0007,ATC-0008"),
+                                            ([], "<none>")])
+def test_the_verifier_learns_its_inputs_only_from_its_caller(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                             tasks: list[str], seen: str) -> None:
+    """docs/TESTKIT.md § Stage times: ``ATC_TASK`` names the candidate's tasks, ``ATC_PROJECT`` and ``ATC_VERSION``
+    its project and this atc, never values the caller inherited."""
+    for name in ("ATC_TASK", "ATC_PROJECT", "ATC_VERSION"):
+        monkeypatch.setenv(name, "inherited")
     candidate = tmp_path / "candidate"
     candidate.mkdir()
-    argv = verifier(tmp_path, "print('TASK', os.environ.get('ATC_TASK', '<none>'))\nsys.exit(1)\n")
+    argv = verifier(tmp_path, "print('INPUTS', *(os.environ.get(n, '<none>') for n in "
+                              "('ATC_PROJECT', 'ATC_VERSION', 'ATC_TASK')))\nsys.exit(1)\n")
+    inputs = gi.cli_conventions.testkit_inputs("demo" if tasks else "", tasks)
     with pytest.raises(gi.Refused) as refused:
         gi._verify_candidate(argv, candidate, "a" * 40, "b" * 40, "c" * 40, 60, tmp_path, tmp_path / "report.json",
-                             task)
-    assert refused.value.token == "VERIFICATION_FAILED" and refused.value.detail.endswith(f"TASK {seen}")
+                             inputs)
+    project = "demo" if tasks else "<none>"
+    assert refused.value.token == "VERIFICATION_FAILED"
+    assert refused.value.detail.endswith(f"INPUTS {project} {inputs['ATC_VERSION']} {seen}")
 
 
-def test_the_candidate_repeats_the_verifiers_elapsed_lines(tmp_path: Path) -> None:
-    log = tmp_path / "x.verify.log"
-    log.write_text("--- stdout ---\nELAPSED checks 1.0s workers 1 PASS\nnoise ELAPSED x\n"
-                   "ELAPSED parallel 9.5s workers 4 PASS\n", encoding="utf-8")
-    assert gi._elapsed_lines(str(log)) == ["ELAPSED checks 1.0s workers 1 PASS", "ELAPSED parallel 9.5s workers 4 PASS"]
-    assert gi._elapsed_lines(None) == [] and gi._elapsed_lines(str(tmp_path / "absent.log")) == []
+def test_the_verifiers_lines_reach_the_echo_as_they_land_and_its_log_ends_with_its_exit(tmp_path: Path) -> None:
+    """docs/WORKFLOW.md § 5. The Owner integrates: the log exists from the start and each stdout line is echoed
+    while the verifier still runs."""
+    candidate = tmp_path / "candidate"
+    candidate.mkdir()
+    environ = {key: value for key, value in __import__("os").environ.items() if not key.startswith("GIT_")}
+    for args in (["init", "-q"], ["-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q",
+                                  "--allow-empty", "-m", "candidate"]):
+        subprocess.run(["git", *args], cwd=candidate, env=environ, check=True, capture_output=True)
+    sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=candidate, env=environ, check=True, capture_output=True,
+                         text=True).stdout.strip()
+    flag = tmp_path / "go"
+    argv = verifier(tmp_path, f"print('ELAPSED checks 1.0s workers 1 PASS', flush=True)\n"
+                              f"while not Path({str(flag)!r}).exists():\n    time.sleep(0.1)\n"
+                              "sys.stdout.write('partial')\n")
+    log = gi.verifier_log(candidate)
+    seen: list[tuple[str, bool]] = []
+
+    def echo(line: str) -> None:
+        seen.append((line, log.read_text(encoding="utf-8").startswith("time: ")))
+        flag.write_text("x")
+
+    warning, written = gi._verify_candidate(argv, candidate, sha, "b" * 40, "c" * 40, 60, tmp_path,
+                                            tmp_path / "report.json", None, echo)
+    assert seen == [("ELAPSED checks 1.0s workers 1 PASS", True), ("partial", True)]
+    text = written.read_text(encoding="utf-8")
+    assert "--- stdout ---\nELAPSED checks 1.0s workers 1 PASS\npartial\n--- stderr ---\n" in text
+    assert text.endswith("\nexit: 0\n") and text.count("exit: ") == 1
 
 
 def test_doctor_lists_the_runs_holding_and_leaves_no_lock(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

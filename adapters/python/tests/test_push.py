@@ -247,6 +247,28 @@ def test_a_failing_pre_push_hook_streams_and_refuses_with_its_last_lines(ws: Pat
     assert origin_main(ws) == base
 
 
+def test_the_pre_push_hook_learns_the_project_version_and_tasks_of_what_it_pushes(
+        ws: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
+    """docs/TESTKIT.md § Stage times: the gate's records name the tasks whose integrations the push carries."""
+    monkeypatch.setenv("ATC_TASK", "inherited")
+    publish(ws, "main")
+    base = run_git(ws, "rev-parse", "origin/main")
+    first = commit(ws, "a.txt", "first\n")
+    second = commit(ws, "b.txt", "second\n")
+    path = ws / ".git" / "atc" / "integrations.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    rows = [{"candidate_sha": sha, "reviewed": sha, "main_before": before, "task": task,
+             "authority": {"kind": "owner_words", "quote": "x"},
+             "authority_reference": f"Owner run: approve integration @ {sha}",
+             "integrated_at": "2026-11-01T00:00:00+00:00"}
+            for sha, before, task in ((first, base, "ATC-0007"), (second, first, "ATC-0008"))]
+    path.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+    pre_push(ws, 'echo "inputs $ATC_PROJECT $ATC_TASK $ATC_VERSION"\n')
+    assert push.main(["root"], root=ws) == 0
+    from atc_cli import package_version
+    assert f"inputs root ATC-0007,ATC-0008 {package_version()}" in capsys.readouterr().err.splitlines()
+
+
 def test_json_keeps_progress_and_hook_output_off_stdout(ws: Path, capsys: pytest.CaptureFixture[str]) -> None:
     integrated = integrated_main(ws)
     pre_push(ws, "echo 'gate: PASS'\n")

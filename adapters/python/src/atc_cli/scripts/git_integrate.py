@@ -7,6 +7,7 @@ and § Command results; options: `--help`.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import json
 import os
@@ -20,6 +21,7 @@ import sys
 import time
 import uuid
 import tempfile
+from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -60,6 +62,10 @@ RECORDS_ONLY = "RECORDS_ONLY"
 VERIFIER_FAILURES = ("VERIFICATION_FAILED", "VERIFICATION_TIMEOUT", "CANDIDATE_CHANGED")
 WAIT_GRACE = 30.0  # seconds past the verifier's own wait limit before its clock ends it
 WAIT_POLL = 5.0
+ECHO_POLL = 1.0  # seconds between looks at a running verifier's log when its lines are echoed
+LOG_STDOUT, LOG_STDERR = "--- stdout ---", "--- stderr ---"
+ECHO_PREFIX = "  verify: "
+CLOCK_COMMAND = "verify"  # the verifier's `command` in timings.jsonl (docs/TESTKIT.md § Stage times)
 INTEGRATIONS = ("atc", "integrations.jsonl")
 CANDIDATE_REFS = "refs/atc/integration-candidates"
 TAIL_LINES = 20
@@ -336,23 +342,55 @@ def _create_kill_on_close_job():
 
 
 
+class _Follow:
+    """The complete lines a running verifier has added to its live log since the last look, each passed to ``echo``."""
+
+    def __init__(self, path: Path, offset: int, echo: Callable[[str], None]) -> None:
+        self.path, self.offset, self.echo = path, offset, echo
+        self.pending = b""
+
+    def pump(self, final: bool = False) -> None:
+        try:
+            with self.path.open("rb") as handle:
+                handle.seek(self.offset)
+                data = handle.read()
+        except OSError:
+            return
+        self.offset += len(data)
+        *lines, self.pending = (self.pending + data).split(b"\n")
+        if final and self.pending:
+            lines, self.pending = [*lines, self.pending], b""
+        for raw in lines:
+            text = raw.decode("utf-8", errors="replace").rstrip("\r")
+            if text.strip():
+                self.echo(text)
+
+
 def _run_verifier(
     argv: list[str], cwd: Path, env: dict[str, str], timeout: float, captures: Path,
-    wait_file: Path | None = None,
+    wait_file: Path | None = None, live: Path | None = None, echo: Callable[[str], None] | None = None,
 ) -> tuple[int | None, str, str, str | None]:
     """Run the verifier with a bounded wall clock and end its whole process tree.
 
-    Output goes to temporary files in ``captures`` rather than pipes so a descendant that
-    outlives the verifier cannot hold the wait open past the timeout. When the
-    verifier returns or times out, every process it started is terminated.
-    The time the verifier reports in ``wait_file`` as queued for host test workers
-    extends the clock, by at most ``timeout`` and ``WAIT_GRACE`` (docs/TESTKIT.md
-    § Host worker budget). Returns the exit code (``None`` on timeout), both streams,
+    Output goes to files rather than pipes so a descendant that outlives the verifier cannot hold the wait open past
+    the timeout: stdout is appended to ``live``, the log `_start_verifier_log` began, else to a temporary file in
+    ``captures``, and stderr to a temporary file. ``echo`` receives each line the verifier writes to ``live`` as it
+    lands. When the verifier returns or times out, every process it started is terminated. The time the verifier
+    reports in ``wait_file`` as queued for host test workers extends the clock, by at most ``timeout`` and
+    ``WAIT_GRACE`` (docs/TESTKIT.md § Host worker budget). Returns the exit code (``None`` on timeout), both streams,
     and the weaker isolation the run had to fall back to, if any.
     """
     tree = _ProcessTree()
-    try:
-        with tempfile.TemporaryFile(dir=captures) as out, tempfile.TemporaryFile(dir=captures) as err:
+    with contextlib.ExitStack() as files:
+        err = files.enter_context(tempfile.TemporaryFile(dir=captures))
+        if live is not None:
+            # The child writes through the inherited handle at its file position, so the position starts at the end.
+            out = files.enter_context(live.open("r+b"))
+            offset = out.seek(0, os.SEEK_END)
+        else:
+            out, offset = files.enter_context(tempfile.TemporaryFile(dir=captures)), 0
+        follow = _Follow(live, offset, echo) if live is not None and echo is not None else None
+        try:
             try:
                 process = subprocess.Popen(
                     argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=out, stderr=err,
@@ -369,21 +407,25 @@ def _run_verifier(
                 if left <= 0:
                     break
                 try:
-                    returncode = process.wait(timeout=min(left, WAIT_POLL))
+                    returncode = process.wait(timeout=min(left, ECHO_POLL if follow else WAIT_POLL))
                     break
                 except subprocess.TimeoutExpired:
-                    continue
+                    if follow is not None:
+                        follow.pump()
             tree.terminate(process)
-            out.seek(0)
-            err.seek(0)
-            return (
-                returncode,
-                out.read().decode("utf-8", errors="replace"),
-                err.read().decode("utf-8", errors="replace"),
-                tree.warning,
-            )
-    finally:
-        tree.close()
+        finally:
+            tree.close()
+        if follow is not None:
+            follow.pump(final=True)
+        out.seek(offset)
+        err.seek(0)
+        # Text-mode writes on Windows end lines with CRLF; the log is written in text mode again.
+        return (
+            returncode,
+            out.read().decode("utf-8", errors="replace").replace("\r\n", "\n"),
+            err.read().decode("utf-8", errors="replace").replace("\r\n", "\n"),
+            tree.warning,
+        )
 
 
 def _tails(stdout: str, stderr: str) -> list[str]:
@@ -401,18 +443,31 @@ def verifier_log(candidate_dir: Path) -> Path:
     return candidate_dir.with_name(candidate_dir.name + ".verify.log")
 
 
-def _write_verifier_log(
-    path: Path, argv: list[str], cwd: Path, returncode: int | None, stdout: str, stderr: str,
-) -> Path | None:
-    """Write the log after `docs/TESTKIT.md` § Running and logging's header; ``None`` when it cannot be written."""
-    header = [
+def _log_header(argv: list[str], cwd: Path) -> list[str]:
+    """`docs/TESTKIT.md` § Running and logging's header."""
+    return [
         f"time: {datetime.now(timezone.utc).isoformat(timespec='seconds')}",
         f"platform: {sys.platform} {platform.machine()}",
         f"working directory: {cwd}",
         f"command: {json.dumps(argv, ensure_ascii=False)}",
-        f"exit: {'timeout' if returncode is None else returncode}",
     ]
-    text = "\n".join([*header, "--- stdout ---", stdout.rstrip(), "--- stderr ---", stderr.rstrip()]) + "\n"
+
+
+def _start_verifier_log(path: Path, argv: list[str], cwd: Path) -> Path | None:
+    """Begin the log the verifier's stdout goes to while it runs; ``None`` when it cannot be written."""
+    try:
+        path.write_text("\n".join([*_log_header(argv, cwd), LOG_STDOUT]) + "\n", encoding="utf-8")
+    except OSError:
+        return None
+    return path
+
+
+def _write_verifier_log(
+    path: Path, argv: list[str], cwd: Path, returncode: int | None, stdout: str, stderr: str,
+) -> Path | None:
+    """Write the whole log: the header, both streams and the exit last; ``None`` when it cannot be written."""
+    text = "\n".join([*_log_header(argv, cwd), LOG_STDOUT, stdout.rstrip(), LOG_STDERR, stderr.rstrip(),
+                      f"exit: {'timeout' if returncode is None else returncode}"]) + "\n"
     try:
         path.write_text(text, encoding="utf-8")
     except OSError:
@@ -686,14 +741,16 @@ def reuse_check(t: "Target", verdict: str, expected_main: str) -> tuple[dict | N
 
 def _verify_candidate(
     argv: list[str], candidate_dir: Path, candidate_sha: str, expected_main: str, reviewed: str,
-    timeout: float, captures: Path, report_path: Path, task: str | None = None,
+    timeout: float, captures: Path, report_path: Path, testkit_inputs: dict[str, str] | None = None,
+    echo: Callable[[str], None] | None = None,
 ) -> tuple[str | None, Path | None]:
-    """Run the verifier in the candidate; return the isolation warning, if any, and the log written. ``task`` names
-    the verifier's stage-time records (docs/TESTKIT.md § Stage times)."""
+    """Run the verifier in the candidate; return the isolation warning, if any, and the log written. Its stdout goes
+    to the log as it runs, each line also to ``echo``. ``testkit_inputs`` are the only task, project and version
+    the verifier's stage-time records name (docs/TESTKIT.md § Stage times)."""
     env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
-    env.pop(elapsed.TASK_VARIABLE, None)
-    if task:
-        env[elapsed.TASK_VARIABLE] = task
+    for name in (elapsed.TASK_VARIABLE, elapsed.PROJECT_VARIABLE, elapsed.VERSION_VARIABLE):
+        env.pop(name, None)
+    env.update({name: value for name, value in (testkit_inputs or {}).items() if value})
     env.update({
         "ATC_INTEGRATION_SHA": candidate_sha,
         "ATC_CANDIDATE_DIR": str(candidate_dir),
@@ -707,7 +764,9 @@ def _verify_candidate(
     env[host_workers.WAIT_FILE] = str(wait_file)
     env[host_workers.MAX_WAIT] = f"{timeout:g}"
     try:
-        returncode, stdout, stderr, warning = _run_verifier(argv, candidate_dir, env, timeout, captures, wait_file)
+        live = _start_verifier_log(verifier_log(candidate_dir), argv, candidate_dir)
+        returncode, stdout, stderr, warning = _run_verifier(argv, candidate_dir, env, timeout, captures, wait_file,
+                                                            live, echo)
         queued = host_workers.wait_total(wait_file)
     finally:
         wait_file.unlink(missing_ok=True)
@@ -1051,8 +1110,9 @@ class Target:
         )
 
 
-def integrate(t: Target, progress: bool = True) -> tuple[int, dict]:
-    """Integrate ``t``; ``progress`` prints the `verify:` line that `--json` keeps on stderr."""
+def integrate(t: Target, steps: cli_conventions.Steps | None = None) -> tuple[int, dict]:
+    """Integrate ``t``; ``steps`` prints a line as each step ends, on stderr (docs/WORKFLOW.md § 5. The Owner
+    integrates)."""
     repo, main, branch, reviewed = t.repo, t.main, t.branch, t.reviewed
     with IntegrationSlot(repo):
         main_tip_for_refs = rev(repo, main)
@@ -1072,6 +1132,8 @@ def integrate(t: Target, progress: bool = True) -> tuple[int, dict]:
             return code, recovered_result
         if branch is None:
             raise stop("ALREADY_MERGED", f"the reviewed SHA {reviewed} is already reachable from {main}; nothing to integrate")
+        if steps is not None:
+            steps.begin()
         report = merge_preflight(repo, branch, reviewed, main)
         main_before = report.evidence["main_tip"]
         source_before = report.evidence["topic_tip"]
@@ -1099,24 +1161,29 @@ def integrate(t: Target, progress: bool = True) -> tuple[int, dict]:
         if stale_candidate_refs:
             result["stale_candidate_refs"] = stale_candidate_refs
         if report.verdict == "STOP":
+            _done(steps, "preflight", f"STOP {report.reason}")
             return STOP_BEFORE_CANDIDATE, {**result, "report": report}
         if t.carried_from:
             try:
                 result["carried_over"] = carry_over(repo, main, t.carried_from, reviewed, main_before)
             except Refused as exc:
+                _done(steps, "preflight", exc.token)
                 return exc.code, {**result, "refusal": exc}
 
         if main_before != t.main_tip:
+            _done(steps, "preflight", "REF_DRIFT")
             return STOP_BEFORE_CANDIDATE, {**result, "refusal": stop(
                 "REF_DRIFT", f"{main} moved from {t.main_tip}, whose verification section was read, to {main_before}; main unchanged",
             )}
         if rev(repo, main) != main_before or rev(repo, "HEAD") != main_before:
+            _done(steps, "preflight", "REF_DRIFT")
             return STOP_BEFORE_CANDIDATE, {**result, "refusal": stop("REF_DRIFT", f"{main} moved after preflight; main unchanged")}
 
         reuse, reuse_reason = None, None
         if not t.binding.records_only:
             reuse, reuse_reason, _path = reuse_check(t, report.verdict, main_before)
             result["verification_reuse"] = reuse_reason
+        _done(steps, "preflight", report.verdict + (f" reuse {reuse_reason}" if reuse_reason else ""))
         built = Built()
         candidate_ref: str | None = None
         integration_updated = False
@@ -1124,84 +1191,90 @@ def integrate(t: Target, progress: bool = True) -> tuple[int, dict]:
             with build_and_verify(
                 repo, main_before, reviewed, report.verdict, t.verify_argv, t.timeout, built,
                 branch=branch, records_only=t.binding.records_only, timeout_source=t.timeout_source,
-                progress=progress, reuse=reuse, reuse_reason=None if reuse else reuse_reason,
-                task=t.binding.tasks[0] if len(t.binding.tasks) == 1 else None,
+                steps=steps, reuse=reuse, reuse_reason=None if reuse else reuse_reason,
+                tasks=t.binding.tasks, project=t.project,
             ):
                 built.fill(result)
                 candidate_sha = built.candidate_sha
                 verifier_report = built.report
 
-                # Final source and target checks are inside the cooperative slot.
-                if rev(repo, branch) != source_before or source_before != reviewed:
-                    raise stop("REF_DRIFT", "source tip changed after candidate verification; main unchanged", after_candidate=True)
-                if rev(repo, main) != main_before or rev(repo, "HEAD") != main_before:
-                    raise stop("REF_DRIFT", f"{main} drifted after candidate verification; main unchanged", after_candidate=True)
-                if git(repo, "status", "--porcelain", "--untracked-files=no").stdout.strip():
-                    raise stop("REF_DRIFT", "integration checkout became dirty; main unchanged", after_candidate=True)
+                with _step(steps, "fast-forward") as moved:
+                    # Final source and target checks are inside the cooperative slot.
+                    if rev(repo, branch) != source_before or source_before != reviewed:
+                        raise stop("REF_DRIFT", "source tip changed after candidate verification; main unchanged", after_candidate=True)
+                    if rev(repo, main) != main_before or rev(repo, "HEAD") != main_before:
+                        raise stop("REF_DRIFT", f"{main} drifted after candidate verification; main unchanged", after_candidate=True)
+                    if git(repo, "status", "--porcelain", "--untracked-files=no").stdout.strip():
+                        raise stop("REF_DRIFT", "integration checkout became dirty; main unchanged", after_candidate=True)
 
-                candidate_ref = f"{CANDIDATE_REFS}/{candidate_sha}"
-                ref_create = git(repo, "update-ref", candidate_ref, candidate_sha, check=False)
-                if ref_create.returncode:
-                    raise Refused("CANDIDATE_REF_FAILED", f"could not retain candidate recovery ref: {(ref_create.stderr or ref_create.stdout).strip()}")
-                result["candidate_ref"] = candidate_ref
+                    candidate_ref = f"{CANDIDATE_REFS}/{candidate_sha}"
+                    ref_create = git(repo, "update-ref", candidate_ref, candidate_sha, check=False)
+                    if ref_create.returncode:
+                        raise Refused("CANDIDATE_REF_FAILED", f"could not retain candidate recovery ref: {(ref_create.stderr or ref_create.stdout).strip()}")
+                    result["candidate_ref"] = candidate_ref
 
-                update = git(repo, "merge", "--ff-only", candidate_sha, check=False)
-                if update.returncode:
-                    raise stop(
-                        "REF_DRIFT",
-                        f"checkout-aware fast-forward rejected candidate; main was not reset: {(update.stderr or update.stdout).strip()}",
-                        after_candidate=True,
-                    )
-                integration_updated = True
-                main_after = rev(repo, main)
-                result["main_after"] = main_after
-                if main_after == candidate_sha:
-                    # main holds the candidate, so the integration happened even
-                    # when its checkout needs recovery below.
-                    _note_integration(repo, result, candidate_sha, reviewed, t.binding, t.carried_from, main_before,
-                                      t.verifier, _reuse_note(reuse))
-                if main_after != candidate_sha or rev(repo, "HEAD") != candidate_sha:
-                    raise stop(
-                        "RECOVERY_REQUIRED",
-                        f"main={main_after}, HEAD={rev(repo, 'HEAD')}, candidate={candidate_sha}; retained {candidate_ref}",
-                        after_candidate=True,
-                    )
-                status = git(repo, "status", "--porcelain", "--untracked-files=no").stdout.strip()
-                if status:
-                    raise stop(
-                        "RECOVERY_REQUIRED",
-                        f"main advanced to {candidate_sha} but checkout is dirty ({status}); retained {candidate_ref}",
-                        after_candidate=True,
-                    )
-                if verifier_report is not None:
+                    update = git(repo, "merge", "--ff-only", candidate_sha, check=False)
+                    if update.returncode:
+                        raise stop(
+                            "REF_DRIFT",
+                            f"checkout-aware fast-forward rejected candidate; main was not reset: {(update.stderr or update.stdout).strip()}",
+                            after_candidate=True,
+                        )
+                    integration_updated = True
+                    main_after = rev(repo, main)
+                    result["main_after"] = main_after
+                    if main_after == candidate_sha:
+                        # main holds the candidate, so the integration happened even
+                        # when its checkout needs recovery below.
+                        _note_integration(repo, result, candidate_sha, reviewed, t.binding, t.carried_from, main_before,
+                                          t.verifier, _reuse_note(reuse))
+                    if main_after != candidate_sha or rev(repo, "HEAD") != candidate_sha:
+                        raise stop(
+                            "RECOVERY_REQUIRED",
+                            f"main={main_after}, HEAD={rev(repo, 'HEAD')}, candidate={candidate_sha}; retained {candidate_ref}",
+                            after_candidate=True,
+                        )
+                    status = git(repo, "status", "--porcelain", "--untracked-files=no").stdout.strip()
+                    if status:
+                        raise stop(
+                            "RECOVERY_REQUIRED",
+                            f"main advanced to {candidate_sha} but checkout is dirty ({status}); retained {candidate_ref}",
+                            after_candidate=True,
+                        )
+                    moved.value = f"OK {main_before}..{main_after}"
+                with _step(steps, "ledger") as recorded:
+                    if verifier_report is not None:
+                        try:
+                            result["evidence"] = str(_write_evidence(repo, {
+                                "schema": evidence_schema(verifier_report),
+                                "candidate_sha": candidate_sha,
+                                "tree": _git_ok(repo, "rev-parse", f"{candidate_sha}^{{tree}}"),
+                                "clean": True,
+                                "expected_main": main_before,
+                                "reviewed": reviewed,
+                                "verdict": result["verdict"],
+                                **({"carried_over_from": t.carried_from} if t.carried_from else {}),
+                                "task": t.binding.tasks[0] if len(t.binding.tasks) == 1 else None,
+                                "tasks": t.binding.tasks,
+                                "authority": t.binding.authority,
+                                "verify_argv": t.verify_argv,
+                                "platform": _platform(),
+                                "verified_at": reuse["verified_at"] if reuse else
+                                datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                                "duration_seconds": reuse["duration_seconds"] if reuse else
+                                result["verification_seconds"],
+                                "report": verifier_report,
+                                **({"reused": _reuse_note(reuse)} if reuse else {}),
+                            }))
+                        except (OSError, GitError):
+                            result["evidence_reason"] = "WRITE_FAILED"
                     try:
-                        result["evidence"] = str(_write_evidence(repo, {
-                            "schema": evidence_schema(verifier_report),
-                            "candidate_sha": candidate_sha,
-                            "tree": _git_ok(repo, "rev-parse", f"{candidate_sha}^{{tree}}"),
-                            "clean": True,
-                            "expected_main": main_before,
-                            "reviewed": reviewed,
-                            "verdict": result["verdict"],
-                            **({"carried_over_from": t.carried_from} if t.carried_from else {}),
-                            "task": t.binding.tasks[0] if len(t.binding.tasks) == 1 else None,
-                            "tasks": t.binding.tasks,
-                            "authority": t.binding.authority,
-                            "verify_argv": t.verify_argv,
-                            "platform": _platform(),
-                            "verified_at": reuse["verified_at"] if reuse else
-                            datetime.now(timezone.utc).isoformat(timespec="seconds"),
-                            "duration_seconds": reuse["duration_seconds"] if reuse else result["verification_seconds"],
-                            "report": verifier_report,
-                            **({"reused": _reuse_note(reuse)} if reuse else {}),
-                        }))
-                    except (OSError, GitError):
-                        result["evidence_reason"] = "WRITE_FAILED"
-                try:
-                    own = set(git(repo, "rev-list", f"{main_before}..{candidate_sha}").stdout.split())
-                    result["push"] = gp.push_listing(repo, main, own)
-                except GitError as exc:
-                    result["push_warning"] = f"could not list origin/{main}..{main}: {exc}"
+                        own = set(git(repo, "rev-list", f"{main_before}..{candidate_sha}").stdout.split())
+                        result["push"] = gp.push_listing(repo, main, own)
+                    except GitError as exc:
+                        result["push_warning"] = f"could not list origin/{main}..{main}: {exc}"
+                    recorded.value = "WRITE_FAILED" if result.get("integration_record_warning") else \
+                        "WRITE_FAILED evidence" if result.get("evidence_reason") == "WRITE_FAILED" else "OK"
             code = 0
         except Refused as exc:
             built.fill(result)
@@ -1226,6 +1299,11 @@ def integrate(t: Target, progress: bool = True) -> tuple[int, dict]:
                 git(repo, "update-ref", "-d", candidate_ref, check=False)
                 result["candidate_ref"] = None
         return code, result
+
+
+def _done(steps: cli_conventions.Steps | None, step: str, result: str) -> None:
+    if steps is not None:
+        steps.done(step, result)
 
 
 def _reuse_note(reuse: dict | None) -> dict | None:
@@ -1268,22 +1346,54 @@ class Built:
             result[LOG_KEY] = self.log
 
 
+class _Outcome:
+    """The result a step's line reports when the step ends without a refusal."""
+
+    def __init__(self, value: str = "OK") -> None:
+        self.value = value
+
+
+@contextmanager
+def _step(steps: cli_conventions.Steps | None, name: str, start: str | None = None):
+    """Time one step on ``steps`` (none for `--check`): its `STEP` line when it ends, with the outcome's value or the
+    token of the refusal that ended it; with ``start``, a `START` line first (docs/WORKFLOW.md § 5. The Owner
+    integrates)."""
+    outcome = _Outcome()
+    if steps is None:
+        yield outcome
+        return
+    steps.begin(name if start is not None else None, start or "")
+    try:
+        yield outcome
+    except Exception as exc:
+        steps.done(name, getattr(exc, "token", None) or type(exc).__name__)
+        raise
+    steps.done(name, outcome.value)
+
+
 @contextmanager
 def build_and_verify(
     repo: Path, main_before: str, reviewed: str, verdict: str, argv: list[str], timeout: float, built: Built, *,
-    branch: str, records_only: bool, timeout_source: str = "", progress: bool = False,
-    reuse: dict | None = None, reuse_reason: str | None = None, command: str = "integrate", task: str | None = None,
+    branch: str, records_only: bool, timeout_source: str = "", steps: cli_conventions.Steps | None = None,
+    reuse: dict | None = None, reuse_reason: str | None = None, command: str = "integrate",
+    tasks: list[str] | None = None, project: str = "",
 ):
     """Build the candidate `atc integrate` would build in a detached worktree under `<tmp>/candidates` (the
     reviewed commit on `FF`, the merge on `NO_FF`), verify it with the verifier, or the record check for a
     records-only range, and remove it when the block ends. It takes no slot and creates no ref (`atc test --candidate`,
-    governance `VERIFICATION.md` § Independent review).
+    governance `VERIFICATION.md` § Independent review). ``steps`` reports the `candidate` and `verify` steps and the
+    verifier's lines as it prints them; ``tasks`` and ``project`` name its stage-time records.
 
     With ``reuse``, a passing `atc test --candidate` record of the same candidate stands in for the verifier: an `FF`
     candidate is the reviewed commit and needs no worktree, a `NO_FF` one is built and must hold its tree."""
+    tasks = tasks or []
+    task = tasks[0] if len(tasks) == 1 else None
+    testkit_inputs = cli_conventions.testkit_inputs(project, tasks)
     if reuse is not None and verdict != "NO_FF":
         built.candidate_sha = reviewed
-        _reused(built, reuse, progress)
+        with _step(steps, "candidate") as outcome:
+            outcome.value = REUSED
+        _reused(built, reuse, steps, testkit_inputs)
         yield built
         return
     places = locations.locate()
@@ -1296,33 +1406,35 @@ def build_and_verify(
     report_path = candidate_dir.with_name(candidate_dir.name + ".report.json")
     created = False
     try:
-        owner.write_marker(candidate_dir, command, repo, task)
-        base = main_before if verdict == "NO_FF" else reviewed
-        add = git(repo, "worktree", "add", "--detach", str(candidate_dir), base, check=False)
-        if add.returncode:
-            raise Refused("CANDIDATE_NOT_CREATED", f"could not create isolated candidate worktree: {(add.stderr or add.stdout).strip()}")
-        created = True
+        with _step(steps, "candidate") as outcome:
+            owner.write_marker(candidate_dir, command, repo, task)
+            base = main_before if verdict == "NO_FF" else reviewed
+            add = git(repo, "worktree", "add", "--detach", str(candidate_dir), base, check=False)
+            if add.returncode:
+                raise Refused("CANDIDATE_NOT_CREATED", f"could not create isolated candidate worktree: {(add.stderr or add.stdout).strip()}")
+            created = True
 
-        if verdict == "NO_FF":
-            built.message = f"merge({topic_name(branch)}): integrate reviewed changes"
-            merged = git(candidate_dir, "merge", "--no-ff", "--no-edit", "-m", built.message, reviewed, check=False)
-            if merged.returncode:
-                git(candidate_dir, "merge", "--abort", check=False)
-                raise Refused("CANDIDATE_MERGE_FAILED", f"candidate merge failed: {(merged.stderr or merged.stdout).strip()}")
-        candidate_sha = rev(candidate_dir, "HEAD")
-        if candidate_sha is None or not FULL_SHA.fullmatch(candidate_sha):
-            raise Refused("CANDIDATE_NOT_CREATED", "candidate did not resolve to a full commit SHA")
-        built.candidate_sha = candidate_sha
-        if verdict == "NO_FF":
-            first, second = _git_ok(candidate_dir, "rev-parse", f"{candidate_sha}^1", f"{candidate_sha}^2").split()
-            built.first_parent, built.second_parent = first, second
-            if (first, second) != (main_before, reviewed):
-                raise stop(
-                    "CANDIDATE_CHANGED", f"candidate parent mismatch: {first} {second}; expected {main_before} {reviewed}",
-                    after_candidate=True,
-                )
-        elif candidate_sha != reviewed:
-            raise stop("CANDIDATE_CHANGED", f"FF candidate is {candidate_sha}, expected reviewed SHA {reviewed}", after_candidate=True)
+            if verdict == "NO_FF":
+                built.message = f"merge({topic_name(branch)}): integrate reviewed changes"
+                merged = git(candidate_dir, "merge", "--no-ff", "--no-edit", "-m", built.message, reviewed, check=False)
+                if merged.returncode:
+                    git(candidate_dir, "merge", "--abort", check=False)
+                    raise Refused("CANDIDATE_MERGE_FAILED", f"candidate merge failed: {(merged.stderr or merged.stdout).strip()}")
+            candidate_sha = rev(candidate_dir, "HEAD")
+            if candidate_sha is None or not FULL_SHA.fullmatch(candidate_sha):
+                raise Refused("CANDIDATE_NOT_CREATED", "candidate did not resolve to a full commit SHA")
+            built.candidate_sha = candidate_sha
+            if verdict == "NO_FF":
+                first, second = _git_ok(candidate_dir, "rev-parse", f"{candidate_sha}^1", f"{candidate_sha}^2").split()
+                built.first_parent, built.second_parent = first, second
+                if (first, second) != (main_before, reviewed):
+                    raise stop(
+                        "CANDIDATE_CHANGED", f"candidate parent mismatch: {first} {second}; expected {main_before} {reviewed}",
+                        after_candidate=True,
+                    )
+            elif candidate_sha != reviewed:
+                raise stop("CANDIDATE_CHANGED", f"FF candidate is {candidate_sha}, expected reviewed SHA {reviewed}", after_candidate=True)
+            outcome.value = f"OK {candidate_sha}"
 
         started = time.monotonic()
         if reuse is not None:
@@ -1331,22 +1443,24 @@ def build_and_verify(
                 raise stop("CANDIDATE_CHANGED",
                            f"candidate tree {tree} differs from the tree the reuse check read, {reuse['candidate_tree']}",
                            after_candidate=True)
-            _reused(built, reuse, progress)
+            _reused(built, reuse, steps, testkit_inputs)
             yield built
             return
         if records_only:
-            if progress:
-                print(f"verify: candidate {candidate_sha} {RECORD_CHECK}", file=sys.stderr)
-            _check_records(candidate_dir, candidate_sha)
+            with _step(steps, "verify", f"{candidate_sha} {RECORD_CHECK}") as outcome:
+                _check_records(candidate_dir, candidate_sha)
+                outcome.value = f"{RECORDS_ONLY} PASS"
             built.evidence_reason = RECORDS_ONLY
         else:
-            if progress:
-                evidence = f" RUN (evidence: {reuse_reason})" if reuse_reason else ""
-                print(f"verify: candidate {candidate_sha}{evidence} timeout {timeout:g}s ({timeout_source})",
-                      file=sys.stderr)
-            warning, log = _verify_candidate(
-                argv, candidate_dir, candidate_sha, main_before, reviewed, timeout, places.systmp, report_path, task,
-            )
+            evidence = f" RUN (evidence: {reuse_reason})" if reuse_reason else ""
+            start = (f"{candidate_sha}{evidence} timeout {timeout:g}s ({timeout_source}) "
+                     f"log {verifier_log(candidate_dir)}")
+            with _step(steps, "verify", start) as outcome:
+                warning, log = _verify_candidate(
+                    argv, candidate_dir, candidate_sha, main_before, reviewed, timeout, places.systmp, report_path,
+                    testkit_inputs, None if steps is None else _echo,
+                )
+                outcome.value = PASS
             built.warning = warning
             built.log = None if log is None else str(log)
             built.report, built.evidence_reason = _read_report(report_path)
@@ -1361,14 +1475,22 @@ def build_and_verify(
             owner.marker(candidate_dir).unlink(missing_ok=True)
 
 
-def _reused(built: Built, reuse: dict, progress: bool) -> None:
+def _echo(line: str) -> None:
+    """One line the verifier printed, on stderr as it lands (docs/WORKFLOW.md § 5. The Owner integrates)."""
+    print(f"{ECHO_PREFIX}{line}", file=sys.stderr, flush=True)
+
+
+def _reused(built: Built, reuse: dict, steps: cli_conventions.Steps | None, testkit_inputs: dict[str, str]) -> None:
+    """A passing `atc test --candidate` record stands in for the verifier; its stage-time record says so."""
     built.reused = reuse
     built.report = reuse["report"]
     built.verification = "PASS"
     built.seconds = 0.0
-    if progress:
-        print(f"verify: candidate {built.candidate_sha} {REUSED} {reuse['path']} (verified {reuse['verified_at']})",
-              file=sys.stderr)
+    with _step(steps, "verify") as outcome:
+        outcome.value = f"{REUSED} {reuse['path']} (verified {reuse['verified_at']})"
+    environ = {**os.environ, **testkit_inputs}
+    elapsed.Clock.create(elapsed.task_of(environ), built.candidate_sha or "", CLOCK_COMMAND,
+                         stages.pool_directory(environ), environ).reused(show=False)
 
 
 def resolve_repo(args: argparse.Namespace, root: Path, cwd: str) -> tuple[str, Path]:
@@ -1509,16 +1631,20 @@ def resolve_binding(
     return Binding(tasks, words, rng.records_only)
 
 
-def resolve(args: argparse.Namespace, root: Path, cwd: str) -> Target:
+def resolve(args: argparse.Namespace, root: Path, cwd: str, steps: cli_conventions.Steps | None = None) -> Target:
+    """The target of ``args``; ``steps`` reports the `fetch` step and takes the project's name."""
     reviewed = sha_form(args.reviewed, "--sha")
     rebased = sha_form(args.rebased, "--rebased") if args.rebased is not None else None
     project, repo = resolve_repo(args, root, cwd)
+    if steps is not None:
+        steps.name = project
     check_checkout(repo)
-    fetched = "none"
-    if gp.has_remote(repo):
-        if error := gp.fetch_origin(repo):
-            raise stop("FETCH_FAILED", f"{gp.REASONS['FETCH_FAILED']}: {error}")
-        fetched = gp.REMOTE
+    with _step(steps, "fetch") as fetching:
+        fetched = fetching.value = "none"
+        if gp.has_remote(repo):
+            if error := gp.fetch_origin(repo):
+                raise stop("FETCH_FAILED", f"{gp.REASONS['FETCH_FAILED']}: {error}")
+            fetched, fetching.value = gp.REMOTE, "OK"
     main = "main"
     main_tip = rev(repo, main)
     if main_tip is None:
@@ -1623,7 +1749,11 @@ def build_parser() -> argparse.ArgumentParser:
         "The reviewed SHA is the one the newest PASS review report of the task names\n"
         "(~/.atc/reports/ID-SHA-review.md), or --sha. The branch is the one the task record names; commits after\n"
         "the reviewed SHA stop it, and a branch rebased onto main carries the approval over when every patch-id\n"
-        "matches. The verifier and its timeout are the ones AGENTS.md on main declares.",
+        "matches. The verifier and its timeout are the ones AGENTS.md on main declares.\n\n"
+        "Progress goes to stderr, also under --json: 'STEP <step> <name> <seconds>s <result>' as each of fetch,\n"
+        "preflight, candidate, verify, fast-forward and ledger ends, a refusal's token as the result where a step\n"
+        "stops. verify also has a line as it starts naming the verifier's log, and the verifier's lines follow\n"
+        "as '  verify: ' lines while it runs. --check prints no step line.",
         exit="0 integrated, or CHECK FF / CHECK NO_FF; 1 STOP before a candidate exists; 2 ERROR; 3 STOP after the "
              "candidate exists, main unchanged, or a required recovery",
         see="GIT_WORKFLOW.md § Integrate, § Command results"))
@@ -1823,13 +1953,14 @@ def _main(args: argparse.Namespace, root: Path, cwd: str | None) -> int:
     payload = {"command": "integrate"}
     try:
         locations.enter()
-        target = resolve(target_args(args.task, args.sha, root, check=args.check), root, cwd or os.getcwd())
+        steps = None if args.check else cli_conventions.Steps("")
+        target = resolve(target_args(args.task, args.sha, root, check=args.check), root, cwd or os.getcwd(), steps)
         _name_paths(target)
         for warning in target.warnings:
             print(f"WARNING {warning}", file=sys.stderr)
         if args.check:
             return check(target, args.json)
-        code, result = integrate(target, progress=args.json)
+        code, result = integrate(target, steps)
     except locations.Refusal as refusal:
         print(f"STOP {refusal.token}: {refusal.detail}", file=sys.stderr)
         if args.json:
@@ -1871,8 +2002,9 @@ def _main(args: argparse.Namespace, root: Path, cwd: str | None) -> int:
     return code
 
 
-def verify(t: Target, as_json: bool) -> int:
-    """`atc test ID --candidate`: preflight as `--check` does, then `build_and_verify` with no slot."""
+def verify(t: Target, as_json: bool, steps: cli_conventions.Steps | None = None) -> int:
+    """`atc test ID --candidate`: preflight as `--check` does, then `build_and_verify` with no slot; ``steps`` reports
+    each step on stderr."""
     payload = {"command": "test", "resolved": {**asdict(t), "repo": str(t.repo)}}
     if t.branch is None:
         _print_refusal(
@@ -1880,7 +2012,10 @@ def verify(t: Target, as_json: bool) -> int:
             payload, as_json,
         )
         return STOP_BEFORE_CANDIDATE
+    if steps is not None:
+        steps.begin()
     report = merge_preflight(t.repo, t.branch, t.reviewed, t.main)
+    _done(steps, "preflight", f"STOP {report.reason}" if report.verdict == "STOP" else report.verdict)
     if report.verdict == "STOP":
         _print_stop_report(report, payload, as_json)
         return STOP_BEFORE_CANDIDATE
@@ -1902,8 +2037,8 @@ def verify(t: Target, as_json: bool) -> int:
     try:
         with build_and_verify(
             t.repo, main_before, t.reviewed, report.verdict, t.verify_argv, t.timeout, built,
-            branch=t.branch, records_only=t.binding.records_only, timeout_source=t.timeout_source, progress=as_json,
-            command="verify", task=t.binding.tasks[0] if len(t.binding.tasks) == 1 else None,
+            branch=t.branch, records_only=t.binding.records_only, timeout_source=t.timeout_source, steps=steps,
+            command="verify", tasks=t.binding.tasks, project=t.project,
         ):
             pass
     except Refused as refusal:
@@ -1926,19 +2061,8 @@ def verify(t: Target, as_json: bool) -> int:
         return 0
     if built.warning:
         print(f"WARNING {built.warning}", file=sys.stderr)
-    for line in _elapsed_lines(log):
-        print(line)
     print(f"PASS candidate {built.candidate_sha} {report.verdict}" + (f" log {log}" if log else ""))
     return 0
-
-
-def _elapsed_lines(log: str | None) -> list[str]:
-    """The verifier's ``ELAPSED`` lines in its log, one per stage (docs/TESTKIT.md § Stage times)."""
-    try:
-        text = Path(log).read_text(encoding="utf-8", errors="replace") if log else ""
-    except OSError:
-        return []
-    return [line.strip() for line in text.splitlines() if line.strip().startswith(f"{elapsed.PREFIX} ")]
 
 
 def run_candidate(task: str, sha: str | None, root: Path = hw.ROOT, cwd: str | None = None,
@@ -1948,12 +2072,13 @@ def run_candidate(task: str, sha: str | None, root: Path = hw.ROOT, cwd: str | N
     with _human_streams(as_json):
         try:
             locations.enter()
+            steps = cli_conventions.Steps("")
             target = resolve(target_args(task, sha or _branch_tip(task, root), root, check=True, verify_only=True),
-                             root, cwd or os.getcwd())
+                             root, cwd or os.getcwd(), steps)
             _name_paths(target)
             for warning in target.warnings:
                 print(f"WARNING {warning}", file=sys.stderr)
-            return verify(target, as_json)
+            return verify(target, as_json, steps)
         except locations.Refusal as refusal:
             print(f"STOP {refusal.token}: {refusal.detail}", file=sys.stderr)
             return refusal.code

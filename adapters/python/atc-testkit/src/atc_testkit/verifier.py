@@ -241,6 +241,7 @@ class _Reuse:
         self.slack = timing.slack(environ)
         self.finder = inputs.Finder(self.common, self.tree) if inputs.has_records(self.common) else None
         self.ran: list[stages.Stage] = []
+        self.counted: dict[str, tuple[int, int]] = {}
 
     @classmethod
     def create(cls, project: Project, work: Path, sha: str, environ: Mapping[str, str]) -> _Reuse | None:
@@ -283,6 +284,7 @@ class _Reuse:
         prefix = Path(os.path.relpath(os.path.realpath(cwd), os.path.realpath(self.project.root))).as_posix()
         missing = [file for file in files if not self.covered(file, stage.marker)]
         print(f"{stage.name}: REUSED {len(files) - len(missing)} files, RUN {len(missing)} files", flush=True)
+        self.counted[stage.name] = (len(files) - len(missing), len(missing))
         if not missing:
             return None
         return [file if prefix == "." else file.removeprefix(f"{prefix}/") for file in missing]
@@ -332,6 +334,11 @@ class _Checks:
             self.clock.stage(CHECKS_STAGE, self.check_seconds, 1, result)
         self.check_seconds, self.checks_run = 0.0, 0
 
+    def select(self, kind: str, reasons: Sequence[str], changed: int) -> None:
+        """The run's selection on the clock's records (docs/TESTKIT.md § Stage times)."""
+        if self.clock is not None:
+            self.clock.select(kind, elapsed.selection_reason(kind, reasons, changed))
+
     def static(self, checks: Iterable[StaticCheck], paths: Sequence[str]) -> None:
         for check in checks:
             if check.applies(paths):
@@ -358,6 +365,9 @@ class _Checks:
                 project.stage_entry(), stage, None, [*self.isolated.run_options(stage.name), "--collect-only", "-q"],
                 pytest_paths)
             own = pytest_paths if reuse is None else reuse.paths(stage, pytest_paths, cwd, env_for(stage), command)
+            if reuse is not None and self.clock is not None and stage.name in reuse.counted:
+                reused, run = reuse.counted[stage.name]
+                self.clock.note(stage.name, reused_files=reused, run_files=run)
             if reuse is not None and own is not None:
                 reuse.ran.append(stage)
             return own
@@ -422,6 +432,8 @@ def _consumer_checks(project: Project, checks: _Checks, base: str, sha: str, pat
     testpaths = project.tests_toolchain().test_paths(project.root)
     collect = any(is_test_input(path, testpaths) for path in paths)
     print(describe(consumer_selection), flush=True)
+    checks.select(elapsed.DOCUMENTATION_ONLY if doc_only else elapsed.kind_of(pytest_paths),
+                  consumer_selection.reasons, len(paths))
     print(f"classification: {'documentation-only' if doc_only else 'impact-selected'}; "
           f"repository-wide collection: {'check' if collect else 'skip'}", flush=True)
     checks.static((check for check in project.checks if check.first), paths)
@@ -438,6 +450,16 @@ def _consumer_checks(project: Project, checks: _Checks, base: str, sha: str, pat
     return doc_only
 
 
+def _root_reasons(project: Project, paths: list[str]) -> Sequence[str]:
+    """The root form's selection reasons, for the stage-time records only; none when they cannot be read."""
+    if project.test_reasons is None:
+        return ()
+    try:
+        return project.test_reasons(paths)
+    except Exception:  # noqa: BLE001 - a record field never refuses the candidate
+        return ()
+
+
 def _root_checks(project: Project, checks: _Checks, base: str, sha: str,
                  paths: list[str]) -> tuple[bool, list[str] | None]:
     """The root form: its static checks, then the stages over its selection unless the range is documentation-only;
@@ -450,6 +472,8 @@ def _root_checks(project: Project, checks: _Checks, base: str, sha: str,
             pytest_paths = project.test_paths(paths)
         except Exception as error:  # noqa: BLE001 - a selection failure refuses the candidate
             raise VerifyError("SELECTION_FAILED", f"{type(error).__name__}: {error}") from error
+    checks.select(elapsed.DOCUMENTATION_ONLY if doc_only else elapsed.kind_of(pytest_paths),
+                  _root_reasons(project, paths) if pytest_paths == [] else (), len(paths))
     checks.static((check for check in project.checks if check.first), paths)
     _lint(checks, project.root, base, sha)
     checks.static((check for check in project.checks if not check.first), paths)
@@ -489,7 +513,8 @@ def main(project: Project, environ: Mapping[str, str] | None = None, run: stages
         locations.enter(work)
         isolated = isolation.IsolatedRun(work, credentials=project.credential_variables,
                                          data_roots=project.data_root_variables, toolchain=toolchain)
-        clock = elapsed.Clock(elapsed.task_of(environ), sha, CLOCK_COMMAND, stages.pool_directory(environ))
+        clock = elapsed.Clock.create(elapsed.task_of(environ), sha, CLOCK_COMMAND, stages.pool_directory(environ),
+                                     environ, project.root)
         reuse = _Reuse.create(project, work, sha, environ)
         checks = _Checks(project, work, isolated, run, workers, budget, clock, reuse)
         if project.select is None:

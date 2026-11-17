@@ -669,7 +669,8 @@ def test_the_verifier_output_is_captured_under_systmp(
         return temporary_file(*args, **kwargs)
     monkeypatch.setattr(gi.tempfile, "TemporaryFile", recording)
     verifier_view(repo, capsys)
-    assert created == [atc_tmp / "systmp"] * 2
+    # stdout goes to the log beside the candidate as it runs; stderr to a temporary file.
+    assert created == [atc_tmp / "systmp"]
 
 
 @pytest.mark.integration
@@ -1159,14 +1160,29 @@ def stderr_lines(capsys: pytest.CaptureFixture[str]) -> list[str]:
     return capsys.readouterr().err.splitlines()
 
 
+def verify_start(lines: list[str]) -> str:
+    """What the `verify` step's `START` line names: the candidate, the evidence, the timeout and the log."""
+    return next(line.split(" START ", 1)[1] for line in lines if line.startswith("STEP verify ") and " START " in line)
+
+
+STEP_LINE = re.compile(r"STEP (?P<step>\S+) repo \d+\.\ds (?P<result>.+)")
+
+
 @pytest.mark.integration
-def test_the_resolved_values_are_the_first_stderr_line(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_each_step_has_a_line_and_verify_names_its_log_as_it_starts(
+    repo: Path, atc_tmp: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """docs/WORKFLOW.md § 5. The Owner integrates: a line as each step ends, the log when verify starts."""
+    before = main_tip(repo)
     tip = topic(repo, {"a.txt": "a2\n"})
     assert integrate(repo, "topic", tip, "--json") == 0
     lines = stderr_lines(capsys)
-    assert lines[0].startswith("verify: candidate ")
-    assert lines[0].endswith("timeout 300s (default)")
-    assert f"verify: candidate {tip} RUN (evidence: NO_RECORD) timeout 300s (default)" in lines
+    steps = [(match["step"], match["result"]) for match in map(STEP_LINE.fullmatch, lines) if match]
+    log = verify_start(lines).split(" log ", 1)[1]
+    assert steps == [("fetch", "none"), ("preflight", "FF reuse NO_RECORD"), ("candidate", f"OK {tip}"),
+                     ("verify", f"START {tip} RUN (evidence: NO_RECORD) timeout 300s (default) log {log}"),
+                     ("verify", "PASS"), ("fast-forward", f"OK {before}..{tip}"), ("ledger", "OK")]
+    assert Path(log).parent == atc_tmp / "candidates" and Path(log).name.endswith(".verify.log")
 
 
 @pytest.mark.integration
@@ -1175,7 +1191,7 @@ def test_the_declared_argv_and_timeout_are_the_defaults(repo: Path, capsys: pyte
     tip = topic(repo, {"a.txt": "a2\n"})
     assert run(repo, tip, "--json") == 0
     lines = stderr_lines(capsys)
-    assert lines[0].endswith("timeout 1234s (AGENTS.md)")
+    assert " timeout 1234s (AGENTS.md) log " in verify_start(lines)
     assert not [line for line in lines if line.startswith("WARNING") and "atc tool checkout" not in line]
     assert main_tip(repo) == tip
 
@@ -1413,7 +1429,7 @@ def test_the_declaration_comes_from_main_not_the_topic(repo: Path, capsys: pytes
     declare_verifier(repo, verify_command(), timeout="1234")
     tip = topic(repo, {"AGENTS.md": "# AGENTS.md\n\n## Integration verification\n\n- Verifier argv file: other.json\n- Verifier timeout: 5\n"})
     assert run(repo, tip, "--json") == 0
-    assert stderr_lines(capsys)[0].endswith("timeout 1234s (AGENTS.md)")
+    assert " timeout 1234s (AGENTS.md) log " in verify_start(stderr_lines(capsys))
     assert main_tip(repo) == tip
 
 
@@ -1502,7 +1518,8 @@ def test_check_warns_of_whitespace_problems_and_keeps_its_verdict(repo: Path, ca
 
 
 def not_warnings(text: str) -> list[str]:
-    return [line for line in text.splitlines() if not line.startswith("WARNING ")]
+    """The stderr lines that are neither a warning nor progress: a step's line or a line the verifier printed."""
+    return [line for line in text.splitlines() if not line.startswith(("WARNING ", "STEP ", gi.ECHO_PREFIX))]
 
 
 @pytest.mark.integration
@@ -1545,7 +1562,8 @@ def test_the_default_integration_output_is_one_line_naming_the_log(
     assert match, captured.out
     log = Path(match["log"])
     assert log.parent == atc_tmp / "candidates"
-    assert "exit: 0\n--- stdout ---\n" in log.read_text(encoding="utf-8")
+    text = log.read_text(encoding="utf-8")
+    assert "\n--- stdout ---\n" in text and "\n--- stderr ---\n" in text and text.endswith("\nexit: 0\n")
     assert not_warnings(captured.err) == []
 
 

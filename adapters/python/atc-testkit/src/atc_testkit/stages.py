@@ -520,6 +520,8 @@ def run_stages(runner: Sequence[str], paths: Sequence[str], *, cwd: Path | str, 
         own = paths if paths_for is None else paths_for(stage)
         if own is None:
             collected = True
+            if clock is not None:
+                clock.stage(stage.name, 0.0, 0, elapsed.REUSED, summary="")
             continue
         log = log_for(stage)
         parallel = stage.name == PARALLEL.name
@@ -545,7 +547,7 @@ def run_stages(runner: Sequence[str], paths: Sequence[str], *, cwd: Path | str, 
             code = run(command, cwd=cwd, env=env, log=log, private=private_desktop(stage))
             if clock is not None:
                 clock.stage(stage.name, time.monotonic() - started, granted.count if parallel else 1,
-                            stage_result(code, toolchain.no_tests_exit))
+                            stage_result(code, toolchain.no_tests_exit), log=log)
         finally:
             budget.release(grant)
         if code not in (0, toolchain.no_tests_exit):

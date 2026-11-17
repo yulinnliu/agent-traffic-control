@@ -124,6 +124,14 @@ how long it takes: `REUSED` takes seconds, any other value runs the verifier.
 Only the Owner runs it; the hard-deny policy refuses it to an agent except
 with `--check`.
 
+While it runs, stderr shows one
+`STEP <step> <project> <seconds>s <result>` line per step: `fetch`,
+`preflight`, `candidate`, `verify`, `fast-forward` and `ledger`, the result
+a refusal's token where the step stopped. The `verify` step's `START` line
+names the verifier's log, and the verifier's lines follow as `  verify: `
+lines while it runs (`TESTKIT.md` § Running and logging). Stdout keeps the
+verdict lines and the `--json` object; `--check` prints no step line.
+
 The coordinator reads completion from Git at its next turn: the task's line
 in `<git common dir>/atc/integrations.jsonl` with the reviewed SHA, and
 `main` at or past its `candidate_sha`. A stop the Owner shows follows its

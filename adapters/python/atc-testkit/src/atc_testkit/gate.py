@@ -7,13 +7,16 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import time
 
-from . import evidence, isolation, locations, scratch, selection, stages, timing, workers as workers_module
+from . import elapsed, evidence, isolation, locations, scratch, selection, stages, timing, workers as workers_module
 from .evidence import Decision
 from .git import SelectionError, baseline_deltas, changed_paths, git_env, published_tag_lines, verify_push_checkout
 from .project import Project, StaticCheck
 
 LOG_PATTERN = "prepush-*.log"
+CLOCK_COMMAND = "prepush"
+CHECKS_STAGE = "checks"
 SELECTION_FAILED_EXIT = 2
 
 
@@ -83,25 +86,33 @@ def _decisions(project: Project, push_lines: list[str], pytest_paths: list[str],
 
 
 def _run_checks(project: Project, checks: Iterable[StaticCheck], isolated: isolation.IsolatedRun, logs: Path,
-                run: stages.Run) -> int:
+                run: stages.Run, clock: elapsed.Clock | None = None) -> int:
+    """Run the static checks up to the first that fails; ``clock`` times them as one ``checks`` stage."""
+    started, ran, code = time.monotonic(), 0, 0
     for check in checks:
         log = logs / f"prepush-{check.name}.log"
         code = run(list(check.argv), cwd=project.root / check.cwd, env=isolated.environment("static"), log=log)
+        ran += 1
         if code:
-            print(f"pre-push: {check.token}; push aborted (full output: {log})", file=sys.stderr)
-            for line in stages.failure_lines(log):
-                print(line, file=sys.stderr)
-            return code
-    return 0
+            break
+    if clock is not None and ran:
+        clock.stage(CHECKS_STAGE, time.monotonic() - started, 1, "FAIL" if code else "PASS", summary="")
+    if code:
+        print(f"pre-push: {check.token}; push aborted (full output: {log})", file=sys.stderr)
+        for line in stages.failure_lines(log):
+            print(line, file=sys.stderr)
+    return code
 
 
 def _run_tests(project: Project, push_lines: list[str], pytest_paths: list[str], isolated: isolation.IsolatedRun,
                logs: Path, git, run: stages.Run, workers: stages.Workers | None = None,
-               budget: workers_module.Budget | None = None) -> int:
+               budget: workers_module.Budget | None = None, clock: elapsed.Clock | None = None) -> int:
     decisions = _decisions(project, push_lines, pytest_paths, git)
     for decision in decisions:
         print(evidence.describe(decision), flush=True)
     if decisions and all(decision.reuse for decision in decisions):
+        if clock is not None:
+            clock.reused()
         return 0
     if not decisions:
         print("pre-push: tests RUN (evidence: NO_PUSHED_COMMIT)", flush=True)
@@ -112,7 +123,7 @@ def _run_tests(project: Project, push_lines: list[str], pytest_paths: list[str],
             options_for=lambda stage: isolated.run_options(stage.name),
             log_for=lambda stage: logs / f"prepush-{stage.name}.log", workers=workers, run=run,
             toolchain=isolated.toolchain, budget=budget,
-            count=stages.collected_items if run is stages.run_logged else None)
+            count=stages.collected_items if run is stages.run_logged else None, clock=clock)
     except workers_module.WaitTimeout as refusal:
         print(f"{refusal.token} {refusal.detail}", file=sys.stderr)
         return refusal.code
@@ -124,6 +135,17 @@ def _run_tests(project: Project, push_lines: list[str], pytest_paths: list[str],
         for line in stages.failure_lines(outcome.log):
             print(line, file=sys.stderr)
     return outcome.code
+
+
+def _clock(project: Project, push_lines: list[str], chosen: selection.Selection,
+           paths: Sequence[str] | None) -> elapsed.Clock:
+    """The gate's stage times (docs/TESTKIT.md § Stage times): the last pushed commit, the task ``atc push`` names."""
+    pushed = pushed_commits(push_lines)
+    clock = elapsed.Clock.create(elapsed.task_of(os.environ), pushed[-1] if pushed else "", CLOCK_COMMAND,
+                                 stages.pool_directory(os.environ), os.environ, project.root)
+    kind = elapsed.kind_of(chosen.pytest_paths())
+    clock.select(kind, elapsed.selection_reason(kind, chosen.reasons, None if paths is None else len(paths)))
+    return clock
 
 
 def main(project: Project, argv: Sequence[str] | None = None, stdin: Iterable[str] | None = None,
@@ -183,9 +205,10 @@ def main(project: Project, argv: Sequence[str] | None = None, stdin: Iterable[st
         return refusal.code
     isolated = isolation.IsolatedRun(work, credentials=project.credential_variables,
                                      data_roots=project.data_root_variables, toolchain=toolchain)
-    code = _run_checks(project, checks, isolated, logs, run)
+    clock = _clock(project, push_lines, chosen, paths)
+    code = _run_checks(project, checks, isolated, logs, run, clock)
     if not code and pytest_paths is not None:
-        code = _run_tests(project, push_lines, pytest_paths, isolated, logs, git, run, workers, budget)
+        code = _run_tests(project, push_lines, pytest_paths, isolated, logs, git, run, workers, budget, clock)
     if code:
         print(f"pre-push: working directory kept: {work}", file=sys.stderr)
         return code

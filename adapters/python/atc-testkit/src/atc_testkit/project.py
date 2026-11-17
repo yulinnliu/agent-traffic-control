@@ -41,7 +41,8 @@ class Project:
     starts a stage, the toolchain's entry by default.
 
     The root form's ``test_paths`` maps the range's paths to the pytest paths its stages run, relative to
-    ``tests_dir``: ``[]`` for the default suite, ``None`` for no test.
+    ``tests_dir``: ``[]`` for the default suite, ``None`` for no test; ``test_reasons`` gives that selection's
+    reasons, which the stage-time records name (docs/TESTKIT.md § Stage times).
 
     ``dependency_files`` names the files a report digests, relative to ``root``; the toolchain's by default.
     """
@@ -60,6 +61,7 @@ class Project:
     automation_prefixes: tuple[str, ...] | None = None
     ignore: tuple[str, ...] | None = None
     test_paths: Callable[[Sequence[str]], list[str] | None] | None = None
+    test_reasons: Callable[[Sequence[str]], Sequence[str]] | None = None
     tests_dir: str = "."
     documentation_only: Callable[[Sequence[str]], bool] | None = None
     dependency_files: tuple[str, ...] | None = None

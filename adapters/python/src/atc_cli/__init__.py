@@ -150,12 +150,10 @@ def _release_pin(command: str, rest: list[str], root: Path) -> int | None:
 
 
 def package_version() -> str:
-    """This atc's version, from its installed distribution, else `unknown`."""
-    from importlib import metadata
-    try:
-        return metadata.version("agent-traffic-control")
-    except metadata.PackageNotFoundError:
-        return "unknown"
+    """This atc's version, from its installed distribution, else `unknown` (`cli_conventions.package_version`)."""
+    scripts_on_path()
+    import cli_conventions
+    return cli_conventions.package_version()
 
 
 def version() -> str:

@@ -56,6 +56,10 @@ def build_parser() -> argparse.ArgumentParser:
         "    the integration verifier on the candidate atc integrate ID would build (default SHA: the branch tip)\n"
         "atc test ID --clean      delete the task's scratches\n"
         "atc test --list [ID]     list the registered scratches, or the task's\n"
+        "atc test --timings [--project NAME] [--since DATE]\n"
+        "    test efficiency from the host's stage-time records, per project, atc and atc-testkit version and per\n"
+        "    command: runs, tests, test seconds, seconds per test, full-suite runs and their mean seconds, the share\n"
+        "    of test files whose evidence was reused, and the runs reused whole\n"
         "atc test --private -- COMMAND   run one command on a private desktop\n\n"
         "The tests run in the shallowest directory of the tree whose pyproject.toml has [tool.atc-testkit];\n"
         "its timeout key bounds the run. -v streams pytest's output.",
@@ -70,9 +74,13 @@ def build_parser() -> argparse.ArgumentParser:
     form.add_argument("--lint", action="store_true", help="run the lint stage alone")
     form.add_argument("--clean", action="store_true", help="delete the task's scratches")
     form.add_argument("--list", action="store_true", help="list registered scratches")
+    form.add_argument("--timings", action="store_true", help="report test efficiency from the stage-time records")
     form.add_argument("--private", action="store_true", help="run the command after -- on a private desktop")
     parser.add_argument("--sha", metavar="SHA", help="test this commit in an export instead of the worktree")
     parser.add_argument("--all", action="store_true", help="the full suite instead of the related tests")
+    cli_conventions.add_project(parser, help="--timings: only this project")
+    parser.add_argument("--since", metavar="DATE", help="--timings: only records from this UTC date or time on "
+                                                         "(2026-11-17, 2026-11-17T08:00)")
     cli_conventions.add_verbose(parser)
     cli_conventions.add_json(parser)
     return parser
@@ -255,6 +263,26 @@ def clean(task_id: str, environ: dict[str, str]) -> int:
     return code
 
 
+def timings(root: Path, environ: dict[str, str], args: argparse.Namespace) -> int:
+    """`atc test --timings`: the host's stage-time records; a record without a project is named by its task's
+    prefix."""
+    import timings_report
+    from atc_testkit import elapsed, stages
+    ws = task_records.workspace(root, environ)
+    projects: dict[str, str | None] = {}
+
+    def by_task(task: str) -> str | None:
+        prefix = task.rsplit("-", 1)[0]
+        if prefix not in projects:
+            try:
+                projects[prefix] = task_records.project_of_task(ws, task).name
+            except Refusal:
+                projects[prefix] = None
+        return projects[prefix]
+    return timings_report.report(elapsed.records(stages.pool_directory(environ)), by_task, project=args.project,
+                                 since=args.since, as_json=args.json)
+
+
 def list_scratches(task_id: str | None, environ: dict[str, str], as_json: bool) -> int:
     if task_id is None:
         return scratch.list_scratches(environ=environ, as_json=as_json)
@@ -285,6 +313,12 @@ def main(argv: list[str] | None = None, root: Path = ROOT, environ: dict[str, st
     try:
         if args.list:
             return list_scratches(args.task, environ, args.json)
+        if args.timings:
+            if args.task or rest or args.sha or args.all:
+                parser.error("--timings takes no ID, tests, --sha or --all")
+            return timings(root, environ, args)
+        if args.project or args.since:
+            parser.error("--project and --since go with --timings")
         if args.task is None:
             parser.error("an ID is required")
         if (args.clean or args.candidate or args.lint) and (rest or args.all):
@@ -298,6 +332,7 @@ def main(argv: list[str] | None = None, root: Path = ROOT, environ: dict[str, st
             import git_integrate
             return git_integrate.run_candidate(args.task, args.sha, root, as_json=args.json)
         task = Task(root, environ, args.task)
+        environ = {**environ, **cli_conventions.testkit_inputs(task.project.name, [task.id])}
         scratch.prune(say=lambda _line: None, environ=environ)
         if args.mutants:
             return run_mutants(task, args, rest, environ)

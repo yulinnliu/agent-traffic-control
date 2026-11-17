@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+import atc_testkit
 from atc_testkit import elapsed, isolation, lines, lint, locations, python_toolchain, scratch, testrun, workers
 from atc_testkit.locations import Refusal
 
@@ -157,6 +158,10 @@ def test_a_run_prints_and_records_its_elapsed_time_before_its_summary(tree: Path
     assert [(r["task"], r["command"], r["stage"], r["workers"], r["result"]) for r in added] == [
         (TASK, "test", "related", 1, "FAIL")]
     assert added[0]["sha"] == "" and added[0]["seconds"] >= 0
+    # docs/TESTKIT.md § Stage times: the summary's counts, the selection and the testkit's version.
+    assert added[0]["failed"] == 1 and isinstance(added[0]["passed"], int) and added[0]["skipped"] == 0
+    assert (added[0]["selection"], added[0]["selection_reason"]) == ("explicit", "pytest arguments")
+    assert added[0]["testkit_version"] == atc_testkit.__version__
 
 
 @pytest.mark.unit
@@ -477,6 +482,8 @@ def test_each_mutant_and_the_baseline_print_and_record_their_elapsed_time(export
         (TASK, export.sha, "mutants", "mutant:S two", granted, "SURVIVED"),
     ]
     assert all(isinstance(r["seconds"], float) and r["seconds"] >= 0 for r in added)
+    assert {r["selection"] for r in added} == {"explicit"}
+    assert all(r["selection_reason"].endswith(" tests") for r in added)
 
 
 @pytest.mark.integration

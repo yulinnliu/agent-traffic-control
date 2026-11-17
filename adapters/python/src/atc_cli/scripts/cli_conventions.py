@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import time
 
 OK = 0
 STOP = 1
@@ -35,6 +36,48 @@ class Refusal(Exception):
     def as_dict(self) -> dict:
         return {"verdict": EXIT_NAMES.get(self.code, str(self.code)), "reason": self.token, "detail": self.detail,
                 "hint": self.hint}
+
+
+class Steps:
+    """A command's progress on stderr: a line `STEP <step> <name> <seconds>s <result>` as a step starts
+    (`0.0s START`, for a step whose own output follows) or ends, timed from its `begin`. Stderr keeps stdout for the
+    verdict lines and the `--json` object (`atc push`, `atc integrate`)."""
+
+    TOKEN = "STEP"
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+        self.started = time.monotonic()
+
+    def begin(self, step: str | None = None, what: str = "") -> None:
+        self.started = time.monotonic()
+        if step is not None:
+            self.done(step, f"START {what}".rstrip())
+
+    def done(self, step: str, result: str) -> None:
+        print(f"{self.TOKEN} {step} {self.name} {time.monotonic() - self.started:.1f}s {result}", file=sys.stderr,
+              flush=True)
+
+
+DISTRIBUTION = "agent-traffic-control"
+
+
+def package_version() -> str:
+    """This atc's version, from its installed distribution, else `unknown`. Read from the distribution's metadata,
+    not the `atc_cli` package, so the scripts that need it import no `atc_cli` module."""
+    from importlib import metadata
+    try:
+        return metadata.version(DISTRIBUTION)
+    except metadata.PackageNotFoundError:
+        return "unknown"
+
+
+def testkit_inputs(project: str, tasks: list[str]) -> dict[str, str]:
+    """The optional inputs a testkit run's stage-time records carry: the project, this atc's version and the tasks
+    (docs/TESTKIT.md § Stage times)."""
+    from atc_testkit import elapsed
+    return {elapsed.PROJECT_VARIABLE: project, elapsed.VERSION_VARIABLE: package_version(),
+            elapsed.TASK_VARIABLE: elapsed.tasks_value(tasks)}
 
 
 def form(summary: str, detail: str | None = None, *, exit: str, see: str) -> dict:

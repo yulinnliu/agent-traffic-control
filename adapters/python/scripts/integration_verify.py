@@ -57,6 +57,10 @@ def selected_tests(paths: Sequence[str], root: Path = ROOT) -> list[str] | None:
     return select_tests.pytest_args(selection)
 
 
+def selection_reasons(root: Path) -> Callable[[Sequence[str]], list[str]]:
+    return lambda paths: select_tests.select(list(paths), graph(root)).reasons
+
+
 def selection_predicate(root: Path) -> Callable[[Sequence[str]], list[str] | None]:
     return lambda paths: selected_tests(paths, root)
 
@@ -70,7 +74,7 @@ def project(root: Path = ROOT) -> Project:
     return Project(root=root, argv_file=root / ADAPTER_DIR / "scripts/integration-verify.json",
                    source_roots=SOURCE_ROOTS,
                    product_prefixes=PRODUCT_PREFIXES, credentials=(), data_roots=(),
-                   test_paths=selection_predicate(root), tests_dir=ADAPTER_DIR,
+                   test_paths=selection_predicate(root), test_reasons=selection_reasons(root), tests_dir=ADAPTER_DIR,
                    documentation_only=documentation_predicate(root), dependency_files=dependency_files(root))
 
 

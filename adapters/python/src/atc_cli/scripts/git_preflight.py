@@ -163,11 +163,11 @@ def git(
     return result
 
 
-def git_streamed(repo: Path, *args: str, out: TextIO) -> tuple[int, str]:
+def git_streamed(repo: Path, *args: str, out: TextIO, extra_env: dict[str, str] | None = None) -> tuple[int, str]:
     """Run git with its stdout and stderr, which carries a hook's output, copied to ``out`` as they arrive;
     its exit code and everything it wrote."""
     process = subprocess.Popen(["git", "-C", str(repo), *args], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                               env=git_env())
+                               env=git_env(extra_env))
     decoder = codecs.getincrementaldecoder("utf-8")("replace")
     written = []
     with process.stdout:

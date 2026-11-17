@@ -364,13 +364,20 @@ The output rule every `atc` command follows is governance `GIT_WORKFLOW.md`
   `--stages` with `LOG_DIRECTORY_UNSUITABLE` (exit 9) before either reads,
   writes or deletes anything in it. The verifier keeps its logs in the run's
   working directory.
+- `atc integrate` and `atc test ID --candidate` write the verifier's log
+  `<candidate>.verify.log` beside the candidate from the start: the header,
+  then the verifier's stdout as it prints it. Each complete stdout line is
+  also echoed to stderr with the prefix `  verify: ` within a second. When
+  the verifier ends, the log is rewritten as the header, `--- stdout ---`,
+  the stdout, `--- stderr ---`, the stderr and `exit: <code>` last.
 - A failure names the log and repeats its last twenty `FAILED` or `ERROR`
   lines.
 
 ## Stage times
 
-`atc test ID`, each run of `atc test ID --mutants` and the integration
-verifier time each stage they run and report it in one place.
+`atc test ID`, each run of `atc test ID --mutants`, the integration
+verifier and the pre-push gate time each stage they run and report it in one
+place.
 
 - A stage is timed from its host worker tokens held to its end, so a wait
   for tokens is not part of it. Its line is
@@ -381,25 +388,52 @@ verifier time each stage they run and report it in one place.
   | --- | --- | --- | --- |
   | `atc test ID` | its log label, `related` or `all` | the pytest `-n` it ran, 1 in process | the summary line's first word |
   | `atc test ID --mutants` | `baseline` (none when reused), then `mutant:<label>` per mutant | the `-n` the run ran, 1 in process | `PASS` or `FAIL` for the baseline, the mutant's verdict |
-  | the verifier, through `atc test ID --candidate` and `atc integrate` | `checks` (every static check before the stages, or up to the first that fails), then each stage of § Stages | 1 for `checks`, the granted count for `parallel`, 1 for the others | `PASS`, `FAIL`, `NO_TESTS` or `TIMEOUT` |
+  | the verifier, through `atc test ID --candidate` and `atc integrate` | `checks` (every static check before the stages, or up to the first that fails), then each stage of § Stages | 1 for `checks`, the granted count for `parallel`, 1 for the others | `PASS`, `FAIL`, `NO_TESTS` or `TIMEOUT`; `REUSED` for a stage whose every file a record covered |
+  | the verifier through `atc integrate`, when a candidate record is reused | `reused`, 0 seconds | 0 | `REUSED` |
+  | the pre-push gate | `checks` (the static checks together), then each stage it runs, or `reused` when evidence covers the push | as for the verifier | as for the verifier |
 
 - `atc test ID` prints its line just before the summary line. A mutant run
   prints its line just before the verdict line. The verifier prints its
-  lines into its log, and `atc test ID --candidate` repeats them before
-  its `PASS candidate` line.
+  lines on its stdout, which `atc integrate` and
+  `atc test ID --candidate` echo once as they land (§ Running and logging).
 - Each line is also one JSON record appended to `timings.jsonl` in the host
-  pool directory (`ATC_HOME.md` § Layout). A record has the fields `time` (UTC),
-  `task`, `sha`, `command` (`test`, `mutants` or `verify`), `stage`,
-  `seconds`, `workers` and `result`.
+  pool directory (`ATC_HOME.md` § Layout). A record has these fields:
+  - `time` (UTC), `task`, `sha`, `command` (`test`, `mutants`, `verify` or
+    `prepush`), `stage`, `seconds`, `workers` and `result`.
+  - `project`, `atc_version` and `testkit_version`.
+  - `passed`, `failed` and `skipped`, from the stage's pytest summary line,
+    or `null` where the stage has none. Errors count as failed.
+  - `selection` (`full`, `related`, `explicit`, `none` or
+    `documentation-only`) and `selection_reason`: for `full`, the first
+    path reason that widened it, with `(+<n> more)`; for `related`,
+    `<n> changed paths`; for `explicit`, what named the tests.
+  - `reused_files` and `run_files` on a stage that input evidence split
+    (§ Input evidence), else `null`.
   - `sha` is the commit tested: for `atc test ID`, the export's commit, else
     the tree's `HEAD`.
-  - The verifier takes `task` from the optional input `ATC_TASK`, which
-    `atc integrate` and `atc test ID --candidate` set for a candidate of one
-    task.
+  - The verifier and the gate take `task` from the optional input
+    `ATC_TASK`, the tasks of the run joined by `,`; `project` from
+    `ATC_PROJECT`, else the name of the directory holding the tree's main
+    checkout; `atc_version` from `ATC_VERSION`. `atc test`, `atc integrate`
+    and `atc test ID --candidate` set all three for their task, and
+    `atc push` sets them in the hook's environment for the tasks of the
+    integrations it pushes.
   - An empty string is a value no input gave.
   - A record that cannot be written is skipped. A reader skips a line that is
     not a JSON object. Nothing deletes the file or reads it to decide
     anything.
+- `atc test --timings [--project NAME] [--since DATE] [--json]` reports the
+  file, one row per project, atc version and testkit version, with these
+  columns:
+  - `runs`: distinct command, task and commit.
+  - `tests`, `test-s` and `s/test`: the counted tests and the seconds of
+    the stages that counted them.
+  - `full` and `full-s`: the runs with a `full` selection and their seconds.
+  - `reuse`: the files reused out of those evidence split.
+  - `reused-runs`: the runs a covering record replaced whole.
+
+  Under each row is one line per command. A record without `project` takes
+  the project of its task's prefix; versions it lacks show as `-`.
 - No evidence record or report carries a time, so evidence written before
   and after this section compares the same.
 
@@ -420,6 +454,9 @@ prints the selection for those paths and runs nothing.
    (§ Input evidence). When every pushed commit is covered, print
    `tests REUSED` for each and finish.
 5. Otherwise print `tests RUN` with the reason and run the stages.
+
+Steps 3 to 5 write stage-time records with the command `prepush`
+(§ Stage times).
 
 A record covers a push only when its selector name and stage list are the
 gate's own. A record written by a testkit version that differs in either
@@ -553,8 +590,9 @@ this order:
 
 - A project static check keeps its own condition on the changed paths and
   says whether it runs before the shared checks.
-- The optional input `ATC_TASK` names the task the stage-time records
-  carry (§ Stage times). The verifier needs only the four other inputs.
+- The optional inputs `ATC_TASK`, `ATC_PROJECT` and `ATC_VERSION` name the
+  tasks, project and atc version the stage-time records carry
+  (§ Stage times). The verifier needs only the four other inputs.
 - A range is documentation-only when the selection names no test and every
   changed path is either Markdown that is not automation Markdown
   (`AGENTS.md`, `CLAUDE.md`, or a file under a prefix the project names) or a

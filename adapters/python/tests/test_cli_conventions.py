@@ -15,7 +15,7 @@ from test_atc_cli import (  # noqa: F401  (fixtures)
 pytestmark = pytest.mark.integration
 
 METAVAR_WORDS = {"NAME", "ID", "SHA", "DIR", "FILE", "PATH", "TEXT", "URL", "OWNER", "REPO", "PROJECT", "COMMAND",
-                 "N", "EVENT_ID", "TITLE", "TAG"}
+                 "N", "EVENT_ID", "TITLE", "TAG", "DATE"}
 
 
 def metavar_ok(metavar: str) -> bool:
