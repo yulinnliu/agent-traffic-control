@@ -45,7 +45,10 @@ window for a test not marked `interactive_desktop`
 (`INTERACTIVE_DESKTOP_WINDOW`; `docs/TESTKIT.md` § Private desktop).
 
 `selection` takes a repository-owned `SelectionPolicy`: dependencies, ordered test
-paths, shared inputs, special package inputs and fixture consumers. Unknown paths
+paths, shared inputs, special package inputs and fixture consumers. A file ATC
+manages (`managed`: `.atc/` outside `.atc/tasks/`, a task record, a skill copy whose
+`SKILL.md` carries `managed-by: agent-traffic-control` in `SelectionPolicy.root`)
+selects only the tests that name it, before every other rule. Unknown paths
 select the default suite. Unknown configured consumers or selected test groups
 raise an error that blocks the repository gate. `Selection.pytest_paths()` returns `None` for no test
 inputs, `[]` for the full default suite, and an ordered list for a partial run.

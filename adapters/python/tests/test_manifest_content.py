@@ -37,6 +37,13 @@ def test_the_repository_manifest_names_what_sync_delivers() -> None:
 
 
 @pytest.mark.unit
+def test_a_workspace_owned_item_may_lie_outside_atc() -> None:
+    """The `.atc/` rule tells a project's testkit what sync owns; a workspace directory runs no testkit."""
+    found = mf.parse(MANIFEST + "workspace:\n  - {id: w, source: a.md, target: policies/a.md, mode: owned}\n")
+    assert found.files(mf.OWNED, "workspace") == [("a.md", "policies/a.md")]
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize("text, detail", [
     ("manifest: 2\nmin_atc: 0.7.0\nproject: []\n", "manifest must be 1"),
     ("manifest: 1\nmin_atc: seven\nproject: []\n", "min_atc must be MAJOR.MINOR.PATCH"),
@@ -49,6 +56,8 @@ def test_the_repository_manifest_names_what_sync_delivers() -> None:
     (MANIFEST.replace('"{harness}/skills/"', "skills/"), "target must be '{harness}/skills/'"),
     (MANIFEST + "workspace:\n  - {id: p, source: a.md, target: AGENTS.md, mode: pointer-line}\n",
      "workspace holds no pointer-line item"),
+    (MANIFEST.replace("target: .atc/README.md", "target: README.md"), "lies under .atc/, outside .atc/tasks/"),
+    (MANIFEST.replace("target: .atc/README.md", "target: .atc/tasks/README.md"), "lies under .atc/, outside .atc/tasks/"),
 ])
 def test_a_manifest_that_breaks_the_format_is_invalid(text: str, detail: str) -> None:
     with pytest.raises(mf.ManifestError) as refused:

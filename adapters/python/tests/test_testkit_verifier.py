@@ -369,10 +369,12 @@ OWN_SKILL = "---\nname: s\n---\n\n# S\n"
 @pytest.mark.integration
 @pytest.mark.parametrize("paths", [
     [".atc/tasks/T-0001.yaml", "docs/a.md"], [".atc/tasks/T-0001.yaml"],
-    [".atc/atc.lock", ".atc/governance/CORE.md", ".atc/README.md", ".claude/skills/s/SKILL.md"]])
+    [".atc/atc.lock", ".atc/governance/CORE.md", ".atc/README.md", ".claude/skills/s/SKILL.md"],
+    [".atc/lint/ruff.toml", ".atc/lint/vale/ATC/RoleTerms.yml", ".dsh/skills/hami-retro/SKILL.md"]])
 def test_a_record_or_sync_range_is_documentation_only_and_ends_after_the_lint_stage(
         candidate: Candidate, paths: list[str]) -> None:
     candidate.advance(".claude/skills/s/SKILL.md", MANAGED_SKILL)
+    candidate.advance(".dsh/skills/hami-retro/SKILL.md", MANAGED_SKILL)
     candidate.main = git(candidate.root, "rev-parse", "HEAD")
     for path in paths:
         candidate.advance(path, MANAGED_SKILL + "changed\n" if path.endswith("SKILL.md") else "x\n")
@@ -380,28 +382,6 @@ def test_a_record_or_sync_range_is_documentation_only_and_ends_after_the_lint_st
     project = consumer(candidate.root, automation_prefixes=(".atc/", ".claude/"))
     assert verifier.main(project, candidate.env(), recorder) == 0
     assert recorder.logs == ["uv_lock_check_failed.log", "lint.log"]
-
-
-@pytest.mark.integration
-@pytest.mark.parametrize(("path", "files", "expected"), [
-    (".atc/tasks/T-0001.yaml", {}, True), (".atc/tasks/sub/T.yaml", {}, False), (".atc/other.md", {}, False),
-    (".agents/skills/s/references/x.md", {".agents/skills/s/SKILL.md": MANAGED_SKILL}, True),
-    (".claude/skills/s/SKILL.md", {".claude/skills/s/SKILL.md": OWN_SKILL}, False),
-    (".dsh/skills/s/SKILL.md", {}, False), ("AGENTS.md", {}, False)])
-def test_atc_managed_paths(tmp_path: Path, path: str, files: dict[str, str], expected: bool) -> None:
-    for name, text in files.items():
-        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
-        (tmp_path / name).write_text(text, encoding="utf-8")
-    assert verifier.is_atc_managed(path, tmp_path, "0" * 40) is expected
-
-
-@pytest.mark.integration
-def test_a_deleted_managed_skill_is_read_at_the_base(candidate: Candidate) -> None:
-    candidate.advance(".claude/skills/s/SKILL.md", MANAGED_SKILL)
-    base = git(candidate.root, "rev-parse", "HEAD")
-    git(candidate.root, "rm", "-q", "-r", ".claude")
-    git(candidate.root, "commit", "-q", "-m", "drop")
-    assert verifier.is_atc_managed(".claude/skills/s/SKILL.md", candidate.root, base)
 
 
 @pytest.mark.integration

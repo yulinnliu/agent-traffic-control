@@ -40,6 +40,61 @@ execution commands, parallelism, platform initialization and diagnostics.
   `atc doctor` judge only a project that holds the record: one without it
   has not adopted the testkit. `python -m atc_testkit.check` refuses a
   missing record the same way.
+- A project moves to a newer testkit by § Upgrading a project's testkit.
+
+## Upgrading a project's testkit
+
+A project upgrades its vendored `atc-testkit` by these steps, in this order.
+A release's notes list only what that version changes for a project and
+point here.
+
+1. **Re-sync first.** `atc sync <project>` moves the project's
+   `.atc/atc.lock` to the installed release; until then the task flow stops
+   with `STOP RELEASE_MISMATCH`. Sync judges the project by the testkit it
+   vendors (§ Adoption), so it needs no upgrade first.
+2. **Collect the deltas.** Read the `atc-testkit` table and § Breaking of
+   every release note from the vendored version to the target one
+   (`docs/releases/`): keys removed from `[tool.atc-testkit]`, removed
+   tokens and API names, and new requirements.
+3. **Vendor the wheel**, in a task of the project. In a worktree of the
+   target release's tag (the workspace checkout stays on `main`), build the
+   wheel and its release record with `uv run --locked python
+   scripts/build_testkit_release.py --output-dir <fresh directory>` in
+   `adapters/python/` (the package's `README.md` § Distribution). Replace the wheel and `vendor/atc-testkit.json` under
+   the project's `vendor/`, pin `atc-testkit==<version>` in its development
+   dependencies, and update its `uv.lock`.
+4. **Meet the vendored version's contract.** Run
+   `python -m atc_testkit.check --installed` in the project and fix every
+   problem it names; the contract is the vendored version's (§ Adoption).
+   From 0.15.0 on, `lint_scope` is no key, and a project that holds
+   `.pre-commit-config.yaml` pins `pre-commit`.
+5. **Replace the removed names** step 2 listed in the project's gate, CI,
+   verifier and scripts; for 0.15.0, `DIFF_CHECK_FAILED`,
+   `RUFF_CHECK_FAILED` and `DOCUMENTATION_REFERENCE_FAILED` become
+   `LINT_FAILED`.
+6. **Hand ATC-managed paths to the testkit.** Pass `root` to the project's
+   `SelectionPolicy` and remove the project's own list of files ATC writes
+   (§ ATC-managed paths). `<gate> --paths` for the paths of a sync commit
+   then prints `ATC-managed` for each.
+7. **Adopt the lint stage**, optional, in a commit of its own: copy
+   `shared/templates/pre-commit-config.yaml` to `.pre-commit-config.yaml`,
+   add `pre-commit` to the development dependencies, extend the shared
+   rules (`extend = ".atc/lint/ruff.toml"` in the ruff settings,
+   `"config": {"extends": ".atc/lint/markdownlint.jsonc"}` in
+   `.markdownlint-cli2.jsonc`), run `atc test ID --lint` and fix its
+   findings (§ Lint stage).
+8. **Move file-reading tests to the lint stage** (governance
+   `VERIFICATION.md` § Testing, the three layers). First list every test
+   that reads a file's text or structure and runs no product code. Then
+   replace each, one for one, by a lint rule proven to bite: the rule fails
+   on a file seeded with the violation before the test is deleted. The task's
+   report lists each removed test beside the rule that replaces it.
+9. **Expect the first run's cost.** The first lint run on a host builds the
+   hook environments (§ Lint stage). The upgrade changes the dependency
+   inputs, so no earlier evidence covers the first verifier or gate run
+   after it, and their test stages run in full once (§ Input evidence).
+10. **Verify.** `atc test ID` for the related tests; the reviewer's
+    `atc test ID --candidate` is the one full run.
 
 ## Markers
 
@@ -373,6 +428,33 @@ covers nothing, and a push with no other record runs the stages.
 The hook is one line: `exec uv run --frozen <project's uv options> python
 <gate> --run`.
 
+## ATC-managed paths
+
+`atc_testkit.managed` tells the files ATC manages in a project from what
+`atc sync` writes there, never from a list of a release's files:
+
+- a file under `.atc/` outside `.atc/tasks/`: sync's by path, since every
+  `owned` target of the manifest lies there (`docs/LAYOUT.md`
+  § The manifest);
+- `.atc/tasks/<name>.yaml`: a task record;
+- a file of `<dir>/skills/<name>/`, any harness directory, when that
+  directory's `SKILL.md` frontmatter carries
+  `managed-by: agent-traffic-control`: a skill copy sync renders. A copy the
+  range deletes is read at the range's base, or before the commit that
+  deleted it.
+
+A file a later release adds under `.atc/`, or a new shared skill, is
+managed with no testkit upgrade. A file sync creates once and then leaves to
+the project (`create-only`, the pointer line in `AGENTS.md`) is the
+project's.
+
+The shared selector classifies a managed path before every other rule: it
+selects the tests that name the file and no other, since no product code
+reads it. `SelectionPolicy.root` names the repository whose skill copies are
+read; without it only the path rules apply, and a skill copy follows the
+project's rules. The verifier counts a managed path as documentation-only
+(governance `VERIFICATION.md` § Documentation-only verification).
+
 ## Lint stage
 
 The lint stage runs the repository's `.pre-commit-config.yaml` through
@@ -433,11 +515,11 @@ Its rules:
   `.markdownlint-cli2.jsonc` with
   `"config": {"extends": ".atc/lint/markdownlint.jsonc"}`. Files in
   `.atc/lint/` run nothing by themselves.
-- A project adopts the lint stage in one commit of its own: it copies
-  `shared/templates/pre-commit-config.yaml` to `.pre-commit-config.yaml`
-  and adds `pre-commit` to its development dependencies. pre-commit has no
-  include, so the project owns that copy from then on. Sync never creates
-  it, so a re-sync adopts nothing (`docs/LAYOUT.md` § The manifest).
+- A project adopts the lint stage in one commit of its own
+  (§ Upgrading a project's testkit, step 7). pre-commit has no include, so
+  the project owns its `.pre-commit-config.yaml` from then on. Sync never
+  creates it, so a re-sync adopts nothing (`docs/LAYOUT.md` § The
+  manifest).
 
 ## Integration verifier
 
@@ -1076,7 +1158,8 @@ describes.
 In the project's Python file:
 
 - The selection policy: package dependencies, path prefixes, full-suite
-  files, and how a missing remote baseline is read.
+  files, how a missing remote baseline is read, and `root`, the repository
+  whose ATC-managed skill copies the selector reads (§ ATC-managed paths).
 - Its static checks with their tokens, path conditions and position.
 
 In `[tool.atc-testkit]`; the first seven keys are required:

@@ -6,6 +6,7 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
+from . import managed
 from .git import BaselineDelta
 
 
@@ -27,6 +28,7 @@ class SelectionPolicy:
     critical_prefixes: tuple[str, ...] = ()
     full_reason: str = "shared test/dependency/runtime input"
     shared_test_reason: str = "shared pytest infrastructure"
+    root: Path | None = None
 
     def __post_init__(self) -> None:
         if not self.test_order or len(set(self.test_order)) != len(self.test_order):
@@ -113,12 +115,17 @@ def classify(path: str, selection: Selection, referenced_by: Callable[[str], set
              baseline_deltas: Mapping[str, BaselineDelta] | None = None) -> None:
     """Add ``path``'s test impact to ``selection``.
 
-    A baseline file only shrinks without widening: each removed entry selects
-    the tests of its test file. A grown baseline, or one whose delta is unknown,
-    widens to the full suite.
+    A file ATC manages (``managed.is_managed`` in ``policy.root``) selects the
+    tests that name it. A baseline file only shrinks without widening: each
+    removed entry selects the tests of its test file. A grown baseline, or one
+    whose delta is unknown, widens to the full suite.
     """
     parts = PurePosixPath(path).parts
     name = parts[-1]
+    if managed.is_managed(path, policy.root):
+        dirs = referenced_by(name)
+        selection.add(path, dirs, "ATC-managed, named by tests" if dirs else "ATC-managed, not a test input")
+        return
     if path in policy.baseline_files:
         delta = (baseline_deltas or {}).get(path)
         if delta is None:

@@ -20,6 +20,8 @@ OWNED, POINTER, CREATE_ONLY, SKILLS = "owned", "pointer-line", "create-only", "s
 MODES = (OWNED, POINTER, CREATE_ONLY, SKILLS)
 SCOPES = ("project", "workspace")
 HARNESS_TARGET = "{harness}/skills/"
+# A project's `owned` targets lie in .atc/ outside tasks/, so the path alone tells a reader what sync owns there.
+ATC_DIR, TASKS_DIR = ".atc/", ".atc/tasks/"
 KEYS = {"manifest", "min_atc", "project", "workspace"}
 ENTRY_KEYS = {"id", "source", "target", "mode", "files"}
 VERSION = re.compile(r"(\d+)\.(\d+)\.(\d+)")
@@ -143,6 +145,8 @@ def _entry(raw: object, where: str, scope: str) -> Entry:
     else:
         source = _relative(raw.get("source"), f"{where}.source")
         target = _relative(raw.get("target"), f"{where}.target", directory=source.endswith("/"))
+    if mode == OWNED and scope == "project" and not (target.startswith(ATC_DIR) and not target.startswith(TASKS_DIR)):
+        raise _invalid(f"{where}.target {target!r}: a project's owned item lies under {ATC_DIR}, outside {TASKS_DIR}")
     files: tuple[str, ...] = ()
     if source.endswith("/") and mode != SKILLS:
         if mode != OWNED:

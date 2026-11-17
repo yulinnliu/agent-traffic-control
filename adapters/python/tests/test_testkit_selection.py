@@ -54,6 +54,41 @@ def test_special_inputs_and_reference_union(policy):
     assert choose(policy, 'main.py', lambda name: {'packages/cli/tests'}).pytest_paths() == ['tests', 'packages/cli/tests']
 
 
+MANAGED_SKILL = '---\nname: s\nmanaged-by: agent-traffic-control\n---\n'
+OWN_SKILL = '---\nname: own\n---\n'
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize('path', [
+    '.atc/lint/ruff.toml', '.atc/lint/vale/ATC/RoleTerms.yml', '.atc/governance/CORE.md', '.atc/atc.lock',
+    '.atc/tasks/T-0001.yaml'])
+def test_a_file_atc_manages_selects_only_the_tests_that_name_it(policy, path):
+    """The sync of atc 0.8.0 added .atc/lint/, which a project's own list did not name: it widened to the full suite."""
+    assert choose(policy, path).pytest_paths() is None
+    assert 'ATC-managed, not a test input' in s.describe(choose(policy, path))
+    named = choose(policy, path, lambda name: {'packages/cli/tests'} if name == Path(path).name else set())
+    assert named.pytest_paths() == ['packages/cli/tests']
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize('harness', ['.claude', '.agents', '.dsh'])
+def test_a_skill_copy_sync_renders_is_managed_in_every_harness(policy, tmp_path, harness):
+    """One skill's copies get one answer, whatever the skill's name and the harness directory."""
+    for name in ('hami-retro', 'own'):
+        skill = tmp_path / harness / 'skills' / name / 'SKILL.md'
+        skill.parent.mkdir(parents=True)
+        skill.write_text(MANAGED_SKILL if name == 'hami-retro' else OWN_SKILL, encoding='utf-8')
+    rooted = replace(policy, root=tmp_path, root_prefixes=('scripts/', '.claude/', '.agents/'))
+    assert choose(rooted, f'{harness}/skills/hami-retro/SKILL.md').pytest_paths() is None
+    own = choose(rooted, f'{harness}/skills/own/SKILL.md').pytest_paths()
+    assert own == ([] if harness == '.dsh' else ['tests'])
+
+
+@pytest.mark.unit
+def test_without_a_root_a_skill_copy_follows_the_project_rules(policy):
+    assert choose(policy, '.dsh/skills/hami-retro/SKILL.md').pytest_paths() == []
+
+
 def test_unknown_path_widens_an_existing_selection(policy):
     selected = choose(policy, 'packages/cli/src/x.py')
     s.classify('unknown', selected, lambda name: set(), policy)

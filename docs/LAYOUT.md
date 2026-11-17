@@ -58,7 +58,9 @@ Operational description of the tree; governance semantics live under
 - `docs/` — operational documentation; `docs/design/<task_id>.md` — a
   task's committed design; `docs/releases/v<version>.md` — the notes of the
   `atc` release `v<version>`, committed in its release commit and used
-  verbatim as its GitHub Release body. Before the Owner tags that commit, a
+  verbatim as its GitHub Release body. What it says to projects lists only
+  that version's changes and points to `docs/TESTKIT.md` § Upgrading a
+  project's testkit for the steps. Before the Owner tags that commit, a
   dispatch of `.github/workflows/validate.yml` on `main` runs at it, and the
   tag goes on only after that run passes on Linux and Windows.
   `.out-of-scope/` — recorded rejections.
@@ -79,6 +81,9 @@ only paths, all relative and without `..`.
 
 - `manifest` is the format (`1`); `min_atc` is the oldest `atc` that renders
   the revision, and an older one stops with `MANIFEST_TOO_NEW`.
+- A `project` item of mode `owned` targets a path under `.atc/` outside
+  `.atc/tasks/`, so the path alone tells a project's tools what sync owns
+  there; any other target is `MANIFEST_INVALID`.
 - `project` items go into every registered project. `workspace` items go into
   the workspace directory when it is not the governance checkout: the
   workspace policy (`create-only`) and the workspace's own skill copies.
@@ -115,15 +120,19 @@ elsewhere it renders the `workspace` items.
 ├── README.md          sync: the governance bootloader, the entry every session reads first
 ├── atc.lock           sync: TOML version, source, revision
 ├── governance/        sync: shared/governance/ byte-equal at the locked revision
+├── lint/              sync: shared/lint/, the lint stage's shared rules (docs/TESTKIT.md § Lint stage)
 └── tasks/             the project's: its task records (docs/TASKS.md)
 ```
 
-- `.atc/` is split by path. Sync writes `README.md`, `atc.lock` and
-  `governance/` and nothing else; `tasks/` belongs to the project, and sync
-  never reads or writes it. Validation reports any other file under `.atc/`,
-  and sync treats one as a collision and writes nothing into that repository.
+- `.atc/` is split by path. Sync writes `atc.lock` and the manifest's
+  `owned` targets, all of which lie under `.atc/` outside `tasks/`
+  (§ The manifest); `tasks/` belongs to the project, and sync never reads or
+  writes it. Validation reports any other file under `.atc/`, and sync
+  treats one as a collision and writes nothing into that repository.
   Ownership under `.atc/` goes by path alone; `managed-by` marks only the
-  rendered skill copies.
+  rendered skill copies. These two records are what a project's testkit
+  reads to tell the files ATC manages (`docs/TESTKIT.md` § ATC-managed
+  paths).
 - `.atc/atc.lock` — `version` (the lock format, `1`), `source` (the governance
   repository, `owner/name`) and `revision` (a full ATC SHA), as TOML strings
   except `version`. The file is exactly these three lines in this order,
