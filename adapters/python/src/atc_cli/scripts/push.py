@@ -3,7 +3,8 @@
 
 Each repository is fetched, every commit in origin/main..main must come from a recorded integration or
 sync, and the checked SHA is pushed to origin/main and confirmed on the remote. Bare `atc push` checks
-every repository; `--all` lists each one and asks y/N before pushing it.
+every repository; `--all` lists each one and asks y/N before pushing it. Each step's progress line, and the
+push's own output with its pre-push hook's, go to stderr as they happen.
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ import argparse
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 import cli_conventions
@@ -27,6 +29,8 @@ REFUSE_HINTS = {
     "PUSH_FAILED": "read git's message, fix the remote or access, then run again",
     "REMOTE_MISMATCH": "origin/main is not at the pushed SHA; fetch and check again",
 }
+# The last lines of a failed push's output that its refusal repeats; the whole output streamed as it ran.
+PUSH_FAILED_LINES = 20
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -36,7 +40,11 @@ def build_parser() -> argparse.ArgumentParser:
         "ledger in the repository's Git directory, also after main was reset below that integration's\n"
         "candidate (listed as 'candidate off main'). NAME is a project in workspace.yaml, or root. Bare\n"
         "atc push checks every repository; --all lists each and asks y/N before pushing it. The Owner runs it;\n"
-        "agents run only --check.",
+        "agents run only --check.\n\n"
+        "Progress goes to stderr, also under --json: one line as each step of a repository ends,\n"
+        "'<step> <name> <seconds>s <result>', for fetch, ledger (the commits in origin/main..main and how\n"
+        "many are recorded), push and read-back (the SHA origin/main names). git push's own output and the\n"
+        "pre-push hook's stream to stderr as the push runs.",
         exit="0 pushed, current or checked; 1 STOP (fetch failed, main behind or diverged, an unrecorded commit, "
              "declined); 2 ERROR",
         see="GIT_WORKFLOW.md § Publication boundary"))
@@ -64,32 +72,70 @@ def repositories(root: Path, names: list[str]) -> list[tuple[str, Path]]:
     return [(name, Path(known[name].repo)) for name in (names or known)]
 
 
-def assess(name: str, repo: Path) -> tuple[cli_conventions.Refusal | None, dict | None]:
+class Steps:
+    """The progress of one repository on stderr: a line `<step> <name> <seconds>s <result>` as each step ends,
+    timed from its `begin`. Stderr keeps stdout for the verdict lines and the `--json` object."""
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+        self.started = time.monotonic()
+
+    @staticmethod
+    def say(line: str) -> None:
+        print(line, file=sys.stderr, flush=True)
+
+    def begin(self) -> None:
+        self.started = time.monotonic()
+
+    def done(self, step: str, result: str) -> None:
+        self.say(f"{step} {self.name} {time.monotonic() - self.started:.1f}s {result}")
+
+
+def assess(name: str, repo: Path, steps: Steps) -> tuple[cli_conventions.Refusal | None, dict | None]:
     """Fetch and list origin/main..main; a refusal when main cannot be pushed as it stands."""
-    report, listing = gp.push_preflight(repo, "main")
+    steps.begin()
+    error = gp.fetch_origin(repo)
+    steps.done("fetch", "FAILED" if error else "OK")
+    if error:
+        return cli_conventions.Refusal("FETCH_FAILED", f"{name}: {gp.fetch_report(error).detail}",
+                                       REFUSE_HINTS["FETCH_FAILED"]), None
+    steps.begin()
+    report, listing = gp.push_state(repo, "main")
     if report.verdict != "PUSH":
+        steps.done("ledger", report.reason)
         return cli_conventions.Refusal(report.reason, f"{name}: {report.detail}", REFUSE_HINTS.get(report.reason)), None
     if listing["origin_main_tip"] is None:
+        steps.done("ledger", "origin has no main")
         return cli_conventions.Refusal("NO_ORIGIN_MAIN", f"{name}: origin has no main",
                                        "the Owner publishes main the first time by hand"), listing
     unrecorded = [entry["sha"][:12] for entry in listing["commits"] if entry["integration"] is None]
+    steps.done("ledger", f"{len(listing['commits'])} commits in origin/main..main, "
+                         f"{len(listing['commits']) - len(unrecorded)} recorded")
     if unrecorded:
         return cli_conventions.Refusal("UNRECORDED_COMMITS", f"{name}: {', '.join(unrecorded)}",
                                        REFUSE_HINTS["UNRECORDED_COMMITS"]), listing
     return None, listing
 
 
-def publish(repo: Path, sha: str) -> cli_conventions.Refusal | None:
-    """Push ``sha`` to origin/main and confirm the remote now names it."""
-    pushed = gp.git(repo, "push", gp.REMOTE, f"{sha}:refs/heads/main", check=False)
-    if pushed.returncode != 0:
-        return cli_conventions.Refusal("PUSH_FAILED", pushed.stderr.strip() or "git push failed",
+def publish(repo: Path, sha: str, steps: Steps) -> cli_conventions.Refusal | None:
+    """Push ``sha`` to origin/main, with git's and the pre-push hook's output streamed to stderr, and confirm the
+    remote now names it. The push itself moves origin/main's remote-tracking ref, so no fetch follows."""
+    steps.say(f"push {steps.name} {gp.short(sha)} -> origin/main")
+    steps.begin()
+    # Git shows its transfer progress only on a terminal; its stderr here is a pipe.
+    progress = ["--progress"] if sys.stderr.isatty() else []
+    code, output = gp.git_streamed(repo, "push", *progress, gp.REMOTE, f"{sha}:refs/heads/main", out=sys.stderr)
+    steps.done("push", "OK" if code == 0 else f"FAILED exit {code}")
+    if code != 0:
+        tail = [line.rstrip() for line in output.splitlines() if line.strip()][-PUSH_FAILED_LINES:]
+        return cli_conventions.Refusal("PUSH_FAILED", "\n".join(tail) or "git push failed",
                                        REFUSE_HINTS["PUSH_FAILED"], cli_conventions.ERROR)
+    steps.begin()
     remote = gp.git(repo, "ls-remote", gp.REMOTE, "refs/heads/main", check=False).stdout.split()
+    named = gp.short(remote[0]) if remote else "absent"
+    steps.done("read-back", f"origin/main {named}")
     if not remote or remote[0] != sha:
-        return cli_conventions.Refusal("REMOTE_MISMATCH", f"origin/main is {remote[0][:12] if remote else 'absent'}",
-                                       REFUSE_HINTS["REMOTE_MISMATCH"])
-    gp.fetch_origin(repo)
+        return cli_conventions.Refusal("REMOTE_MISMATCH", f"origin/main is {named}", REFUSE_HINTS["REMOTE_MISMATCH"])
     return None
 
 
@@ -107,8 +153,9 @@ def main(argv: list[str] | None = None, root: Path = ROOT, answer=input) -> int:
     code = cli_conventions.OK
     rows = []
     for name, repo in targets:
+        steps = Steps(name)
         try:
-            refusal, listing = assess(name, repo)
+            refusal, listing = assess(name, repo, steps)
         except gp.GitError as exc:
             refusal, listing = cli_conventions.Refusal("GIT_FAILED", f"{name}: {exc}", "check the repository's Git "
                                                        "state", cli_conventions.ERROR), None
@@ -130,7 +177,7 @@ def main(argv: list[str] | None = None, root: Path = ROOT, answer=input) -> int:
                     refusal = cli_conventions.Refusal("DECLINED", f"{name} was not pushed",
                                                       f"atc push {name}")
             if refusal is None:
-                refusal = publish(repo, listing["main_tip"])
+                refusal = publish(repo, listing["main_tip"], steps)
             row["verdict"] = "PUSHED" if refusal is None else "REFUSED"
         else:
             row["verdict"] = "REFUSED"

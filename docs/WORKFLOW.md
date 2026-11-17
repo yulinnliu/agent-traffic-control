@@ -170,6 +170,33 @@ older ledger lines while their commits still exist. `atc push --all` asks y/N
 per repository. The coordinator then archives the task's sessions
 (`DELIVERY.md` § Close-out and § 10).
 
+`atc push` shows its progress on stderr, one line as each step of a
+repository ends, `<step> <name> <seconds>s <result>`, with one decimal like
+the `ELAPSED` lines (`TESTKIT.md` § Stage times):
+
+```text
+fetch hami-quant 2.5s OK
+ledger hami-quant 0.1s 3 commits in origin/main..main, 3 recorded
+push hami-quant 1a2b3c4d5e6f -> origin/main
+<git push's output and the pre-push hook's, as they run>
+push hami-quant 41.0s OK
+read-back hami-quant 2.4s origin/main 1a2b3c4d5e6f
+PUSHED hami-quant 1a2b3c4 (3 commits)
+```
+
+- `fetch` is `git fetch origin`; `ledger` checks each commit of
+  `origin/main..main` against the integration ledger, and its result is the
+  count and how many are recorded, or the stop that ends the run.
+- `push` streams `git push` as it runs: the pre-push hook's output and git's
+  own, with git's transfer progress when stderr is a terminal. A failed push
+  is `PUSH_FAILED`, and its refusal repeats the last 20 lines of that output.
+- `read-back` is `git ls-remote origin refs/heads/main`, the remote's own
+  answer that it names the pushed SHA (governance `GIT_WORKFLOW.md`
+  § Publication boundary). The push itself moves the remote-tracking
+  `origin/main`, so no second fetch follows.
+- Under `--json` the progress stays on stderr and stdout holds only the JSON
+  object, as for every human line (`shared/conformance/CLI.md` § Output).
+
 ## Build trees
 
 ```text

@@ -5,7 +5,9 @@ a bare `origin` beside it.
 """
 from __future__ import annotations
 
+import io
 import json
+import re
 import subprocess
 from pathlib import Path
 
@@ -183,6 +185,94 @@ def test_check_with_names_or_all_lists_and_never_pushes(ws: Path, argv: list[str
     else:
         assert out.splitlines()[0].startswith("CHECK root") and f"integration {integrated[:12]}" in out
     assert origin_main(ws) == base
+
+
+# Progress and the streamed push (ATC-0061)
+
+def integrated_main(ws: Path) -> str:
+    """origin/main at a base and main one recorded integration ahead; the integration's SHA."""
+    publish(ws, "main")
+    integrated = commit(ws, "a.txt", "integrated\n")
+    ledger(ws, integrated, base=run_git(ws, "rev-parse", "origin/main"))
+    return integrated
+
+
+def pre_push(ws: Path, body: str) -> None:
+    hook = ws / ".git" / "hooks" / "pre-push"
+    hook.parent.mkdir(parents=True, exist_ok=True)
+    hook.write_text("#!/bin/sh\n" + body, encoding="utf-8", newline="\n")
+    hook.chmod(0o755)
+
+
+def test_a_push_reports_each_step_with_its_time_on_stderr(ws: Path, capsys: pytest.CaptureFixture[str],
+                                                          monkeypatch: pytest.MonkeyPatch) -> None:
+    integrated = integrated_main(ws)
+    pre_push(ws, "echo 'gate: PASS'\n")
+    fetches = []
+    real_fetch = gp.fetch_origin
+    monkeypatch.setattr(gp, "fetch_origin", lambda repo: fetches.append(repo) or real_fetch(repo))
+    assert push.main(["root"], root=ws) == 0
+    captured = capsys.readouterr()
+    err = captured.err.splitlines()
+    steps = [line for line in err if re.match(r"(fetch|ledger|push|read-back) root ", line)]
+    assert [re.sub(r" \d+\.\ds ", " Ts ", line) for line in steps] == [
+        "fetch root Ts OK",
+        "ledger root Ts 1 commits in origin/main..main, 1 recorded",
+        f"push root {integrated[:12]} -> origin/main",
+        "push root Ts OK",
+        f"read-back root Ts origin/main {integrated[:12]}",
+    ]
+    assert err.index("gate: PASS") == err.index(steps[2]) + 1
+    assert "gate: PASS" not in captured.out and not any(line in captured.out for line in steps)
+    # The push moved origin/main's remote-tracking ref itself: one fetch, before the push.
+    assert len(fetches) == 1
+    assert run_git(ws, "rev-parse", "refs/remotes/origin/main") == integrated
+
+
+def test_a_failing_pre_push_hook_streams_and_refuses_with_its_last_lines(ws: Path,
+                                                                        capsys: pytest.CaptureFixture[str]) -> None:
+    integrated_main(ws)
+    base = run_git(ws, "rev-parse", "origin/main")
+    lines = push.PUSH_FAILED_LINES + 10
+    pre_push(ws, f"i=1; while [ $i -le {lines} ]; do echo \"gate: line $i\"; i=$((i+1)); done\nexit 1\n")
+    assert push.main(["root"], root=ws) == 2
+    captured = capsys.readouterr()
+    assert "gate: line 1\n" in captured.err  # streamed whole
+    assert re.search(r"^push root \d+\.\ds FAILED exit 1$", captured.err, re.M)
+    assert "PUSH_FAILED" in captured.out
+    refusal = captured.out[captured.out.index("PUSH_FAILED"):]
+    assert f"gate: line {lines}" in refusal and "gate: line 1\n" not in refusal
+    assert origin_main(ws) == base
+
+
+def test_json_keeps_progress_and_hook_output_off_stdout(ws: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    integrated = integrated_main(ws)
+    pre_push(ws, "echo 'gate: PASS'\n")
+    assert push.main(["root", "--json"], root=ws) == 0
+    captured = capsys.readouterr()
+    assert json.loads(captured.out)["repositories"][0]["verdict"] == "PUSHED"
+    assert "gate: PASS" in captured.err and re.search(r"^fetch root \d+\.\ds OK$", captured.err, re.M)
+    assert origin_main(ws) == integrated
+
+
+def test_git_output_reaches_the_terminal_while_git_still_runs(ws: Path, tmp_path: Path) -> None:
+    """The hook waits for a file that only the copy of its first line creates: output buffered until git exits
+    would time the hook out."""
+    integrated = integrated_main(ws)
+    flag = tmp_path / "released"
+    pre_push(ws, f"echo 'gate: waiting'\ni=0\nwhile [ ! -f '{flag.as_posix()}' ] && [ $i -lt 300 ]; do "
+                 "sleep 0.1; i=$((i+1)); done\n"
+                 f"[ -f '{flag.as_posix()}' ] && echo 'gate: released'\n")
+
+    class Terminal(io.StringIO):
+        def write(self, text: str) -> int:
+            if "gate: waiting" in self.getvalue() + text:
+                flag.touch()
+            return super().write(text)
+
+    out = Terminal()
+    code, output = gp.git_streamed(ws, "push", "origin", f"{integrated}:refs/heads/main", out=out)
+    assert code == 0 and "gate: released" in out.getvalue() and output == out.getvalue()
 
 
 # A main reset below a recorded candidate (design ATC-0057)

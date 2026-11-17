@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Read-only Git preflight for the lifecycle in shared/governance/GIT_WORKFLOW.md.
 
-`push_preflight()` runs `git fetch origin` and lists every commit a push of main would carry, grouped by
-the integration that brought it in, for `atc push`. `merge_preflight()` evaluates that file's integration
+`push_state()` lists every commit a push of main would carry after `fetch_origin()`, grouped by the
+integration that brought it in, for `atc push`. `merge_preflight()` evaluates that file's integration
 table for `atc integrate`, and `cleanup_preflight()` judges a worktree's removal for `atc task close`. None
 of them writes a branch, the index or the working tree: conflicts are detected with
 `git merge-tree --write-tree`, which creates only unreferenced objects, and the fetch updates only
@@ -11,6 +11,7 @@ remote-tracking refs. A STOP carries the step that resolves it (governance `GIT_
 
 from __future__ import annotations
 
+import codecs
 import json
 import os
 import re
@@ -18,6 +19,7 @@ import subprocess
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TextIO
 
 # Hook-exported variables would redirect every `git -C <repo>` call to the
 # hook's own repository.
@@ -136,25 +138,46 @@ class Report:
             self.next = NEXT[self.reason]
 
 
-def git(
-    repo: Path, *args: str, check: bool = True, extra_env: dict[str, str] | None = None, input: str | None = None,
-) -> subprocess.CompletedProcess:
+def git_env(extra_env: dict[str, str] | None = None) -> dict[str, str]:
     env = {key: value for key, value in os.environ.items() if key not in SCRUBBED_ENV}
     # Stops `git status` from refreshing and rewriting the index of a checkout
     # another agent may be using.
     env["GIT_OPTIONAL_LOCKS"] = "0"
     env.update(extra_env or {})
+    return env
+
+
+def git(
+    repo: Path, *args: str, check: bool = True, extra_env: dict[str, str] | None = None, input: str | None = None,
+) -> subprocess.CompletedProcess:
     result = subprocess.run(
         ["git", "-C", str(repo), *args],
         capture_output=True,
         text=True,
         encoding="utf-8",
-        env=env,
+        env=git_env(extra_env),
         input=input,
     )
     if check and result.returncode != 0:
         raise GitError(f"git {' '.join(args)}: {result.stderr.strip() or result.returncode}")
     return result
+
+
+def git_streamed(repo: Path, *args: str, out: TextIO) -> tuple[int, str]:
+    """Run git with its stdout and stderr, which carries a hook's output, copied to ``out`` as they arrive;
+    its exit code and everything it wrote."""
+    process = subprocess.Popen(["git", "-C", str(repo), *args], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                               env=git_env())
+    decoder = codecs.getincrementaldecoder("utf-8")("replace")
+    written = []
+    with process.stdout:
+        while chunk := process.stdout.read1(65536):
+            text = decoder.decode(chunk)
+            out.write(text)
+            out.flush()
+            written.append(text)
+    written.append(decoder.decode(b"", final=True))
+    return process.wait(), "".join(written)
 
 
 def rev(repo: Path, ref: str) -> str | None:
@@ -597,11 +620,14 @@ def render_push(listing: dict) -> list[str]:
     return [FULL_SHA_WORD.sub(r"\1", line) for line in lines]
 
 
-def push_preflight(repo: Path, main: str = "main", own: set[str] | str | None = None) -> tuple[Report, dict | None]:
-    """Fetch origin, then list what a push of main would carry; stop when main lacks origin commits."""
-    error = fetch_origin(repo)
-    if error:
-        return Report("push", "STOP", "FETCH_FAILED", f"{REASONS['FETCH_FAILED']}: {error}"), None
+def fetch_report(error: str) -> Report:
+    """The stop for a failed `git fetch origin`, with git's message."""
+    return Report("push", "STOP", "FETCH_FAILED", f"{REASONS['FETCH_FAILED']}: {error}")
+
+
+def push_state(repo: Path, main: str = "main", own: set[str] | str | None = None) -> tuple[Report, dict | None]:
+    """List what a push of main would carry, against origin/main as last fetched; stop when main lacks origin
+    commits. The caller fetches first (`fetch_origin`)."""
     main_tip = rev(repo, main)
     if main_tip is None:
         raise GitError(f"cannot resolve {main}")
