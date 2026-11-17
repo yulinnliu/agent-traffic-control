@@ -10,6 +10,7 @@ push's own output with its pre-push hook's, go to stderr as they happen.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import sys
@@ -173,12 +174,15 @@ def main(argv: list[str] | None = None, root: Path = ROOT, answer=input) -> int:
         elif refusal is None and check:
             row["verdict"] = "CHECK"
         elif refusal is None:
-            if args.all and not args.json:
-                print("\n".join(gp.render_push(listing)))
-                try:
-                    reply = answer(f"push {name}? [y/N] ")
-                except EOFError:
-                    reply = ""
+            if args.all:
+                # The question and the listing it asks about are human lines: on stderr under --json, which
+                # keeps stdout for the JSON object (CLI.md § Output). No answer is a no.
+                with contextlib.redirect_stdout(sys.stderr if args.json else sys.stdout):
+                    print("\n".join(gp.render_push(listing)))
+                    try:
+                        reply = answer(f"push {name}? [y/N] ")
+                    except EOFError:
+                        reply = ""
                 if reply.strip().lower() not in ("y", "yes"):
                     refusal = cli_conventions.Refusal("DECLINED", f"{name} was not pushed",
                                                       f"atc push {name}")

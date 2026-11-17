@@ -257,6 +257,23 @@ def test_json_keeps_progress_and_hook_output_off_stdout(ws: Path, capsys: pytest
     assert origin_main(ws) == integrated
 
 
+@pytest.mark.parametrize("reply, verdict", [("n", "REFUSED"), (None, "REFUSED"), ("y", "PUSHED")])
+def test_all_with_json_asks_on_stderr_and_pushes_only_on_a_yes(ws: Path, reply: str | None, verdict: str,
+                                                               capsys: pytest.CaptureFixture[str],
+                                                               monkeypatch: pytest.MonkeyPatch) -> None:
+    """`--all` confirms every repository under `--json` too; the question goes through the real `input` to stderr,
+    and no answer (end of input) is a no."""
+    integrated = integrated_main(ws)
+    base = run_git(ws, "rev-parse", "origin/main")
+    monkeypatch.setattr("sys.stdin", io.StringIO("" if reply is None else reply + "\n"))
+    assert push.main(["--all", "--json"], root=ws) == (0 if reply == "y" else 1)
+    captured = capsys.readouterr()
+    row = json.loads(captured.out)["repositories"][0]
+    assert row["verdict"] == verdict and (reply == "y" or row["reason"] == "DECLINED")
+    assert "push root? [y/N] " in captured.err and f"integration {integrated[:12]}" in captured.err
+    assert origin_main(ws) == (integrated if reply == "y" else base)
+
+
 def test_git_output_reaches_the_terminal_while_git_still_runs(ws: Path, tmp_path: Path) -> None:
     """The hook waits for a file that only the copy of its first line creates: output buffered until git exits
     would time the hook out."""

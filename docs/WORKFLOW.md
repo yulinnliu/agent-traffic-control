@@ -167,7 +167,8 @@ when a line of the integration ledger names it in its `commits`, also after
 the Owner reset `main` below that integration's candidate; the listing marks
 such a group `candidate off main`. `atc integrate` adds the `commits` of
 older ledger lines while their commits still exist. `atc push --all` asks y/N
-per repository. The coordinator then archives the task's sessions
+per repository, also under `--json`, where the listing and the question go to
+stderr; no answer is a no. The coordinator then archives the task's sessions
 (`DELIVERY.md` § Close-out and § 10).
 
 `atc push` shows its progress on stderr, one line as each step of a
