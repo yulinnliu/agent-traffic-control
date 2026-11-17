@@ -211,23 +211,24 @@ def test_tests_after_dashes_judge_every_mutant_from_the_given_file(
     assert "--verifier-argv" not in argv  # the worktree's AGENTS.md names no verifier
 
 
-def test_the_mutant_baseline_takes_the_verifier_of_the_repository_that_holds_the_commit(
+def test_an_export_names_its_own_verifier_argv_file_never_the_worktrees(
         workspace: Workspace, calls: dict[str, list], tmp_path: Path) -> None:
-    """The verifier argv file the worktree's AGENTS.md names classifies the commit's input set for the baseline key:
-    the export is no Git checkout (docs/TESTKIT.md § ``atc test ID --mutants FILE``)."""
+    """The export's own verifier classifies its commit's input set, for the mutant baseline and for a --sha run's
+    input evidence; the worktree's file is never named (docs/TESTKIT.md § Input evidence)."""
     put(workspace.worktree, {"AGENTS.md": "# AGENTS.md\n\n## Integration verification\n\n"
                                           "- Verifier argv file: verify.json\n- Verifier timeout: 60\n",
                              "verify.json": "[]\n"}, "name the verifier")
     listing = write_mutants(tmp_path, [{"label": "a", "edits": DEMO_EDIT}])
     assert workspace.run(TASK, "--mutants", str(listing), "--", "tests/test_value.py") == 0
     [(argv, _entries)] = calls["mutants"]
-    assert Path(argv[argv.index("--verifier-argv") + 1]) == workspace.worktree / "verify.json"
+    named = Path(argv[argv.index("--verifier-argv") + 1])
+    assert named.name == "verify.json" and named.parent.name == "tree" and named.parent.parent.name == argv[0]
     assert argv.index("--verifier-argv") < argv.index("--tests")
-    # a run of an export of the commit records its input evidence with the same classifier
     tip = git(workspace.worktree, "rev-parse", "HEAD")
     assert workspace.run(TASK, "--sha", tip) == 0
     run_argv = calls["run"][-1]
-    assert Path(run_argv[run_argv.index("--verifier-argv") + 1]) == workspace.worktree / "verify.json"
+    named = Path(run_argv[run_argv.index("--verifier-argv") + 1])
+    assert named.parent.name == "tree" and named.parent.parent.name == run_argv[run_argv.index("--scratch") + 1]
 
 
 def test_a_candidate_is_verified_at_the_branch_tip_or_the_given_sha(workspace: Workspace,

@@ -443,10 +443,10 @@ def commit_tree(repository: str, commit: str) -> list[inputs.Entry] | None:
         return None
 
 
-def classified_inputs(repository: str, commit: str, tree: Sequence[inputs.Entry] | None, argv_file: str | None,
-                      environ: Mapping[str, str]) -> dict | None:
-    """A baseline's ``inputs``: the input digest of ``commit`` and its excluded paths, as the verifier of the
-    repository that holds the commit classifies them; ``None`` without a classification."""
+def classified_inputs(export: Path, repository: str, commit: str, tree: Sequence[inputs.Entry] | None,
+                      argv_file: str | None, environ: Mapping[str, str]) -> dict | None:
+    """A baseline's ``inputs``: the input digest of ``commit`` and its excluded paths, as the verifier of its export
+    classifies them (``classify_export``); ``None`` without a classification."""
     if tree is None or not argv_file:
         return None
     try:
@@ -455,7 +455,7 @@ def classified_inputs(repository: str, commit: str, tree: Sequence[inputs.Entry]
         return None
     if not isinstance(argv, list) or not all(isinstance(item, str) for item in argv):
         return None
-    classified = inputs.classify(argv, Path(repository), environ, commit)
+    classified = classify_export(argv, export, Path(repository), environ, commit)
     if classified is None:
         return None
     excluded = sorted(classified[0])
@@ -769,8 +769,7 @@ def _mutants(argv: Sequence[str], environ: MutableMapping[str, str] | None,
         print(f"BASELINE-OK {summary}", flush=True)
     choices = _choices(entries, args.tests, tree, place, recording)
     if stored is None:
-        classified = classified_inputs(worktree, commit, commit_entries, args.verifier_argv,
-                                       {name: value for name, value in child.items() if not name.upper().startswith("GIT_")})
+        classified = classified_inputs(tree, worktree, commit, commit_entries, args.verifier_argv, child)
         _keep_record(place, {**key, "inputs": classified or key["inputs"], "sha": commit, "recorded": bool(choices),
                              "time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "summary": summary,
                              "seconds": round(float(ran["seconds"]), 1), "workers": _run_workers(arguments)})
@@ -1205,13 +1204,53 @@ class RunSource:
         """A worktree's state after the run; an export stays its commit while the scratch is held."""
         return worktree_unclean(self.top) if self.worktree else None
 
-    def classifier_top(self) -> Path:
-        """Where the verifier classifies the commit's input set: the worktree's top, or for an export, which is no
-        Git checkout, the top of the repository that holds the commit."""
+    def classify(self, argv: Sequence[str], env: Mapping[str, str]) -> tuple[list[str], list[str]] | None:
+        """The commit's input set as its own verifier classifies it: in the worktree, or in the export with Git
+        reads served from the source repository's objects (``classify_export``)."""
         if self.worktree:
-            return self.top
-        top = _git_lines(self.repository, "rev-parse", "--show-toplevel")
-        return Path(top[0]) if top else self.repository
+            return inputs.classify(argv, self.top, env, self.commit)
+        return classify_export(argv, self.top, self.repository, env, self.commit)
+
+
+CLASSIFY_GIT = "classify.git"
+
+
+def _export_git(top: Path, *args: str) -> None:
+    subprocess.run(["git", "-C", str(top), *args], check=True, capture_output=True, env=git_env(),
+                   stdin=subprocess.DEVNULL, creationflags=scratch.WINDOW_HIDDEN)
+
+
+def classify_export(argv: Sequence[str], top: Path, repository: Path, env: Mapping[str, str], commit: str
+                    ) -> tuple[list[str], list[str]] | None:
+    """``commit``'s input set as the verifier of its export ``top`` classifies it, run in the export: an export is
+    no Git checkout, so it gets a Git directory beside it (``<scratch>/classify.git``) that reads the source
+    repository's objects through ``objects/info/alternates``, with ``HEAD`` and the index at ``commit``, removed
+    with its ``.git`` pointer file afterwards. Nothing runs in, or writes to, the source checkout. ``None`` when
+    the export already has a ``.git`` or the Git directory cannot be made."""
+    marker, directory = top / ".git", top.parent / CLASSIFY_GIT
+    if os.path.lexists(marker):
+        return None
+
+    def clean() -> None:
+        marker.unlink(missing_ok=True)
+        if os.path.isdir(directory):
+            scratch.remove_tree(directory, lambda _link: False, say=lambda _line: None)
+    try:
+        clean()
+        objects = inputs.common_directory(repository) / "objects"
+        _export_git(top, "init", "-q", f"--separate-git-dir={directory}")
+        # Git reads a carriage return as part of the path, so the line ends in a bare LF on every platform.
+        (directory / "objects" / "info" / "alternates").write_bytes(f"{objects.as_posix()}\n".encode())
+        _export_git(top, "update-ref", "HEAD", commit)
+        _export_git(top, "read-tree", commit)
+    except (OSError, subprocess.CalledProcessError):
+        clean()
+        return None
+    try:
+        return inputs.classify(argv, top, {name: value for name, value in env.items()
+                                           if not name.upper().startswith("GIT_")}, commit)
+    finally:
+        clean()
 
 
 def worktree_unclean(tree: Path) -> str | None:
@@ -1235,7 +1274,7 @@ def record_inputs(source: RunSource, argv_file: Path, outcomes: Path, private: b
         argv = json.loads(argv_file.read_text(encoding="utf-8-sig"))
     except (OSError, ValueError):
         return f"{INPUTS_NOT_RECORDED} the verifier argv file {argv_file} cannot be read"
-    classified = inputs.classify(argv, source.classifier_top(), env, source.commit)
+    classified = source.classify(argv, env)
     if classified is None:
         return f"{INPUTS_NOT_RECORDED} the verifier did not classify {source.commit[:12]}'s input set"
     excluded, dependency_files = classified

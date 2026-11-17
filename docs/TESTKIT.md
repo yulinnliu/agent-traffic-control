@@ -564,8 +564,13 @@ non-Python toolchain runs its stages whole.
 pytest arguments and the tree equals its commit before and after the run:
 the worktree's `HEAD` with a clean status, or an export still equal to its
 commit. It asks the project's verifier for the commit's input set by running
-the verifier argv file with `ATC_INPUTS_OF=<commit>` in the repository that
-holds the commit, the worktree, since an export is no Git checkout; it prints
+the tree's own verifier argv file with `ATC_INPUTS_OF=<commit>` in that
+tree. An export is no Git checkout, so for the classification it gets a Git
+directory beside it, `<scratch>/classify.git`, that reads the source
+repository's objects through `objects/info/alternates`, with `HEAD` and the
+index at the commit, removed with its `.git` pointer file afterwards; no
+code runs in the source checkout, and an export that already holds a `.git`
+records nothing. The verifier prints
 `{"commit", "excluded", "dependency_files"}` and runs no check, and records
 each file of the run whose every test passed under the expression the run
 used. It prints `EVIDENCE <n> test files recorded for <sha12> (inputs
@@ -920,9 +925,9 @@ clamp.
   path from the scratch when it lies inside it) and whether the runs are
   private, with its time, summary, seconds and workers. `inputs` is
   `{"digest", "excluded"}`, the commit's input digest and the paths outside
-  its input set (§ Input evidence), as the verifier argv file of the
-  repository that holds the commit classifies them, since an export is no
-  Git checkout; without a classification it is `commit <sha>`. A later run
+  its input set (§ Input evidence), as the export's own verifier argv file
+  classifies them in the export, with the Git directory § Input evidence
+  gives an export; without a classification it is `commit <sha>`. A later run
   reuses the record when its commit has those inputs
   (`shared/conformance/verification-evidence/README.md` § Input set; a
   `commit <sha>` record only its own commit), its test arguments (in order),

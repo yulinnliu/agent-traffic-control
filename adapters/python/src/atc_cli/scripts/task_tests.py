@@ -144,6 +144,16 @@ def export(task: Task, sha: str, environ: dict[str, str]) -> tuple[str, str, Pat
     return name, commit, test_dir(tree, task)
 
 
+def repository_top(directory: Path, worktree: Path | None) -> Path:
+    """The top of the tree a run tests: the worktree, or the ``tree`` directory of an export."""
+    if worktree is not None:
+        return worktree
+    top = directory
+    while top.name != checkout.TREE and top.parent != top:
+        top = top.parent
+    return top
+
+
 def verifier_argv_file(top: Path) -> Path | None:
     """The verifier argv file the tree's `AGENTS.md` names, which classifies its input set (docs/TESTKIT.md
     § Input evidence); ``None`` when it names none."""
@@ -168,8 +178,8 @@ def run_tests(task: Task, args: argparse.Namespace, pytest_args: list[str], envi
             *timeout_of(directory), *(["--progress"] if args.verbose else [])]
     if task.base:
         argv += ["--lint", task.base]
-    # The repository that holds the commit classifies its input set (docs/TESTKIT.md § Input evidence).
-    argv_file = verifier_argv_file(task.source())
+    # The tree's own verifier classifies its commit's input set (docs/TESTKIT.md § Input evidence).
+    argv_file = verifier_argv_file(repository_top(Path(directory), None if args.sha else task.worktree))
     if argv_file is not None:
         argv += ["--verifier-argv", str(argv_file)]
     if args.lint:
@@ -216,8 +226,8 @@ def run_mutants(task: Task, args: argparse.Namespace, tests: list[str], environ:
     with scratch.mutants_lock(place):
         if narrow:
             listing, tests = selected_mutants(entries, directory, place, environ)
-        # The repository that holds the commit classifies its input set: an export is no Git checkout.
-        argv_file = verifier_argv_file(task.source())
+        # The export's own verifier classifies its commit's input set.
+        argv_file = verifier_argv_file(repository_top(directory, None))
         return testrun.mutants([name, commit, str(task.source()), str(listing), "--task", task.id,
                                 *(["--lines"] if narrow else []),
                                 *(["--verifier-argv", str(argv_file)] if argv_file is not None else []),

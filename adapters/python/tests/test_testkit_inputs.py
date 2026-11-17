@@ -208,29 +208,44 @@ def test_a_run_records_each_passed_file_only_when_the_tree_is_its_commit(reposit
 
 
 @pytest.mark.integration
-def test_an_export_run_is_classified_in_the_repository_that_holds_its_commit(repository: Path, tmp_path: Path) -> None:
-    """An export is no Git checkout, so a verifier that reads the commit from Git classifies it from the source."""
+def test_an_export_run_is_classified_by_its_own_tree_whatever_the_source_worktree_holds(
+        repository: Path, tmp_path: Path) -> None:
+    """An export is no Git checkout: its own verifier classifies it in the export, Git reads served from the source
+    repository's objects, while the source worktree has moved on and holds an uncommitted edit; nothing is left in
+    the export or the worktree (docs/TESTKIT.md § Input evidence)."""
     argv_file = tmp_path / "verify.json"
+    # The stand-in verifier reads the commit from Git and its classification from a file of the tree it runs in.
     script = ("import json, os, subprocess; commit = os.environ['ATC_INPUTS_OF']; "
               "subprocess.run(['git', 'cat-file', '-e', commit], check=True); "
-              "print(json.dumps({'commit': commit, 'excluded': ['docs/notes.md'], 'dependency_files': []}))")
+              "excluded = open('classify.txt', encoding='utf-8').read().split(); "
+              "print(json.dumps({'commit': commit, 'excluded': excluded, 'dependency_files': []}))")
     argv_file.write_text(json.dumps([sys.executable, "-c", script]), encoding="utf-8")
-    sha = git(repository, "rev-parse", "HEAD")
+    sha = commit(repository, "classify.txt", "docs/notes.md\n")
     place = tmp_path / "scratch"
     export = place / "tree"
-    (export / "tests").mkdir(parents=True)
-    (export / "tests/test_a.py").write_bytes((repository / "tests/test_a.py").read_bytes())
+    for path in ("tests/test_a.py", "docs/notes.md", "classify.txt"):
+        (export / path).parent.mkdir(parents=True, exist_ok=True)
+        (export / path).write_bytes((repository / path).read_bytes())
+    moved = commit(repository, "classify.txt", "tests/test_a.py\n")
+    (repository / "classify.txt").write_text("docs/notes.md tests/test_a.py\n", encoding="utf-8")
+    status = git(repository, "status", "--porcelain")
     outcomes = tmp_path / "outcomes.json"
     outcomes.write_text(json.dumps({"rootdir": str(export), "files": {"tests/test_a.py": "passed"}}), encoding="utf-8")
     row = scratch.Row("p", str(place), str(export), "2026-11-17T00:00:00Z", "ATC-0001", str(repository), sha)
     source = testrun.RunSource.of(export, place, row)
-    assert source is not None and not source.worktree and source.classifier_top() == Path(
-        git(repository, "rev-parse", "--show-toplevel"))
+    assert source is not None and not source.worktree
     line = testrun.record_inputs(source, argv_file, outcomes, False, environment())
     assert line.startswith(f"EVIDENCE 1 test files recorded for {sha[:12]} (inputs "), line
-    (record,) = [json.loads(path.read_text(encoding="utf-8"))
-                 for path in inputs.store(inputs.common_directory(repository)).glob("*.json")]
-    assert record["ran_on"] == sha and record["identity"]["file"] == "tests/test_a.py"
+    common = inputs.common_directory(repository)
+    (record,) = [json.loads(path.read_text(encoding="utf-8")) for path in inputs.store(common).glob("*.json")]
+    assert record["ran_on"] == sha and inputs.read_excluded(common, record["excluded"]) == ["docs/notes.md"]
+    assert not os.path.lexists(export / ".git") and not (place / testrun.CLASSIFY_GIT).exists()
+    assert git(repository, "rev-parse", "HEAD") == moved and git(repository, "status", "--porcelain") == status
+    # an export that holds a .git of its own is not classified: nothing is recorded
+    (export / ".git").write_text("gitdir: elsewhere\n", encoding="utf-8")
+    assert testrun.classify_export(json.loads(argv_file.read_text(encoding="utf-8")), export, repository,
+                                   environment(), sha) is None
+    assert (export / ".git").read_text(encoding="utf-8") == "gitdir: elsewhere\n"
 
 
 @pytest.mark.integration

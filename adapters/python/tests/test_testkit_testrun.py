@@ -789,8 +789,11 @@ def test_a_baseline_is_keyed_by_the_inputs_of_its_commit(tmp_path: Path) -> None
     def tree(commit: str) -> list | None:
         return testrun.commit_tree(str(worktree), commit)
 
+    export = tmp_path / "s" / "tree"  # the stand-in verifier needs no files of the export, only Git reads there
+    export.mkdir(parents=True)
+
     def classified(argv: str | None = argv_file) -> dict | None:
-        return testrun.classified_inputs(str(worktree), first, tree(first), argv, dict(os.environ))
+        return testrun.classified_inputs(export, str(worktree), first, tree(first), argv, dict(os.environ))
     stored = classified()
     assert stored is not None and stored["excluded"] == ["notes.md"]
     assert testrun._same_inputs(stored, f"commit {docs}", tree(docs))
