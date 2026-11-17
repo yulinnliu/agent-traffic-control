@@ -24,3 +24,4 @@ decisions:
 - 'Owner 11-17 「用草案，刪「your own tooling」」: README first paragraph is the design § 4.6 draft with the parenthesis (Claude Code, Codex); home title: Agent Traffic Control: governance for Claude Code and Codex coding agents; README.zh-TW.md gets the matching translation.'
 - 'Owner 11-17 「Repository variable」: the Search Console token is the repository variable GOOGLE_SITE_VERIFICATION read by the Pages workflow; the Owner steps say the workflow reruns after the variable is set and that deleting it drops the verification.'
 - 'Owner 11-17 「照設計」: publication scope as designed in § 3.1.'
+- 'Owner 11-17 「用 writer 擬的」: the zh-TW home title is 「Agent Traffic Control：Claude Code 與 Codex coding agent 的治理層」 (site/zensical.toml extra.home_title zh-TW).'
