@@ -1,0 +1,22 @@
+task_id: ATC-0059
+title: Release atc 0.8.0
+repository: yulinnliu/agent-traffic-control
+base_sha: 1aecea204a35ca1e9e25fb84cb72e4bf6bb6e433
+scope: 'Batch release of atc 0.8.0 and atc-testkit 0.15.0. It carries ATC-0057 and ATC-0058, which is everything on main since v0.7.0 (5d523c1). - **Version bump.** Bump both packages and every place the version is pinned. Set `min_atc` in `atc-manifest.yaml` to the lowest atc that reads what testkit 0.15.0 writes (the input-keyed candidate records), and state why. 0.8.0 is expected. - **Release notes.** Write `docs/releases/v0.8.0.md` in the shape of `docs/releases/v0.7.0.md`. - **Breaking section, complete.** List every removed or renamed command, flag, output token, exit code, record field, skill contract and governance rule, each with its replacement and its task. - This includes the `integrations.jsonl` `commits` field and its backfill (ATC-0057). - It includes ATC-0058''s evidence record format, the verifier''s `LINT_FAILED` row, and the text-reading tests moved to the lint stage. - It includes the governance changes in VERIFICATION.md and GIT_WORKFLOW.md (both tasks) and CORE.md (whitespace
+  only). - **For each atc-testkit change,** say whether a project upgrade is required or skippable. Projects pin older testkits. The lint stage and the shared lint rules that sync ships to `.atc/lint/` get their own row: what a project must add to adopt them, and what happens if it does not. - **First-run cost.** State the lint stage''s first-run cost on a host, including Vale through pre-commit golang (Go download and build), as `docs/TESTKIT.md` records it. - **Upgrade section, for the host:** - `uv tool install --force` from the tag (`docs/WORKFLOW.md` § Installing a release); - `atc guard --install`, if the hook table changed; - `atc sync`; - `atc doctor`. - **Upgrade section, the push after install.** Root `main` has not been pushed since v0.6.0, and the push of `main` plus tags v0.7.0 and v0.8.0 waits on this release. - Check against the code how the ledger backfill reaches the lines integrated before 0.8.0 is installed: this release''s own integration runs on the installed 0.7.0.
+  - Write the exact Owner steps from install to a passing `atc push root --check`. - If 0.8.0 offers no step that backfills without a further integration, report it to the coordinator before writing the notes. Do not work around it. - The backfill needs a785fb1 in the reflog, which expires about 12-15. - **Upgrade section, for projects:** re-sync on 0.8.0; adopting the lint stage goes through Hami-Coordinator. The tag, its push, the install and each project''s re-sync are the Owner''s steps after integration, not this task''s.'
+tests: standard
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: 1aecea204a35ca1e9e25fb84cb72e4bf6bb6e433
+branch: claude+ATC-0059
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
+decisions:
+- 'Owner 11-17 「0.8.0 ／ 0.15.0，開 task」: atc 0.7.0 -> 0.8.0, atc-testkit 0.14.0 -> 0.15.0.'
+- Release notes describe the final state and what a user must change. They name no competitor and claim nothing the code does not do.
+- No code changes beyond version strings and their pinned tests. A defect found while writing the notes is reported to the coordinator, not fixed here.
