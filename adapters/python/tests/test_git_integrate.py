@@ -1004,7 +1004,7 @@ def test_valid_report_writes_evidence_record(repo: Path, capsys: pytest.CaptureF
     assert record.pop("duration_seconds") >= 0
     assert record.pop("verified_at").endswith("+00:00")
     assert record == {
-        "schema": "atc-verification-evidence/3", "candidate_sha": tip,
+        "schema": "atc-verification-evidence/2", "candidate_sha": tip,
         "tree": run_git(repo, "rev-parse", f"{tip}^{{tree}}"), "clean": True,
         "expected_main": before, "reviewed": tip, "verdict": "FF",
         "task": "ATC-0001", "tasks": ["ATC-0001"],
@@ -1014,6 +1014,23 @@ def test_valid_report_writes_evidence_record(repo: Path, capsys: pytest.CaptureF
     }
     assert leftover_reports() == []
     assert run_git(repo, "status", "--porcelain") == ""
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(("report", "schema"), [
+    (REPORT, "atc-verification-evidence/2"),
+    ({**REPORT, "schema": "atc-verification-report/2", "time_slack": 2.0}, "atc-verification-evidence/2"),
+    ({**REPORT, "schema": "atc-verification-report/3", "time_slack": 2.0, "inputs": None},
+     "atc-verification-evidence/3"),
+], ids=["report-1", "report-2", "report-3"])
+def test_the_record_takes_the_schema_the_reports_gate_reads(repo: Path, report: dict, schema: str) -> None:
+    """A project on testkit 0.10.0 writes a /2 report and its gate reads records /1 and /2 only: a /3 record made it
+    run its tests at every push (hami-quant-trading, 11-17, `evidence: SCHEMA_MISMATCH`)."""
+    declare_verifier(repo, report_command(json.dumps(report)))
+    tip = topic(repo, {"a.txt": "a2\n"})
+    assert integrate_with(repo, "topic", tip) == 0
+    record = json.loads((evidence_dir(repo) / f"{tip}.json").read_text(encoding="utf-8"))
+    assert (record["schema"], record["report"]) == (schema, report)
 
 
 def test_no_ff_record_names_the_merge_commit_only(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:

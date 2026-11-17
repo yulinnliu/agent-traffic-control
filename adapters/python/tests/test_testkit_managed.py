@@ -45,6 +45,7 @@ def test_the_path_rule(path: str, expected: bool) -> None:
     (".new-harness/skills/s/SKILL.md", {".new-harness/skills/s/SKILL.md": MANAGED_SKILL}, True),
     (".claude/skills/s/SKILL.md", {".claude/skills/s/SKILL.md": OWN_SKILL}, False),
     (".claude/skills/s/SKILL.md", {".claude/skills/s/SKILL.md": MARKER_IN_BODY}, False),
+    (".claude/skills/s/SKILL.md", {".claude/skills/s/SKILL.md": "managed-by: agent-traffic-control\n"}, False),
     (".claude/skills/s/scripts/run.py", {".claude/skills/s/SKILL.md": OWN_SKILL}, False),
     (".claude/settings.json", {}, False),
     ("packages/a/skills/s/SKILL.md", {"packages/a/skills/s/SKILL.md": MANAGED_SKILL}, False)])

@@ -91,7 +91,13 @@ reused               present only when the integration reused a candidate record
 
 The adapter also wraps an `atc-verification-report/2` or `/1` report, the
 report of a project on an earlier testkit: `/1` has no `time_slack`, and
-neither has `inputs`, so no reader reuses the record. The adapter
+neither has `inputs`. Such a record's `schema` is
+`atc-verification-evidence/2`, the format that testkit's gate reads, and it
+holds the fields above without `reused`, since no reuse takes a report
+without `inputs`. The gate of a testkit that writes `/2` reports reuses it
+under its own rows (`schema` `/2` or `/1`, `report.schema` `/2`, then the
+commit, tree, platform, dependency, argv, selector, stage, slack and
+selection rows); no reader of `/3` records does. The adapter
 writes no record when the report is missing (`NO_REPORT`), is not a valid
 report (`INVALID_REPORT`), or the file cannot be written
 (`WRITE_FAILED`); integration succeeds regardless. A recovered integration

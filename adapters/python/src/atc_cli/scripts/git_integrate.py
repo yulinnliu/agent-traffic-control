@@ -49,6 +49,8 @@ REPORT_SCHEMAS = ("atc-verification-report/1", "atc-verification-report/2", "atc
 # /3 carries the inputs the verifier ran on; only a /3 report is reused.
 INPUT_REPORT_SCHEMA = REPORT_SCHEMAS[-1]
 EVIDENCE_SCHEMA = "atc-verification-evidence/3"
+# An integration record wrapping a /2 or /1 report is a /2 record, the format the gate of that report's testkit reads.
+EARLIER_EVIDENCE_SCHEMA = "atc-verification-evidence/2"
 EVIDENCE_DIR = ("atc", "verification-evidence")
 EVIDENCE_RETENTION_SECONDS = 14 * 24 * 3600
 CANDIDATE_RECORDS = "verify"  # the subdirectory of EVIDENCE_DIR holding `atc test --candidate` records, which no gate reads
@@ -495,6 +497,11 @@ def _read_report(path: Path) -> tuple[dict | None, str | None]:
     except (UnicodeDecodeError, json.JSONDecodeError):
         return None, "INVALID_REPORT"
     return (report, None) if _valid_report(report) else (None, "INVALID_REPORT")
+
+
+def evidence_schema(report: dict) -> str:
+    """The integration record's schema for a valid ``report``: the one the gate of the report's testkit reads."""
+    return EVIDENCE_SCHEMA if report["schema"] == INPUT_REPORT_SCHEMA else EARLIER_EVIDENCE_SCHEMA
 
 
 def _evidence_dir(repo: Path) -> Path:
@@ -1169,7 +1176,7 @@ def integrate(t: Target, progress: bool = True) -> tuple[int, dict]:
                 if verifier_report is not None:
                     try:
                         result["evidence"] = str(_write_evidence(repo, {
-                            "schema": EVIDENCE_SCHEMA,
+                            "schema": evidence_schema(verifier_report),
                             "candidate_sha": candidate_sha,
                             "tree": _git_ok(repo, "rev-parse", f"{candidate_sha}^{{tree}}"),
                             "clean": True,
