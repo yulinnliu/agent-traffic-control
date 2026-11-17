@@ -231,20 +231,27 @@ def test_a_push_reports_each_step_with_its_time_on_stderr(ws: Path, capsys: pyte
     assert run_git(ws, "rev-parse", "refs/remotes/origin/main") == integrated
 
 
-def test_a_failing_pre_push_hook_streams_and_refuses_with_its_last_lines(ws: Path,
-                                                                        capsys: pytest.CaptureFixture[str]) -> None:
+def test_a_failing_pre_push_hook_streams_once_and_refuses_with_gits_own_message(
+        ws: Path, capsys: pytest.CaptureFixture[str]) -> None:
     integrated_main(ws)
     base = run_git(ws, "rev-parse", "origin/main")
-    lines = push.PUSH_FAILED_LINES + 10
-    pre_push(ws, f"i=1; while [ $i -le {lines} ]; do echo \"gate: line $i\"; i=$((i+1)); done\nexit 1\n")
+    pre_push(ws, "i=1; while [ $i -le 30 ]; do echo \"gate: line $i\"; i=$((i+1)); done\nexit 1\n")
     assert push.main(["root"], root=ws) == 2
     captured = capsys.readouterr()
-    assert "gate: line 1\n" in captured.err  # streamed whole
+    assert "gate: line 1\n" in captured.err and "gate: line 30\n" in captured.err  # streamed whole
     assert re.search(r"^STEP push root \d+\.\ds FAILED exit 1$", captured.err, re.M)
-    assert "PUSH_FAILED" in captured.out
     refusal = captured.out[captured.out.index("PUSH_FAILED"):]
-    assert f"gate: line {lines}" in refusal and "gate: line 1\n" not in refusal
+    assert "gate: line" not in refusal
+    assert "git push exited 1" in refusal and "error: failed to push some refs" in refusal
     assert origin_main(ws) == base
+
+
+def test_a_push_failure_names_the_exit_and_gits_and_the_transports_lines_once() -> None:
+    output = ("gate: tests RUN\nConnection to github.com closed by remote host.\n=== 3 passed ===\n"
+              "Connection to github.com closed by remote host.\n")
+    assert push.push_failure(141, output).splitlines() == [
+        f"git push exited 141 ({push.EXIT_MEANINGS[141]})", "Connection to github.com closed by remote host."]
+    assert push.push_failure(128, "fatal: unable to access\n") == "git push exited 128\nfatal: unable to access"
 
 
 def test_the_pre_push_hook_learns_the_project_version_and_tasks_of_what_it_pushes(

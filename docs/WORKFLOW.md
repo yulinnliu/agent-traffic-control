@@ -199,7 +199,11 @@ PUSHED hami-quant 1a2b3c4 (3 commits)
   count and how many are recorded, or the stop that ends the run.
 - `push` streams `git push` as it runs: the pre-push hook's output and git's
   own, with git's transfer progress when stderr is a terminal. A failed push
-  is `PUSH_FAILED`, and its refusal repeats the last 20 lines of that output.
+  is `PUSH_FAILED`. Its refusal names git's exit code, with its meaning
+  when git prints nothing of its own (141: the connection closed), and
+  repeats only git's and the transport's own lines (`error:`, `fatal:`,
+  `remote:`, `To`, `ssh:`, `Connection to … closed`), not the hook's
+  output, which streamed once.
 - `read-back` is `git ls-remote origin refs/heads/main`, the remote's own
   answer that it names the pushed SHA (governance `GIT_WORKFLOW.md`
   § Publication boundary). The push itself moves the remote-tracking

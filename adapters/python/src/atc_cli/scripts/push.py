@@ -13,6 +13,7 @@ import argparse
 import contextlib
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -29,8 +30,20 @@ REFUSE_HINTS = {
     "PUSH_FAILED": "read git's message, fix the remote or access, then run again",
     "REMOTE_MISMATCH": "origin/main is not at the pushed SHA; fetch and check again",
 }
-# The last lines of a failed push's output that its refusal repeats; the whole output streamed as it ran.
-PUSH_FAILED_LINES = 20
+# The lines of a failed push's streamed output that are git's or the transport's own, which its refusal repeats;
+# the pre-push hook's output streamed once and stays out of it.
+GIT_MESSAGE = re.compile(r"^(?:(?:error|fatal|remote): |To |ssh: | ! |Connection to .* closed)")
+# What an exit status of git push says when git prints nothing of its own.
+EXIT_MEANINGS = {141: "SIGPIPE: the connection to the remote closed before git wrote to it"}
+
+
+def push_failure(code: int, output: str) -> str:
+    """The detail of ``PUSH_FAILED``: git's exit code, its meaning when known, and git's and the transport's own
+    lines, without the hook's output already streamed."""
+    meaning = EXIT_MEANINGS.get(code)
+    head = f"git push exited {code}" + (f" ({meaning})" if meaning else "")
+    own = list(dict.fromkeys(line.rstrip() for line in output.splitlines() if GIT_MESSAGE.match(line)))
+    return "\n".join([head, *own])
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -115,9 +128,8 @@ def publish(repo: Path, sha: str, steps: cli_conventions.Steps,
                                    extra_env=hook_env)
     steps.done("push", "OK" if code == 0 else f"FAILED exit {code}")
     if code != 0:
-        tail = [line.rstrip() for line in output.splitlines() if line.strip()][-PUSH_FAILED_LINES:]
-        return cli_conventions.Refusal("PUSH_FAILED", "\n".join(tail) or "git push failed",
-                                       REFUSE_HINTS["PUSH_FAILED"], cli_conventions.ERROR)
+        return cli_conventions.Refusal("PUSH_FAILED", push_failure(code, output), REFUSE_HINTS["PUSH_FAILED"],
+                                       cli_conventions.ERROR)
     steps.begin()
     remote = gp.git(repo, "ls-remote", gp.REMOTE, "refs/heads/main", check=False).stdout.split()
     named = gp.short(remote[0]) if remote else "absent"
