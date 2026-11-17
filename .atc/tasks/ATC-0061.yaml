@@ -1,0 +1,21 @@
+task_id: ATC-0061
+title: atc push shows its progress and step times
+repository: yulinnliu/agent-traffic-control
+base_sha: 1aecea204a35ca1e9e25fb84cb72e4bf6bb6e433
+scope: '`atc push <name>` (`adapters/python/src/atc_cli/scripts/push.py`) runs fetch, the ledger check, `git push` (which runs the repository''s pre-push hook), `ls-remote` and a second fetch. It prints nothing until it ends. The Owner sees it as much slower than a plain `git push`, which streams the pre-push gate''s output and git''s progress. Goal: `atc push` shows what it is doing while it runs, and how long each step took. - **Measure first.** Time each step of `atc push root --check` and of a real push of a registered project, so the design knows where the time goes: - fetch; - the ledger walk in `git_preflight.push_listing`, including its graph claims; - the push with its pre-push hook; - ls-remote; - the second fetch. Name any step worth making faster. A step that is redundant (for example the second fetch after `ls-remote` confirmed the SHA) is removed, or kept with a reason. - **Progress lines.** One line per step with its elapsed time, in the house style of the other `atc` commands''
+  progress output (for example the `ELAPSED` lines). For example: fetch, the commits checked and how many are recorded, push, and confirmation that origin/main names the SHA. - **The pre-push hook''s output streams to the terminal as the push runs,** as a plain `git push` shows it. Its result still decides PUSH_FAILED. Keep stderr detail in the refusal. - `--json` output stays machine-readable: progress never goes into the JSON stream. Choose stderr or suppress it under `--json`, and state why. - `--check` and `--all` keep their behaviour; `--all` keeps its y/N per repository. - **Docs:** docs/WORKFLOW.md push section and the CLI help.'
+tests: standard
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: 1aecea204a35ca1e9e25fb84cb72e4bf6bb6e433
+branch: claude+ATC-0061
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
+decisions:
+- 'Owner 11-17 「開 task」: after the coordinator''s comparison of `atc push` with a plain `git push`.'
+- 'Owner rule 11-16: choose by industry practice and root cause, never by cost.'
+- No version bump; this lands in the release after 0.8.0 (ATC-0059 is in progress separately).
