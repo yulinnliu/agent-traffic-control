@@ -26,6 +26,9 @@ REQUIRED_LISTS = ("product_module_prefixes",)
 OPTIONAL_LISTS = ("credential_variables", "data_root_variables", "automation_markdown_prefixes", "hook_uv_options",
                   "ci_platforms")
 LINT_CONFIG = ".pre-commit-config.yaml"
+# A project is judged by the contract of the testkit it vendors: the lint-stage rules hold from this release on.
+LINT_CONTRACT = (0, 15, 0)
+RELEASE_VERSION = re.compile(r"(\d+)\.(\d+)\.(\d+)")
 TOOLCHAINS = ("python",)  # the names atc_testkit.toolchain registers; this file also loads outside the package
 INITIALIZATION = re.compile(r"[A-Za-z_][\w.]*:[A-Za-z_]\w*")
 
@@ -41,16 +44,29 @@ def _strings(value: object) -> bool:
     return isinstance(value, list) and all(isinstance(item, str) for item in value)
 
 
-def _data_problems(root: Path, project: dict, config: dict, workflow: dict) -> list[str]:
-    """The data of docs/TESTKIT.md § What a project supplies, and the markers and plugin of § Adoption and § Markers."""
+def release_version(value: object) -> tuple[int, int, int]:
+    """The vendored testkit's version from its release record; a value that is not MAJOR.MINOR.PATCH is a
+    ValueError, so the contract is unavailable rather than judged by a guessed release."""
+    match = RELEASE_VERSION.fullmatch(value) if isinstance(value, str) else None
+    if match is None:
+        raise ValueError(f'{RECORD} version {value!r} is not MAJOR.MINOR.PATCH')
+    return int(match[1]), int(match[2]), int(match[3])
+
+
+def _data_problems(root: Path, project: dict, config: dict, workflow: dict,
+                   vendored: tuple[int, int, int]) -> list[str]:
+    """The data of docs/TESTKIT.md § What a project supplies, and the markers and plugin of § Adoption and § Markers,
+    as the contract of the ``vendored`` testkit release states them."""
     problems = []
+    lint_contract = vendored >= LINT_CONTRACT
     for key in REQUIRED_STRINGS:
         if not isinstance(config.get(key), str) or not config[key]:
             problems.append(f'[tool.atc-testkit] must name {key}')
     for key in REQUIRED_LISTS:
         if not _strings(config.get(key)) or not config[key]:
             problems.append(f'[tool.atc-testkit] must list {key}')
-    for key in OPTIONAL_LISTS:
+    # Before the lint stage, lint_scope was an optional list.
+    for key in OPTIONAL_LISTS if lint_contract else (*OPTIONAL_LISTS, 'lint_scope'):
         if key in config and not _strings(config[key]):
             problems.append(f'[tool.atc-testkit] {key} must be a list of strings')
     ignore = config.get('ignore', {})
@@ -70,11 +86,11 @@ def _data_problems(root: Path, project: dict, config: dict, workflow: dict) -> l
     if not any(isinstance(item, str) and re.match(r'pytest-xdist\b', item) for item in dev):
         problems.append('development dependencies must include pytest-xdist')
     # A repository with the lint stage's config adopted it, and pre-commit runs it; without the config it has not.
-    if (root / LINT_CONFIG).is_file() and not any(isinstance(item, str) and re.match(r'pre-commit\b', item)
+    if lint_contract and (root / LINT_CONFIG).is_file() and not any(isinstance(item, str) and re.match(r'pre-commit\b', item)
                                                   for item in dev):
         problems.append(f'development dependencies must include pre-commit, which runs the lint stage {LINT_CONFIG} '
                         'names')
-    if 'lint_scope' in config:
+    if lint_contract and 'lint_scope' in config:
         problems.append(f'[tool.atc-testkit] lint_scope is no key: {LINT_CONFIG} names what the lint stage reads')
     conftest = root / 'conftest.py'
     plugins = [node.value for node in ast.walk(ast.parse(conftest.read_text(encoding='utf-8')))
@@ -101,6 +117,7 @@ def repository_problems(root: Path, *, installed: bool = False, hooks: bool = Fa
         if release.get('managed_by') != 'agent-traffic-control':
             problems.append('testkit release record lacks managed ownership')
         version = release['version']
+        vendored = release_version(version)
         if f'{DISTRIBUTION}=={version}' not in project.get('dependency-groups', {}).get('dev', []):
             problems.append('development dependency must pin the release version')
         wheel_relative = 'vendor/' + release['wheel']
@@ -144,7 +161,7 @@ def repository_problems(root: Path, *, installed: bool = False, hooks: bool = Fa
                 or not sync_steps or check_steps[0][0] <= max(sync_steps)
                 or 'if' in check_steps[0][1] or check_steps[0][1].get('continue-on-error')):
             problems.append('CI must run an unconditional testkit check after dependency sync')
-        problems.extend(_data_problems(root, project, config, workflow))
+        problems.extend(_data_problems(root, project, config, workflow, vendored))
         if installed:
             distribution = importlib.metadata.distribution(DISTRIBUTION)
             if distribution.version != version:

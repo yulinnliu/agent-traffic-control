@@ -158,10 +158,8 @@ def test_onboarding_reports_testkit_drift_without_rewriting_project_config(repos
     ('pyproject.toml', 'product_module_prefixes = ["fixture_"]', ''),
     ('pyproject.toml', 'product_module_prefixes = ["fixture_"]', 'product_module_prefixes = []'),
     ('pyproject.toml', ', "pytest-xdist==3.6.1"', ''),
-    ('pyproject.toml', ', "pre-commit==4.7.0"', ''),
     ('pyproject.toml', 'testpaths = ["tests"]', 'testpaths = ["tests"]\nmarkers = ["x: y"]'),
     ('pyproject.toml', 'gate = "scripts/prepush_select.py"', 'gate = "scripts/prepush_select.py"\nci_init = "no function"'),
-    ('pyproject.toml', 'gate = "scripts/prepush_select.py"', 'gate = "scripts/prepush_select.py"\nlint_scope = "src"'),
     ('pyproject.toml', 'gate = "scripts/prepush_select.py"', 'gate = "scripts/prepush_select.py"\nignore = { other = ["x"] }'),
     ('pyproject.toml', 'gate = "scripts/prepush_select.py"', 'gate = "scripts/prepush_select.py"\nhook_uv_options = ["--all-packages"]'),
     ('conftest.py', 'atc_testkit.plugin', 'other'),
@@ -175,14 +173,85 @@ def test_the_supplied_data_is_checked(repository, relative, old, new):
     assert repository_problems(repository)
 
 
-@pytest.mark.unit
-def test_a_repository_without_the_lint_config_has_not_adopted_the_stage_and_needs_no_pre_commit(repository):
+def vendoring(repository, version):
+    """The fixture repository as one that vendors atc-testkit ``version``: its pin, release record and lock entry."""
+    for relative, old, new in (('pyproject.toml', 'atc-testkit==0.2.0', f'atc-testkit=={version}'),
+                               ('vendor/atc-testkit.json', '"version": "0.2.0"', f'"version": "{version}"'),
+                               ('uv.lock', 'version = "0.2.0"', f'version = "{version}"')):
+        path = repository / relative
+        text = path.read_text(encoding='utf-8')
+        assert old in text
+        path.write_text(text.replace(old, new), encoding='utf-8')
+    return repository
+
+
+def with_lint_scope(repository, value='["src"]'):
+    path = repository / 'pyproject.toml'
+    text = path.read_text(encoding='utf-8')
+    if 'lint_scope = ' in text:
+        text = '\n'.join(line for line in text.splitlines() if not line.startswith('lint_scope = ')) + '\n'
+    path.write_text(text.replace('gate = "scripts/prepush_select.py"',
+                                 f'gate = "scripts/prepush_select.py"\nlint_scope = {value}'), encoding='utf-8')
+
+
+def without_pre_commit(repository):
     path = repository / 'pyproject.toml'
     path.write_text(path.read_text(encoding='utf-8').replace(', "pre-commit==4.7.0"', ''), encoding='utf-8')
-    assert repository_problems(repository) == [
-        'development dependencies must include pre-commit, which runs the lint stage .pre-commit-config.yaml names']
+
+
+LINT_SCOPE_REFUSED = '[tool.atc-testkit] lint_scope is no key: .pre-commit-config.yaml names what the lint stage reads'
+PRE_COMMIT_MISSING = ('development dependencies must include pre-commit, which runs the lint stage '
+                      '.pre-commit-config.yaml names')
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize('version', ['0.10.1', '0.14.0'])
+def test_a_project_on_an_older_testkit_is_judged_by_its_own_contract(repository, version):
+    vendoring(repository, version)
+    with_lint_scope(repository)
+    without_pre_commit(repository)
+    assert repository_problems(repository) == []
+    with_lint_scope(repository, '"src"')
+    assert repository_problems(repository) == ['[tool.atc-testkit] lint_scope must be a list of strings']
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize('version', ['0.15.0', '1.0.0'])
+def test_a_project_on_testkit_0_15_0_or_later_takes_the_lint_stage_rules(repository, version):
+    vendoring(repository, version)
+    with_lint_scope(repository)
+    assert repository_problems(repository) == [LINT_SCOPE_REFUSED]
+
+
+@pytest.mark.unit
+def test_a_repository_without_the_lint_config_has_not_adopted_the_stage_and_needs_no_pre_commit(repository):
+    vendoring(repository, '0.15.0')
+    without_pre_commit(repository)
+    assert repository_problems(repository) == [PRE_COMMIT_MISSING]
     (repository / '.pre-commit-config.yaml').unlink()
     assert repository_problems(repository) == []
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize('version', ['0.15', 'v0.15.0', '0.15.0rc1', 15, None])
+def test_a_release_record_version_that_is_not_major_minor_patch_makes_the_contract_unavailable(repository, version):
+    path = repository / 'vendor/atc-testkit.json'
+    record = json.loads(path.read_text(encoding='utf-8'))
+    record['version'] = version
+    path.write_text(json.dumps(record), encoding='utf-8')
+    problems = repository_problems(repository)
+    assert len(problems) == 1 and problems[0].startswith('testkit contract unavailable: ValueError: '), problems
+
+
+@pytest.mark.unit
+def test_a_missing_or_unreadable_release_record_makes_the_contract_unavailable(repository):
+    path = repository / 'vendor/atc-testkit.json'
+    path.write_text('{not json', encoding='utf-8')
+    assert repository_problems(repository)[0].startswith('testkit contract unavailable: ')
+    path.write_text(json.dumps({'managed_by': 'agent-traffic-control'}), encoding='utf-8')
+    assert repository_problems(repository) == ["testkit contract unavailable: KeyError: 'version'"]
+    path.unlink()
+    assert repository_problems(repository)[0].startswith('testkit contract unavailable: FileNotFoundError')
 
 
 def test_the_hook_carries_the_named_uv_options(repository):

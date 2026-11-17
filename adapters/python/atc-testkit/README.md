@@ -164,7 +164,10 @@ governance and each project's stricter rules.
 development pin, uv lock artifact, required test directories, supplied data, local
 gate and an unconditional CI check after dependency sync. `--hooks` also checks the
 effective installed pre-push hook; clone setup invokes it after dependencies are
-installed. The CLI reads files and Git configuration without changing them.
+installed. The CLI reads files and Git configuration without changing them. It
+judges a consumer by the contract of the release its record names
+(`docs/TESTKIT.md` § Adoption), so a newer `atc` keeps accepting a project on an
+older testkit.
 
 Consumers opt in through `[tool.atc-testkit]` and a workspace-owned release record.
 The rows down to `product_module_prefixes` are required; the others are optional.

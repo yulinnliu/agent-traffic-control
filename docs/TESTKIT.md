@@ -28,6 +28,18 @@ execution commands, parallelism, platform initialization and diagnostics.
   static checks stay in the project's Python file.
 - A project keeps no script of its own for a targeted isolated run;
   `atc test ID` against the task's worktree is that run.
+- `atc_testkit.check` judges a project by the contract of the testkit it
+  vendors, read as the `version` of `vendor/atc-testkit.json`
+  (`MAJOR.MINOR.PATCH`). The lint-stage rules (`lint_scope` is no key;
+  `pre-commit` in the development dependencies of a repository with
+  `.pre-commit-config.yaml`) hold from 0.15.0 on; before it, `lint_scope`
+  is an optional list. A record that is unreadable, lacks `version`, or
+  holds a version that is not `MAJOR.MINOR.PATCH` is the one problem
+  `testkit contract unavailable: <error>`, so `atc sync`, `atc doctor` and
+  the verifier's contract row refuse the project. `atc sync` and
+  `atc doctor` judge only a project that holds the record: one without it
+  has not adopted the testkit. `python -m atc_testkit.check` refuses a
+  missing record the same way.
 
 ## Markers
 
