@@ -267,9 +267,9 @@ integration unaffected and writes no record. The report and record formats
 are defined in `shared/conformance/verification-evidence/README.md`.
 `atc test <task> --candidate` writes a record of its own candidate, passed or failed, apart from the
 records the pre-push gate reads; within the active slot `atc integrate`
-reuses its latest passing one in place of rerunning the verifier when the
-candidate tree's input digest, verifier argv and timeout, platform,
-dependency inputs, selector and time slack all match, and names the reused
+reuses its latest passing one that ran on the candidate tree itself in place
+of rerunning the verifier when the input digest, verifier argv and timeout,
+platform, dependency inputs, selector and time slack all match, and names the reused
 record and the revision it ran on in its evidence and integration record.
 The record's expected main and reviewed SHA stay in it for audit.
 
