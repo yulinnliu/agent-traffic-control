@@ -22,3 +22,6 @@ decisions:
 - 'Owner 11-17 「Open P1 + P2」: this task runs in parallel with the `atc integrate` progress task.'
 - 'Owner rule 11-16: choose by industry practice and root cause, never by cost.'
 - No version bump. The next release carries this task.
+- 'Owner 11-17 「另開 task」: running the lint stage over all files when a lint input changes is a separate task, out of this scope.'
+- 'Owner 11-17 「不修，等升級」: hqt and hq do not patch their own ATC-owned lists; they remove atc_owned() when they vendor the next testkit, following docs/TESTKIT.md § Upgrading a project''s testkit.'
+- 'Owner 11-17 「採用」: the manifest requires `owned` targets to lie under .atc/, outside .atc/tasks/.'
