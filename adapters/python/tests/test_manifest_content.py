@@ -26,8 +26,10 @@ def test_the_repository_manifest_names_what_sync_delivers() -> None:
     found = mf.load(sync_project.ROOT)
     assert found.governance_modules()[0] == "INDEX.md"
     assert found.skills_source() == "shared/skills"
-    assert found.files(mf.CREATE_ONLY) == [("CLAUDE.md", "CLAUDE.md"),
-                                           ("shared/templates/pre-commit-config.yaml", ".pre-commit-config.yaml")]
+    # Adopting the lint stage is a project's own commit: sync never delivers .pre-commit-config.yaml.
+    assert found.files(mf.CREATE_ONLY) == [("CLAUDE.md", "CLAUDE.md")]
+    assert ".pre-commit-config.yaml" not in {target for mode in (mf.CREATE_ONLY, mf.OWNED)
+                                             for _source, target in found.files(mode)}
     assert {target for _source, target in found.files(mf.OWNED)} >= {
         ".atc/lint/ruff.toml", ".atc/lint/markdownlint.jsonc", ".atc/lint/vale.ini",
         ".atc/lint/vale/ATC/RoleTerms.yml", ".atc/lint/vale/ATC/OwnerCase.yml", ".atc/lint/vale/ATC/FinalState.yml"}

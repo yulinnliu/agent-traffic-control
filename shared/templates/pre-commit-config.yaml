@@ -1,5 +1,6 @@
 # The lint stage (atc-testkit, docs/TESTKIT.md § Lint stage): the commit hook, `atc test ID --lint` and the
-# integration verifier run this one list. `atc sync` creates this file once; from then on the project owns it.
+# integration verifier run this one list. A project adopts the lint stage by copying this file to its root
+# .pre-commit-config.yaml, in the commit that adds pre-commit to its development dependencies; it owns the copy.
 # The shared rules are in .atc/lint/, which sync keeps current: a project's ruff and markdownlint settings extend
 # them (`extend = ".atc/lint/ruff.toml"`; "extends": ".atc/lint/markdownlint.jsonc").
 default_install_hook_types: [pre-commit]

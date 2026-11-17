@@ -419,10 +419,13 @@ Its rules:
   keeps them current; the project's
   ruff settings extend them with `extend = ".atc/lint/ruff.toml"`, its
   `.markdownlint-cli2.jsonc` with
-  `"config": {"extends": ".atc/lint/markdownlint.jsonc"}`. pre-commit has no
-  include, so sync creates `.pre-commit-config.yaml` once from
-  `shared/templates/pre-commit-config.yaml` and the project owns it from
-  then on (`docs/LAYOUT.md` § The manifest).
+  `"config": {"extends": ".atc/lint/markdownlint.jsonc"}`. Files in
+  `.atc/lint/` run nothing by themselves.
+- A project adopts the lint stage in one commit of its own: it copies
+  `shared/templates/pre-commit-config.yaml` to `.pre-commit-config.yaml`
+  and adds `pre-commit` to its development dependencies. pre-commit has no
+  include, so the project owns that copy from then on. Sync never creates
+  it, so a re-sync adopts nothing (`docs/LAYOUT.md` § The manifest).
 
 ## Integration verifier
 

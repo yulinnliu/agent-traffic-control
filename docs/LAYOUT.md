@@ -27,9 +27,10 @@ Operational description of the tree; governance semantics live under
   in a project's `AGENTS.md`, sending every session to `.atc/README.md`.
   `shared/templates/ATC_README.md` — the content sync writes to a project's
   `.atc/README.md`: the governance bootloader.
-  `shared/templates/pre-commit-config.yaml` — the lint stage's list sync
-  creates once as a project's `.pre-commit-config.yaml`, which the project
-  owns from then on.
+  `shared/templates/pre-commit-config.yaml` — the lint stage's list a
+  project copies to its `.pre-commit-config.yaml` to adopt the lint stage,
+  and owns from then on (`docs/TESTKIT.md` § Lint stage); sync does not
+  deliver it.
 - `shared/lint/` — the shared lint rules sync keeps current in a project's
   `.atc/lint/` (`docs/TESTKIT.md` § Lint stage). This repository's own ruff
   and markdownlint settings extend them in place.

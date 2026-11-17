@@ -31,10 +31,6 @@ project:
     source: CLAUDE.md
     target: CLAUDE.md
     mode: create-only
-  - id: lint-stage
-    source: shared/templates/pre-commit-config.yaml
-    target: .pre-commit-config.yaml
-    mode: create-only
   - id: skills
     source: shared/skills/
     target: "{harness}/skills/"
