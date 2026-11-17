@@ -5,6 +5,7 @@ Universal Hami governance invariants. Project/repository policy may be stricter;
 ```text
 capability != authority
 ```
+
 Technical ability never grants permission; current task/delegated authority and applicable governance/project policy must all allow the action.
 
 ## Canonical task contract
