@@ -28,3 +28,7 @@ __pycache__/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# The docs site's output when Zensical runs in site/ by hand; docs_site.py builds in a temporary directory.
+/site/site/
+/site/.cache/

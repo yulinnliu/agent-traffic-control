@@ -98,6 +98,14 @@ repos:
         language: system
         pass_filenames: false
         files: ^adapters/python/atc-testkit/(pyproject\.toml|README\.md|src/atc_testkit/__init__\.py)$
+      # The docs site staged, built in strict mode and checked (docs/WORKFLOW.md § Docs site). The files are the
+      # Pages workflow's paths; tests/test_docs_site.py keeps the two equal.
+      - id: docs-site
+        name: docs site builds and its pages pass the site check (docs_site.py check)
+        entry: uv run --quiet --locked --project adapters/python python adapters/python/scripts/docs_site.py check
+        language: system
+        pass_filenames: false
+        files: ^(README(\.[^/]+)?\.md|SCOPE\.md|GLOSSARY\.md|docs/.*|site/.*|adapters/python/(scripts/docs_site\.py|atc-testkit/src/atc_testkit/docs\.py|pyproject\.toml|uv\.lock)|\.github/workflows/pages\.yml)$
       - id: markdown-links
         name: Markdown relative links and anchors (atc_testkit.docs), every tracked file
         entry: uv run --quiet --locked --project adapters/python python -m atc_testkit.docs --anchors --tracked

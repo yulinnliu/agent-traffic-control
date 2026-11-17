@@ -33,10 +33,14 @@ lint = [
     "pre-commit==4.7.0",
     "ruff==0.17.5",
 ]
+# The docs site's generator (docs/design/ATC-0060.md § 2); the lint stage builds the site with it.
+site = [
+    "zensical>=0.1.1",
+]
 
 [tool.uv]
-# The lint stage runs in the same environment as the tests (.pre-commit-config.yaml).
-default-groups = ["dev", "lint"]
+# The lint stage, the docs site build among it, runs in the same environment as the tests (.pre-commit-config.yaml).
+default-groups = ["dev", "lint", "site"]
 
 [tool.uv.sources]
 atc-testkit = { path = "atc-testkit", editable = true }

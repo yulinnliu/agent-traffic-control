@@ -9,6 +9,11 @@
 
 [繁體中文](README.zh-TW.md)
 
+Agent Traffic Control (`atc`) is a governance layer for running several coding
+agents (Claude Code, Codex) on the same repositories: one writer per branch and
+git worktree, handoffs that name exact SHAs, and a `main` that moves only to a
+reviewed, verified commit.
+
 **Many agents. One runway. Clearance before landing.**
 
 Who is cleared to write, one writer per branch, and clean handoffs between

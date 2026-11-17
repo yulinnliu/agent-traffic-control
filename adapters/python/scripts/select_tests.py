@@ -115,6 +115,8 @@ DIRECTORY_READERS = {
     f"{TESTS}/test_tooling.py": ("shared/skills", ".dsh/skills"),
     f"{TESTS}/test_manifest_content.py": ("atc-manifest.yaml",),
     f"{TESTS}/test_integration_verify.py": ("AGENTS.md",),
+    # Builds with this checkout's site configuration and compares the Pages workflow's paths with the hook's.
+    f"{TESTS}/test_docs_site.py": ("site", ".github/workflows/pages.yml", ".pre-commit-config.yaml"),
     f"{TESTS}/test_shell_install.py": SCRIPT_READS,
     f"{TESTS}/test_packaged_schemas.py": ("shared/policies/schemas", f"{CLI_SRC}/schemas"),
     # Builds and installs the wheels in a subprocess: any packaged module or the policy it composes.

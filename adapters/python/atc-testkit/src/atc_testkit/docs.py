@@ -20,6 +20,8 @@ from .git import git_env
 FENCE = re.compile(r"(?ms)^ {0,3}(`{3,}|~{3,}).*?(?:^ {0,3}\1[^\n]*$|\Z)")
 INLINE_CODE = re.compile(r"(`+)(?!`).+?(?<!`)\1(?!`)", re.S)
 INLINE_LINK = re.compile(r"!?\[(?:[^\]\\]|\\.)*\]\(\s*(<[^>\n]*>|[^)\s]+)(?:\s+(?:\"[^\"]*\"|'[^']*'))?\s*\)")
+# A link whose text is an image, such as a badge: INLINE_LINK finds the image's target, this the link's.
+LINKED_IMAGE = re.compile(r"\[!\[(?:[^\]\\]|\\.)*\]\([^)\n]*\)\]\(\s*(<[^>\n]*>|[^)\s]+)(?:\s+(?:\"[^\"]*\"|'[^']*'))?\s*\)")
 REFERENCE = re.compile(r"(?m)^ {0,3}\[[^\]\n]+\]:[ \t]*(<[^>\n]*>|\S+)")
 SCHEME = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*:")
 HEADING = re.compile(r"(?m)^ {0,3}#{1,6}[ \t]+(.+?)[ \t]*#*[ \t]*$")
@@ -34,6 +36,15 @@ class Target:
     raw: str
 
 
+@dataclass(frozen=True)
+class Span:
+    """A link target's place in the LF-normalized text; ``start``/``end`` bound it as written, angle brackets included."""
+    start: int
+    end: int
+    line: int
+    raw: str
+
+
 def _blank(match: re.Match) -> str:
     return re.sub(r"[^\n]", " ", match.group(0))
 
@@ -43,13 +54,26 @@ def without_code(text: str) -> str:
     return INLINE_CODE.sub(_blank, FENCE.sub(_blank, text))
 
 
+def link_spans(text: str) -> list[Span]:
+    """Each link target outside code, in order: inline links, images and reference definitions, with its place."""
+    body = without_code(text.replace("\r\n", "\n"))
+    found = sorted((match.start(1), match.end(1), match.group(1))
+                   for pattern in (INLINE_LINK, LINKED_IMAGE, REFERENCE) for match in pattern.finditer(body))
+    return [Span(start, end, body.count("\n", 0, start) + 1, raw.removeprefix("<").removesuffix(">"))
+            for start, end, raw in found]
+
+
 def link_targets(text: str) -> list[Target]:
     """Each link target outside code: inline links, images and reference definitions, with its line."""
-    body = without_code(text.replace("\r\n", "\n"))
-    found = [(match.start(1), match.group(1))
-             for pattern in (INLINE_LINK, REFERENCE) for match in pattern.finditer(body)]
-    return [Target(body.count("\n", 0, start) + 1, raw.removeprefix("<").removesuffix(">"))
-            for start, raw in sorted(found)]
+    return [Target(span.line, span.raw) for span in link_spans(text)]
+
+
+def heading_anchors(text: str) -> list[tuple[int, str]]:
+    """Each heading outside fenced blocks as its line and GitHub's anchor, in order and not yet numbered."""
+    body = FENCE.sub(_blank, text.replace("\r\n", "\n"))
+    return [(body.count("\n", 0, match.start()) + 1,
+             SLUG_DROP.sub("", match.group(1).strip().lower()).replace(" ", "-"))
+            for match in HEADING.finditer(body)]
 
 
 def slugs(text: str) -> set[str]:
@@ -60,8 +84,7 @@ def slugs(text: str) -> set[str]:
     body = FENCE.sub(_blank, text.replace("\r\n", "\n"))
     seen: dict[str, int] = {}
     anchors = set(HTML_ANCHOR.findall(body))
-    for title in HEADING.findall(body):
-        slug = SLUG_DROP.sub("", title.strip().lower()).replace(" ", "-")
+    for _, slug in heading_anchors(text):
         count = seen.get(slug, 0)
         seen[slug] = count + 1
         anchors.add(slug if count == 0 else f"{slug}-{count}")

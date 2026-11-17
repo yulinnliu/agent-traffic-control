@@ -9,6 +9,11 @@
 
 [English](README.md)
 
+Agent Traffic Control（`atc`）是一套治理層，
+讓多個 coding agent（Claude Code、Codex）在同一批 repository 上工作：
+每條 branch 與 git worktree 只有一個 writer，交接寫明確切的 SHA，
+`main` 只會移到審過、驗過的 commit。
+
 **多個 agent，一條跑道，放行才能降落。**
 
 一個人同時讓好幾個 coding agent 在好幾個 repository 裡工作時，總得有人管：
