@@ -392,6 +392,7 @@ def test_maintainer_commands_refuse_to_run_from_the_canonical_checkout(
 
 def test_maintainer_commands_dispatch_to_their_modules(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     workspace, worktree = nested_checkouts(tmp_path)
+    import release_check
     import sync_project
     import task_records
     import validate_workspace
@@ -401,13 +402,16 @@ def test_maintainer_commands_dispatch_to_their_modules(tmp_path: Path, monkeypat
     monkeypatch.setattr(sync_project, "root_main", lambda argv, root: seen.append(("sync", argv, root)) or 0)
     monkeypatch.setattr(validate_workspace, "main", lambda argv: seen.append(("validate", argv)) or 0)
     monkeypatch.setattr(task_records, "check_main", lambda argv: seen.append(("task", argv)) or 0)
+    monkeypatch.setattr(release_check, "main", lambda argv, root: seen.append(("release", argv, root)) or 0)
     assert maintain.main(["sync", "--root", "--check"]) == 0
     assert maintain.main(["validate"]) == 0
     assert maintain.main(["task", "check", "DIR"]) == 0
+    assert maintain.main(["release", "check"]) == 0
     assert seen == [
         ("sync", ["--root", "--check"], worktree.resolve()),
         ("validate", ["--root", str(worktree.resolve())]),
         ("task", ["DIR"]),
+        ("release", ["check"], worktree.resolve()),
     ]
 
 
@@ -421,8 +425,8 @@ def test_maintainer_task_without_check_is_a_usage_error(tmp_path: Path, monkeypa
 
 
 def test_maintainer_unknown_command_is_a_usage_error(capsys: pytest.CaptureFixture[str]) -> None:
-    assert maintain.main(["release"]) == 2
-    assert "unknown command: release" in capsys.readouterr().err
+    assert maintain.main(["bogus"]) == 2
+    assert "unknown command: bogus" in capsys.readouterr().err
 
 
 def test_doctor_verdict_line_counts_and_lists_only_what_is_not_ready(monkeypatch: pytest.MonkeyPatch,

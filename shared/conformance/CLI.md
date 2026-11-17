@@ -65,8 +65,8 @@ guard.
 
 `atc --help` lists them by group, one line each; `atc --version` prints the
 `atc` and `atc-testkit` versions. The maintainer commands (`atc-maintain sync
---root`, `validate`, `policies`, `task check`, `guard`) run from an ATC
-worktree and are not part of `atc`.
+--root`, `validate`, `policies`, `task check`, `guard`, `release`) run from an
+ATC worktree and are not part of `atc`.
 
 ## Help
 

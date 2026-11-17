@@ -92,12 +92,15 @@ repos:
         language: system
         pass_filenames: false
         files: ^(shared/policies/schemas/|adapters/python/src/atc_cli/schemas/)
-      - id: testkit-version
-        name: atc-testkit has one version and its README names it
-        entry: uv run --quiet --locked --project adapters/python python adapters/python/scripts/drift.py testkit-version
+      # Every version pin agrees, min_atc is not above atc, and before the version is tagged its notes hold the
+      # required sections and every task added since the last tag (docs/development/RELEASING.md § Check).
+      # It always runs: the tasks come from the Git range, not from the files a commit changes.
+      - id: release
+        name: version pins and release notes (atc-maintain release check)
+        entry: uv run --quiet --locked --project adapters/python atc-maintain release check
         language: system
         pass_filenames: false
-        files: ^adapters/python/atc-testkit/(pyproject\.toml|README\.md|src/atc_testkit/__init__\.py)$
+        always_run: true
       # The docs site staged, built in strict mode and checked (docs/WORKFLOW.md § Docs site). The files are the
       # Pages workflow's paths; tests/test_docs_site.py keeps the two equal.
       - id: docs-site

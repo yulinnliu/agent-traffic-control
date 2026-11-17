@@ -17,7 +17,7 @@ from pathlib import Path
 import time
 
 import yaml
-from atc_testkit import locations, stages, workers as host_workers
+from atc_testkit import children, locations, stages, workers as host_workers
 
 import checkout_guard
 import cli_conventions
@@ -138,6 +138,29 @@ def worker_pool_checks(environ: dict[str, str], pool: dict | None = None) -> lis
     checks += [Check("worker pool run", "READY", found["line"]) for found in pool.get("runs", ())]
     checks += [Check("worker pool waiter", "READY", found["line"]) for found in pool.get("waiters", ())]
     return checks
+
+
+ENV_IN_USE = "ATC_ENV_IN_USE"
+COMMAND_SHOWN = 120
+
+
+def environment_checks(prefix: Path | None = None,
+                       processes: list[children.HostProcess] | None = None) -> list[Check]:
+    """The processes, doctor and its ancestors excepted, whose command line runs from this atc's environment
+    (``sys.prefix``): while one runs, `uv tool install --force` cannot replace the environment (docs/WORKFLOW.md
+    § Installing a release). ``processes`` stands for the host's list in tests."""
+    prefix = Path(sys.prefix) if prefix is None else prefix
+    try:
+        found = children.survivors(prefix, processes)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return [Check("atc environment", "WARN", f"processes cannot be listed ({exc}); check by hand that no atc "
+                                                 "command runs before installing")]
+    if not found:
+        return [Check("atc environment", "READY", f"no other process runs from {prefix}")]
+    return [Check("atc environment", "WARN", f"{ENV_IN_USE}: {len(found)} processes run from {prefix}; "
+                                             "uv tool install fails until they end"),
+            *(Check("atc environment process", "WARN", f"pid {process.pid} {process.command[:COMMAND_SHOWN]}")
+              for process in found)]
 
 
 NONPAGED_KEY = "nonpaged_pool_warn_gib"
@@ -322,6 +345,7 @@ def diagnose(root: Path = ROOT, environ: dict[str, str] | None = None, checkout:
         )
     )
     checks += worker_pool_checks(environ)
+    checks += environment_checks()
     checks += memory_checks(environ, memory(environ))
 
     workspace_file = root / "workspace.yaml"

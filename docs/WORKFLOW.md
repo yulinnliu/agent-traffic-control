@@ -245,8 +245,17 @@ The installed `atc` is the Owner's `uv tool install` of a release tag, never
 changes the CLI, changes nothing a host runs, and every step of the flow runs
 the commands of the installed release. Installing is the Owner's act, run
 from their own terminal after the release is tagged on `main`; agents never
-install `atc`. On the host whose workspace directory is the ATC checkout, the
-source is that checkout:
+install `atc`.
+
+Before installing, no `atc test`, verifier or other `atc` command runs:
+`atc doctor` reports its `atc environment` line READY. While a process runs
+from the installed environment, `uv tool install --force` cannot replace it
+(os error 5, or `WinError 32` on `atc.exe`) and can leave an `atc.exe` that
+cannot start, so every session's PreToolUse hook fails closed until an install
+succeeds. `ATC_ENV_IN_USE` lists each such process with its PID and command.
+
+On the host whose workspace directory is the ATC checkout, the source is
+that checkout:
 
 ```text
 uv tool install --force "git+file:///<checkout>@<tag>#subdirectory=adapters/python"
@@ -283,7 +292,8 @@ install, a policy change on `main` or `atc add` needs no new entry
 earlier tag; it does not loosen the hook's table, which only
 `atc guard --reset` does. On Windows, uv
 cannot replace `atc.exe` while it runs: the Owner installs when no session
-runs, and reruns the command after a `WinError 32`.
+runs, and reruns the command after a `WinError 32`. Cutting a release is the
+maintainer's `docs/development/RELEASING.md`.
 
 On a host whose workspace directory is itself the ATC checkout, its
 `workspace.yaml` names it with `governance_checkout: .`. Without that line

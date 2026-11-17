@@ -66,6 +66,7 @@ part of the installed `atc`.
 | `policies` | `policies.py` | `check DIR`: schema-validate a policy directory and refuse contradictions | `shared/policies/schemas/` |
 | `task check` | `task_records.py` | `[DIR]`: task records and their `## Task records` declaration | `docs/TASKS.md` |
 | `guard` | `generate_enforcement.py` | `--policies DIR --out DIR [--check]` and the `--live-*`, `--local-out`, `--hook-out` forms: harness deny configs from hard deny | `docs/ENFORCEMENT.md` |
+| `release` | `release_check.py` | `prepare VERSION [--testkit VERSION] [--min-atc VERSION]`: version pins and the notes' scaffold; `check [--json]`: pins, `min_atc` and the notes of an untagged version, run by the lint stage | `docs/development/RELEASING.md` |
 | | `select_tests.py` | the test files a change can affect: a count and one reason per path, each file's cause with `--explain`, a JSON array with `--json` (§ Selected tests) | |
 
 `src/atc_cli/` holds the dispatchers for `atc` and `atc-maintain`: they resolve `--root`, applies the

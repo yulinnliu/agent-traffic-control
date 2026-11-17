@@ -1,6 +1,7 @@
 """docs/WORKFLOW.md § Docs site: staging, the Zensical build and the built site's check (design docs/design/ATC-0060.md)."""
 from __future__ import annotations
 
+import importlib.util
 import os
 import re
 import shutil
@@ -167,9 +168,13 @@ def test_the_description_is_the_first_prose_paragraph_plain_and_cut_at_a_word():
     ("Agent Traffic Control（`atc`）是一套治理層，\n讓多個 coding agent 在同一批 repository 上工作：\n每條 branch",
      "Agent Traffic Control（atc）是一套治理層，讓多個 coding agent 在同一批 repository 上工作：每條 branch"),
     ("one writer per\nbranch and git\n  worktree", "one writer per branch and git worktree"),
-    ("中文結尾\nEnglish start", "中文結尾English start"),
+    ("中文結尾\nEnglish start", "中文結尾 English start"),
+    ("English end\n中文開頭", "English end 中文開頭"),
+    ("中文結尾\n中文開頭", "中文結尾中文開頭"),
+    ("句子結束。\nEnglish start", "句子結束。English start"),
+    ("see `atc`\n「引號」", "see atc「引號」"),
 ])
-def test_a_line_break_is_a_space_between_words_and_nothing_next_to_cjk(block, expected):
+def test_a_line_break_is_a_space_except_between_cjk_or_next_to_cjk_punctuation(block, expected):
     assert docs_site.plain(block) == expected
 
 
@@ -314,3 +319,25 @@ def test_the_pages_workflow_and_the_docs_site_hook_watch_the_same_paths():
               ".github/workflows/validate.yml", "docsx/a.md"]
     for probe in probes:
         assert bool(re.search(files, probe)) == any(path.match(probe) for path in paths), probe
+
+
+THEME_LANGUAGE = "templates/partials/language.html"
+PAGE_LANGUAGE = re.compile(r"\{% if page and page\.meta and page\.meta\.language %\}.*?\{% else %\}\s*"
+                           r"(\{% set language = [^\n]*?%\})\s*\{% endif %\}", re.DOTALL)
+
+
+def template_lines(text: str) -> list[str]:
+    """A Jinja template's lines without comments, blank lines or indentation."""
+    text = re.sub(r"\{#.*?#\}", "", text, flags=re.DOTALL)
+    return [line.strip() for line in text.splitlines() if line.strip()]
+
+
+@pytest.mark.unit
+def test_the_language_partial_is_the_themes_with_the_page_language_ahead():
+    """site/overrides/partials/language.html copies the theme's partial: with its `page.meta.language` branch put
+    back to the theme's one line, the two are equal, so a theme upgrade that changes the partial fails here."""
+    theme = Path(importlib.util.find_spec("zensical_ui").origin).parent / THEME_LANGUAGE
+    override = (CHECKOUT / "site/overrides/partials/language.html").read_text(encoding="utf-8")
+    assert PAGE_LANGUAGE.search(override), "the override no longer sets the page's language first"
+    assert template_lines(PAGE_LANGUAGE.sub(r"\1", override)) == template_lines(theme.read_text(encoding="utf-8")), \
+        f"the theme's {THEME_LANGUAGE} changed: copy it to site/overrides/partials/language.html again"

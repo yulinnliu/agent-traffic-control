@@ -7,6 +7,7 @@ Maintainer commands of this ATC checkout, run only from a worktree of it (never 
   policies check  check a policy directory against shared/policies/schemas
   task check      check the task records and declaration of a working tree
   guard           generate the harness deny configs and hook table from policies
+  release         prepare a release's version pins and notes, or check them
 
 Exit codes and output: shared/conformance/CLI.md. Run `atc-maintain <command> --help` for one command.
 """
@@ -19,8 +20,8 @@ from pathlib import Path
 from atc_cli import command_name, enveloped, escape_unencodable_output, scripts_on_path, wants_json
 
 COMMANDS = {"sync": "sync_project", "validate": "validate_workspace", "policies": "policies",
-            "task": "task_records", "guard": "generate_enforcement"}
-GROUPED = ("policies", "task")
+            "task": "task_records", "guard": "generate_enforcement", "release": "release_check"}
+GROUPED = ("policies", "task", "release")
 
 
 def usage() -> str:
@@ -99,6 +100,8 @@ def dispatch(command: str, rest: list[str], checkout: Path) -> int:
             print("usage: atc-maintain task check [DIR] [--json]", file=sys.stderr)
             return 2
         return module.check_main(rest[1:])
+    if command == "release":
+        return module.main(rest, root=checkout)
     if command == "guard":
         workspace = checkout / "workspace.yaml"
         if workspace.is_file() and not any(a.split("=", 1)[0] == "--workspace" for a in rest):

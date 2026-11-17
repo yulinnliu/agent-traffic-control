@@ -56,6 +56,8 @@ H1 = re.compile(r"(?m)^ {0,3}#[ \t]")
 BLOCK = re.compile(r"(?s)\S.*?(?=\n[ \t]*\n|\Z)")
 # CJK ideographs, kana, Hangul and full-width punctuation and forms.
 CJK = re.compile(r"[⺀-鿿가-힯豈-﫿︰-﹏＀-￯]")
+# CJK punctuation and full-width forms: a line break next to one is no space, whatever is on its other side.
+CJK_MARK = re.compile(r"[　-〿︰-﹏＀-￯]")
 LANGUAGE = re.compile(r'(?m)^language: "([^"]+)"$')
 
 
@@ -155,8 +157,11 @@ def plain(block: str) -> str:
     for line in (" ".join(line.split()) for line in text.split("\n")):
         if not line:
             continue
-        # A line break between CJK characters is no space; between words of other scripts it is one.
-        gap = "" if not joined or CJK.match(joined[-1]) or CJK.match(line[0]) else " "
+        # A line break between two CJK characters or next to CJK punctuation is no space; every other one is a
+        # space, so a CJK word and a Latin one stay apart, as the source writes them on one line.
+        tight = not joined or (CJK.match(joined[-1]) and CJK.match(line[0])) \
+            or CJK_MARK.match(joined[-1]) or CJK_MARK.match(line[0])
+        gap = "" if tight else " "
         joined += gap + line
     return joined
 
