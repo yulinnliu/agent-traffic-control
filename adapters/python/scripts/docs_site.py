@@ -54,6 +54,9 @@ LINK = re.compile(r"\[((?:[^\]\\]|\\.)*)\]\([^)]*\)")
 TAG = re.compile(r"<[^>]+>")
 H1 = re.compile(r"(?m)^ {0,3}#[ \t]")
 BLOCK = re.compile(r"(?s)\S.*?(?=\n[ \t]*\n|\Z)")
+# CJK ideographs, kana, Hangul and full-width punctuation and forms.
+CJK = re.compile(r"[⺀-鿿가-힯豈-﫿︰-﹏＀-￯]")
+LANGUAGE = re.compile(r'(?m)^language: "([^"]+)"$')
 
 
 class SiteError(Exception):
@@ -148,7 +151,14 @@ def plain(block: str) -> str:
     """A Markdown block as plain text: images dropped, links as their text, emphasis, code marks and tags removed."""
     text = LINK.sub(r"\1", IMAGE.sub("", block))
     text = TAG.sub("", text).replace("**", "").replace("`", "")
-    return " ".join(text.split())
+    joined = ""
+    for line in (" ".join(line.split()) for line in text.split("\n")):
+        if not line:
+            continue
+        # A line break between CJK characters is no space; between words of other scripts it is one.
+        gap = "" if not joined or CJK.match(joined[-1]) or CJK.match(line[0]) else " "
+        joined += gap + line
+    return joined
 
 
 def paragraphs(text: str) -> list[str]:
@@ -169,7 +179,10 @@ def shorten(text: str, limit: int) -> str:
     """``text`` cut at a word boundary to at most ``limit`` characters, an ellipsis marking the cut."""
     if len(text) <= limit:
         return text
-    cut = text[:limit - 1].rsplit(" ", 1)[0].rstrip(" ,;:")
+    cut = text[:limit - 1]
+    if " " in cut[-TITLE_LENGTH // 2:]:  # a word boundary near the limit; CJK text may have none
+        cut = cut.rsplit(" ", 1)[0]
+    cut = cut.rstrip(" ,;:")
     return cut + "…"
 
 
@@ -182,14 +195,24 @@ def duplicate_headings(source: str, text: str) -> None:
         first[slug] = line
 
 
-def front_matter(fields: Mapping[str, str]) -> str:
-    """YAML front matter; each value a JSON string, which YAML reads as a double-quoted scalar."""
+def front_matter(fields: Mapping[str, str | bool]) -> str:
+    """YAML front matter; each value JSON, which YAML reads as a double-quoted scalar or a boolean."""
     lines = [f"{key}: {json.dumps(value, ensure_ascii=False)}" for key, value in fields.items() if value]
     return "---\n" + "\n".join(lines) + "\n---\n\n" if lines else ""
 
 
-def stage(root: Path, docs: Path, *, home_title: str, token: str, repo_url: str) -> dict[str, str]:
-    """Write every published document to ``docs`` at its site path; returns each Markdown page's staged text."""
+def home_language(source: str, default: str) -> str | None:
+    """The language of a README at the repository root, ``default`` for ``README.md``; None for any other file."""
+    readme = README.fullmatch(source)
+    return (readme.group(1) or default) if readme else None
+
+
+def stage(root: Path, docs: Path, *, home_titles: Mapping[str, str], token: str, repo_url: str,
+          language: str = "en") -> dict[str, str]:
+    """Write every published document to ``docs`` at its site path; returns each Markdown page's staged text.
+
+    A README at the root is a home page: titled by ``home_titles`` under its language, in that language.
+    """
     tracked = tracked_files(root)
     pages = published(tracked)
     repository = Repository(set(tracked), pages, repo_url)
@@ -204,9 +227,14 @@ def stage(root: Path, docs: Path, *, home_title: str, token: str, repo_url: str)
         duplicate_headings(source, text)
         body = rewrite_links(source, text, repository)
         prose = paragraphs(body)
-        fields = {}
-        if target == "index.md":
-            fields["title"] = home_title
+        fields: dict[str, str | bool] = {}
+        home = home_language(source, language)
+        if home:
+            if not home_titles.get(home):
+                raise SiteError(f"{source}: site/zensical.toml extra.home_title names no title for {home}")
+            fields.update(title=home_titles[home], home_page=True)
+            if home != language:
+                fields["language"] = home
         elif not H1.search(without_code(body)) and prose:
             # A page without a heading, such as release notes, is titled by its first paragraph.
             fields["title"] = shorten(prose.pop(0), TITLE_LENGTH)
@@ -225,8 +253,8 @@ def build(root: Path, output: Path, *, token: str = "") -> tuple[Path, dict[str,
     output.mkdir(parents=True, exist_ok=True)
     (output / "zensical.toml").write_text(config_text, encoding="utf-8", newline="\n")
     shutil.copytree(root / OVERRIDES, output / "overrides", dirs_exist_ok=True)
-    staged = stage(root, output / "docs", home_title=config.get("extra", {}).get("home_title", ""), token=token,
-                   repo_url=config["repo_url"].rstrip("/"))
+    staged = stage(root, output / "docs", home_titles=config.get("extra", {}).get("home_title", {}), token=token,
+                   repo_url=config["repo_url"].rstrip("/"), language=config["theme"].get("language", "en"))
     run = subprocess.run([sys.executable, "-m", "zensical", "build", "--strict", "--clean", "-f",
                           str(output / "zensical.toml")], cwd=output, capture_output=True, text=True,
                          encoding="utf-8", errors="replace")
@@ -249,11 +277,16 @@ class Page(HTMLParser):
         self.links: list[str] = []
         self.meta: dict[str, list[str]] = {}
         self.canonical: list[str] = []
-        self.title = ""
+        self.titles: list[str] = []
+        self.language = ""
         self._in_title = False
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         values = {name: value or "" for name, value in attrs}
+        if tag == "html":
+            self.language = values.get("lang", "")
+        if tag == "title":
+            self.titles.append("")
         if "id" in values:
             self.ids.add(values["id"])
             if re.fullmatch(r"h[1-6]", tag):
@@ -278,7 +311,11 @@ class Page(HTMLParser):
 
     def handle_data(self, data: str) -> None:
         if self._in_title:
-            self.title += data
+            self.titles[-1] += data
+
+    @property
+    def title(self) -> str:
+        return "".join(self.titles).strip()
 
 
 def read_pages(site: Path) -> dict[str, Page]:
@@ -313,7 +350,7 @@ def resolve(site: Path, page: str, link: str, site_url: str) -> tuple[str, str] 
     return target, parts.fragment
 
 
-def check(site: Path, staged: Mapping[str, str], site_url: str, *, token: str = "") -> list[str]:
+def check(site: Path, staged: Mapping[str, str], site_url: str, *, token: str = "", language: str = "en") -> list[str]:
     """Every problem of the built site (design § 5.2): links, search tags, heading ids, sitemap and robots.txt."""
     problems: list[str] = []
     pages = read_pages(site)
@@ -335,7 +372,9 @@ def check(site: Path, staged: Mapping[str, str], site_url: str, *, token: str = 
         if page is None:
             problems.append(f"{path}: no built page {built}")
             continue
-        problems += [f"{built}: {problem}" for problem in page_problems(page, url)]
+        declared = LANGUAGE.search(text.partition("\n---\n")[0]) if text.startswith("---\n") else None
+        problems += [f"{built}: {problem}"
+                     for problem in page_problems(page, url, declared.group(1) if declared else language)]
         missing = sorted({slug for _, slug in heading_anchors(text)} - page.headings)
         if missing:
             problems.append(f"{built}: no heading id for GitHub's anchors {', '.join(missing)}")
@@ -354,12 +393,19 @@ def check(site: Path, staged: Mapping[str, str], site_url: str, *, token: str = 
     return problems
 
 
-def page_problems(page: Page, url: str) -> list[str]:
+def page_problems(page: Page, url: str, language: str) -> list[str]:
+    """A page's search tags: one title and one description, each with content, the canonical URL, each Open Graph
+    and Twitter tag once, and the page's language on ``<html>``."""
     problems = []
-    if not page.title.strip():
-        problems.append("empty <title>")
-    if not "".join(page.meta.get("description", [])).strip():
-        problems.append("no description meta")
+    if len(page.titles) != 1 or not page.title:
+        problems.append(f"<title> appears {len(page.titles)} times, not once with content")
+    elif len(parts := page.title.split(" - ")) != len(set(parts)):
+        problems.append(f"<title> {page.title!r} repeats itself")
+    descriptions = page.meta.get("description", [])
+    if len(descriptions) != 1 or not descriptions[0].strip():
+        problems.append(f"description appears {len(descriptions)} times, not once with content")
+    if page.language != language:
+        problems.append(f"<html lang> is {page.language!r}, not {language!r}")
     if page.canonical != [url]:
         problems.append(f"canonical {page.canonical} is not [{url}]")
     for key in OPEN_GRAPH:
@@ -382,7 +428,7 @@ def run(root: Path, output: Path, token: str) -> int:
     except SiteError as error:
         print(f"SITE_FAILED {error}", file=sys.stderr)
         return 1
-    problems = check(site, staged, config["site_url"], token=token)
+    problems = check(site, staged, config["site_url"], token=token, language=config["theme"].get("language", "en"))
     for problem in problems:
         print(f"SITE_FAILED {problem}", file=sys.stderr)
     if problems:

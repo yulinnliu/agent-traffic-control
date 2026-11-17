@@ -1,7 +1,7 @@
 {% extends "base.html" %}
-{#- The home page's title already names the site (site/zensical.toml extra.home_title). -#}
+{#- A home page's title already names the site (site/zensical.toml extra.home_title). -#}
 {% block htmltitle %}
-  {%- if not page.url and page.meta and page.meta.title %}
+  {%- if page.meta and page.meta.home_page and page.meta.title %}
   <title>{{ page.meta.title | e }}</title>
   {%- else %}
   {{ super() }}

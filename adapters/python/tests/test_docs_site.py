@@ -36,7 +36,8 @@ def repository(root: Path, files: dict[str, str | bytes]) -> Path:
 
 
 def staged(root: Path, out: Path, *, token: str = "") -> dict[str, str]:
-    return docs_site.stage(root, out, home_title="Home title", token=token, repo_url=REPO_URL)
+    return docs_site.stage(root, out, home_titles={"en": "Home title", "zh-TW": "首頁"}, token=token,
+                           repo_url=REPO_URL)
 
 
 def front(text: str) -> dict:
@@ -162,14 +163,39 @@ def test_the_description_is_the_first_prose_paragraph_plain_and_cut_at_a_word():
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(("block", "expected"), [
+    ("Agent Traffic Control（`atc`）是一套治理層，\n讓多個 coding agent 在同一批 repository 上工作：\n每條 branch",
+     "Agent Traffic Control（atc）是一套治理層，讓多個 coding agent 在同一批 repository 上工作：每條 branch"),
+    ("one writer per\nbranch and git\n  worktree", "one writer per branch and git worktree"),
+    ("中文結尾\nEnglish start", "中文結尾English start"),
+])
+def test_a_line_break_is_a_space_between_words_and_nothing_next_to_cjk(block, expected):
+    assert docs_site.plain(block) == expected
+
+
+@pytest.mark.unit
+def test_a_cjk_description_without_spaces_is_cut_at_the_limit():
+    short = docs_site.shorten("治理" * 100, docs_site.DESCRIPTION_LENGTH)
+    assert len(short) == docs_site.DESCRIPTION_LENGTH and short.endswith("…")
+
+
+@pytest.mark.unit
+def test_a_home_page_in_a_language_without_a_configured_title_stops(tmp_path):
+    root = repository(tmp_path / "repo", {"README.md": "# R\n", "README.ja.md": "# R\n"})
+    with pytest.raises(docs_site.SiteError, match="names no title for ja"):
+        staged(root, tmp_path / "out")
+
+
+@pytest.mark.unit
 def test_staging_writes_front_matter_and_only_the_home_page_carries_the_token(tmp_path):
     root = repository(tmp_path / "repo", {
         "README.md": "# R\n\nWhat it is.\n", "README.zh-TW.md": "# R\n\n是什麼。\n",
         "docs/releases/v1.0.0.md": "atc 1.0.0 (atc-testkit 2.0.0)\n\nInstalled from its tag.\n"})
     pages = staged(root, tmp_path / "out", token="tok")
-    assert front(pages["index.md"]) == {"title": "Home title", "description": "What it is.",
+    assert front(pages["index.md"]) == {"title": "Home title", "home_page": True, "description": "What it is.",
                                          "google_site_verification": "tok"}
-    assert front(pages["zh-TW/index.md"]) == {"description": "是什麼。"}
+    assert front(pages["zh-TW/index.md"]) == {"title": "首頁", "home_page": True, "language": "zh-TW",
+                                              "description": "是什麼。"}
     assert front(pages["releases/v1.0.0.md"]) == {"title": "atc 1.0.0 (atc-testkit 2.0.0)",
                                                   "description": "Installed from its tag."}
     assert (tmp_path / "out" / "releases" / "v1.0.0.md").read_text(encoding="utf-8") == pages["releases/v1.0.0.md"]
@@ -204,6 +230,10 @@ def test_the_built_site_passes_its_check(built):
     assert re.search(r"<title>Home title|<title>Agent Traffic Control: ", home)
     page = docs_site.read_pages(site)["index.html"]
     assert {"安裝-與-設定", "what-atc-does-really"} <= page.headings
+    zh = docs_site.read_pages(site)["zh-TW/index.html"]
+    config = docs_site.tomllib.loads((CHECKOUT / docs_site.CONFIG).read_text(encoding="utf-8"))["project"]
+    assert (zh.language, zh.titles) == ("zh-TW", [config["extra"]["home_title"]["zh-TW"]])
+    assert page.language == "en"
     assert (site / "sitemap.xml").is_file()
     assert (site / "robots.txt").read_text(encoding="utf-8").endswith(f"Sitemap: {SITE_URL}sitemap.xml\n")
 
@@ -215,7 +245,7 @@ def test_the_home_title_is_the_configured_one_without_the_site_name_again(tmp_pa
     repository(root, {"README.md": "# Probe\n\nProbe.\n"})
     site, _, config = docs_site.build(root, tmp_path / "out")
     title = docs_site.read_pages(site)["index.html"].title
-    assert title == config["extra"]["home_title"]
+    assert title == config["extra"]["home_title"]["en"]
 
 
 def broken(site: Path, tmp_path: Path, page: str, pattern: str, replacement: str) -> Path:
@@ -232,7 +262,11 @@ def broken(site: Path, tmp_path: Path, page: str, pattern: str, replacement: str
 @pytest.mark.parametrize(("page", "pattern", "replacement", "problem"), [
     ("index.html", r"</body>", '<a href="nowhere/">x</a></body>', "index.html: nowhere/ names no built file"),
     ("index.html", r"</body>", '<a href="guide-one/#no-such">x</a></body>', "names no id on guide-one/index.html"),
-    ("index.html", r'<meta name="?description"?[^>]*>', "", "index.html: no description meta"),
+    ("index.html", r'<meta name="?description"?[^>]*>', "", "index.html: description appears 0 times"),
+    ("index.html", r"</head>", '<meta name="description" content="again"></head>', "description appears 2 times"),
+    ("index.html", r"</head>", "<title>again</title></head>", "<title> appears 2 times"),
+    ("guide-one/index.html", r"<title>[^<]*</title>", "<title>Probe - Probe</title>", "repeats itself"),
+    ("zh-TW/index.html", r'<html lang="?zh-TW"?', '<html lang="en"', "<html lang> is 'en', not 'zh-TW'"),
     ("index.html", r'<link rel="?canonical"?[^>]*>', "", "index.html: canonical [] is not"),
     ("index.html", r"</head>", '<meta property="og:title" content="again"></head>', "og:title appears 2 times"),
     ("guide-one/index.html", r'<meta property="?og:image"?[^>]*>', "", "og:image appears 0 times"),

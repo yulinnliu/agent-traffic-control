@@ -1,0 +1,12 @@
+{#-
+  The theme's language partial, with a page's front matter `language` ahead of the theme's: docs_site.py sets it
+  on a README.<lang>.md home page, so that page's <html lang> and interface strings are its language.
+-#}
+{% if page and page.meta and page.meta.language %}
+  {% set language = page.meta.language %}
+{% else %}
+  {% set language = config.theme.language | d("en", true) %}
+{% endif %}
+{% import "partials/languages/" ~ language ~ ".html" as lang %}
+{% import "partials/languages/en.html" as fallback %}
+{% macro t(key) %}{{ lang.t(key) or fallback.t(key) or key }}{% endmacro %}

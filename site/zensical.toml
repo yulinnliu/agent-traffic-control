@@ -25,9 +25,11 @@ media = "(prefers-color-scheme: dark)"
 scheme = "slate"
 toggle = { icon = "lucide/moon", name = "Switch to light mode" }
 
-# The home page's <title>; docs_site.py writes it into the home page's front matter.
-[project.extra]
-home_title = "Agent Traffic Control: governance for Claude Code and Codex coding agents"
+# Each home page's <title> by language: README.md under the theme's language, README.<lang>.md under <lang>;
+# docs_site.py writes it into that page's front matter.
+[project.extra.home_title]
+en = "Agent Traffic Control: governance for Claude Code and Codex coding agents"
+"zh-TW" = "Agent Traffic Control：Claude Code 與 Codex coding agent 的治理層"
 
 # GitHub's heading anchors, so a link written for GitHub keeps its target on the site (design § 2.4).
 [project.markdown_extensions.toc]
