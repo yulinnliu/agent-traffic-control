@@ -26,3 +26,4 @@ decisions:
 - 'Owner 11-17 「拿掉」: atc test ID --candidate drops the stdout repeat of ELAPSED lines; they appear once, live on stderr.'
 - 'Owner 11-17 「atc test --timings」: the timings report is a flag on atc test, no new command.'
 - 'Owner 11-17 「調查」: find the root cause of the screen freezes during test runs (dwm.exe at 1-2 cores, CPU not saturated), then fix it; findings go to the coordinator before the fix.'
+- 'Owner 11-17 「採用選項 1」: atc push runs the pre-push hook through git hook run before git connects, then git push --no-verify of the same SHA; a new gate step, GATE_FAILED when the hook fails.'
