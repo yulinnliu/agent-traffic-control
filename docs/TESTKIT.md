@@ -129,7 +129,9 @@ order. Each is one pytest invocation over the selected paths.
   `loadscope`. A test that already carries `xdist_group` keeps its own.
 - `<workers>` is, in order: the `--workers N` of the command that starts the
   stages (the CI runner's `--stages`, the gate's `--run`); 1 in a run nested
-  in one that holds host workers (§ Host worker budget); `test_workers` in
+  in one that holds host workers (§ Host worker budget), when `CI` is not
+  set, so `CI` outranks `ATC_TEST_WORKERS_HELD` and an ancestor's tokens;
+  `test_workers` in
   the host file `~/.atc/config.toml` (`ATC_HOME.md` § Host settings), read
   only when `CI` is not set; the default. In the host pool the default asks
   for the pool size, and memory cuts it only when the stage takes its tokens
@@ -230,7 +232,12 @@ set) use no pool.
 - A run that holds tokens sets `ATC_TEST_WORKERS_HELD` for its stages. A run
   started with it set, a test's gate or verifier for example, takes no token
   and never waits, and its parallel stage takes one worker unless a flag
-  names a count.
+  names a count. A run is nested the same way when a live ledger row of its
+  pool that holds tokens belongs to the run's own process or one of its
+  ancestors, which covers a caller that passes its own environment or
+  starts the run with a cleaned one: such a run waiting on the pool would
+  wait on its ancestor's tokens forever. On Windows the ancestor walk stops
+  at a parent created after its child, whose process ID was reused.
 - The wait is not part of any timeout: the test timeout and the
   mutant timeout start once the tokens are held, and the verifier writes its
   total wait to `ATC_WORKER_WAIT_FILE`, which `atc integrate` and `atc test

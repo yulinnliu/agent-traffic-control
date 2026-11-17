@@ -321,6 +321,74 @@ def list_processes() -> list[HostProcess]:
     return _windows_processes() if os.name == "nt" else _posix_processes()
 
 
+ANCESTORS_MOST = 64
+
+
+def _windows_parents() -> dict[int, int]:
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
+    kernel.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+    kernel.Process32FirstW.argtypes = [wintypes.HANDLE, ctypes.POINTER(_ProcessEntry)]
+    kernel.Process32NextW.argtypes = [wintypes.HANDLE, ctypes.POINTER(_ProcessEntry)]
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    snapshot = kernel.CreateToolhelp32Snapshot(0x2, 0)  # TH32CS_SNAPPROCESS
+    if snapshot in (None, wintypes.HANDLE(-1).value):
+        raise ctypes.WinError(ctypes.get_last_error())
+    parents: dict[int, int] = {}
+    try:
+        entry = _ProcessEntry()
+        entry.dwSize = ctypes.sizeof(_ProcessEntry)
+        more = kernel.Process32FirstW(snapshot, ctypes.byref(entry))
+        while more:
+            parents[int(entry.th32ProcessID)] = int(entry.th32ParentProcessID)
+            more = kernel.Process32NextW(snapshot, ctypes.byref(entry))
+    finally:
+        kernel.CloseHandle(snapshot)
+    return parents
+
+
+def _windows_created(pid: int) -> int | None:
+    """The process's creation time in 100 ns units, or ``None`` when it cannot be opened."""
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel.OpenProcess.restype = wintypes.HANDLE
+    kernel.GetProcessTimes.argtypes = [wintypes.HANDLE] + [ctypes.POINTER(wintypes.FILETIME)] * 4
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    handle = kernel.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+    if not handle:
+        return None
+    try:
+        times = [wintypes.FILETIME() for _ in range(4)]
+        if not kernel.GetProcessTimes(handle, *(ctypes.byref(time_) for time_ in times)):
+            return None
+        return (times[0].dwHighDateTime << 32) | times[0].dwLowDateTime
+    finally:
+        kernel.CloseHandle(handle)
+
+
+def ancestors(pid: int | None = None) -> list[int]:
+    """The live processes ``pid`` (this process by default) descends from, parent first. On Windows a parent ID can
+    outlive its process and name a later one, so the walk stops at a parent created after its child."""
+    pid = os.getpid() if pid is None else pid
+    if os.name == "nt":
+        parents, created = _windows_parents(), _windows_created
+    else:
+        parents = {entry.pid: entry.parent for entry in _posix_processes()}
+        created = lambda _pid: 0  # noqa: E731 - a POSIX parent ID names the live parent, or init after it ends
+    chain: list[int] = []
+    child, child_created = pid, created(pid)
+    while len(chain) < ANCESTORS_MOST:
+        parent = parents.get(child, 0)
+        if parent in (0, child) or parent in chain:
+            break
+        parent_created = created(parent)
+        if parent_created is None or child_created is None or parent_created > child_created:
+            break
+        chain.append(parent)
+        child, child_created = parent, parent_created
+    return chain
+
+
 def _short_path(path: Path) -> str:
     if os.name != "nt":
         return str(path)

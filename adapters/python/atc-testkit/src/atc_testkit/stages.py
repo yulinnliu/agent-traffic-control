@@ -16,8 +16,8 @@ import sys
 import time
 import tomllib
 
-from . import config as project_config, desktop, elapsed, locations, timing, toolchain as toolchains, \
-    workers as host_workers
+from . import children, config as project_config, desktop, elapsed, locations, timing, \
+    toolchain as toolchains, workers as host_workers
 from .evidence import Stage
 from .toolchain import Toolchain
 
@@ -344,7 +344,7 @@ def resolve_workers(flag: int | None = None, environ: Mapping[str, str] | None =
 
     if flag is not None:
         return within_memory(flag, SOURCE_FLAG)
-    if environ.get(host_workers.HELD):
+    if not environ.get("CI") and nested(environ):
         return Workers(1, SOURCE_NESTED)
     table = host_table(environ, config)
     if WORKERS_KEY in table:
@@ -357,6 +357,23 @@ def resolve_workers(flag: int | None = None, environ: Mapping[str, str] | None =
     if size:
         return Workers(size, SOURCE_DEFAULT)
     return within_memory(default_workers(), SOURCE_DEFAULT)
+
+
+def nested(environ: Mapping[str, str]) -> bool:
+    """Whether this process runs inside a budgeted run: ``ATC_TEST_WORKERS_HELD`` in ``environ``, or a token of the
+    pool ``environ`` names held by this process or one of its ancestors. The ancestry covers a caller that builds
+    ``environ`` itself or starts a child with a cleaned environment: such a run waiting on the pool would wait on its
+    own ancestor's tokens forever (docs/TESTKIT.md § Host worker budget)."""
+    if environ.get(host_workers.HELD):
+        return True
+    held = host_workers.holders(pool_directory(environ))
+    if not held:
+        return False
+    try:
+        chain = {os.getpid(), *children.ancestors()}
+    except OSError:
+        return False
+    return any(row.pid in chain for row in held)
 
 
 def pool_directory(environ: Mapping[str, str]) -> Path:
@@ -375,13 +392,13 @@ def open_budget(label: str, environ: Mapping[str, str] | None = None, config: Pa
                 root: Path | None = None, max_wait: float | None = None) -> host_workers.Budget:
     """The host budget of one entry point (docs/TESTKIT.md § Host worker budget).
 
-    Outside the pool: with ``CI`` set, inside a run that holds tokens (``ATC_TEST_WORKERS_HELD``), and with
+    Outside the pool: with ``CI`` set, inside a run that holds tokens (``nested``), and with
     ``test_worker_pool = 0``. The wait limit is ``ATC_WORKER_MAX_WAIT``, else ``max_wait`` (the run's own timeout),
     else ``test_worker_max_wait``, else ``workers.MAX_WAIT_SECONDS``.
     """
     environ = os.environ if environ is None else environ
     per_worker, origin = worker_memory_source(root, environ)
-    if environ.get("CI") or environ.get(host_workers.HELD):
+    if environ.get("CI") or nested(environ):
         return host_workers.Budget(None, label=label, per_worker=per_worker)
     table = host_table(environ, config)
     size = pool_size(table, config)

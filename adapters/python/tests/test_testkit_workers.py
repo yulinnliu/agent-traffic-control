@@ -148,6 +148,56 @@ def test_ci_a_nested_run_and_a_pool_of_zero_stay_outside_the_pool(tmp_path: Path
     assert stages.open_budget("x", named, absent).active
 
 
+NESTING_HOLDER = """
+import os, subprocess, sys
+from pathlib import Path
+from atc_testkit import workers
+pool = workers.Pool(Path(sys.argv[1]), 2)
+grant = workers.Budget(pool, label="holder").acquire("parallel", 2, 2)
+child = ("import sys\\nfrom pathlib import Path\\nfrom atc_testkit import stages, workers\\n"
+         "environ = {workers.POOL_DIRECTORY: sys.argv[1]}\\n"
+         "print('CHILD', stages.nested(environ), stages.open_budget('verifier x', environ, Path(sys.argv[2])).active,"
+         " stages.resolve_workers(None, environ, Path(sys.argv[2])).line(), flush=True)\\n")
+clean = {name: value for name, value in os.environ.items() if name != workers.HELD}
+done = subprocess.run([sys.executable, "-c", child, sys.argv[1], sys.argv[2]], env=clean, capture_output=True,
+                      text=True, timeout=60)
+print(done.stdout.strip() or done.stderr.strip(), flush=True)
+"""
+
+
+@pytest.mark.integration
+def test_a_run_whose_ancestor_holds_tokens_is_nested_whatever_its_environment(tmp_path: Path,
+                                                                                pool_dir: Path) -> None:
+    """A verifier a test calls with its own environment, inside a stage that holds every token, waited on its
+    ancestor's tokens forever. It finds the holder among its ancestors and runs outside the pool with one worker."""
+    script = tmp_path / "nesting.py"
+    script.write_text(NESTING_HOLDER, encoding="utf-8")
+    done = subprocess.run([sys.executable, str(script), str(pool_dir), str(tmp_path / "absent.toml")],
+                          capture_output=True, text=True, timeout=120)
+    assert done.stdout.strip() == "CHILD True False workers: 1 (nested in a budgeted run)", done.stdout + done.stderr
+
+
+@pytest.mark.integration
+def test_a_holder_that_is_not_an_ancestor_leaves_a_run_in_the_pool(tmp_path: Path, pool_dir: Path) -> None:
+    holder = start_holder(tmp_path, pool_dir, 2, 1, 60)
+    try:
+        assert not stages.nested({workers.POOL_DIRECTORY: str(pool_dir)})
+        assert stages.open_budget("x", {workers.POOL_DIRECTORY: str(pool_dir)}, tmp_path / "absent.toml").active
+    finally:
+        holder.kill()
+        holder.wait()
+
+
+@pytest.mark.integration
+def test_ancestors_name_the_parent_first() -> None:
+    # A virtual environment's python.exe on Windows starts the base interpreter as its child: this process is the
+    # parent or the grandparent.
+    script = "import os\nfrom atc_testkit import children\nprint(os.getppid(), *children.ancestors())\n"
+    done = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=60, check=True)
+    parent, *chain = map(int, done.stdout.split())
+    assert chain[0] == parent and os.getpid() in chain[:2]
+
+
 @pytest.mark.unit
 @pytest.mark.parametrize("text", ["test_worker_pool = -1\n", "test_worker_pool = 'all'\n",
                                   "test_worker_max_wait = 0\n", "test_worker_max_wait = 90000\n"])

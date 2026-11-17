@@ -338,6 +338,16 @@ def _row_alive(path: Path, prune: bool = True) -> bool:
     return False
 
 
+def holders(directory: Path) -> list[Row]:
+    """The live rows of ``directory``'s pool that hold tokens, read without taking or pruning anything."""
+    found = []
+    for path in sorted((directory / ROWS).glob("*.json")):
+        row = _read_row(path) if _row_alive(path, prune=False) else None
+        if row is not None and row.tokens:
+            found.append(row)
+    return found
+
+
 class _OwnRow:
     """This process's ledger row: locked for the process's life, rewritten in place, removed at exit."""
 
