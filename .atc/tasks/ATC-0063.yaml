@@ -25,3 +25,4 @@ decisions:
 - No version bump. The next release carries this task.
 - 'Owner 11-17 「拿掉」: atc test ID --candidate drops the stdout repeat of ELAPSED lines; they appear once, live on stderr.'
 - 'Owner 11-17 「atc test --timings」: the timings report is a flag on atc test, no new command.'
+- 'Owner 11-17 「調查」: find the root cause of the screen freezes during test runs (dwm.exe at 1-2 cores, CPU not saturated), then fix it; findings go to the coordinator before the fix.'
