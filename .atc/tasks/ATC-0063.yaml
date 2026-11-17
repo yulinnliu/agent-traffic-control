@@ -1,0 +1,25 @@
+task_id: ATC-0063
+title: atc integrate shows its steps, and test timings are measurable per project and version
+repository: yulinnliu/agent-traffic-control
+base_sha: 2332ff71d62e8c5926299dc445f36600be77fdd4
+scope: '**1. `atc integrate` progress.** Do it the way ATC-0061 did `atc push`. Today `git_integrate.py:1338` prints one line, `verify: candidate <sha> RUN … timeout 1800s`. It then prints nothing until the verifier ends, up to 30 minutes, and the verifier log''s path appears only at the end. On 11-17 the Owner saw HQ-0035''s integrate as stuck. Required: - one `STEP <step> <name> <seconds>s <result>` line per step: fetch, preflight, candidate build, verify, ledger, fast-forward; - the verifier log''s path printed when verify starts; - the verifier''s `ELAPSED` stage lines streamed to stderr while it runs; - `--check` and `--json` unchanged on stdout. **2. Repeated output.** In the Owner''s terminal, the streamed pre-push listing of `atc push hami-quant-trading` printed the same blocks several times (11-17). Find out whether the cause is ATC-0061''s streaming (chunk handling, `\r`, `--progress`), a console redraw, or the hook printing twice. Fix it if it is ours. **3. Measurable test efficiency.**
+  Each record in `~/.atc/run/timings.jsonl` gains: - the atc version and the testkit version; - the project; - the counts of tests passed, failed and skipped; - the selection kind and reason (related or full, and why, e.g. "no selection rule"); - whether verifier evidence was reused. Also: - **Every verify record carries its task.** 42 of 510 records on 11-17 have `task: ""`. - **The project pre-push gate writes records too.** Today it writes none, so the push that ran hqt''s full suite left no trace. - **A small report command or flag:** per project and version, seconds per test, the full-suite rate and the reuse rate. The 11-17 baseline of the current records is in the coordinator hand-over. Use it as the shape the report should reproduce. **Design first** (atc-review "Writer: the design step"): - Where each piece lives: atc, testkit, or both. - The record fields and their compatibility with existing readers. - The report''s command name and output shape. - The docs: WORKFLOW.md, TESTKIT.md
+  § Stage times, and the CLI help.'
+tests: standard
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: 2332ff71d62e8c5926299dc445f36600be77fdd4
+branch: claude+ATC-0063
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
+decisions:
+- Owner 11-17 「Yes, queue it」 (integrate progress, after HQ-0035's integrate looked stuck).
+- 'Owner 11-17 「Both」: measure test efficiency per project and version. A baseline has been pulled, and the missing fields are added here.'
+- 'Owner 11-17 「Open P1 + P2」: this task runs in parallel with the projects-follow-a-release task, which changes testkit test selection. Coordinate through the coordinator if a file overlaps.'
+- 'Owner rule 11-16: choose by industry practice and root cause, never by cost.'
+- The Owner reports the screen freezing for seconds during tests and integrations. A host recorder is measuring it. If the coordinator relays that CPU contention is confirmed, lowering the test workers' process priority may be folded in here. Do not start that without the relay.
+- No version bump. The next release carries this task.
