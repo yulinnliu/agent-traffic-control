@@ -84,7 +84,7 @@ def test_a_range_lints_what_its_commits_add_or_change() -> None:
 def test_atc_test_lints_before_its_tests_and_lint_alone_runs_no_test(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch, flags: dict, expected: list[str]) -> None:
     (tmp_path / "pyproject.toml").write_text("[tool.atc-testkit]\n", encoding="utf-8")
-    task = argparse.Namespace(id="ATC-0001", worktree=tmp_path, base="BASE")
+    task = argparse.Namespace(id="ATC-0001", worktree=tmp_path, base="BASE", source=lambda: tmp_path)
     seen = []
     monkeypatch.setattr(testrun, "run", lambda argv, environ: seen.append(argv) or 0)
     args = argparse.Namespace(sha=None, verbose=False, **flags)
