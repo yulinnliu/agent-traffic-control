@@ -385,6 +385,20 @@ def test_a_record_or_sync_range_is_documentation_only_and_ends_after_the_lint_st
 
 
 @pytest.mark.integration
+def test_files_atc_manages_are_outside_the_input_set(candidate: Candidate) -> None:
+    """A sync or record commit leaves a run's input digest as it was (docs/TESTKIT.md § Input evidence)."""
+    managed = (".atc/lint/ruff.toml", ".atc/tasks/T-0001.yaml", ".dsh/skills/hami-retro/SKILL.md",
+               ".dsh/skills/hami-retro/run.toml")
+    for path in managed:
+        candidate.advance(path, MANAGED_SKILL if path.endswith("SKILL.md") else "x = 1\n")
+    candidate.advance(".claude/skills/own/SKILL.md", OWN_SKILL)
+    sha = candidate.advance("notes.toml", "x = 1\n")
+    excluded = verifier.excluded_paths(consumer(candidate.root, automation_prefixes=(".claude/",)), sha)
+    assert set(managed) <= set(excluded)
+    assert not {"notes.toml", ".claude/skills/own/SKILL.md", "src/fixture_prod/tool.py"} & set(excluded)
+
+
+@pytest.mark.integration
 def test_an_own_skill_beside_a_record_is_not_documentation_only(candidate: Candidate) -> None:
     candidate.advance(".atc/tasks/T-0001.yaml", "x\n")
     candidate.advance(".claude/skills/own/SKILL.md", OWN_SKILL)
