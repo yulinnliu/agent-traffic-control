@@ -850,6 +850,12 @@ def test_another_scratch_of_the_task_lends_a_matching_baseline_with_its_line_pat
     record = lines.read(place / lines.DIRECTORY / lines.DATA)
     assert record is not None and record.files == {lines.real(place / "tree/src/m.py")}
     (place / testrun.BASELINE_RECORD).unlink()
+    # what an earlier lender's partial copy left in the recording is gone before the next lender's rows arrive
+    recording = lines.prepare(place, place / "tree", [])
+    (recording.data / "9-left.tsv").write_text(f"tests/t.py::other\t{lines.real(place / 'tree/src/n.py')}\t1\n",
+                                               encoding="utf-8")
+    assert testrun._copy_lines(lender, place, recording)
+    assert sorted(path.name for path in recording.data.iterdir()) == ["1.tsv", f"{lines.LOADED}1", f"{lines.STARTED}1"]
     # a lender whose line records no longer read back, or whose record changed during the copy, lends nothing
     (lender / lines.DIRECTORY / lines.DATA / f"{lines.STARTED}1").unlink()
     assert adopt(key) is None
