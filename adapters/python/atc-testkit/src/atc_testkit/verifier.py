@@ -435,9 +435,13 @@ def _write_report(environ: Mapping[str, str], project: Project, pytest_paths: li
         print(f"verification report: {path}", flush=True)
 
 
-def _lint_row(base: str, sha: str) -> _Row:
-    """The lint stage over the range, in the candidate's own environment (docs/TESTKIT.md § Lint stage)."""
-    return _Row(lint.TOKEN, tuple(lint.range_argv(sys.executable, base, sha)))
+def _lint(checks: _Checks, root: Path, base: str, sha: str) -> None:
+    """The lint stage over the range, in the candidate's own environment (docs/TESTKIT.md § Lint stage); a
+    candidate without its config has not adopted it."""
+    if not lint.configured(root):
+        print(lint.not_configured_line(root), flush=True)
+        return
+    checks.row(_Row(lint.TOKEN, tuple(lint.range_argv(sys.executable, base, sha))), "lint")
 
 
 def _consumer_checks(project: Project, checks: _Checks, base: str, sha: str, paths: list[str],
@@ -453,7 +457,7 @@ def _consumer_checks(project: Project, checks: _Checks, base: str, sha: str, pat
           f"repository-wide collection: {'check' if collect else 'skip'}", flush=True)
     checks.static((check for check in project.checks if check.first), paths)
     checks.row(_Row("UV_LOCK_CHECK_FAILED", checks.isolated.toolchain.lock_check_argv))
-    checks.row(_lint_row(base, sha), "lint")
+    _lint(checks, project.root, base, sha)
     if doc_only:
         return doc_only
     checks.row(_Row("TESTKIT_CONTRACT_FAILED", (sys.executable, "-m", "atc_testkit.check", "--installed")))
@@ -478,7 +482,7 @@ def _root_checks(project: Project, checks: _Checks, base: str, sha: str,
         except Exception as error:  # noqa: BLE001 - a selection failure refuses the candidate
             raise VerifyError("SELECTION_FAILED", f"{type(error).__name__}: {error}") from error
     checks.static((check for check in project.checks if check.first), paths)
-    checks.row(_lint_row(base, sha), "lint")
+    _lint(checks, project.root, base, sha)
     checks.static((check for check in project.checks if not check.first), paths)
     if pytest_paths is not None:
         checks.stages(pytest_paths, project.root / project.tests_dir)

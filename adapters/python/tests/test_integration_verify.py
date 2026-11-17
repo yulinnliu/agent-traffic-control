@@ -100,6 +100,7 @@ def candidate(tmp_path: Path, atc_tmp: Path, monkeypatch: pytest.MonkeyPatch) ->
     root = tmp_path / "candidate"
     (root / iv.ADAPTER_DIR).mkdir(parents=True)
     run_git(root, "init", "-q", "-b", "main")
+    commit(root, ".pre-commit-config.yaml", "repos: []\n")
     main = commit(root, "a.txt", "a\n")
     monkeypatch.chdir(root)
     monkeypatch.setattr(iv, "PRODUCT_PREFIXES", ())

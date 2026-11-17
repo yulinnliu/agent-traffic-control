@@ -378,9 +378,16 @@ trees and run no product code. One list serves every entry:
 
 Its rules:
 
+- A repository adopts the lint stage by holding `.pre-commit-config.yaml` at
+  its root. Without it, `atc test ID`, `atc test ID --lint` and the
+  verifier print `LINT_NOT_CONFIGURED: no .pre-commit-config.yaml at
+  <root>; the lint stage is not adopted and does not run` and go on, with
+  no lint row and no `LINT_FAILED`.
 - pre-commit runs as `python -m pre_commit` with the interpreter the tests
-  run with, so a project pins `pre-commit` in its development dependencies
-  and keeps `.pre-commit-config.yaml` at its root (`atc_testkit.check`).
+  run with, so a repository with the config pins `pre-commit` in its
+  development dependencies (`atc_testkit.check`). With the config, a stage
+  that cannot run, pre-commit missing or a hook environment that fails to
+  build, is `LINT_FAILED`.
   Hook environments live in `PRE_COMMIT_HOME`, `~/.atc/cache/pre-commit`
   (`ATC_HOME.md` § Cache).
 - Vale runs as the `vale` hook of its own repository, pinned by `rev`, with
@@ -439,7 +446,7 @@ this order:
 | The selection for that range can be computed | `SELECTION_FAILED` |
 | The project's static checks that run first | the project's tokens |
 | The toolchain's lock check, `uv lock --check` | `UV_LOCK_CHECK_FAILED` |
-| The lint stage over the range (§ Lint stage) | `LINT_FAILED` |
+| The lint stage over the range, when the candidate holds `.pre-commit-config.yaml` (§ Lint stage) | `LINT_FAILED` |
 | `python -m atc_testkit.check --installed` | `TESTKIT_CONTRACT_FAILED` |
 | Repository-wide collection, when the range changes a test, test helper, fixture or `conftest.py` | `COLLECTION_FAILED` |
 | The project's other static checks | the project's tokens |
@@ -846,7 +853,7 @@ from then; a wait past its limit stops it with `WORKER_WAIT_TIMEOUT` (exit
 The lint stage alone (§ Lint stage), in the task's worktree or with `--sha`
 in the export of `SHA`, over the files changed since the record's
 `base_sha`: steps 1 to 5 of the run above, then the lint stage, and no test.
-It takes no tests and no `--all`. Exit 0 when it passes, 1 on
+It takes no tests and no `--all`. Exit 0 when it passes or prints `LINT_NOT_CONFIGURED`, 1 on
 `LINT_FAILED`. A reviewer runs it before reading the diff (atc-review
 skill).
 
@@ -1081,8 +1088,9 @@ In `[tool.atc-testkit]`; the first seven keys are required:
 
 Elsewhere in the project:
 
-- `.pre-commit-config.yaml` at the repository root, the lint stage's list
-  (§ Lint stage), and `pre-commit` pinned in the development dependencies.
+- To adopt the lint stage, `.pre-commit-config.yaml` at the repository
+  root, the lint stage's list (§ Lint stage), and `pre-commit` pinned in
+  the development dependencies; without the config the stage does not run.
 - Test paths and pytest's search path, as `testpaths` and `pythonpath` in
   `[tool.pytest.ini_options]`.
 - The verifier argv file, which is a project file and carries the `uv`

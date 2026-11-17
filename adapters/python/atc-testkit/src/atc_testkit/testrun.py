@@ -1306,8 +1306,12 @@ def repository_top(tree: Path, place: Path) -> Path:
 
 
 def run_lint(tree: Path, place: Path, python: str, paths: Sequence[str], env: Mapping[str, str]) -> int:
-    """The lint stage over ``paths`` (docs/TESTKIT.md § Lint stage): 0 when it passes or has no file, else 1."""
+    """The lint stage over ``paths`` (docs/TESTKIT.md § Lint stage): 0 when it passes, has no file or is not
+    adopted, else 1."""
     top = repository_top(tree, place)
+    if not lint.configured(top):
+        print(lint.not_configured_line(top), flush=True)
+        return 0
     files = lint.existing(top, paths)
     if not files:
         print("LINT no changed file", flush=True)

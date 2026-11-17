@@ -177,9 +177,13 @@ def test_the_supplied_data_is_checked(repository, relative, old, new):
 
 
 @pytest.mark.unit
-def test_the_lint_stage_needs_its_config(repository):
+def test_a_repository_without_the_lint_config_has_not_adopted_the_stage_and_needs_no_pre_commit(repository):
+    path = repository / 'pyproject.toml'
+    path.write_text(path.read_text(encoding='utf-8').replace(', "pre-commit==4.7.0"', ''), encoding='utf-8')
+    assert repository_problems(repository) == [
+        'development dependencies must include pre-commit, which runs the lint stage .pre-commit-config.yaml names']
     (repository / '.pre-commit-config.yaml').unlink()
-    assert repository_problems(repository) == ['the lint stage needs .pre-commit-config.yaml at the repository root']
+    assert repository_problems(repository) == []
 
 
 def test_the_hook_carries_the_named_uv_options(repository):

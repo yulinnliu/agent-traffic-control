@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 import git_integrate as gi
-from atc_testkit import elapsed, selection, stages, verifier
+from atc_testkit import elapsed, lint, selection, stages, verifier
 from atc_testkit.project import Project, StaticCheck
 
 PYPROJECT = """[tool.pytest.ini_options]
@@ -98,6 +98,7 @@ def candidate(tmp_path: Path, atc_tmp: Path, monkeypatch: pytest.MonkeyPatch) ->
     (root / "src/fixture_prod/__init__.py").write_text("", encoding="utf-8")
     (root / "pyproject.toml").write_text(PYPROJECT, encoding="utf-8")
     (root / "argv.json").write_text("[]", encoding="utf-8")
+    (root / ".pre-commit-config.yaml").write_text("repos: []\n", encoding="utf-8")
     git(root, "init", "-q", "-b", "main")
     git(root, "add", ".")
     git(root, "commit", "-q", "-m", "base")
@@ -221,6 +222,17 @@ def test_the_checks_run_in_the_order_of_the_table(candidate: Candidate, atc_tmp:
     assert recorder.calls[2][0] == [sys.executable, "-m", "pre_commit", "run", "--show-diff-on-failure", "--color",
                                     "never", "--from-ref", candidate.main, "--to-ref", sha]
     assert recorder.calls[3][0][-3:] == ["-m", "atc_testkit.check", "--installed"]
+
+
+@pytest.mark.integration
+def test_a_candidate_without_the_lint_config_has_not_adopted_the_stage_and_goes_on(
+        candidate: Candidate, capsys: pytest.CaptureFixture[str]) -> None:
+    git(candidate.root, "rm", "-q", ".pre-commit-config.yaml")
+    candidate.advance()
+    recorder = Recorder()
+    assert verifier.main(consumer(candidate.root), candidate.env(), recorder) == 0
+    assert "lint.log" not in recorder.logs and "testkit_contract_failed.log" in recorder.logs
+    assert f"{lint.NOT_CONFIGURED}: no .pre-commit-config.yaml at {candidate.root}" in capsys.readouterr().out
 
 
 @pytest.mark.integration

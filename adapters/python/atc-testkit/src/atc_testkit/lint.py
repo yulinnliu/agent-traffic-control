@@ -10,9 +10,20 @@ from . import scratch
 from .git import git_env
 
 TOKEN = "LINT_FAILED"
+# A repository without CONFIG has not adopted the lint stage: each entry prints this token and goes on.
+NOT_CONFIGURED = "LINT_NOT_CONFIGURED"
 CONFIG = ".pre-commit-config.yaml"
 INDEX = "lint.git"
 RUN = ("-m", "pre_commit", "run", "--show-diff-on-failure", "--color", "never")
+
+
+def configured(top: Path) -> bool:
+    """Whether the repository at ``top`` adopted the lint stage: it holds ``.pre-commit-config.yaml``."""
+    return (top / CONFIG).is_file()
+
+
+def not_configured_line(top: Path) -> str:
+    return f"{NOT_CONFIGURED}: no {CONFIG} at {top}; the lint stage is not adopted and does not run"
 
 
 def range_argv(python: str, base: str, sha: str) -> list[str]:

@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from atc_testkit import elapsed, isolation, lines, locations, python_toolchain, scratch, testrun, workers
+from atc_testkit import elapsed, isolation, lines, lint, locations, python_toolchain, scratch, testrun, workers
 from atc_testkit.locations import Refusal
 
 TASK = "ATC-0044"
@@ -127,6 +127,21 @@ def test_a_runs_tests_get_the_verifiers_environment_with_the_scratch_as_working_
 def test_the_exit_code_is_pytests(tree: Path, atc_tmp: Path) -> None:
     (tree / "tests/test_bad.py").write_text("def test_bad(): assert False\n", encoding="utf-8")
     assert run_tests(str(tree), "s", sys.executable, "tests").returncode == 1
+
+
+@pytest.mark.integration
+def test_a_repository_without_the_lint_config_runs_its_tests_after_the_lint_stage(tree: Path, atc_tmp: Path) -> None:
+    git_env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    for args in (["init", "-q", "-b", "main"], ["add", "-A"],
+                 ["-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "base"]):
+        subprocess.run(["git", "-C", str(tree), *args], check=True, capture_output=True, env=git_env)
+    (tree / "tests/test_more.py").write_text("def test_more():\n    assert True\n", encoding="utf-8")
+    run = run_command("run", "--scratch", "s", "--task", TASK, "--tree", str(tree), "--python", sys.executable,
+                      "--lint", "HEAD", "--", "-n", "0", "tests")
+    lines = run.stdout.splitlines()
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert any(line.startswith(f"{lint.NOT_CONFIGURED}: no .pre-commit-config.yaml at ") for line in lines), lines
+    assert lines[-1].startswith("PASS 2 passed"), lines
 
 
 @pytest.mark.integration

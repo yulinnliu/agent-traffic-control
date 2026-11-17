@@ -28,10 +28,10 @@ def environment(tmp_path: Path) -> dict[str, str]:
     return {**env, "PRE_COMMIT_HOME": str(tmp_path / "pre-commit-home")}
 
 
-def tree_with(tmp_path: Path, files: dict[str, str]) -> Path:
+def tree_with(tmp_path: Path, files: dict[str, str], config: bool = True) -> Path:
     tree = tmp_path / "scratch" / "tree"
     tree.mkdir(parents=True)
-    for name, text in {".pre-commit-config.yaml": CONFIG, **files}.items():
+    for name, text in {**({".pre-commit-config.yaml": CONFIG} if config else {}), **files}.items():
         (tree / name).write_text(text, encoding="utf-8")
     return tree
 
@@ -67,6 +67,30 @@ def test_a_lint_failure_stops_the_run_with_its_token_and_a_deleted_path_has_noth
     out = capsys.readouterr().out.splitlines()
     assert out[-1].startswith(f"STOP {lint.TOKEN}: pre-commit exited 1 on 1 files; log {place / 'runs'}")
     assert any("bad.txt:1:FORBIDDEN" in line for line in out)
+
+
+@pytest.mark.integration
+def test_a_tree_without_the_config_has_not_adopted_the_stage_and_goes_on(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    tree = tree_with(tmp_path, {"bad.txt": "FORBIDDEN\n"}, config=False)
+    assert testrun.run_lint(tree, tree.parent, sys.executable, ["bad.txt"], environment(tmp_path)) == 0
+    assert capsys.readouterr().out == (f"{lint.NOT_CONFIGURED}: no .pre-commit-config.yaml at {tree}; "
+                                       "the lint stage is not adopted and does not run\n")
+    assert not (tree.parent / "runs").exists()
+
+
+@pytest.mark.integration
+def test_a_tree_with_the_config_whose_interpreter_has_no_pre_commit_fails(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    bare = tmp_path / "bare"
+    subprocess.run([sys.executable, "-m", "venv", "--without-pip", str(bare)], check=True, capture_output=True)
+    python = bare / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    tree = tree_with(tmp_path, {"good.txt": "fine\n"})
+    env = {key: value for key, value in environment(tmp_path).items() if key not in ("VIRTUAL_ENV", "PYTHONPATH")}
+    assert testrun.run_lint(tree, tree.parent, str(python), ["good.txt"], env) == 1
+    out = capsys.readouterr().out.splitlines()
+    assert out[-1].startswith(f"STOP {lint.TOKEN}: pre-commit exited 1 on 1 files; log {tree.parent / 'runs'}")
+    assert any("No module named pre_commit" in line for line in out), out
 
 
 @pytest.mark.unit

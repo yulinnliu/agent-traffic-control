@@ -69,10 +69,11 @@ def _data_problems(root: Path, project: dict, config: dict, workflow: dict) -> l
     dev = project.get('dependency-groups', {}).get('dev', [])
     if not any(isinstance(item, str) and re.match(r'pytest-xdist\b', item) for item in dev):
         problems.append('development dependencies must include pytest-xdist')
-    if not any(isinstance(item, str) and re.match(r'pre-commit\b', item) for item in dev):
-        problems.append('development dependencies must include pre-commit, which runs the lint stage')
-    if not (root / LINT_CONFIG).is_file():
-        problems.append(f'the lint stage needs {LINT_CONFIG} at the repository root')
+    # A repository with the lint stage's config adopted it, and pre-commit runs it; without the config it has not.
+    if (root / LINT_CONFIG).is_file() and not any(isinstance(item, str) and re.match(r'pre-commit\b', item)
+                                                  for item in dev):
+        problems.append(f'development dependencies must include pre-commit, which runs the lint stage {LINT_CONFIG} '
+                        'names')
     if 'lint_scope' in config:
         problems.append(f'[tool.atc-testkit] lint_scope is no key: {LINT_CONFIG} names what the lint stage reads')
     conftest = root / 'conftest.py'
