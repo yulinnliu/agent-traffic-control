@@ -20,3 +20,7 @@ decisions:
 - 'Owner rule 11-16: choose by industry practice and root cause, never by cost.'
 - The site names no competitor and claims nothing the code does not do (README rule).
 - No version bump.
+- 'Owner 11-17 「Zensical (Recommended)」: the site generator is Zensical (design § 2).'
+- 'Owner 11-17 「用草案，刪「your own tooling」」: README first paragraph is the design § 4.6 draft with the parenthesis (Claude Code, Codex); home title: Agent Traffic Control: governance for Claude Code and Codex coding agents; README.zh-TW.md gets the matching translation.'
+- 'Owner 11-17 「Repository variable」: the Search Console token is the repository variable GOOGLE_SITE_VERIFICATION read by the Pages workflow; the Owner steps say the workflow reruns after the variable is set and that deleting it drops the verification.'
+- 'Owner 11-17 「照設計」: publication scope as designed in § 3.1.'
