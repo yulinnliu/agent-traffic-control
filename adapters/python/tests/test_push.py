@@ -214,15 +214,17 @@ def test_a_push_reports_each_step_with_its_time_on_stderr(ws: Path, capsys: pyte
     assert push.main(["root"], root=ws) == 0
     captured = capsys.readouterr()
     err = captured.err.splitlines()
-    steps = [line for line in err if re.match(r"(fetch|ledger|push|read-back) root ", line)]
+    steps = [line for line in err if line.startswith("STEP ")]
     assert [re.sub(r" \d+\.\ds ", " Ts ", line) for line in steps] == [
-        "fetch root Ts OK",
-        "ledger root Ts 1 commits in origin/main..main, 1 recorded",
-        f"push root {integrated[:12]} -> origin/main",
-        "push root Ts OK",
-        f"read-back root Ts origin/main {integrated[:12]}",
+        "STEP fetch root Ts OK",
+        "STEP ledger root Ts 1 commit in origin/main..main, 1 recorded",
+        f"STEP push root Ts START {integrated[:12]} -> origin/main",
+        "STEP push root Ts OK",
+        f"STEP read-back root Ts origin/main {integrated[:12]}",
     ]
     assert err.index("gate: PASS") == err.index(steps[2]) + 1
+    assert steps[2].startswith("STEP push root 0.0s START ")
+    assert captured.out.splitlines()[0] == f"PUSHED root {integrated[:7]} (1 commit)"
     assert "gate: PASS" not in captured.out and not any(line in captured.out for line in steps)
     # The push moved origin/main's remote-tracking ref itself: one fetch, before the push.
     assert len(fetches) == 1
@@ -238,7 +240,7 @@ def test_a_failing_pre_push_hook_streams_and_refuses_with_its_last_lines(ws: Pat
     assert push.main(["root"], root=ws) == 2
     captured = capsys.readouterr()
     assert "gate: line 1\n" in captured.err  # streamed whole
-    assert re.search(r"^push root \d+\.\ds FAILED exit 1$", captured.err, re.M)
+    assert re.search(r"^STEP push root \d+\.\ds FAILED exit 1$", captured.err, re.M)
     assert "PUSH_FAILED" in captured.out
     refusal = captured.out[captured.out.index("PUSH_FAILED"):]
     assert f"gate: line {lines}" in refusal and "gate: line 1\n" not in refusal
@@ -251,7 +253,7 @@ def test_json_keeps_progress_and_hook_output_off_stdout(ws: Path, capsys: pytest
     assert push.main(["root", "--json"], root=ws) == 0
     captured = capsys.readouterr()
     assert json.loads(captured.out)["repositories"][0]["verdict"] == "PUSHED"
-    assert "gate: PASS" in captured.err and re.search(r"^fetch root \d+\.\ds OK$", captured.err, re.M)
+    assert "gate: PASS" in captured.err and re.search(r"^STEP fetch root \d+\.\ds OK$", captured.err, re.M)
     assert origin_main(ws) == integrated
 
 

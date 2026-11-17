@@ -171,16 +171,17 @@ per repository. The coordinator then archives the task's sessions
 (`DELIVERY.md` § Close-out and § 10).
 
 `atc push` shows its progress on stderr, one line as each step of a
-repository ends, `<step> <name> <seconds>s <result>`, with one decimal like
-the `ELAPSED` lines (`TESTKIT.md` § Stage times):
+repository ends, `STEP <step> <name> <seconds>s <result>`, with one decimal
+like the `ELAPSED` lines (`TESTKIT.md` § Stage times). A step whose own
+output follows also has a line as it starts, `0.0s START <what>`:
 
 ```text
-fetch hami-quant 2.5s OK
-ledger hami-quant 0.1s 3 commits in origin/main..main, 3 recorded
-push hami-quant 1a2b3c4d5e6f -> origin/main
+STEP fetch hami-quant 2.5s OK
+STEP ledger hami-quant 0.1s 3 commits in origin/main..main, 3 recorded
+STEP push hami-quant 0.0s START 1a2b3c4d5e6f -> origin/main
 <git push's output and the pre-push hook's, as they run>
-push hami-quant 41.0s OK
-read-back hami-quant 2.4s origin/main 1a2b3c4d5e6f
+STEP push hami-quant 41.0s OK
+STEP read-back hami-quant 2.4s origin/main 1a2b3c4d5e6f
 PUSHED hami-quant 1a2b3c4 (3 commits)
 ```
 

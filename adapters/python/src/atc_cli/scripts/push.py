@@ -42,9 +42,10 @@ def build_parser() -> argparse.ArgumentParser:
         "atc push checks every repository; --all lists each and asks y/N before pushing it. The Owner runs it;\n"
         "agents run only --check.\n\n"
         "Progress goes to stderr, also under --json: one line as each step of a repository ends,\n"
-        "'<step> <name> <seconds>s <result>', for fetch, ledger (the commits in origin/main..main and how\n"
-        "many are recorded), push and read-back (the SHA origin/main names). git push's own output and the\n"
-        "pre-push hook's stream to stderr as the push runs.",
+        "'STEP <step> <name> <seconds>s <result>', for fetch, ledger (the commits in origin/main..main and\n"
+        "how many are recorded), push and read-back (the SHA origin/main names); push also has a line as it\n"
+        "starts, '0.0s START <sha> -> origin/main'. git push's own output and the pre-push hook's stream to\n"
+        "stderr as the push runs.",
         exit="0 pushed, current or checked; 1 STOP (fetch failed, main behind or diverged, an unrecorded commit, "
              "declined); 2 ERROR",
         see="GIT_WORKFLOW.md § Publication boundary"))
@@ -73,22 +74,28 @@ def repositories(root: Path, names: list[str]) -> list[tuple[str, Path]]:
 
 
 class Steps:
-    """The progress of one repository on stderr: a line `<step> <name> <seconds>s <result>` as each step ends,
-    timed from its `begin`. Stderr keeps stdout for the verdict lines and the `--json` object."""
+    """The progress of one repository on stderr: a line `STEP <step> <name> <seconds>s <result>` as a step
+    starts (`0.0s START`, for a step whose own output follows) or ends, timed from its `begin`. Stderr keeps
+    stdout for the verdict lines and the `--json` object."""
+
+    TOKEN = "STEP"
 
     def __init__(self, name: str) -> None:
         self.name = name
         self.started = time.monotonic()
 
-    @staticmethod
-    def say(line: str) -> None:
-        print(line, file=sys.stderr, flush=True)
-
-    def begin(self) -> None:
+    def begin(self, step: str | None = None, what: str = "") -> None:
         self.started = time.monotonic()
+        if step is not None:
+            self.done(step, f"START {what}".rstrip())
 
     def done(self, step: str, result: str) -> None:
-        self.say(f"{step} {self.name} {time.monotonic() - self.started:.1f}s {result}")
+        print(f"{self.TOKEN} {step} {self.name} {time.monotonic() - self.started:.1f}s {result}", file=sys.stderr,
+              flush=True)
+
+
+def count_commits(n: int) -> str:
+    return f"{n} commit" if n == 1 else f"{n} commits"
 
 
 def assess(name: str, repo: Path, steps: Steps) -> tuple[cli_conventions.Refusal | None, dict | None]:
@@ -109,7 +116,7 @@ def assess(name: str, repo: Path, steps: Steps) -> tuple[cli_conventions.Refusal
         return cli_conventions.Refusal("NO_ORIGIN_MAIN", f"{name}: origin has no main",
                                        "the Owner publishes main the first time by hand"), listing
     unrecorded = [entry["sha"][:12] for entry in listing["commits"] if entry["integration"] is None]
-    steps.done("ledger", f"{len(listing['commits'])} commits in origin/main..main, "
+    steps.done("ledger", f"{count_commits(len(listing['commits']))} in origin/main..main, "
                          f"{len(listing['commits']) - len(unrecorded)} recorded")
     if unrecorded:
         return cli_conventions.Refusal("UNRECORDED_COMMITS", f"{name}: {', '.join(unrecorded)}",
@@ -120,8 +127,7 @@ def assess(name: str, repo: Path, steps: Steps) -> tuple[cli_conventions.Refusal
 def publish(repo: Path, sha: str, steps: Steps) -> cli_conventions.Refusal | None:
     """Push ``sha`` to origin/main, with git's and the pre-push hook's output streamed to stderr, and confirm the
     remote now names it. The push itself moves origin/main's remote-tracking ref, so no fetch follows."""
-    steps.say(f"push {steps.name} {gp.short(sha)} -> origin/main")
-    steps.begin()
+    steps.begin("push", f"{gp.short(sha)} -> origin/main")
     # Git shows its transfer progress only on a terminal; its stderr here is a pipe.
     progress = ["--progress"] if sys.stderr.isatty() else []
     code, output = gp.git_streamed(repo, "push", *progress, gp.REMOTE, f"{sha}:refs/heads/main", out=sys.stderr)
@@ -189,7 +195,7 @@ def main(argv: list[str] | None = None, root: Path = ROOT, answer=input) -> int:
         if args.json:
             continue
         tip = (row["main_tip"] or "")[:7]
-        print(f"{row['verdict']} {name}" + (f" {tip} ({len(commits)} commits)" if commits else ""))
+        print(f"{row['verdict']} {name}" + (f" {tip} ({count_commits(len(commits))})" if commits else ""))
         if refusal is not None:
             for line in refusal.lines():
                 print(f"  {line}")
