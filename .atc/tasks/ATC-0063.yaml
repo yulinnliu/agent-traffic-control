@@ -23,3 +23,5 @@ decisions:
 - 'Owner rule 11-16: choose by industry practice and root cause, never by cost.'
 - The Owner reports the screen freezing for seconds during tests and integrations. A host recorder is measuring it. If the coordinator relays that CPU contention is confirmed, lowering the test workers' process priority may be folded in here. Do not start that without the relay.
 - No version bump. The next release carries this task.
+- 'Owner 11-17 「拿掉」: atc test ID --candidate drops the stdout repeat of ELAPSED lines; they appear once, live on stderr.'
+- 'Owner 11-17 「atc test --timings」: the timings report is a flag on atc test, no new command.'
