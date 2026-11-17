@@ -1,0 +1,24 @@
+task_id: ATC-0062
+title: Projects follow a release without a forced full suite, and one testkit upgrade procedure
+repository: yulinnliu/agent-traffic-control
+base_sha: 2332ff71d62e8c5926299dc445f36600be77fdd4
+scope: '**Problem 1.** A sync forces a project''s pre-push gate to run its full suite. - On 11-17, the atc 0.8.0 sync commit in hami-quant-trading (1ae94a5d) ran hqt''s full default suite at push. Each of these paths printed "no selection rule -> full suite": - `.atc/lint/markdownlint.jsonc` - `.atc/lint/ruff.toml` - `.atc/lint/vale.ini` - `.atc/lint/vale/ATC/{FinalState,OwnerCase,RoleTerms}.yml` - `.dsh/skills/hami-retro/SKILL.md` - The same sync''s `.claude/skills/hami-retro/SKILL.md` mapped to "root app/tooling", and other ATC-owned paths mapped to "ATC-owned document". - hq and heartopia sync pushes are expected to do the same. **Design first** (atc-review "Writer: the design step"): - **Find the root cause, from the code and from hqt''s own config.** Which code decides each line? - It may be the vendored testkit (hqt pins 0.10.0, hq 0.10.1), or project data in `[tool.atc-testkit]`, or the project''s selection file. - Why do `.atc/lint/` and `.dsh/skills/` fall through? - Why do the
+  `.claude/` and `.dsh/` copies of one skill get different answers? - **Choose the fix by industry practice and root cause.** The expected direction: a path that sync owns is classified from what sync records in the project (the manifest / `atc.lock`), not from a list inside a pinned testkit. That way a new release''s new ATC-owned paths need no project testkit upgrade. - State what an ATC-owned path selects. A synced lint rule file, for example, changes no test outcome in a project that has not adopted the lint stage, but may matter in one that has. - Keep fail-safe behaviour for any path nobody claims. - **Say which projects get the fix and when.** The fix lives in atc, in testkit, or in both; say which. A project on an old testkit may need a re-sync or an upgrade, and the Owner and Hami-Coordinator need to know which. **Problem 2.** A project has no single procedure for upgrading its vendored testkit. - Add a fixed procedure, "a project upgrades its vendored atc-testkit", to `docs/TESTKIT.md`.
+  It is user-facing. - The procedure covers: - vendoring the wheel and `vendor/atc-testkit.json`; - re-syncing; - the contract changes judged by the vendored version; - adopting the lint stage (copy `shared/templates/pre-commit-config.yaml`, add `pre-commit` to the dev dependencies, drop `lint_scope` from 0.15.0 on); - replacing the removed tokens; - the first-run cost; - reclassifying the project''s tests under governance VERIFICATION.md § the three layers (lint stage, behaviour tests, mutants): inventory first, then a one-for-one replacement of each file-reading test by a lint rule that is proven to bite. - Today these steps are scattered over TESTKIT § Adoption, the last bullet of § Lint stage, and docs/releases/v0.8.0.md. A summary built from that scatter was wrong on 11-17. - From now on, a release''s § Projects lists only that version''s delta and points to this procedure.'
+tests: strict
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: 2332ff71d62e8c5926299dc445f36600be77fdd4
+branch: claude+ATC-0062
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
+decisions:
+- Owner 11-17 「Yes, queue it」, after the hqt sync push ran its full suite.
+- 'Owner 11-17 「同意」: one fixed testkit-upgrade procedure in docs/TESTKIT.md; release notes list only each version''s delta.'
+- 'Owner 11-17 「Open P1 + P2」: this task runs in parallel with the `atc integrate` progress task.'
+- 'Owner rule 11-16: choose by industry practice and root cause, never by cost.'
+- No version bump. The next release carries this task.
