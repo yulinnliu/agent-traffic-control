@@ -1,0 +1,21 @@
+task_id: ATC-0064
+title: 'Release tooling: atc-maintain release prepare and check, and a maintainer releasing doc'
+repository: yulinnliu/agent-traffic-control
+base_sha: 8a2959ed6254e003de4f2f19bddd57e65be6ac21
+scope: '- `atc-maintain release prepare <atc version> --testkit <version>`: - bumps every pinned version; - lists the tasks integrated since the last tag, read from integrations.jsonl; - scaffolds docs/releases/vX.Y.Z.md. - `atc-maintain release check`, run in the lint stage, checks: - the versions are consistent; - min_atc ≤ version; - every task integrated since the last tag appears in the notes; - the required sections are present, including § Projects pointing to the project testkit-upgrade procedure in docs/TESTKIT.md (from ATC-0062). - New maintainer doc docs/development/RELEASING.md holds: - the judgment parts: the Breaking prose, required/skippable, the min_atc reason, first-run cost; - the Owner''s steps after integration: tag, install, sync, push. docs/WORKFLOW.md stays user-facing, and its § Installing a release stays. - Install precondition. The install step states "no `atc test` or verifier running", and a check lists such processes, in `atc doctor` or as step 1 of a release''s
+  notes. - Reason: on 11-17, `uv tool install --force` failed with os error 5 on `Scripts` while `atc test` runs held the tool env''s python.exe. That left atc.exe without `atc_cli`, and every session''s PreToolUse hook failed closed until a rerun. - AGENTS.md "Changing this repo" adds `atc-maintain guard` and `task check`. - Fold in from ATC-0060''s non-blocking follow-ups: - docs_site.plain() puts no space at a CJK/Latin line break; - site/overrides/partials/language.html copies the theme''s partial, so add a test comparing it against the theme''s. The release notes line for the testkit docs.py LINKED_IMAGE change goes into the next release itself.'
+tests: standard
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: 8a2959ed6254e003de4f2f19bddd57e65be6ac21
+branch: claude+ATC-0064
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
+decisions:
+- No skill. The mechanical part is a tool and the rest is a doc. `atc-maintain` is the ATC-development CLI; root `task`, `integrate` and `push` stay in `atc` (Owner 11-17).
+- This task builds the tooling only. Cutting the next release with it (carrying ATC-0060 to ATC-0063 and this task) is a separate release task opened after this one integrates; the Owner names its versions then.
+- Design first.
