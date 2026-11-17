@@ -1710,7 +1710,9 @@ def diff_check_warning(repo: Path, main: str, reviewed: str) -> str | None:
     if not problems:
         return None
     return (f"DIFF_CHECK: {len(problems)} whitespace problems in {base[:12]}..{reviewed[:12]}; "
-            f"first: {problems[0]}; the verifier's lint stage refuses them with LINT_FAILED")
+            f"first: {problems[0]}; a verifier that checks whitespace refuses them: LINT_FAILED where the "
+            f"repository's .pre-commit-config.yaml holds a whitespace hook, DIFF_CHECK_FAILED on an atc-testkit "
+            f"before 0.15.0")
 
 
 def check(t: Target, as_json: bool) -> int:

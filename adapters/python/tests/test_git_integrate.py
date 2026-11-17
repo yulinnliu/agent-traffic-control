@@ -1477,6 +1477,8 @@ def test_check_warns_of_whitespace_problems_and_keeps_its_verdict(repo: Path, ca
     data = json.loads(captured.out)
     [warning] = [w for w in data["resolved"]["warnings"] if w.startswith("DIFF_CHECK: ")]
     assert warning.startswith("DIFF_CHECK: 2 whitespace problems in ") and "first: a.txt:1: trailing whitespace." in warning, warning
+    assert warning.endswith("LINT_FAILED where the repository's .pre-commit-config.yaml holds a whitespace hook, "
+                            "DIFF_CHECK_FAILED on an atc-testkit before 0.15.0"), warning
     assert data["preflight"]["verdict"] == "FF" and f"WARNING {warning}" in captured.err
     assert run(repo, clean, "--check") == 0
     assert "DIFF_CHECK" not in capsys.readouterr().err
