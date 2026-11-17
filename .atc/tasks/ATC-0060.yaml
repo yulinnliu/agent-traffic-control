@@ -1,0 +1,22 @@
+task_id: ATC-0060
+title: Docs site on GitHub Pages, indexable by search engines
+repository: yulinnliu/agent-traffic-control
+base_sha: 1aecea204a35ca1e9e25fb84cb72e4bf6bb6e433
+scope: 'The public repository is not found by search engines. - It is 24 days old, with no inbound links, stars or forks. - A github.com URL cannot be claimed in Google Search Console, so nothing can be submitted for it. - The name "agent traffic control" is generic and shares a name with another GitHub project (209512/atc). Goal: a project site at `yulinnliu.github.io/agent-traffic-control` that the Owner can verify in Search Console. It submits a sitemap and links to the repository, which then sets it as its homepage. - **Design first** (atc-review "Writer: the design step"). Choose the industry-standard static-site route and state why. Candidates: MkDocs Material or plain Jekyll, built by a GitHub Actions workflow or by Pages'' branch build. - The site builds from the repository''s existing docs (README, `docs/`), with no hand-copied text. A doc''s single source stays where it is. - Say which docs are published and which stay out: design docs, task records, `.agents/` and governance internals
+  are candidates for exclusion. - **Search basics:** - a sitemap.xml; - a robots.txt that allows crawling; - canonical URLs; - a title and meta description per page; - Open Graph tags; - a landing page whose title and first paragraph say what ATC is in words people search for (coding agents, Claude Code, Codex, git worktree, multi-agent governance). - **Search Console verification** uses the HTML-tag or HTML-file method. The Owner supplies the token; the site carries a place for it. - **The build** runs in this repository''s checks: the lint stage covers the site config, and a link check covers the built site. - **Documentation:** docs/WORKFLOW.md says how the site is built and published. The following are the Owner''s steps after integration, not this task''s. The writer writes them out for the Owner: - enabling Pages in the repository settings; - the push that publishes the site; - Search Console verification and the sitemap submission; - setting the repository homepage URL.'
+tests: standard
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: 1aecea204a35ca1e9e25fb84cb72e4bf6bb6e433
+branch: claude+ATC-0060
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
+decisions:
+- 'Owner 11-17 「開 task」: open the Pages and Search Console task after the coordinator''s analysis of why the repository is not found.'
+- 'Owner rule 11-16: choose by industry practice and root cause, never by cost.'
+- The site names no competitor and claims nothing the code does not do (README rule).
+- No version bump.
