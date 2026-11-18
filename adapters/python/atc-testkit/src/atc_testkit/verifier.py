@@ -351,10 +351,15 @@ class _Checks:
     def stages(self, pytest_paths: list[str], cwd: Path | None = None) -> None:
         project = self.project
         cwd = project.root if cwd is None else cwd
-        reuse = self.reuse if self.isolated.toolchain.name == "python" else None
+        python = self.isolated.toolchain.name == "python"
+        if self.reuse is not None and not python:
+            print(f"input evidence: not used by the {self.isolated.toolchain.name} toolchain", flush=True)
+        reuse = self.reuse if python else None
         self.report_checks()
 
         def env_for(stage: stages.Stage) -> dict[str, str]:
+            """The isolated environment, which never holds an outcomes file, plus the stage's own when its input
+            evidence is recorded."""
             env = dict(self.isolated.environment(stage.name))
             if reuse is not None:
                 env[inputs.OUTCOMES] = str(reuse.outcomes(stage))

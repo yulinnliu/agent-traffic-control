@@ -620,10 +620,16 @@ def test_a_bad_host_file_refuses_before_any_check(candidate: Candidate, tmp_path
 
 
 @pytest.fixture()
-def no_outer_outcomes(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The stage environments inherit the process's: an `atc test` run that records evidence names its own outcomes
-    file there, which says nothing of the verifier's own input evidence."""
-    monkeypatch.delenv(verifier.inputs.OUTCOMES, raising=False)
+def outer_outcomes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
+    """An outer run's outcomes file in the verifier's own environment, as an `atc test` run that records evidence
+    names it: no stage environment may carry it."""
+    outer = str(tmp_path / "outer-outcomes.json")
+    monkeypatch.setenv(verifier.inputs.OUTCOMES, outer)
+    return outer
+
+
+# The note of a toolchain whose stages use no input evidence.
+NOT_USED = "input evidence: not used by the other toolchain"
 
 
 def selected_stages(recorder: Recorder) -> list[tuple[list[str], dict[str, str]]]:
@@ -645,7 +651,7 @@ FAILING_RUNNER = (sys.executable, "-c", "raise SystemExit(3)")
 
 @pytest.mark.integration
 def test_a_candidate_whose_input_set_cannot_be_read_runs_every_file_with_no_evidence(
-        candidate: Candidate, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, no_outer_outcomes: None,
+        candidate: Candidate, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, outer_outcomes: str,
         capsys: pytest.CaptureFixture[str]) -> None:
     candidate.advance()
 
@@ -679,7 +685,7 @@ def test_a_stage_whose_files_cannot_be_listed_runs_them_all(candidate: Candidate
 
 @pytest.mark.integration
 def test_a_toolchain_other_than_python_runs_its_stages_with_no_input_evidence(
-        candidate: Candidate, no_outer_outcomes: None, capsys: pytest.CaptureFixture[str]) -> None:
+        candidate: Candidate, outer_outcomes: str, capsys: pytest.CaptureFixture[str]) -> None:
     candidate.advance()
     stored_input_record(candidate.root)
     recorder = Recorder()
@@ -688,9 +694,38 @@ def test_a_toolchain_other_than_python_runs_its_stages_with_no_input_evidence(
                         test_paths=lambda paths: ["tests/test_x.py"])
     assert verifier.main(project, candidate.env(), recorder) == 0
     out = capsys.readouterr().out
-    assert "input evidence" not in out and "REUSED" not in out, out
+    assert [line for line in out.splitlines() if "input evidence" in line] == [NOT_USED], out
+    assert "REUSED" not in out, out
     for command, env in selected_stages(recorder):
         assert command[-1] == "tests/test_x.py" and verifier.inputs.OUTCOMES not in env
+
+
+@pytest.mark.integration
+def test_a_toolchain_other_than_python_with_no_input_set_prints_only_that_evidence_is_off(
+        candidate: Candidate, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    candidate.advance()
+
+    def unreadable(_project: Project, commit: str) -> list[str]:
+        raise subprocess.CalledProcessError(128, ["git", "ls-tree", commit])
+    monkeypatch.setattr(verifier, "excluded_paths", unreadable)
+    other = dataclasses.replace(python_toolchain.TOOLCHAIN, name="other")
+    project = root_form(candidate.root, toolchain=other, test_paths=lambda paths: ["tests/test_x.py"])
+    assert verifier.main(project, candidate.env(), Recorder()) == 0
+    noted = [line for line in capsys.readouterr().out.splitlines() if "input evidence" in line]
+    assert len(noted) == 1 and noted[0].startswith("input evidence: off (CalledProcessError: "), noted
+
+
+@pytest.mark.integration
+def test_a_python_stage_records_into_its_own_outcomes_file_never_the_outer_one(
+        candidate: Candidate, outer_outcomes: str, capsys: pytest.CaptureFixture[str]) -> None:
+    candidate.advance()
+    recorder = Recorder()
+    project = root_form(candidate.root, test_paths=lambda paths: ["tests/test_x.py"])
+    assert verifier.main(project, candidate.env(), recorder) == 0
+    assert "input evidence: not used" not in capsys.readouterr().out
+    for (_command, env), stage in zip(selected_stages(recorder), project.stage_list(), strict=True):
+        assert env[verifier.inputs.OUTCOMES] != outer_outcomes
+        assert Path(env[verifier.inputs.OUTCOMES]).name == f"{stage.name}-outcomes.json"
 
 
 # the real path: `atc integrate` to the exit code

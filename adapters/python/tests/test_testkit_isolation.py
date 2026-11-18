@@ -20,7 +20,8 @@ def run_of(work: Path, environ: dict[str, str], **options) -> isolation.Isolated
 
 
 @pytest.mark.parametrize("name", ["GIT_DIR", "git_work_tree", "HAMI_X", "hami_y", "BINANCE_API_KEY", "x_api_secret",
-                                  "MY_SECRET", "BOT_TOKEN", "DB_PASSWORD", "NAMED_BY_PROJECT"])
+                                  "MY_SECRET", "BOT_TOKEN", "DB_PASSWORD", "NAMED_BY_PROJECT", "ATC_FILE_OUTCOMES",
+                                  "atc_file_outcomes"])
 def test_removed_variables(tmp_path: Path, name: str) -> None:
     env = run_of(tmp_path, caller(**{name: "v"}), credentials=("named_by_project",)).environment("parallel")
     assert not any(key.upper() == name.upper() for key in env)

@@ -7,7 +7,7 @@ from pathlib import Path
 import re
 import secrets
 
-from . import locations, toolchain as toolchains
+from . import inputs, locations, toolchain as toolchains
 from .toolchain import Toolchain
 
 CREDENTIAL_SUFFIXES = ("_API_KEY", "_API_SECRET", "_SECRET", "_TOKEN", "_PASSWORD")
@@ -36,8 +36,11 @@ def create_working_directory(environ: MutableMapping[str, str] | None = None) ->
 
 
 def _removed(name: str, credentials: frozenset[str]) -> bool:
+    """Whether the caller's ``name`` stays out of a child's environment; an outer run's outcomes file is never a
+    child's, which gets one only from the run that records its input evidence (docs/TESTKIT.md § Input evidence)."""
     upper = name.upper()
-    return upper.startswith(("GIT_", "HAMI_")) or upper in credentials or upper.endswith(CREDENTIAL_SUFFIXES)
+    return (upper.startswith(("GIT_", "HAMI_")) or upper in credentials or upper.endswith(CREDENTIAL_SUFFIXES)
+            or upper == inputs.OUTCOMES)
 
 
 class IsolatedRun:

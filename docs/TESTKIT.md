@@ -314,7 +314,9 @@ environment built from the caller's by these rules:
 
 - Removed: every `GIT_*` and `HAMI_*` variable, and every credential variable:
   one whose name ends in `_API_KEY`, `_API_SECRET`, `_SECRET`, `_TOKEN` or
-  `_PASSWORD`, or that the project names. Names compare case-insensitively.
+  `_PASSWORD`, or that the project names; and `ATC_FILE_OUTCOMES`, so a run
+  nested under one that records input evidence never writes into the outer
+  run's outcomes file (§ Input evidence). Names compare case-insensitively.
 - Pointed into the run's working directory: `HOME`, `USERPROFILE`, `APPDATA`,
   `LOCALAPPDATA`, `XDG_CACHE_HOME`, `XDG_CONFIG_HOME`, `XDG_DATA_HOME`,
   the toolchain's bytecode variable, pytest's `cache_dir`, and each
@@ -706,8 +708,10 @@ The integration verifier, before each pytest stage of a candidate, collects
 the stage (`ATC_COLLECTED_FILES`) and runs only the files no record covers,
 printing `<stage>: REUSED <n> files, RUN <m> files`; a stage every file of
 which is covered does not run. After the final-state rows pass it records
-each file the stages ran whose every test passed (`ATC_FILE_OUTCOMES`). A
-non-Python toolchain runs its stages whole.
+each file the stages ran whose every test passed (`ATC_FILE_OUTCOMES`, set
+only for those stages: § Isolated environment removes the caller's). A
+non-Python toolchain runs its stages whole after printing
+`input evidence: not used by the <toolchain> toolchain`.
 
 `atc test ID` records too, when it runs the related tests or `--all` with no
 pytest arguments and the tree equals its commit before and after the run:
