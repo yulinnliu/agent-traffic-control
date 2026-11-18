@@ -101,17 +101,18 @@ def test_a_range_lints_what_its_commits_add_or_change() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize(("flags", "expected"), [
-    (dict(lint=False, all=False), ["--lint", "BASE", "--related", "BASE"]),
-    (dict(lint=False, all=True), ["--lint", "BASE"]),
-    (dict(lint=True, all=False), ["--lint", "BASE", "--lint-only"])])
+@pytest.mark.parametrize(("flags", "tests", "expected"), [
+    (dict(lint=False, all=False), [], ["--lint", "BASE", "--related", "BASE"]),
+    (dict(lint=False, all=True), [], ["--lint", "BASE"]),
+    (dict(lint=False, all=False), ["t.py"], ["--lint", "BASE", "--", "t.py"]),
+    (dict(lint=True, all=False), [], ["--lint", "BASE", "--lint-only"])])
 def test_atc_test_lints_before_its_tests_and_lint_alone_runs_no_test(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, flags: dict, expected: list[str]) -> None:
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, flags: dict, tests: list[str], expected: list[str]) -> None:
     (tmp_path / "pyproject.toml").write_text("[tool.atc-testkit]\n", encoding="utf-8")
     task = argparse.Namespace(id="ATC-0001", worktree=tmp_path, base="BASE", source=lambda: tmp_path)
     seen = []
     monkeypatch.setattr(testrun, "run", lambda argv, environ: seen.append(argv) or 0)
     args = argparse.Namespace(sha=None, verbose=False, **flags)
     import task_tests
-    assert task_tests.run_tests(task, args, [], {}) == 0
+    assert task_tests.run_tests(task, args, tests, {}) == 0
     assert seen[0][seen[0].index("--label") + 2:] == expected

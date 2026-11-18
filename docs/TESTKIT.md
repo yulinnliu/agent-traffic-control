@@ -395,7 +395,7 @@ place.
 
   | Command | Stage | Workers | Result |
   | --- | --- | --- | --- |
-  | `atc test ID` | its log label, `related` or `all` | the pytest `-n` it ran, 1 in process | the summary line's first word |
+  | `atc test ID` | its log label, `related`, `all` or `explicit` | the pytest `-n` it ran, 1 in process | the summary line's first word |
   | `atc test ID --mutants` | `baseline` (none when reused), then `mutant:<label>` per mutant | the `-n` the run ran, 1 in process | `PASS` or `FAIL` for the baseline, the mutant's verdict |
   | the verifier, through `atc test ID --candidate` and `atc integrate` | `checks` (every static check before the stages, or up to the first that fails), then each stage of § Stages | 1 for `checks`, the granted count for `parallel`, 1 for the others | `PASS`, `FAIL`, `NO_TESTS` or `TIMEOUT`; `REUSED` for a stage whose every file a record covered |
   | the verifier through `atc integrate`, when a candidate record is reused | `reused`, 0 seconds | 0 | `REUSED` |
@@ -713,8 +713,8 @@ only for those stages: § Isolated environment removes the caller's). A
 non-Python toolchain runs its stages whole after printing
 `input evidence: not used by the <toolchain> toolchain`.
 
-`atc test ID` records too, when it runs the related tests or `--all` with no
-pytest arguments and the tree equals its commit before and after the run:
+`atc test ID` records too, when it runs the related tests or `--all`, not an
+explicit run of pytest arguments, and the tree equals its commit before and after the run:
 the worktree's `HEAD` with a clean status, or an export still equal to its
 commit. It asks the project's verifier for the commit's input set by running
 the tree's own verifier argv file with `ATC_INPUTS_OF=<commit>` in that
@@ -900,7 +900,9 @@ One isolated pytest run for the task `ID` after the lint stage
 and no closure, in the task's worktree, in the scratch `<ID>`
 (`ATC_HOME.md` § Test scratch). `--sha SHA` runs them in an export of `SHA`,
 in the scratch `<ID>-<sha7>`, whose environment is built once; `--all` runs
-the full suite. The test directory is the shallowest directory, at most two
+the full suite. Pytest arguments after `--` make an explicit run: pytest gets
+exactly those, with no related selection, with or without `--all` (step 2).
+The test directory is the shallowest directory, at most two
 levels below the repository root, whose `pyproject.toml` has
 `[tool.atc-testkit]`; the run's timeout is that table's `timeout`. A project
 with no such directory refuses with `NO_TESTKIT`, and its tasks use
@@ -921,9 +923,9 @@ scratch entries. In order:
    `SCRATCH_TASK_MISMATCH`, and one that cannot be made with
    `SCRATCH_NOT_CREATED`. So a refusal before the line leaves no directory,
    and a later one leaves the scratch registered.
-2. Unless `--all` is given, the related tests come from the tree's
-   `[tool.atc-testkit]` `selector`, a list of strings: the argv of a command
-   that takes changed paths as arguments and, with `--direct` after them,
+2. Unless `--all` or pytest arguments are given, the related tests come
+   from the tree's `[tool.atc-testkit]` `selector`, a list of strings: the
+   argv of a command that takes changed paths as arguments and, with `--direct` after them,
    prints the changed test files and the test files one import from a changed
    module as a JSON array on its last line. It runs with the run's Python and
    the tree as its working directory. The changed paths are
@@ -933,7 +935,11 @@ scratch entries. In order:
    gives the changed test files of the tree. The line
    `RELATED <base>: <n> changed paths, <k> test paths` follows; with
    none selected, `NO_TESTS no test selected` ends the command with exit 0.
-   The selected paths come before the pytest arguments.
+   Pytest arguments after `--` select nothing: pytest gets exactly those
+   arguments, and the run's stage-time record has `selection` `explicit`,
+   `selection_reason` `pytest arguments` (§ Stage times). The run's label,
+   which names its log and its stage, is `explicit` for such a run, `all`
+   under `--all` alone, else `related`.
 
 3. Remove every `HAMI_*` variable. Point each data-root variable the tree's
    `[tool.atc-testkit]` names, and `QUANT_DATA_ROOT` when it names none, at

@@ -2,7 +2,7 @@
 """`atc test`: a task's tests in isolation (docs/TESTKIT.md § Commands).
 
 `atc test ID` runs the lint stage and then the tests related to the task's changes since its record's `base_sha`
-in the task's own worktree; `--lint` runs the lint stage alone; `--sha` runs either in an export of that commit, `--mutants` judges a mutant list there, and
+in the task's own worktree, or exactly the pytest arguments after `--`; `--lint` runs the lint stage alone; `--sha` runs either in an export of that commit, `--mutants` judges a mutant list there, and
 `--candidate` verifies the candidate `atc integrate ID` would build. Every run happens in a registered
 scratch named after the task, and every run prunes stale scratch entries first.
 """
@@ -42,8 +42,9 @@ def build_parser() -> argparse.ArgumentParser:
         "Run a task's tests in isolation, its output kept in a log.",
         "atc test ID [--sha SHA] [--all] [-v] [-- PYTEST_ARG...]\n"
         "    the lint stage over the files changed since the task's base_sha, then the tests related to them\n"
-        "    (--all: the full suite), in the task's worktree, or with --sha in an export of SHA (scratch ID-SHA7,\n"
-        "    its environment built once); a lint failure runs no test\n"
+        "    (--all: the full suite; PYTEST_ARGs: exactly those, with no related selection, --all or not), in\n"
+        "    the task's worktree, or with --sha in an export of SHA (scratch ID-SHA7, its environment built\n"
+        "    once); a lint failure runs no test\n"
         "atc test ID --lint [--sha SHA]\n"
         "    the lint stage alone: the repository's .pre-commit-config.yaml over those files\n"
         "atc test ID --mutants FILE [--sha SHA] [-- TEST...]\n"
@@ -182,7 +183,10 @@ def run_tests(task: Task, args: argparse.Namespace, pytest_args: list[str], envi
         if task.worktree is None:
             raise Refusal("NO_WORKTREE", f"{task.id} has no worktree", f"atc test {task.id} --sha SHA tests a commit")
         name, directory = task.id, test_dir(task.worktree, task)
-    argv = ["--scratch", name, "--task", task.id, "--tree", str(directory), "--label", "all" if args.all else "related",
+    # Pytest arguments after -- are an explicit run: exactly those, with no related selection (docs/TESTKIT.md
+    # § Commands, step 2).
+    label = "explicit" if pytest_args else "all" if args.all else "related"
+    argv = ["--scratch", name, "--task", task.id, "--tree", str(directory), "--label", label,
             *timeout_of(directory), *(["--progress"] if args.verbose else [])]
     if task.base:
         argv += ["--lint", task.base]
@@ -192,7 +196,7 @@ def run_tests(task: Task, args: argparse.Namespace, pytest_args: list[str], envi
         argv += ["--verifier-argv", str(argv_file)]
     if args.lint:
         argv += ["--lint-only"]
-    elif not args.all and task.base:
+    elif not args.all and not pytest_args and task.base:
         argv += ["--related", task.base]
     return testrun.run([*argv, *(["--", *pytest_args] if pytest_args else [])], environ)
 

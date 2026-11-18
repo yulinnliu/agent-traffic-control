@@ -17,7 +17,7 @@ import yaml
 
 import git_integrate
 import task_tests
-from atc_testkit import checkout, locations, scratch, testrun
+from atc_testkit import checkout, elapsed, locations, scratch, testrun, workers
 
 pytestmark = pytest.mark.integration
 
@@ -134,11 +134,51 @@ def test_a_run_tests_the_related_tests_of_the_worktree_as_the_task_scratch(works
     assert option(argv, "--timeout") == "60" and "--" not in argv
 
 
-def test_all_runs_the_full_suite_and_passes_pytests_arguments_after_dashes(workspace: Workspace,
-                                                                          calls: dict[str, list]) -> None:
-    assert workspace.run(TASK, "--all", "--", "-q") == 0
+def test_all_runs_the_full_suite(workspace: Workspace, calls: dict[str, list]) -> None:
+    assert workspace.run(TASK, "--all") == 0
     [argv] = calls["run"]
-    assert option(argv, "--label") == "all" and "--related" not in argv and argv[-2:] == ["--", "-q"]
+    assert option(argv, "--label") == "all" and "--related" not in argv and "--" not in argv
+
+
+@pytest.mark.parametrize("given", [[], ["--all"]], ids=["related", "all"])
+def test_pytest_arguments_after_dashes_are_an_explicit_run_with_no_related_selection(
+        workspace: Workspace, calls: dict[str, list], given: list[str]) -> None:
+    """docs/TESTKIT.md § Commands, step 2: the arguments after -- are exactly what pytest gets, --all or not; the
+    lint stage still covers the task's changes."""
+    assert workspace.run(TASK, *given, "--", "tests/test_value.py", "-q") == 0
+    [argv] = calls["run"]
+    assert option(argv, "--label") == "explicit" and "--related" not in argv
+    assert option(argv, "--lint") == workspace.base
+    assert argv[argv.index("--"):] == ["--", "tests/test_value.py", "-q"]
+
+
+def test_an_explicit_run_runs_its_files_where_the_related_selection_selects_none(
+        workspace: Workspace, calls: dict[str, list]) -> None:
+    """The task changes no test file, so its related selection is empty: the related form stops with NO_TESTS and
+    exit 0 without running anything, while the argv `atc test ID -- FILE` hands the runner runs FILE and records an
+    explicit selection. Only the runner's interpreter is given; the run is the real one, in a child process."""
+    assert workspace.run(TASK, "--", "-n", "0", "tests/test_value.py") == 0
+    [argv] = calls["run"]
+    at = argv.index("--")
+    explicit = [*argv[:at], "--python", sys.executable, *argv[at:]]
+    related = [*argv[:at], "--python", sys.executable, "--related", workspace.base]
+    environment = {key: value for key, value in os.environ.items() if not key.startswith("PYTEST_")}
+    environment["PYTHONIOENCODING"] = "utf-8"
+    entry = "import sys\nfrom atc_testkit import testrun\nsys.exit(testrun.run(sys.argv[1:]))\n"
+    pool = Path(os.environ[workers.POOL_DIRECTORY])
+
+    def run(runner_argv: list[str]) -> tuple[int, list[str], str]:
+        done = subprocess.run([sys.executable, "-c", entry, *runner_argv], env=environment, capture_output=True,
+                              text=True, encoding="utf-8", stdin=subprocess.DEVNULL)
+        return done.returncode, done.stdout.splitlines(), done.stdout + done.stderr
+    before = len(elapsed.records(pool))
+    code, lines, shown = run(related)
+    assert code == 0 and lines[-1] == "NO_TESTS no test selected", shown
+    code, lines, shown = run(explicit)
+    assert code == 0 and lines[-1].startswith("PASS 1 passed"), shown
+    added = elapsed.records(pool)[before:]
+    assert [(r["task"], r["stage"], r["selection"], r["selection_reason"]) for r in added] == [
+        (TASK, "explicit", "explicit", "pytest arguments")]
 
 
 def test_a_sha_is_exported_into_the_task_and_commit_scratch_and_reused(workspace: Workspace, calls: dict[str, list],
