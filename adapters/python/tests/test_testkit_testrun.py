@@ -13,7 +13,8 @@ from pathlib import Path
 import pytest
 
 import atc_testkit
-from atc_testkit import elapsed, isolation, lines, lint, locations, python_toolchain, scratch, testrun, workers
+from atc_testkit import (elapsed, inputs, isolation, lines, lint, locations, python_toolchain, scratch, testrun,
+                         workers)
 from atc_testkit.locations import Refusal
 
 TASK = "ATC-0044"
@@ -162,6 +163,43 @@ def test_a_run_prints_and_records_its_elapsed_time_before_its_summary(tree: Path
     assert added[0]["failed"] == 1 and isinstance(added[0]["passed"], int) and added[0]["skipped"] == 0
     assert (added[0]["selection"], added[0]["selection_reason"]) == ("explicit", "pytest arguments")
     assert added[0]["testkit_version"] == atc_testkit.__version__
+
+
+@pytest.mark.integration
+def test_an_explicit_run_records_no_input_evidence_where_the_same_tree_run_whole_does(tmp_path: Path,
+                                                                                       atc_tmp: Path) -> None:
+    """docs/TESTKIT.md § Input evidence: only the related tests or `--all` record, never an explicit run of pytest
+    arguments, which may run part of a file (`-k`) and must not stand for it. The tree equals its commit, so the same
+    run with no arguments records its passed file: the explicit run was eligible but for its arguments."""
+    repo = tmp_path / "repo"
+    (repo / "tests").mkdir(parents=True)
+    (repo / "conftest.py").write_text('pytest_plugins = ("atc_testkit.plugin",)\n', encoding="utf-8")
+    (repo / "pyproject.toml").write_text("[tool.pytest.ini_options]\n", encoding="utf-8")
+    (repo / "tests/test_a.py").write_text("import pytest\n\n\n@pytest.mark.unit\ndef test_a():\n    pass\n",
+                                          encoding="utf-8")
+    git_env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    for args in (["init", "-q", "-b", "main"], ["add", "-A"],
+                 ["-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "base"]):
+        subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, env=git_env)
+    argv_file = tmp_path / "verify.json"
+    argv_file.write_text(json.dumps([sys.executable, "-c", "import json, os; print(json.dumps({'commit': "
+                                     "os.environ['ATC_INPUTS_OF'], 'excluded': [], 'dependency_files': []}))"]),
+                         encoding="utf-8")
+    store = inputs.store(inputs.common_directory(repo))
+    common = ("run", "--scratch", "ev", "--task", TASK, "--tree", str(repo), "--python", sys.executable,
+              "--verifier-argv", str(argv_file))
+
+    run = run_command(*common, "--", "-n", "0", "tests/test_a.py")
+    lines = run.stdout.splitlines()
+    assert run.returncode == 0 and lines[-1].startswith("PASS 1 passed"), run.stdout + run.stderr
+    assert not [line for line in lines if line.startswith(("EVIDENCE ", testrun.INPUTS_NOT_RECORDED))], lines
+    assert not list(store.glob("*.json"))
+
+    run = run_command(*common)
+    lines = run.stdout.splitlines()
+    assert run.returncode == 0 and lines[-1].startswith("PASS 1 passed"), run.stdout + run.stderr
+    assert any(line.startswith("EVIDENCE 1 test files recorded for ") for line in lines), lines
+    assert len(list(store.glob("*.json"))) == 1
 
 
 @pytest.mark.unit
