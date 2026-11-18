@@ -1,0 +1,23 @@
+task_id: ATC-0065
+title: 'Test debt: the unreached and surviving mutants of ATC-0055 and ATC-0057, and ATC-0058''s fallback tests'
+repository: yulinnliu/agent-traffic-control
+base_sha: 490b2c3b8c8c881632a4e739270a70f6513542fd
+scope: 'Tests only: no behaviour change, no version bump, no governance change. Each item adds the tests that kill a guard''s mutant, or, where a guard is equivalent or unreachable, says why in the step report. - **ATC-0055''s 13 reviewer mutants the review did not reach.** Their definitions are lost: the ATC-0055 verdict and its mutants file were removed at close-out. Re-derive each guard from its name and the ATC-0055 code on `main` (the sharded `--mutants` baseline: its worker grant and cap, `--dist loadgroup`, `Budget.shrink` after the baseline, the per-worker line records and their validity rule, and same-tree baseline reuse; docs/design/ATC-0055.md): t-files-superset, t-fields-not-compared, t-records-not-checked, t-stale-record-kept, t-recorded-always, t-reuse-ignored, t-records-not-cleared, t-baseline-serial, t-uncapped, t-dist-load, t-no-shrink, w-shrink-keeps-all, t-red-unnamed. The step report maps each name to `file:line`, what the guard blocks, and the test expected to kill its
+  mutant. - **ATC-0057''s two survivors**, both in `claim()` of adapters/python/src/atc_cli/scripts/git_preflight.py: claim_first_wins (`sha not in owner`) and claim_in_range (`sha in position`). Both fail closed today; the killing tests use a ledger with a stray unrecorded commit and two lines claiming one commit. - **ATC-0058''s fail-safe fallbacks** in adapters/python/atc-testkit/src/atc_testkit/verifier.py, cited at 1aecea2 as lines 277, 311 and 378: `_Reuse.create` returning `None` when the candidate''s input set cannot be read; a stage whose files cannot be listed recording no input evidence; a non-Python toolchain running with no reuse. One dedicated test each, asserting that the stages still run and the note is printed.'
+tests: strict
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: 490b2c3b8c8c881632a4e739270a70f6513542fd
+branch: dsh+ATC-0065
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
+decisions:
+- 'Owner 11-16 「只補4個測試，13個發版後補跑」: the 13 ATC-0055 reviewer mutants were left for after a release; 0.8.0 is installed, so they run now.'
+- 'Owner 11-18: this task runs before the next release; the release timing is the Owner''s.'
+- 'Owner 11-18: the root pre-push gate stays as it is and adds no static check (option A), so that item of the test-debt queue closes with no change.'
+- 'Owner 11-18: the lint stage''s `--all-files` run when a range changes a lint input is a separate task, not this one.'
+- The ATC-0055 mutant definitions are re-derived from their names and the code, since the originals are lost.
