@@ -1,4 +1,5 @@
-"""docs/TESTKIT.md § Input evidence: a check's result keyed by its identity and the contents of the files it reads."""
+"""shared/conformance/verification-evidence/README.md § Input evidence: a check's result keyed by its identity and the
+contents of the files it reads."""
 from __future__ import annotations
 
 import json
@@ -212,7 +213,7 @@ def test_an_export_run_is_classified_by_its_own_tree_whatever_the_source_worktre
         repository: Path, tmp_path: Path) -> None:
     """An export is no Git checkout: its own verifier classifies it in the export, Git reads served from the source
     repository's objects, while the source worktree has moved on and holds an uncommitted edit; nothing is left in
-    the export or the worktree (docs/TESTKIT.md § Input evidence)."""
+    the export or the worktree (docs/development/TESTKIT_INTERNALS.md § Input evidence)."""
     argv_file = tmp_path / "verify.json"
     # The stand-in verifier reads the commit from Git and its classification from a file of the tree it runs in.
     script = ("import json, os, subprocess; commit = os.environ['ATC_INPUTS_OF']; "

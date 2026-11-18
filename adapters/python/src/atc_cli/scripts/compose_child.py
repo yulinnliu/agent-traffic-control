@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """The composing child of the PreToolUse hook (`hook_state.run_child`): read the request, compose the table from
-the map and each repository's `main`, and write the result or the failure, keyed (docs/ENFORCEMENT.md § Table)."""
+the map and each repository's `main`, and write the result or the failure, keyed (docs/ENFORCEMENT.md § PreToolUse hook, Table)."""
 
 from __future__ import annotations
 

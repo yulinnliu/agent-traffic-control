@@ -37,7 +37,8 @@ def create_working_directory(environ: MutableMapping[str, str] | None = None) ->
 
 def _removed(name: str, credentials: frozenset[str]) -> bool:
     """Whether the caller's ``name`` stays out of a child's environment; an outer run's outcomes file is never a
-    child's, which gets one only from the run that records its input evidence (docs/TESTKIT.md § Input evidence)."""
+    child's, which gets one only from the run that records its input evidence (docs/development/TESTKIT_INTERNALS.md
+    § Input evidence)."""
     upper = name.upper()
     return (upper.startswith(("GIT_", "HAMI_")) or upper in credentials or upper.endswith(CREDENTIAL_SUFFIXES)
             or upper == inputs.OUTCOMES)

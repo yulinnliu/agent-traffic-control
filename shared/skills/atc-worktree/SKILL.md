@@ -41,24 +41,22 @@ the `GIT_WORKFLOW.md` topic-branch procedure in this clone, and report the
 branch, tip SHA and base SHA instead of a worktree path. Never substitute raw
 `git worktree` commands.
 
-`create` takes `--project <name>`; without it the CLI uses the project whose
-repository or worktrees root holds the working directory, and the rest of
-the workspace root's checkout is `--project root`. Every other command takes
-the task ID, whose prefix names the repository. `--json` prints one object:
-`command`, `verdict`, `exit_code`, `hint`, then the command's own fields.
+Every command but `create` takes the task ID, whose prefix names the
+repository; `create` takes the project (`--project root` for the workspace
+root).
 
 ## Commands
 
 | Command | Use | Changes |
 | --- | --- | --- |
-| `atc task create [TITLE] [--scope S] [--tests none\|standard\|strict] [--file F] [--project P]` | start a new task | adds the worktree on a new branch from local `main`, locked, and commits the record |
-| `atc task update ID [--title T] [--decision TEXT]... [--scope S] [--tests L] [--file F]` | record an Owner decision or a changed scope or test level | one commit on the task's branch |
+| `atc task create` | start a new task | adds the worktree on a new branch from local `main`, locked, and commits the record |
+| `atc task update ID` | record an Owner decision or a changed scope or test level | one commit on the task's branch |
 | `atc task resume ID` | continue a task in a new session | nothing; prints the worktree and how many commits `main` has moved since its tip |
-| `atc task list [ID] [--project P \| --all] [-v]` | list tasks with their status (`open`, `integrated`, `closed`, `abandoned`) | nothing; `-v` adds each worktree's lock, clean and path findings |
-| `atc task close ID [--check]` | the task is integrated and its worktree is no longer needed | re-checks identity, merged and clean, then removes the worktree, its branch (a topic integrated by a recorded, Owner-authorized squash keeps its tip as `archive/<ID>`), the task's registered scratches and its reports; lists the items that need the Owner's consent and deletes none of them |
+| `atc task list` | list tasks with their status (`open`, `integrated`, `closed`, `abandoned`) | nothing; `-v` adds each worktree's lock, clean and path findings |
+| `atc task close ID` | the task is integrated and its worktree is no longer needed | re-checks identity, merged and clean, then removes the worktree, its branch (a topic integrated by a recorded, Owner-authorized squash keeps its tip as `archive/<ID>`), the task's registered scratches and its reports; lists the items that need the Owner's consent and deletes none of them |
 | `atc task close ID --abandon` | the task authority explicitly abandons the task | tags the tip `archive/<ID>`, then removes the worktree and compare-and-deletes the branch, keeping the tag |
 
-`--check` lists what `close` would delete and deletes nothing. The record's
+`atc task <command> -h` gives the flags. The record's
 `keep: [worktree, scratches, reports]` keeps those items on every close.
 `close` finds the worktree from the record's `branch`, so a task created
 under another naming is closed the same way.
@@ -67,8 +65,7 @@ under another naming is closed the same way.
 
 Success is one verdict line; `-v` adds detail lines. A refusal is
 `STOP <CODE>: <detail>` or `ERROR <CODE> <detail>` on stderr, then a `hint:`
-line with the concrete next step. Exit status is `0` OK, `1` STOP, `2` ERROR,
-`3` PARTIAL (`close` deleted some items and refused another).
+line with the concrete next step.
 
 | Code | Next step |
 | --- | --- |

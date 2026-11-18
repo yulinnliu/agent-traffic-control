@@ -1,33 +1,18 @@
 # `atc test --mutants`
 
-```text
-atc test <task> --mutants <mutants.json> [--sha <sha>] [-- <test>...]
-```
-
-Applies each mutant alone to the export of `<sha>` (default: the task
-branch's tip) at `<tmp>/<task>-<sha7>/tree`, built once with its own
-environment, and restores its files after each run. The tests after `--`
-judge every mutant. Without them, each mutant is judged by the tests the
-tree's selector picks for its edited paths plus its own `tests`, narrowed
-to the tests the unmutated run saw execute the lines it edits, child
-processes included; `<scratch>/mutants-covered.json` lists each mutant's
-lines and tests. A mutant whose edited lines no test executed is reported
-`NOT_COVERED` without a run.
-Each run is pytest with `-x` and a 900-second timeout.
+`atc test -h` gives the command's form, which tests judge a mutant and the
+shape of the mutants file. A mutant's tests are narrowed to the tests the
+unmutated run saw execute the lines it edits, child processes included;
+`<scratch>/mutants-covered.json` lists each mutant's lines and tests. A
+mutant whose edited lines no test executed is reported `NOT_COVERED`
+without a run. Each run is pytest with `-x` and a 900-second timeout, and
+the mutant's files are restored after it.
 
 ## Input
 
-`<mutants.json>` is a JSON array of mutants:
-
-```json
-[{"label": "...", "edits": [{"path": "...", "old": "...", "new": "..."}], "tests": ["..."]}]
-```
-
 Every `old` occurs exactly once in its file; one that does not aborts the
-run. Edits follow the file's line endings. `tests` is optional: the pytest
-arguments that judge that mutant in place of the default tests.
-`kill_rule` is optional: `failure` (default) or `assertion` for that
-mutant.
+run. Edits follow the file's line endings. A mutant's own `tests` are the
+pytest arguments that judge it in place of the default tests.
 
 ## Kill rule
 

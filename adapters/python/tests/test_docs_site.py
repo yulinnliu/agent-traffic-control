@@ -1,4 +1,4 @@
-"""docs/WORKFLOW.md § Docs site: staging, the Zensical build and the built site's check (design docs/design/ATC-0060.md)."""
+"""docs/development/DOCS_SITE.md: staging, the Zensical build and the built site's check (design docs/design/ATC-0060.md)."""
 from __future__ import annotations
 
 import importlib.util
@@ -66,7 +66,8 @@ def test_a_site_path_is_the_source_lower_cased_with_dashes_and_readmes_as_indexe
 @pytest.mark.unit
 def test_the_publication_table_leaves_design_docs_records_and_governance_out():
     tracked = ["README.md", "README.zh-TW.md", "SCOPE.md", "GLOSSARY.md", "AGENTS.md", "LICENSE",
-               "docs/WORKFLOW.md", "docs/design/ATC-0060.md", "docs/releases/v1.0.0.md", "docs/assets/a.png",
+               "docs/WORKFLOW.md", "docs/design/ATC-0060.md", "docs/development/RELEASING.md",
+               "docs/releases/v1.0.0.md", "docs/assets/a.png",
                ".atc/tasks/ATC-0060.yaml", "shared/governance/CORE.md", "adapters/python/README.md"]
     assert docs_site.published(tracked) == {
         "README.md": "index.md", "README.zh-TW.md": "zh-TW/index.md", "SCOPE.md": "scope.md",

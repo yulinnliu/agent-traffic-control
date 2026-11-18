@@ -31,7 +31,7 @@ Work rules:
   Fixed text, one line each, in this order:
   - Reply in the Owner's language, role terms in English.
   - Run the tests the task's level names: `atc test <ID>` for the related
-    tests, `-- <files>` for an explicit list (atc-review "Writer: the step
+    tests (`atc test -h` for the other forms; atc-review "Writer: the step
     report"); never the full suite: the reviewer's `atc test <ID> --candidate`
     is the one full run. Under `strict`, no mutant: the step report lists the
     guards (`file:line` and what each blocks) for the reviewer's mutants.

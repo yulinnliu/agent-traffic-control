@@ -1,6 +1,6 @@
 name: docs site
 
-# Builds the docs site from main and publishes it to GitHub Pages (docs/WORKFLOW.md § Docs site). The paths are
+# Builds the docs site from main and publishes it to GitHub Pages (docs/development/DOCS_SITE.md). The paths are
 # those of the docs-site hook in .pre-commit-config.yaml, plus this file; tests/test_docs_site.py keeps them equal.
 on:
   push:
@@ -37,7 +37,7 @@ jobs:
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
       - name: stage, build and check the site
         env:
-          # The Search Console token, a repository variable the Owner sets (docs/WORKFLOW.md § Docs site).
+          # The Search Console token, a repository variable the Owner sets (docs/development/DOCS_SITE.md).
           GOOGLE_SITE_VERIFICATION: ${{ vars.GOOGLE_SITE_VERIFICATION }}
         run: uv run --locked --project adapters/python python adapters/python/scripts/docs_site.py build "$RUNNER_TEMP/docs-site"
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0

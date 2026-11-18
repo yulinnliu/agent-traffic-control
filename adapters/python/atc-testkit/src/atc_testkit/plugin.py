@@ -119,7 +119,8 @@ def pytest_collectreport(report):
 
 
 def pytest_collection_finish(session):
-    """The files of the selected tests, where ``ATC_COLLECTED_FILES`` names (docs/TESTKIT.md § Input evidence)."""
+    """The files of the selected tests, where ``ATC_COLLECTED_FILES`` names
+    (docs/development/TESTKIT_INTERNALS.md § Input evidence)."""
     target = os.environ.get(COLLECTED_VARIABLE)
     if target and not hasattr(session.config, "workerinput"):
         files = sorted({item.nodeid.split("::", 1)[0] for item in session.items})
@@ -128,9 +129,9 @@ def pytest_collection_finish(session):
 
 
 def write_outcomes(config, exitstatus) -> None:
-    """Each test file's outcome, where ``ATC_FILE_OUTCOMES`` names (docs/TESTKIT.md § Input evidence): a file
-    passed when every report of its tests passed or skipped. A run that ended other than passed or failed writes
-    none."""
+    """Each test file's outcome, where ``ATC_FILE_OUTCOMES`` names (docs/development/TESTKIT_INTERNALS.md § Input
+    evidence): a file passed when every report of its tests passed or skipped. A run that ended other than passed or
+    failed writes none."""
     target = os.environ.get(OUTCOMES_VARIABLE)
     if not target or int(exitstatus) not in (pytest.ExitCode.OK, pytest.ExitCode.TESTS_FAILED):
         return

@@ -1,4 +1,5 @@
-"""``check.ps1``: the entry-point row of docs/ATC_HOME.md § Resolving the locations, § Cache, § pytest without a scratch."""
+"""``check.ps1`` (docs/development/TESTING.md § check.ps1), which applies docs/ATC_HOME.md § Resolving the locations,
+§ Cache and § pytest without a scratch."""
 from __future__ import annotations
 
 import json

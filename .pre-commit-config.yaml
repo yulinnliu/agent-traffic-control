@@ -101,7 +101,7 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
-      # The docs site staged, built in strict mode and checked (docs/WORKFLOW.md § Docs site). The files are the
+      # The docs site staged, built in strict mode and checked (docs/development/DOCS_SITE.md). The files are the
       # Pages workflow's paths; tests/test_docs_site.py keeps the two equal.
       - id: docs-site
         name: docs site builds and its pages pass the site check (docs_site.py check)

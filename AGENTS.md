@@ -45,7 +45,7 @@ Tasks here are identified by record (governance `CORE.md` § Task identity).
   (the test budget, governance `VERIFICATION.md` § Verifier test budget)
 
 What the verifier checks, which ranges it treats as documentation-only and
-where the full suite runs: `docs/TESTKIT.md` § The workspace root's verifier.
+where the full suite runs: `docs/development/TESTING.md` § The workspace root's verifier.
 Integrating changes nothing a host runs: the Owner tags a release and installs
 it on each host with `uv tool install` from that tag (`docs/WORKFLOW.md`
 § Installing a release).

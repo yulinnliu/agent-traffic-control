@@ -63,8 +63,11 @@ Operational description of the tree; governance semantics live under
   project's testkit for the steps. Before the Owner tags that commit, a
   dispatch of `.github/workflows/validate.yml` on `main` runs at it, and the
   tag goes on only after that run passes on Linux and Windows.
-  `docs/development/` — maintainer documentation, such as
-  `RELEASING.md`, how a release is cut.
+  `docs/development/` — maintainer documentation, for whoever changes `atc`
+  and `atc-testkit` or runs this repository's own tools, kept off the docs
+  site: `RELEASING.md`, how a release is cut; `TESTING.md`, how this
+  repository verifies itself; `TESTKIT_INTERNALS.md`, how `atc-testkit` is
+  built inside; `DOCS_SITE.md`, how the docs site is built and published.
   `.out-of-scope/` — recorded rejections.
 
 ## The manifest

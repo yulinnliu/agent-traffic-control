@@ -1,6 +1,6 @@
 """Verify the candidate checkout ``atc integrate`` prepared for this repository (AGENTS.md "Integration verification").
 
-The root's data for the verifier skeleton (docs/TESTKIT.md § The workspace root's verifier),
+The root's data for the verifier skeleton (docs/development/TESTING.md § The workspace root's verifier),
 imported from the candidate's own tree: the environment ``scripts/integration-verify.json`` builds from ``uv.lock``
 under the candidate's ignored ``adapters/python/.venv/`` installs ``atc_testkit`` from there. The skeleton runs the
 lint stage (``.pre-commit-config.yaml``, which holds ``atc-maintain validate`` and ``policies check``) over the

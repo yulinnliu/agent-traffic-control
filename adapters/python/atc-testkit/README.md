@@ -183,13 +183,14 @@ The rows down to `product_module_prefixes` are required; the others are optional
 | `product_module_prefixes` | the module prefixes the verifier checks are imported from the candidate |
 | `credential_variables` | further variables the isolated environment removes |
 | `data_root_variables` | the variables that get one data directory per stage |
-| `automation_markdown_prefixes` | Markdown paths that are not documentation; files ATC manages there (a skill copy whose `SKILL.md` carries `managed-by: agent-traffic-control`) still count as documentation-only (`docs/TESTKIT.md` § Verifier) |
+| `automation_markdown_prefixes` | Markdown paths that are not documentation; files ATC manages there (a skill copy whose `SKILL.md` carries `managed-by: agent-traffic-control`) still count as documentation-only (`docs/TESTKIT.md` § Integration verifier) |
 | `hook_uv_options` | the options the hook's `uv run --frozen` carries |
 | `ci_platforms` | the platforms the CI job covers |
 | `ci_init` | the `module:function` the CI runner calls first |
 | `ignore` | the test paths each stage ignores, under `nt` and `posix` |
 | `selector` | the command `atc test ID` runs to pick the related test paths |
 | `toolchain` | the toolchain's name, `python` when absent |
+| `worker_memory_mib` | the memory one test worker is counted to need, an integer from 1 to 65536 (`docs/TESTKIT.md` § Stages) |
 
 The selection policy and the static checks stay in the project's gate script.
 The workspace validator, doctor and `atc sync` inspect opted-in projects.

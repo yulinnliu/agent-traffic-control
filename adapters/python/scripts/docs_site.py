@@ -1,6 +1,6 @@
 """The docs site: stage the repository's docs, build them with Zensical, check the built site.
 
-docs/WORKFLOW.md § Docs site; design docs/design/ATC-0060.md. Usage, from the workspace root::
+docs/development/DOCS_SITE.md; design docs/design/ATC-0060.md. Usage, from the workspace root::
 
     python adapters/python/scripts/docs_site.py check            # stage, build and check in a temporary directory
     python adapters/python/scripts/docs_site.py build <output>   # the same, keeping <output>/site for publication

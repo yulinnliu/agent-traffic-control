@@ -97,12 +97,10 @@ directory, so a child the run starts never reads it.
 
 One rule gives `<tmp>` and `<tmp>/systmp`, and every entry point applies it:
 
-- `atc-testkit` publishes the Python implementation, and `atc` uses it
-  through the adapter's dependency on the package (`TESTKIT.md` § Commands).
-  It returns the two
-  paths, creating them on first use, and offers one call that makes a
-  directory below `<tmp>` the temporary directory of the current process and
-  of every process it starts (`TEMP`, `TMP`, `TMPDIR`, and Python's
+- `atc-testkit` holds the implementation. It returns the two paths,
+  creating them on first use, and offers one call that makes a directory
+  below `<tmp>` the temporary directory of the current process and of every
+  process it starts (`TEMP`, `TMP`, `TMPDIR`, and Python's
   `tempfile`). The directory is `<tmp>/systmp` unless the entry point names
   another.
 - An entry point makes that call before it creates a temporary file or starts
@@ -112,7 +110,6 @@ One rule gives `<tmp>` and `<tmp>/systmp`, and every entry point applies it:
   | --- | --- | --- |
   | `atc test ID`, `atc test ID --mutants FILE` | the scratch, `<tmp>/<scratch>` | ATC |
   | `atc integrate`, `build_testkit_release.py` | `<tmp>/systmp` | ATC |
-  | `check.ps1` | `<tmp>/systmp`, applying the same rule in shell | ATC |
   | the integration verifier named by a project's verifier argv file | `<tmp>/systmp`, or a working directory it creates there | the project |
   | the pre-push gate | `<tmp>/systmp`, or a working directory it creates there | the project |
 
@@ -297,8 +294,9 @@ expected, except a working directory of the verifier or of the gate.
   includes the working directory a failed verifier or gate run left for
   inspection, named `w` and six lowercase hexadecimal digits. Links inside a
   base directory, `<work>/<stage>/bt`, are the run's own: they are expected,
-  removed as links and never entered. `<stage>` is a stage of `TESTKIT.md`
-  § Stages or `tests`, the workspace root's test command.
+  removed as links and never entered. `<stage>` is the stage that ran there:
+  a stage of `TESTKIT.md` § Stages, or the one stage a repository's own
+  verifier names.
 - Under `<tmp>/candidates` it removes a candidate tree through
   `git worktree remove -f -f` in the repository that owns it, which the
   tree's own `.git` file names; a tree Git refuses to remove prints
@@ -347,8 +345,7 @@ pytest's base follows the temporary directory, so a run started directly in a
 repository that registers the plugin gets
 `<tmp>/systmp/pytest-of-<user>/pytest-<N>/`. pytest removes runs older than
 the newest three at each run's start and exit and leaves a run with a live
-`.lock` alone. The ATC adapter's own test suite and `check.ps1` follow the
-same rule and pass no `--basetemp` of their own.
+`.lock` alone.
 
 This base carries the user name and has no length bound of its own. A suite
 whose paths need the shorter base runs through `atc test ID`, the gate or
@@ -356,13 +353,12 @@ the verifier.
 
 ## Cache
 
-- `check.ps1` sets `UV_CACHE_DIR` to `~/.atc/cache/uv` and
-  `UV_PYTHON_INSTALL_DIR` to `~/.atc/cache/python` when the caller has not set
-  them.
-- The gate and the verifier give the processes they start the same two
-  values, `RUFF_CACHE_DIR` as `~/.atc/cache/ruff` and `PRE_COMMIT_HOME` as
-  `~/.atc/cache/pre-commit` (`TESTKIT.md` § Isolated environment), and so do the runs of `atc test ID`
-  and the `uv sync` that builds the environment of its export (§ Checkout).
+- The gate and the verifier give the processes they start `UV_CACHE_DIR` as
+  `~/.atc/cache/uv`, `UV_PYTHON_INSTALL_DIR` as `~/.atc/cache/python`,
+  `RUFF_CACHE_DIR` as `~/.atc/cache/ruff` and `PRE_COMMIT_HOME` as
+  `~/.atc/cache/pre-commit` (`TESTKIT.md` § Isolated environment), and so do
+  the runs of `atc test ID` and the `uv sync` that builds the environment of
+  its export (§ Checkout).
 - A cache entry is safe to delete at any time; the next run downloads it again.
 
 ## Outside the ATC home
@@ -372,6 +368,5 @@ the verifier.
 | Workspace map, project checkouts, worktrees, project data | `workspace.yaml`, `projects/`, `worktrees/`, `state/<name>-data/` | bound to one workspace checkout (`LAYOUT.md`) |
 | Verification evidence records, integration slot lock | the repository's git common directory | bound to one repository |
 | The latest pre-push gate logs | the checkout's ignored `.tmp/` directory | read next to the checkout after a refused push |
-| Built testkit wheels | `.tooling/testkit-dist/` | release output of `build_testkit_release.py` |
 | Installed `atc` command | uv's tool bin directory (`~/.local/bin`), and its environment `<uv tool dir>/agent-traffic-control` | installer convention; the Owner's `uv tool install` of a release tag (`WORKFLOW.md` § Installing a release) |
 | A product's runtime files | the product's own locations (`PROJECT_RUNTIME.md`) | product state, not ATC's |

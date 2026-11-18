@@ -1,4 +1,4 @@
-# The docs site (docs/design/ATC-0060.md, docs/WORKFLOW.md § Docs site). adapters/python/scripts/docs_site.py
+# The docs site (docs/design/ATC-0060.md, docs/development/DOCS_SITE.md). adapters/python/scripts/docs_site.py
 # stages the repository's docs next to a copy of this file and builds them with Zensical; the content lives in the
 # documents themselves, and the publication table in docs_site.py says which ones.
 [project]

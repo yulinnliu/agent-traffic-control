@@ -28,7 +28,7 @@ ARGFILE_THRESHOLD = 30_000
 FALLBACK, BY_LINES, UNCOVERED = "file-level", "lines", "not covered"
 NOT_RECORDED = "NOTE lines: not recorded; every mutant is judged by its file-level tests"
 
-RECORDER = r'''"""The line recorder of atc-testkit (docs/TESTKIT.md § atc test ID --mutants FILE); written into the scratch."""
+RECORDER = r'''"""The line recorder of atc-testkit (docs/development/TESTKIT_INTERNALS.md § Line recorder); written into the scratch."""
 import os
 import sys
 

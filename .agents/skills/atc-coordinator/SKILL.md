@@ -59,7 +59,7 @@ Owner with what was observed:
 
 A coordinator that restarts or has lost its conversation rebuilds its state
 from durable sources, never from memory: the task record and
-`atc task list` (`-v` adds each worktree's findings), git (the topic
+`atc task list -v`, git (the topic
 branch tip and `main`),
 `<git common dir>/atc/integrations.jsonl`, the previous coordinator
 hand-over and the session list. A truncated notification or a verdict
@@ -123,9 +123,8 @@ the map from task ID to session and nothing a record, Git or
    taken is a collision (§ Stops). Done when the reads show the task ID and
    the branch name free.
 2. **Open the task** where the project declares `## Task records`:
-   `atc task create "<title>" --project <name> [--tests <level>]`, or
-   `--file <brief.md>` with `# title`, `## Scope`, `## Decisions` and
-   `## Tests`. It creates the worktree and branch and commits the record on
+   `atc task create "<title>" --project <name>`; `atc task create -h` gives
+   the test level and the brief-file form. It creates the worktree and branch and commits the record on
    the branch; the record reaches `main` with the task's integration. Its
    scope, decisions and test level are the writer's contract (governance
    `VERIFICATION.md` § Testing, Test levels); `tests: none` needs the Owner's

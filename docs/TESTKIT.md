@@ -552,8 +552,6 @@ Its rules:
   one: the run gives the export a Git directory `<scratch>/lint.git` holding
   an index of its files, and removes it with the export's `.git` pointer
   file when pre-commit ends, so the tree is again the export of its commit.
-- `atc_testkit.lint` holds the commands: `range_argv` is the verifier's,
-  `run_paths` the run over a set of paths.
 - `atc sync` delivers the shared rules to a project's `.atc/lint/`
   (`ruff.toml`, `markdownlint.jsonc`, `vale.ini` with `vale/ATC/`) and
   keeps them current; the project's
@@ -618,57 +616,8 @@ this order:
   verdict a pass.
 - The gate and the verifier of a project share one selection policy and one
   stage definition, which is what lets a record of one be reused by the other.
-
-### The workspace root's verifier
-
-The workspace root builds the testkit and vendors no wheel. Root `AGENTS.md`
-§ Integration verification names its argv file, which runs
-`adapters/python/scripts/integration_verify.py` in the candidate's own
-`adapters/python/.venv/` built from `uv.lock`. That script supplies the
-root's data to the same skeleton, imported from the tree, with the rows a
-consumer's data feeds absent: no selection hook, lock, contract or
-collection row. § Isolated environment, § Running and logging and the
-working-directory rules bind it as they bind a project's verifier.
-
-- Its own rows carry its own tokens: after the ancestry rows it reads the
-  range, and a range Git cannot read refuses with `RANGE_UNREADABLE`; its
-  static checks follow, then the stages.
-- Static checks: the lint stage over the range. The root's
-  `.pre-commit-config.yaml` holds its workspace checks as `local` hooks
-  (`atc-maintain validate`, `atc-maintain policies check`), with the drift
-  checks and the link check; the `python-adapter` job in
-  `.github/workflows/validate.yml` runs the same list over every file.
-- Selection: in place of the job's full run of the stages, `test_paths`
-  maps the range through `select_tests.py` (`adapters/python/README.md`
-  § Selected tests) to the pytest paths the stages run in `tests_dir`: `[]`
-  for the full suite, where the selector's rules widen to it, and `None` for
-  none, which skips the stages. A failure of it refuses with
-  `SELECTION_FAILED`.
-- Documentation-only (`VERIFICATION.md` § Documentation-only verification),
-  decided by consumers: a range is documentation-only, and skips the
-  selection and the stages, when every path is Markdown under `docs/`, a
-  task record under `.atc/tasks/`, or Markdown the selection maps to no test
-  file. Markdown a test reads or a tool renders (the guidance, skills and
-  their managed copies, the root's top-level Markdown) selects its readers
-  and is not documentation-only. The caller never chooses the exception.
-  The log line `classification: full` names every range that is not
-  documentation-only; the selector's lines after it say which tests ran.
-- The candidate has no `workspace.yaml`, `projects/`, `worktrees/` or
-  `state/`, so the checks read the committed tree only, as CI does.
-- A pass writes the verification report, as a consumer's does
-  (`shared/conformance/verification-evidence/README.md` § Report), so
-  `atc integrate` reuses the reviewer's `atc test ID --candidate` record of a
-  run on the same tree in place of running the verifier again
-  (`shared/conformance/verification-evidence/README.md` § Integration reuse).
-  Its `dependency_inputs` are the adapter toolchain's dependency files,
-  named from the root (`adapters/python/uv.lock`,
-  `adapters/python/.python-version`); its `classification` is
-  `documentation-only` or `impact-selected`.
-- The full suite, and with it the check that fails a session whose tests
-  read the root's guidance undeclared (`ROOT_READ_UNDECLARED`), runs only in
-  a manually dispatched run of `.github/workflows/validate.yml`
-  (`VERIFICATION.md` § Full regression timing and evidence reuse); the
-  Owner starts it.
+- The workspace root's own verifier, which builds the testkit rather than
+  vendoring it, is `docs/development/TESTING.md`.
 
 ## Input evidence
 
@@ -677,57 +626,37 @@ on the same inputs takes the record in place of running the file again.
 A run's input set and input digest are
 `shared/conformance/verification-evidence/README.md` § Input set: the
 commit's files less the paths the project's verifier classifies as no
-check's input (`atc_testkit.verifier.non_input`: for the workspace root its
-documentation-only paths, for a consumer its managed files and the Markdown
-the selection maps to no test). The candidate and gate records of that
-README carry the same digest (`report.inputs`).
+check's input (for the workspace root its documentation-only paths, for a
+consumer its managed files and the Markdown the selection maps to no test).
+The candidate and gate records of that README carry the same digest
+(`report.inputs`).
 
-- **Record.** `<git-common-dir>/atc/verification-evidence/inputs/<name>-<key>.json`,
-  schema `atc-input-evidence/1`, written once and never changed:
-  `identity`, `inputs` (the digest), `excluded` (the SHA-256 of the run's
-  excluded list, which is stored once as `inputs/excluded/<hash>.json`),
-  `ran_on` (the commit), `result` `PASS` and `recorded_at`. `<name>` is a
-  hash of the identity and `<key>` a hash of the identity and the digest.
-- **Identity.** `{"kind": "test-file", "file", "marker", "selector",
-  "platform", "time_slack", "dependency_inputs"}`: the test file by its path
-  from the repository's top, the category expression it ran under, and what
-  else decides its outcome. The verifier argv is not part of it, so a run of
-  `atc test` and a verifier's stage share records.
-- **Lookup.** A reader lists the records of the identity's name and takes
-  the newest whose digest equals the digest of its own commit's tree with
-  that record's excluded list left out (`atc_testkit.inputs.Finder`).
-- **Coverage.** A record under the expression `R` serves a run under `W`
-  when every test `W` selects, `R` selects too (`stages.covers`). The
-  verifier looks for records under `""` (no expression), the private
-  desktop's exclusion (§ Private desktop) and the stage's own expression.
-- **Retention.** Every write deletes records and excluded lists older than
-  14 days. A failure while reading or writing evidence never changes a
-  verdict: the files run.
+- A record, schema `atc-input-evidence/1`, lies in the repository's Git
+  common directory and stands for one test file that passed under one
+  category expression, selector, platform, time slack and set of dependency
+  inputs; a run reuses it only where all of them match and the record's
+  expression selects every test the run's expression selects. Its format and
+  lookup are `shared/conformance/verification-evidence/README.md` § Input
+  evidence.
+- Records older than 14 days are deleted. A failure while reading or writing
+  evidence never changes a verdict: the files run.
 
-The integration verifier, before each pytest stage of a candidate, collects
-the stage (`ATC_COLLECTED_FILES`) and runs only the files no record covers,
-printing `<stage>: REUSED <n> files, RUN <m> files`; a stage every file of
-which is covered does not run. After the final-state rows pass it records
-each file the stages ran whose every test passed (`ATC_FILE_OUTCOMES`, set
-only for those stages: § Isolated environment removes the caller's). A
+The integration verifier, before each pytest stage of a candidate, runs only
+the files no record covers, printing `<stage>: REUSED <n> files, RUN <m> files`;
+a stage every file of which is covered does not run. After the final-state
+rows pass it records each file the stages ran whose every test passed. A
 non-Python toolchain runs its stages whole after printing
 `input evidence: not used by the <toolchain> toolchain`.
 
 `atc test ID` records too, when it runs the related tests or `--all`, not an
-explicit run of pytest arguments, and the tree equals its commit before and after the run:
-the worktree's `HEAD` with a clean status, or an export still equal to its
-commit. It asks the project's verifier for the commit's input set by running
-the tree's own verifier argv file with `ATC_INPUTS_OF=<commit>` in that
-tree. An export is no Git checkout, so for the classification it gets a Git
-directory beside it, `<scratch>/classify.git`, that reads the source
-repository's objects through `objects/info/alternates`, with `HEAD` and the
-index at the commit, removed with its `.git` pointer file afterwards; no
-code runs in the source checkout, and an export that already holds a `.git`
-records nothing. The verifier prints
-`{"commit", "excluded", "dependency_files"}` and runs no check, and records
-each file of the run whose every test passed under the expression the run
-used. It prints `EVIDENCE <n> test files recorded for <sha12> (inputs
-<digest12>)` or `NOTE input evidence: not recorded: <reason>`.
+explicit run of pytest arguments, and the tree equals its commit before and
+after the run: the worktree's `HEAD` with a clean status, or an export still
+equal to its commit. The tree's own verifier argv file classifies the
+commit's input set (`ATC_INPUTS_OF=<commit>`), for an export as well, and no
+code runs in the source checkout; an export that already holds a `.git`
+records nothing. The run records each file whose every test passed under the
+expression it used, and prints `EVIDENCE <n> test files recorded for <sha12>
+(inputs <digest12>)` or `NOTE input evidence: not recorded: <reason>`.
 
 ## Documentation check
 
@@ -879,10 +808,6 @@ No run has confirmed this on a cloud writer host, a clone with no
 `workspace.yaml`: installing `atc` from a clone there and running
 `atc test ID` against a project clone is untried, and what such a host runs
 when it has no `atc` is not decided.
-
-`atc test` is implemented in `atc-testkit`. The adapter depends on the
-package by its path in the tree, and `atc` dispatches to it; `atc integrate`
-takes the location rule from the same package.
 
 `atc <command> [<subcommand>] --help` prints a usage line that starts with
 `usage: atc <command> [<subcommand>]` and exits 0; output the console cannot
@@ -1084,9 +1009,9 @@ clamp.
   path from the scratch when it lies inside it) and whether the runs are
   private, with its time, summary, seconds and workers. `inputs` is
   `{"digest", "excluded"}`, the commit's input digest and the paths outside
-  its input set (§ Input evidence), as the export's own verifier argv file
-  classifies them in the export, with the Git directory § Input evidence
-  gives an export; without a classification it is `commit <sha>`. A later run
+  its input set, as the export's own verifier argv file classifies them in
+  the export (§ Input evidence); without a classification it is
+  `commit <sha>`. A later run
   reuses the record when its commit has those inputs
   (`shared/conformance/verification-evidence/README.md` § Input set; a
   `commit <sha>` record only its own commit), its test arguments (in order),
@@ -1111,23 +1036,10 @@ clamp.
 - Without `TEST...`, the baseline also records the lines each test executes
   in the `.py` files the mutants edit, in the pytest process and in every
   process it starts that keeps `PYTHONPATH` (a nested testkit run keeps the
-  recorder). The recorder is a `sys.monitoring` tool the command writes to
-  `<scratch>/lines/hook` (a `sitecustomize` that hands over to the one it
-  shadows, and a pytest plugin that gives each test its own context, passed
-  to its child processes in `ATC_LINES_CONTEXT`); a test's context and its
-  collected name are its node ID as collected, without the `@<group>` that
-  pytest-xdist's `loadgroup` appends in a worker; each process appends its
-  rows to its own file in `<scratch>/lines/data`, which every baseline
-  starts empty. Each pytest process that loads the plugin, the xdist
-  controller and every worker, marks that it loaded it and, when its
-  recorder started, that it started; each that collects writes the
-  collected tests in order. The records of all processes are merged; the
-  baseline counts as recorded only when every process that loaded the
-  plugin started its recorder, and its order is the collection order, the
-  order a single-process baseline runs. Only
+  recorder). The baseline counts as recorded only when every pytest process
+  of it, the xdist controller and every worker, started its recorder. Only
   the baseline records, together with each test's seconds from its setup
-  to its teardown (`durations-<pid>`; a name two processes recorded keeps
-  the longer time). The tests of a mutant are then the tests that executed
+  to its teardown. The tests of a mutant are then the tests that executed
   a line it changes, ordered to reach a kill soonest under `-x`: the node
   IDs named among its own tests first, then the others fastest first, in
   collection order among equal times and with a test without a time last,

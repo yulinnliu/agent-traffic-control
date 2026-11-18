@@ -66,10 +66,8 @@ atc test <ID> -- tests/test_one.py
 `<ID>`; it prints `LOG <path>` and one summary line. `--all` runs the full
 suite and `-v` streams pytest's output. A command that opens windows runs
 under `atc test --private -- <command>` (`docs/TESTKIT.md` § Private
-desktop). A root writer also runs the checks its change calls for, from the
-worktree's `adapters/python` with `uv run --locked atc-maintain`: `sync
---root` then `validate` after a skill change, `policies check` after a schema
-or example change (root `AGENTS.md` § Changing this repo).
+desktop). A root writer also runs the checks root `AGENTS.md` § Changing
+this repo names for its change.
 
 - `NO_TESTKIT`: the project has no `[tool.atc-testkit]`; its tasks use
   `tests: none`.
@@ -293,7 +291,8 @@ earlier tag; it does not loosen the hook's table, which only
 `atc guard --reset` does. On Windows, uv
 cannot replace `atc.exe` while it runs: the Owner installs when no session
 runs, and reruns the command after a `WinError 32`. Cutting a release is the
-maintainer's `docs/development/RELEASING.md`.
+maintainer's `docs/development/RELEASING.md`; building and publishing the
+docs site is `docs/development/DOCS_SITE.md`.
 
 On a host whose workspace directory is itself the ATC checkout, its
 `workspace.yaml` names it with `governance_checkout: .`. Without that line
@@ -319,51 +318,4 @@ lists each project's pin against the installed release.
 
 The canonical checkout stays the workspace that `atc` and every session
 read: task records, policies, governance and skills. Off `main` every `atc`
-command but `doctor` refuses with `CHECKOUT_NOT_MAIN`. A topic worktree runs
-its own code with `uv run atc` and `uv run --locked atc-maintain` from its
-`adapters/python`.
-
-## Docs site
-
-The project site <https://yulinnliu.github.io/agent-traffic-control/> is
-built from the repository's own documents, each read from its one place
-(design `docs/design/ATC-0060.md`):
-
-```text
-python adapters/python/scripts/docs_site.py check
-python adapters/python/scripts/docs_site.py build <output>
-```
-
-Both run from the workspace root in the adapter's environment
-(`uv run --locked --project adapters/python ...`). `docs_site.py` stages the
-documents its `PUBLISHED` table names into a temporary directory: each site
-path is the source's file name in lower case with `_` as `-`, a `README.md`
-becomes an index, links into published documents point within the site and
-links to every other tracked path point at GitHub. It then builds with
-Zensical in strict mode from `site/zensical.toml` and `site/overrides/`, writes
-`robots.txt`, and checks the built site: every internal link and anchor, a
-title, description, canonical URL and each Open Graph tag once per page,
-GitHub's heading anchors as heading ids, the sitemap and `robots.txt`. A
-published document may not repeat a heading anchor. `check` is the lint
-stage's `docs-site` hook; `build` keeps `<output>/site`.
-
-`.github/workflows/pages.yml` runs `build` on each push to `main` that
-changes a watched path, and on a manual dispatch, and deploys the result to
-GitHub Pages. The site therefore shows only what the Owner pushed.
-
-The Owner's steps, once, after the first integration:
-
-1. Repository Settings → Pages → Build and deployment → Source: GitHub
-   Actions.
-2. Push `main` (`atc push root`); the workflow publishes the site. If it ran
-   before step 1, rerun it from the Actions tab.
-3. Google Search Console: add the URL-prefix property
-   `https://yulinnliu.github.io/agent-traffic-control/` and choose the HTML
-   tag method. Set the tag's `content` value as the repository variable
-   `GOOGLE_SITE_VERIFICATION` (Settings → Secrets and variables → Actions →
-   Variables), rerun the workflow, since setting a variable publishes
-   nothing, and press Verify once it has deployed. Keep the variable: the
-   next publication after deleting it carries no tag, and the verification
-   lapses.
-4. In Search Console, submit `sitemap.xml`.
-5. Repository About → Website: the site URL.
+command but `doctor` refuses with `CHECKOUT_NOT_MAIN`.

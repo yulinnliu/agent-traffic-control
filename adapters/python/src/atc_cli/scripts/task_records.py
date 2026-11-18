@@ -734,7 +734,7 @@ def build_parser() -> argparse.ArgumentParser:
                                       "integrated, keeping its tip under the local tag archive/<ID>.",
                                       exit="0 every item deleted (under --check: would be); 1 STOP, or an item "
                                            "refused with nothing deleted; 3 PARTIAL; 2 ERROR",
-                                      see="docs/TASKS.md § Close; DELIVERY.md § Close-out"))
+                                      see="docs/TASKS.md § Close-out; DELIVERY.md § Close-out"))
     close_parser.add_argument("task", metavar="ID", help="the task")
     close_parser.add_argument("--check", action="store_true",
                               help="list what the run would delete and refuse; delete nothing")

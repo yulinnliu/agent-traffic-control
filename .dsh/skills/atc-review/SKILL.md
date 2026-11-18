@@ -110,11 +110,11 @@ FAIL verdict the writer may amend or squash the fixes into the reviewed
 commits instead (governance `GIT_WORKFLOW.md` § After formal review) and
 reports the new tip.
 
-Where the project runs its tests through `atc-testkit`, run targeted tests
-against the worktree with `atc test <task> [-- <pytest args...>]`; elsewhere
-the targeted test commands are the ones the project's `AGENTS.md` names.
-Every run registers its scratch to the task (`<tmp>/<task>`, or
-`<tmp>/<task>-<sha7>` under `--sha`), so `atc task close` removes it; a
+Where the project runs its tests through `atc-testkit`, run the task's
+related tests against the worktree with `atc test <task>`; `atc test -h`
+gives the other forms. Elsewhere the targeted test commands are the ones the
+project's `AGENTS.md` names. Every run registers its scratch to the task
+(`atc test --list <task>` lists them), so `atc task close` removes it; a
 directory under `<tmp>` named for the task but not registered to it is
 listed for the Owner's consent and never deleted. A reviewer, a subagent
 included, writes its own output files (captured output, notes, logs) only
@@ -176,11 +176,9 @@ from reading is sent as a FAIL with no test or mutant run after it.
    was renamed, or a count changed), re-check against current state and
    continue; do not stop to ask the holder to verify a premise you can check
    yourself. Done when the branch tip equals that SHA.
-2. **Build a scratch copy and lint it.** `atc test <task> --lint --sha <sha>`
-   exports that exact tree to `<tmp>/<task>-<sha7>/tree`, builds its
-   environment and runs the lint stage there, which points imports at the
-   copy and isolates data roots; strip ambient credentials from the shell
-   that runs it. `LINT_FAILED` is a FAIL with nothing read or run after it. Tests and
+2. **Build a scratch copy and lint it** with
+   `atc test <task> --lint --sha <sha>`; strip ambient credentials from the
+   shell that runs it. `LINT_FAILED` is a FAIL with nothing read or run after it. Tests and
    mutants never run in a live worktree. Prepare and delete a `.venv` in the
    copy as "Writer: the step report" says. An exported tree can differ only
    in line endings, so compare files with carriage returns ignored. Done when
@@ -199,12 +197,9 @@ from reading is sent as a FAIL with no test or mutant run after it.
    drops the script's directory from the import path. Under `strict` run the
    mutants (below) first; a surviving mutant not argued equivalent is a FAIL
    finding, which saves the candidate run. Before a PASS on a
-   `standard` or `strict` task, run `atc test <task> --candidate --sha <sha>`:
-   it runs the integration verifier on the candidate `atc integrate` would
-   build, without a slot, a ref update or the Owner's run, and records a PASS
-   that `atc integrate` reuses in place of rerunning the verifier. Its stages
-   skip each test file a clean run on the same inputs passed, the writer's
-   included, and print `REUSED <n> files, RUN <m> files`. Run it while no integration runs. Quote its last line
+   `standard` or `strict` task, run `atc test <task> --candidate --sha <sha>`.
+   Its stages skip each test file a clean run on the same inputs passed, the
+   writer's included, and print `REUSED <n> files, RUN <m> files`. Run it while no integration runs. Quote its last line
    in the verified line; a refusal is a blocker finding, except
    `WORKER_WAIT_TIMEOUT`. A `WAIT host workers` line means the run is queued
    for the host's test workers, not stuck; the queue is outside the timeout,
@@ -217,8 +212,7 @@ from reading is sent as a FAIL with no test or mutant run after it.
    Done when every file in the copy is proven equal to its Git object again
    and every surviving mutant is listed as a test gap or argued equivalent.
    Under `strict`, where the project runs its tests through `atc-testkit`,
-   `atc test <task> --mutants <mutants.json> --sha <sha> [-- <tests>...]`
-   performs this step on the export of `<sha>` with its own environment;
+   `atc test <task> --mutants <mutants.json> --sha <sha>` performs this step;
    elsewhere the
    project's `AGENTS.md` names how a mutant run is done. Its input file and
    result lines are in [`references/mutants.md`](references/mutants.md).
@@ -275,9 +269,7 @@ and `atc integrate <task>` takes the reviewed SHA from the newest PASS file.
   `atc integrate <task> --sha <SHA>`, with the task record ID, which names the
   repository, and the full 40-character reviewed SHA (governance
   `GIT_WORKFLOW.md` § Integrate, § Task and authority). The command names no
-  branch, verifier or timeout: the tool takes the branch from the record's
-  `branch` and reads the verifier from the `## Integration verification`
-  section of `AGENTS.md` at `main`. In a repository without managed worktrees, where
+  branch, verifier or timeout. In a repository without managed worktrees, where
   the topic branch lives in the main checkout,
   `git -C <main checkout> switch main` comes before it.
 

@@ -2,7 +2,8 @@
 
 The contract between a verifier, `atc integrate` and a project's pre-push
 gate for reusing a passed candidate verification (`VERIFICATION.md` § Testing,
-`GIT_WORKFLOW.md` § Integrate). All three files are UTF-8 JSON objects.
+`GIT_WORKFLOW.md` § Integrate), and between the runs that reuse a passed
+test file (§ Input evidence). Every file it defines is a UTF-8 JSON object.
 
 ## Report
 
@@ -45,8 +46,8 @@ inputs              {"ran_on": str, "digest": str, "excluded": [str, ...]} | nul
 
 A run's inputs are the files of the commit it ran against, less the paths
 the project classifies as outside every test's input: for the workspace root
-the documentation-only ranges (`docs/TESTKIT.md` § The workspace root's
-verifier), for a consumer its managed files and Markdown. The **input digest**
+the documentation-only ranges (`docs/development/TESTING.md` § The workspace
+root's verifier), for a consumer its managed files and Markdown. The **input digest**
 of a tree is the SHA-256 hex digest of its `git ls-tree -r -z --full-tree`
 entries outside the excluded paths, each written as the string
 `<mode> <blob> <path>`, the strings sorted and joined by `\n`, encoded in
@@ -58,6 +59,34 @@ the run's `digest`. It needs neither the project's classification nor its
 code. A path the commit adds outside the input set is not in the run's
 `excluded` list, so the reader counts it as an input and the digests differ:
 the comparison errs toward running the tests.
+
+## Input evidence
+
+A passed test file is recorded against the inputs it ran on (§ Input set),
+so a later run on the same inputs takes the record in place of running the
+file again (`docs/TESTKIT.md` § Input evidence).
+
+- **Record.** `<git-common-dir>/atc/verification-evidence/inputs/<name>-<key>.json`,
+  schema `atc-input-evidence/1`, written once and never changed:
+  `identity`, `inputs` (the digest), `excluded` (the SHA-256 of the run's
+  excluded list, which is stored once as `inputs/excluded/<hash>.json`),
+  `ran_on` (the commit), `result` `PASS` and `recorded_at`. `<name>` is a
+  hash of the identity and `<key>` a hash of the identity and the digest.
+- **Identity.** `{"kind": "test-file", "file", "marker", "selector",
+  "platform", "time_slack", "dependency_inputs"}`: the test file by its path
+  from the repository's top, the category expression it ran under, and what
+  else decides its outcome. The verifier argv is not part of it, so a run of
+  `atc test` and a verifier's stage share records.
+- **Lookup.** A reader lists the records of the identity's name and takes
+  the newest whose digest equals the digest of its own commit's tree with
+  that record's excluded list left out.
+- **Coverage.** A record under the expression `R` serves a run under `W`
+  when every test `W` selects, `R` selects too. The verifier looks for
+  records under `""` (no expression), the private desktop's exclusion
+  (`docs/TESTKIT.md` § Private desktop) and the stage's own expression.
+- **Retention.** Every write deletes records and excluded lists older than
+  14 days. A failure while reading or writing evidence never changes a
+  verdict: the files run.
 
 ## Record
 
@@ -175,8 +204,7 @@ tree for FF and the `git merge-tree --write-tree` result for NO_FF. A reuse
 stands in for the whole verifier, whose lint and reference rows read the
 paths outside the input set as well, so it needs the record's own tree; a
 candidate that differs only outside the input set runs the verifier, whose
-test stages then reuse each file by its inputs (`docs/TESTKIT.md` § Input
-evidence).
+test stages then reuse each file by its inputs (§ Input evidence).
 It reuses the record in place of running the verifier only when every row
 holds, checked in this order. The first row that fails gives the reason, and
 the verifier runs.
