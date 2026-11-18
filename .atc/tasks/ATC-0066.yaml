@@ -1,0 +1,21 @@
+task_id: ATC-0066
+title: Verifier stages drop an inherited ATC_FILE_OUTCOMES, and a non-Python toolchain says it uses no input evidence
+repository: yulinnliu/agent-traffic-control
+base_sha: 95a781f7026f5e1614adc99aa22726b9970cafa8
+scope: 'Two small changes in the testkit verifier''s input-evidence path (adapters/python/atc-testkit/src/atc_testkit/verifier.py and, where the stage environment is built, isolation), with their tests and the matching docs/TESTKIT.md text (§ Input evidence or wherever the verifier''s evidence notes are listed). - **ATC_FILE_OUTCOMES is never inherited.** Today a stage''s environment copies the caller''s, and when the verifier does not reuse evidence (reuse is `None`) it neither sets nor removes `ATC_FILE_OUTCOMES`; a verifier nested under a pytest that records evidence therefore writes its stage outcomes into the outer run''s outcomes file. Every stage environment drops the variable; the verifier sets it only for a stage whose input evidence it records. Found in ATC-0065''s review (low severity: the outer pytest rewrites the file last, and a top-level `atc integrate` has no such variable). - **A non-Python toolchain says so.** `reuse = self.reuse if self.isolated.toolchain.name == "python"
+  else None` runs every file with no note; print one line, in the form of the existing input-evidence notes, saying input evidence is not used for that toolchain. - The test ATC-0065 added that clears `ATC_FILE_OUTCOMES` with a fixture (adapters/python/tests/test_testkit_verifier.py) is updated to the new behaviour, and the non-Python test asserts the note.'
+tests: strict
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: 95a781f7026f5e1614adc99aa22726b9970cafa8
+branch: dsh+ATC-0066
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
+decisions:
+- 'Owner 11-18: a separate small task, before the next release (fix the inherited ATC_FILE_OUTCOMES).'
+- 'Owner 11-18: add the non-Python note, folded into this task.'
+- No version bump; no governance change.
