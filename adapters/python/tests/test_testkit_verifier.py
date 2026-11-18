@@ -1,6 +1,7 @@
 """docs/TESTKIT.md § Integration verifier: one test per row, both forms, and the walk from ``atc integrate``."""
 from __future__ import annotations
 
+import dataclasses
 import json
 import os
 import re
@@ -13,7 +14,7 @@ import pytest
 
 import atc_testkit
 import git_integrate as gi
-from atc_testkit import elapsed, lint, selection, stages, verifier
+from atc_testkit import elapsed, lint, python_toolchain, selection, stages, verifier
 from atc_testkit.project import Project, StaticCheck
 
 PYPROJECT = """[tool.pytest.ini_options]
@@ -613,6 +614,83 @@ def test_a_bad_host_file_refuses_before_any_check(candidate: Candidate, tmp_path
     recorder = Recorder()
     assert verifier.main(consumer(candidate.root), candidate.env(), recorder) == 9
     assert capsys.readouterr().err.splitlines()[0] == "ATC_CONFIG_INVALID" and recorder.calls == []
+
+
+# The input evidence's fail-safe fallbacks (docs/TESTKIT.md § Input evidence): evidence never decides a verdict.
+
+
+@pytest.fixture()
+def no_outer_outcomes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The stage environments inherit the process's: an `atc test` run that records evidence names its own outcomes
+    file there, which says nothing of the verifier's own input evidence."""
+    monkeypatch.delenv(verifier.inputs.OUTCOMES, raising=False)
+
+
+def selected_stages(recorder: Recorder) -> list[tuple[list[str], dict[str, str]]]:
+    """The command and environment of each stage the verifier ran, after asserting it ran all three."""
+    assert recorder.logs[-3:] == STAGE_LOGS, recorder.logs
+    return [(call[0], call[2]) for call in recorder.calls[-3:]]
+
+
+def stored_input_record(root: Path) -> None:
+    """An input record in the candidate's store: with one, each stage first lists its files to look them up."""
+    store = verifier.inputs.store(verifier.inputs.common_directory(root))
+    store.mkdir(parents=True)
+    (store / "unrelated.json").write_text("{}", encoding="utf-8")
+
+
+# A runner whose collection, and so the listing of a stage's files, fails.
+FAILING_RUNNER = (sys.executable, "-c", "raise SystemExit(3)")
+
+
+@pytest.mark.integration
+def test_a_candidate_whose_input_set_cannot_be_read_runs_every_file_with_no_evidence(
+        candidate: Candidate, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, no_outer_outcomes: None,
+        capsys: pytest.CaptureFixture[str]) -> None:
+    candidate.advance()
+
+    def unreadable(_project: Project, commit: str) -> list[str]:
+        raise subprocess.CalledProcessError(128, ["git", "ls-tree", commit])
+    monkeypatch.setattr(verifier, "excluded_paths", unreadable)
+    report = tmp_path / "report.json"
+    recorder = Recorder()
+    project = root_form(candidate.root, test_paths=lambda paths: ["tests/test_x.py"])
+    assert verifier.main(project, candidate.env(ATC_VERIFICATION_REPORT=str(report)), recorder) == 0
+    assert "input evidence: off (CalledProcessError: " in capsys.readouterr().out
+    for command, env in selected_stages(recorder):
+        assert command[-1] == "tests/test_x.py" and verifier.inputs.OUTCOMES not in env
+    assert json.loads(report.read_text(encoding="utf-8"))["inputs"] is None
+
+
+@pytest.mark.integration
+def test_a_stage_whose_files_cannot_be_listed_runs_them_all(candidate: Candidate,
+                                                            capsys: pytest.CaptureFixture[str]) -> None:
+    candidate.advance()
+    stored_input_record(candidate.root)
+    recorder = Recorder()
+    project = root_form(candidate.root, runner=FAILING_RUNNER, test_paths=lambda paths: ["tests/test_x.py"])
+    assert verifier.main(project, candidate.env(), recorder) == 0
+    out = capsys.readouterr().out
+    for stage in project.stage_list():
+        assert f"{stage.name}: input evidence not read: its files could not be listed" in out, out
+    assert "REUSED" not in out
+    assert all(command[-1] == "tests/test_x.py" for command, _env in selected_stages(recorder))
+
+
+@pytest.mark.integration
+def test_a_toolchain_other_than_python_runs_its_stages_with_no_input_evidence(
+        candidate: Candidate, no_outer_outcomes: None, capsys: pytest.CaptureFixture[str]) -> None:
+    candidate.advance()
+    stored_input_record(candidate.root)
+    recorder = Recorder()
+    other = dataclasses.replace(python_toolchain.TOOLCHAIN, name="other")
+    project = root_form(candidate.root, toolchain=other, runner=FAILING_RUNNER,
+                        test_paths=lambda paths: ["tests/test_x.py"])
+    assert verifier.main(project, candidate.env(), recorder) == 0
+    out = capsys.readouterr().out
+    assert "input evidence" not in out and "REUSED" not in out, out
+    for command, env in selected_stages(recorder):
+        assert command[-1] == "tests/test_x.py" and verifier.inputs.OUTCOMES not in env
 
 
 # the real path: `atc integrate` to the exit code

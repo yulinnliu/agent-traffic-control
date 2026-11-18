@@ -748,6 +748,62 @@ def test_a_sharded_baseline_records_what_a_single_process_one_does(lines_export:
     assert verdicts(sharded) == verdicts(single), sharded.stdout + single.stdout
 
 
+@pytest.mark.integration
+def test_a_baseline_in_the_pool_takes_one_worker_per_eight_collected_tests(lines_export: Export,
+                                                                           tmp_path: Path) -> None:
+    run = lines_export.run(tmp_path, BY_LINES[:1], "--lines")
+    assert run.returncode == 0, run.stdout + run.stderr
+    shown = re.search(r"^workers: (\d+)(?: of (\d+))? \((.*)\)$", run.stdout, re.MULTILINE)
+    assert shown is not None, run.stdout
+    pool = int(shown.group(2) or 0)
+    if pool <= workers.FLOOR:
+        pytest.skip(f"a pool of {pool} workers holds no more than three tests ask for")
+    # three collected tests ask for the floor of two workers, not the whole pool
+    assert int(shown.group(1)) <= workers.FLOOR and "3 tests collected, 8 per worker" in shown.group(3), run.stdout
+
+
+# A test that fails in a pytest-xdist worker unless the run distributes by loadgroup.
+LOADGROUP_TEST = ("import os\n\n\n"
+                  "def test_loadgroup(request):\n"
+                  "    if os.environ.get('PYTEST_XDIST_WORKER'):\n"
+                  "        assert request.config.getoption('loadgroup')\n")
+
+
+@pytest.mark.integration
+def test_a_sharded_baseline_distributes_its_tests_by_loadgroup(export: Export, tmp_path: Path) -> None:
+    (export.place / "tree/tests/test_loadgroup.py").write_text(LOADGROUP_TEST, encoding="utf-8")
+    run = export.run(tmp_path, [KILLED])
+    count = int(re.search(r"^workers: (\d+)", run.stdout, re.MULTILINE).group(1))
+    assert count >= 2, run.stdout
+    assert mutant_lines(run)[0].startswith("BASELINE-OK 2 passed"), run.stdout + run.stderr
+
+
+@pytest.mark.integration
+def test_a_baseline_that_recorded_no_lines_is_kept_as_such_and_reused(export: Export, tmp_path: Path) -> None:
+    first = export.run(tmp_path, [KILLED])
+    assert first.returncode == 0, first.stdout + first.stderr
+    stored = json.loads((export.place / testrun.BASELINE_RECORD).read_text(encoding="utf-8"))
+    assert stored["recorded"] is False and stored["lines"] is False
+    second = export.run(tmp_path, [KILLED])
+    assert mutant_lines(second)[0].startswith("BASELINE-OK reused "), second.stdout + second.stderr
+    assert testrun.NOT_REUSED not in second.stdout
+
+
+@pytest.mark.integration
+def test_a_lent_record_that_does_not_read_back_is_cleared_before_the_baseline(lines_export: Export,
+                                                                               tmp_path: Path) -> None:
+    lines_export.run(tmp_path, BY_LINES, "--lines")
+    # The lender's key still matches, but its line records no longer read back: no process started the recorder.
+    for started in (lines_export.place / "lines" / "data").glob(f"{lines.STARTED}*"):
+        started.unlink()
+    borrower = Export(lines_export.worktree, lines_export.sha, lines_export.place.parent / "m2")
+    shutil.copytree(lines_export.place / "tree", borrower.place / "tree")
+    run = borrower.run(tmp_path, BY_LINES, "--lines")
+    shown = mutant_lines(run)
+    assert shown[0].startswith("BASELINE-OK 3 passed") and lines.NOT_RECORDED not in run.stdout, run.stdout
+    assert shown[2] == "NOT_COVERED U unused -> no baseline test runs src/fixture_pkg/__init__.py:6", run.stdout
+
+
 @pytest.mark.unit
 def test_a_baseline_is_reused_only_on_its_whole_key(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     key = {"inputs": "inputs a", "tests": ["tests"], "lines": False, "files": ["a.py", "b.py"], "recorder": "r",

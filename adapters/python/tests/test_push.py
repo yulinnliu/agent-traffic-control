@@ -460,6 +460,30 @@ def test_the_earlier_off_main_line_keeps_a_commit_two_record(ws: Path) -> None:
     assert owners(gp.push_listing(ws))[0] == (c1, c2, False, "graph")
 
 
+def test_a_commit_stays_with_its_first_line_while_an_unrecorded_one_keeps_the_claims_going(ws: Path) -> None:
+    """The stray commit leaves the listing short of an owner for every commit, so each later line still claims."""
+    base, c1, c2, c3 = reset_below(ws)
+    stray = commit(ws, "c.txt", "stray\n")
+    other = "e" * 40
+    write_ledger(ws, line(other, base, commits=[c1]), line(c2, base), line(c3, c1))
+    assert owners(gp.push_listing(ws)) == [(c1, other, False, "line"), (c3, c3, True, "graph"),
+                                           (stray, None, None, None)]
+    write_ledger(ws, line(c2, base), line(MISSING, base, commits=[c1]), line(c3, base, task="ATC-0002"))
+    assert owners(gp.push_listing(ws)) == [(c1, c3, True, "graph"), (c3, c3, True, "graph"),
+                                           (stray, None, None, None)]
+
+
+def test_a_recorded_commit_outside_the_range_never_counts_toward_every_commit_owned(
+        ws: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """c2 is off main: claiming it would leave as many owners as commits and stop before the line that records c1."""
+    base, c1, c2, c3 = reset_below(ws)
+    other = "e" * 40
+    write_ledger(ws, line(c3, c1), line(MISSING, base, commits=[c2]), line(other, base, commits=[c1]))
+    assert owners(gp.push_listing(ws)) == [(c1, other, False, "line"), (c3, c3, True, "graph")]
+    assert push.main(["root", "--check"], root=ws) == 0
+    assert capsys.readouterr().out.splitlines()[0].startswith("CHECK root")
+
+
 def test_an_off_main_binding_names_every_task(ws: Path) -> None:
     base, c1, c2, c3 = reset_below(ws)
     write_ledger(ws, line(c2, base, task="ATC-0001"), line(c2, base, task="ATC-0003"), line(c3, c1))
