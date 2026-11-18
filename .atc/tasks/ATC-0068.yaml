@@ -1,0 +1,22 @@
+task_id: ATC-0068
+title: 'Docs split by audience: ATC-maintainer content moves to docs/development/'
+repository: yulinnliu/agent-traffic-control
+base_sha: 66d80a3cac2794abfc64583a0aa5bacb5039b4c5
+scope: 'The user-facing docs (for people who run `atc` in a workspace and its projects) carry ATC-maintainer internals that belong in `docs/development/`, which ATC-0064 created with RELEASING.md. This task moves them, design first. - **Design step first** (atc-review "Writer: the design step"), committed as docs/design/ATC-<this task>.md, reviewed before any move: - a per-section audience inventory of docs/TESTKIT.md, docs/ATC_HOME.md and docs/ENFORCEMENT.md: each section user-facing, maintainer-only or mixed, with the proposed target (stays, moves to a named file under docs/development/, or splits). Start with TESTKIT.md''s internals (Integration verifier, Input evidence, Private desktop, CI runner); judge ATC_HOME.md and ENFORCEMENT.md section by section. docs/design/ stays where it is. - every citer of each section that would move: code and its help text and refusal hints, tests, shared/governance, shared skills and overlays, the docs site config (Zensical nav and any page list), other
+  docs, and each registered project''s vendored copy (`git grep` in each project checkout under projects/, read-only). - how each citer is updated, and which citers are outside this repository''s reach (a project''s vendored copy updates through the next release''s sync). - **Skill check.** List the places where the atc skills restate CLI flags that belong in `-h` (a skill names the step, the help gives the flags), with a proposed rewording; apply them in the implementation step. - **Implementation** after the design''s review and the Owner''s rulings: the moves, every in-repo citer updated, the site nav, `atc-maintain sync --root` and `validate` after a skill change. - **Governance.** A move that would change a citation inside shared/governance/ is listed in the design and stops for the Owner''s explicit authorization; no edit there without it.'
+tests: standard
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: 66d80a3cac2794abfc64583a0aa5bacb5039b4c5
+branch: dsh+ATC-0068
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
+decisions:
+- 'Owner 11-17: docs/development/ is the maintainer doc home (created by ATC-0064); WORKFLOW.md stays for atc users.'
+- 'Owner 11-18: P5 runs now, before the next release; the release timing is the Owner''s.'
+- Design step first, with the audience inventory and every citer, before any move.
+- No version bump; no change to shared/governance/ without the Owner's explicit authorization for this topic.
