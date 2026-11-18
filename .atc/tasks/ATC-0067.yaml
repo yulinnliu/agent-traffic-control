@@ -1,0 +1,20 @@
+task_id: ATC-0067
+title: atc test ID -- ARGS runs exactly the given pytest arguments, with no related selection
+repository: yulinnliu/agent-traffic-control
+base_sha: de76425852e0e91a6f882a4a815d9832d719e580
+scope: 'Today `atc test ID -- <files>` without `--all` still passes `--related <base_sha>` (adapters/python/src/atc_cli/scripts/task_tests.py, the `elif not args.all and task.base` branch), so testkit''s testrun prepends the related tests to the arguments and, when none are related, prints `NO_TESTS no test selected` and exits 0 without running the named files (adapters/python/atc-testkit/src/atc_testkit/testrun.py, the `if paths is not None` block). Hami-Coordinator hit this twice on HQT-0048 (atc 0.8.0 / testkit 0.15.0). It contradicts the atc-coordinator brief ("`-- <files>` for an explicit list") and docs/design/ATC-0063.md § 4.2 (`atc test ID -- ARGS` → selection `explicit`, reason `pytest arguments`). - **Explicit run.** When pytest arguments follow `--`, `atc test ID` runs no related selection: pytest gets exactly those arguments, the run''s stage-time record says `selection: explicit`, `selection_reason: pytest arguments`, and its label tells it apart from `related` and `all`. `--all
+  -- ARGS` behaves the same. With no arguments after `--` nothing changes: the related selection, `NO_TESTS` when none, or `--all`. - **Lint unchanged.** The lint stage still runs over the files changed since the task''s `base_sha` first. - **Unchanged elsewhere.** `--mutants FILE -- TEST...`, `--candidate`, `--lint`, the verifier and the gate keep their behaviour. - **Documentation.** docs/TESTKIT.md § Commands (`atc test ID`, step 2 and wherever the pytest arguments are described), the `atc test` help text, and the release notes of the next release if one is already scaffolded (otherwise the step report names the line the notes need). Check atc-review and atc-coordinator text that describes `-- <files>` and keep it consistent; a shared skill change is followed by `atc-maintain sync --root` and `validate` from the worktree.'
+tests: strict
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: de76425852e0e91a6f882a4a815d9832d719e580
+branch: dsh+ATC-0067
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
+decisions:
+- 'Owner 11-18 「改 tool」: fix the tool so `-- ARGS` is an explicit run (option A), not a documentation-only workaround of `--all -- <files>`.'
+- No version bump; the change ships in the next release. No governance change.
