@@ -408,6 +408,17 @@ def test_a_run_without_its_scratch_option_prints_the_usage() -> None:
     assert run.returncode == 2 and "--scratch" in run.stderr
 
 
+@pytest.mark.unit
+@pytest.mark.parametrize("extra", [["--lint-only"], ["--lint", "--lint-only", "--", "tests"],
+                                   ["--lint", "--lint-only", "--related", "HEAD"]],
+                         ids=["without-lint", "with-tests", "with-related"])
+def test_lint_only_takes_lint_and_no_tests(extra: list[str], capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as stopped:
+        testrun.run(["--scratch", "s", "--task", TASK, *extra], {})
+    assert stopped.value.code == 2
+    assert "--lint-only takes --lint and no tests" in capsys.readouterr().err
+
+
 # the mutant run
 
 
