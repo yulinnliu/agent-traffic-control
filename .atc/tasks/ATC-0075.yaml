@@ -1,0 +1,21 @@
+task_id: ATC-0075
+title: Sync moves a project's lock to the installed release, release atc 0.10.1
+repository: yulinnliu/agent-traffic-control
+base_sha: 2e748def8ed4c0b8cb1dc1c7f53f4e9c48f0c175
+scope: 'After installing atc 0.10.0, `atc doctor` reports `RELEASE_MISMATCH` for every registered project (hami-quant, hami-quant-trading, my-heartopia-tools, ria-project, rin-vn: "pins v0.9.0 (38432a7924a6) in .atc/atc.lock; the installed atc is v0.10.0 (2e748def8ed4); task commands refuse; fix: atc sync <project> moves it to the installed release"), while `atc sync --check` reports every project `current` and so never moves the lock. Cause: `sync_project.lock_plan` (adapters/python/src/atc_cli/scripts/sync_project.py:218) moves the lock only when sync changes a file it writes or the source changes, but `release_pin.mismatch` (release_pin.py:186) requires the pin to equal the installed release commit. 0.10.0 is the first release that changes no synced file, so no project can reach the installed release and every project''s task commands refuse. Fix: `lock_plan` also updates the lock when its revision differs from the sync target revision (never moving a project back from a pin ahead of
+  the installed release, as `release_pin.ahead` states), so `atc sync <project>` brings a project whose files are current to the installed release and `atc sync --check` reports it. Tests reproduce the 0.10.0 case: a release that changes no synced file, a project pinned to the previous release, then `sync --check` reports the lock update, `sync` writes it, and doctor''s pin check passes. Check every doc and conformance text that describes when the lock moves (docs/LAYOUT.md, docs/TESTKIT.md § Adoption step, docs/WORKFLOW.md, shared/conformance/CLI.md) and state the final rule. Then release atc 0.10.1 in the same task, following `docs/development/RELEASING.md`: `uv run --locked atc-maintain release prepare 0.10.1` (atc-testkit stays 0.17.0 unless the fix touches it), notes in `docs/releases/v0.10.1.md` naming the defect, its symptom and that projects re-sync on 0.10.1 to get one lock-only sync commit each.'
+tests: strict
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: 2e748def8ed4c0b8cb1dc1c7f53f4e9c48f0c175
+branch: claude+ATC-0075
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
+decisions:
+- 'Owner 2026-11-20 「sync 一律移 lock」: sync moves the lock to the target revision whenever the revision differs, even with no file change.'
+- 'Owner 2026-11-20 「維持 0.10.0，等 0.10.1」: 0.10.0 stays installed; the fix ships as atc 0.10.1.'
+- Release notes describe the final state and what a user must change; they claim nothing the code does not do.
