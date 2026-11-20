@@ -68,7 +68,8 @@ file again (`docs/TESTKIT.md` § Input evidence).
 
 - **Record.** `<git-common-dir>/atc/verification-evidence/inputs/<name>-<key>.json`,
   schema `atc-input-evidence/1`, written once and never changed:
-  `identity`, `inputs` (the digest), `excluded` (the SHA-256 of the run's
+  `key` (the same value as `<key>` in the file name), `identity`, `inputs`
+  (the digest), `excluded` (the SHA-256 of the run's
   excluded list, which is stored once as `inputs/excluded/<hash>.json`),
   `ran_on` (the commit), `result` `PASS` and `recorded_at`. `<name>` is a
   hash of the identity and `<key>` a hash of the identity and the digest.

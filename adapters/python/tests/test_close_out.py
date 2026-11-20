@@ -1,4 +1,4 @@
-"""`atc task close`: an integrated task's worktree and branch, scratches and reports (docs/TASKS.md § Close)."""
+"""`atc task close`: an integrated task's worktree and branch, scratches and reports (docs/TASKS.md § Close-out)."""
 from __future__ import annotations
 
 import json

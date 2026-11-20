@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""`atc task close`: a task's worktree and branch, scratches and report files (docs/TASKS.md § Close).
+"""`atc task close`: a task's worktree and branch, scratches and report files (docs/TASKS.md § Close-out).
 
 Rules: governance `DELIVERY.md` § Close-out. Report files are also read here for `atc integrate`, which takes
 the reviewed SHA from the newest PASS review.
