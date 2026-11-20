@@ -45,10 +45,14 @@ Each of these stops the task until it is resolved, and is reported to the
 Owner with what was observed:
 
 - **SHA mismatch.** The tip the writer reported, the SHA the verdict names
-  and the SHA the Owner's command names must be one SHA, or, after a rebase,
-  the command names the rebased tip whose `carried_over` names the
-  reviewed SHA; the `--json` check and the `integrations.jsonl` line must
-  show the full SHA the command names. Any other difference stops the task.
+  and the SHA the Owner's command names must be one SHA, and the `--json`
+  check and the `integrations.jsonl` line must show it in full. After a
+  rebase whose review carries over, the verdict and the command still name
+  the reviewed SHA and the writer reports the rebased tip: the check's
+  `carried_over` names the reviewed SHA as `carried_over_from` and the
+  reported tip as `rebased`, and the line's `reviewed` is the rebased tip and
+  its `carried_over_from` the reviewed SHA. Any other difference stops the
+  task.
 - **Incomplete verdict.** A verdict without its verdict token, its verified
   line or the integration instruction it says it carries stops the task. A
   truncated notification (a short note, a preview) is a pointer: obtain the
@@ -160,9 +164,12 @@ the map from task ID to session and nothing a record, Git or
      `atc integrate <task> --sha <reviewed SHA> --check --json`, which takes
      the rebased tip from the task's branch, as governance `GIT_WORKFLOW.md`
      § After formal review states. When the
-     carry-over holds, give the Owner the command for the rebased tip,
-     naming the carried-from SHA and the `main` commits in between; on
-     `CARRY_OVER_REFUSED`, the reviewer re-reviews the rebased tip first.
+     carry-over holds, give the Owner the command for the reviewed SHA,
+     naming the rebased tip it resolves to and the `main` commits in
+     between; a command naming the rebased tip integrates it as a direct
+     approval and records no `carried_over_from`. On `CARRY_OVER_REFUSED`,
+     the reviewer re-reviews the rebased tip first, and its PASS names that
+     tip as the reviewed SHA.
    - On any other `refusal`, follow its `hint` (`GIT_WORKFLOW.md`
      § Command results); a `hint` that names a re-review goes back to the
      reviewer before the Owner gets a command.
@@ -171,9 +178,11 @@ the map from task ID to session and nothing a record, Git or
    writer. A reply that the command ran is not its completion: at your next
    turn read Git as § Owner-run commands states. Then:
    - Done: compare the line. `FF` matches when `candidate_sha` equals the
-     reviewed SHA; `NO_FF` when the candidate's second parent is the
-     reviewed SHA and its first parent `main_before`. Go on to step 6 in
-     the same turn.
+     line's `reviewed`; `NO_FF` when the candidate's second parent is
+     `reviewed` and its first parent `main_before`. `reviewed` is the
+     reviewed SHA, or after a carry-over the rebased tip the writer
+     reported, with `carried_over_from` the reviewed SHA. Go on to step 6
+     in the same turn.
    - Not run, `main` unchanged: the command waits on the Owner; keep it
      ready to copy and ask for nothing else. A stop the Owner shows you
      follows its token's `hint`; a corrected command for the same SHA needs

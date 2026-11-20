@@ -117,7 +117,11 @@ atc integrate <ID> --sha <sha>
 The ID names the repository by its prefix and the branch by the record's
 `branch`; without `--sha` the newest PASS review report names the reviewed
 SHA. A branch rebased onto `main` after the review carries the approval over
-when every patch-id matches. The check's `verification_reuse` tells the Owner
+when every patch-id matches; the command still names the reviewed SHA, and
+`atc integrate` takes the rebased tip from the record's branch and records it
+as `reviewed`, with the reviewed SHA as `carried_over_from`. A command naming
+the rebased tip integrates it as a direct approval without
+`carried_over_from`. The check's `verification_reuse` tells the Owner
 how long it takes: `REUSED` takes seconds, any other value runs the verifier.
 Only the Owner runs it; the hard-deny policy refuses it to an agent except
 with `--check`.
@@ -131,8 +135,9 @@ lines while it runs (`TESTKIT.md` § Running and logging). Stdout keeps the
 verdict lines and the `--json` object; `--check` prints no step line.
 
 The coordinator reads completion from Git at its next turn: the task's line
-in `<git common dir>/atc/integrations.jsonl` with the reviewed SHA, and
-`main` at or past its `candidate_sha`. A stop the Owner shows follows its
+in `<git common dir>/atc/integrations.jsonl` with the reviewed SHA as
+`reviewed`, or after a carry-over as `carried_over_from` with the rebased tip
+as `reviewed`, and `main` at or past its `candidate_sha`. A stop the Owner shows follows its
 `hint`; `VERIFICATION_FAILED` names the failing tests in the verifier's log,
 and the fix goes back to review.
 

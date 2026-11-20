@@ -261,9 +261,12 @@ and `atc integrate <task>` takes the reviewed SHA from the newest PASS file.
   after `switch main` assesses a dirty checkout and `FF` or `NO_FF`.
 
   When `main` has moved, the topic follows governance `GIT_WORKFLOW.md`
-  § Integrate and § After formal review, and the Owner gets the command again
-  for the SHA being integrated: the rebased tip, or for `NO_FF` the reviewed
-  SHA.
+  § Integrate and § After formal review, and the Owner's command still names
+  the reviewed SHA, for `NO_FF` and for a rebase whose review carries over
+  alike. After such a rebase `atc integrate` takes the rebased tip from the
+  task's branch and records it as `reviewed`, with the reviewed SHA as
+  `carried_over_from`; a command naming the rebased tip integrates it as a
+  direct approval and records no `carried_over_from`.
 
   The instruction is the verdict's last line, every value filled in:
   `atc integrate <task> --sha <SHA>`, with the task record ID, which names the
@@ -288,8 +291,9 @@ writer runs neither and is sent neither.
 
 - When the holder reports that `main` moved and the check's `hint` names a
   rebase, rebase the topic branch onto `main` and give the holder the
-  rebased tip; `CARRY_OVER_REFUSED` sends that tip to the reviewer for a
-  fresh review.
+  rebased tip; the Owner's command keeps naming the reviewed SHA ("Reviewer:
+  the verdict block"). `CARRY_OVER_REFUSED` sends that tip to the reviewer
+  for a fresh review.
 - When the verdict or the holder sends work back, the fix goes in new
   commits, or after a FAIL verdict as "Writer: the step report" allows, and
   in a new step report.
