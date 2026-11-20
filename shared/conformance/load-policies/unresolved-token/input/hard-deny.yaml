@@ -1,0 +1,10 @@
+version: 1
+capabilities:
+  deny: []
+filesystem:
+  deny:
+    - "**/.env"
+    - glob: "${DATA}/**"
+      modes: [write]
+commands:
+  deny: []

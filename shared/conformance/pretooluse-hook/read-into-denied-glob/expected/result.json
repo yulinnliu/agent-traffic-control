@@ -1,0 +1,7 @@
+{
+  "exit_code": 0,
+  "output_contains": [
+    "\"permissionDecision\": \"deny\"",
+    "matches hard-deny rule `filesystem.deny[1]` (projects.p)"
+  ]
+}

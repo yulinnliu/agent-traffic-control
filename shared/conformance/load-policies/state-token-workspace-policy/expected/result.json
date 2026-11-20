@@ -1,0 +1,1 @@
+{"exit_code": 1, "output_contains": ["hard-deny.yaml: unresolved-token: filesystem.deny[1] \"${state}/demo/**\": only a project policy's glob may start with ${state}/"]}

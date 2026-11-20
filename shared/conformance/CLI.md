@@ -43,7 +43,7 @@ and the reinstall command.
 An `atc` installed from a release tag, whose `direct_url.json` (PEP 610)
 records the installed commit, stops a task-flow command
 (`task create|update|resume|close`, `test ID` without `--clean`, `--list` or
-`--private`, `integrate`, `push`, with or without `--check`) on a registered
+`--private`, `policy render`, `integrate`, `push`, with or without `--check`) on a registered
 project whose `.atc/atc.lock` does not pin that release's commit, with
 `STOP RELEASE_MISMATCH` and a hint: `atc sync <project>`, which then targets
 the installed release and moves the pin to it even when no synced file
@@ -57,7 +57,7 @@ workspace root is never compared, and an install that records no commit
 
 | Group | Commands |
 | --- | --- |
-| Task lifecycle | `task` (`create`, `update`, `list`, `resume`, `close`), `test`, `integrate`, `push` |
+| Task lifecycle | `task` (`create`, `update`, `list`, `resume`, `close`), `test`, `policy` (`render`), `integrate`, `push` |
 | Workspace | `init`, `add`, `remove`, `sync`, `doctor`, `guard`, `checkout`, `hook` |
 
 `atc hook` is the command a PreToolUse hook entry runs: it reads no

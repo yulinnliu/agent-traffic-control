@@ -1,0 +1,10 @@
+version: 1
+capabilities:
+  deny: []
+filesystem:
+  deny:
+    - "**/.env"
+commands:
+  deny:
+    - id: git-push-force
+      argv_prefix: [git, push, --force]

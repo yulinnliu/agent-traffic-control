@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "commands": [],
+  "filesystem": [
+    {
+      "id": "filesystem.deny[0]",
+      "glob": "**/.env",
+      "modes": [
+        "read",
+        "edit",
+        "write"
+      ],
+      "scope": [
+        {
+          "base": "c:\\ws\\repo",
+          "depth": 0
+        }
+      ],
+      "reason": "Environment files hold credentials.",
+      "source": "projects.p"
+    },
+    {
+      "id": "filesystem.deny[1]",
+      "glob": "c:/ws/state/p-data/demo/**",
+      "modes": [
+        "read",
+        "edit",
+        "write"
+      ],
+      "scope": null,
+      "reason": "An agent reading one would authorize itself.",
+      "source": "projects.p"
+    },
+    {
+      "id": "filesystem.deny[2]",
+      "glob": "c:/ws/state/p-data/imports/**",
+      "modes": [
+        "edit",
+        "write"
+      ],
+      "scope": null,
+      "reason": "Written only by the Owner's commands.",
+      "source": "projects.p"
+    }
+  ],
+  "worktrees": [
+    "c:\\ws\\worktrees"
+  ],
+  "write_roots": [
+    "c:\\ws"
+  ],
+  "protected": [
+    "c:\\home\\.atc\\enforcement"
+  ]
+}

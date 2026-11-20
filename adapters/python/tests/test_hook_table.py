@@ -798,7 +798,7 @@ def test_install_writes_the_baseline_and_replaces_the_retired_guards(workspace, 
     assert settings["model"] == "x" and settings["hooks"]["UserPromptSubmit"]
     assert settings["hooks"]["PreToolUse"] == [
         {"matcher": "Edit|Write", "hooks": [{"type": "command", "command": "bash keep.sh"}]},
-        {"matcher": "Bash|PowerShell|Edit|Write|NotebookEdit", "hooks": [{
+        {"matcher": "Bash|PowerShell|Edit|Write|NotebookEdit|Read|Grep|Glob", "hooks": [{
             "type": "command", "command": command, "timeout": 10, "onFailure": "block"}]},
     ]
     codex = json.loads((home / ".codex" / "hooks.json").read_text(encoding="utf-8"))
@@ -1030,10 +1030,56 @@ def test_live_drift_compares_the_composed_table(workspace, home, capsys):
 @pytest.mark.parametrize("args, message", [
     (["--install-hooks"], "unrecognized arguments: --install-hooks"),
     (["--workspace", "w.yaml", "--live-hook-table", "t.json"], "require --check"),
-    (["--policies", "p"], "go together"),
-    ([], "are required unless"),
+    (["--policies", "p"], "unrecognized arguments: --policies"),
+    (["--hook-out", "d"], "require --workspace"),
+    ([], "give --hook-out DIR"),
 ])
 def test_usage_errors(args, message, capsys):
     with pytest.raises(SystemExit) as raised:
         ge.main(args)
     assert raised.value.code == 2 and message in capsys.readouterr().err
+
+
+# The state token: a project policy's `${state}/` glob resolves to that project's state root in the map
+
+
+STATE_POLICY = PROJECT_POLICY.replace('''    - glob: "~/.ssh/**"
+''', '''    - glob: "~/.ssh/**"
+    - glob: "${state}/demo/**"
+      reason: Owner-only records.
+    - glob: "${state}/imports/**"
+      modes: [edit, write]
+''')
+
+
+def test_a_state_glob_resolves_to_the_projects_state_root(workspace, home):
+    commit(workspace.parent / "projects" / "p", {"policies/hard-deny.yaml": STATE_POLICY})
+    table = compose(workspace, home)
+    root = norm(workspace.parent / "state" / "p-data").replace("\\", "/")
+    rules = {r["glob"]: r for r in table["filesystem"] if r["source"] == "projects.p"}
+    demo, imports = rules[root + "/demo/**"], rules[root + "/imports/**"]
+    assert (demo["modes"], demo["scope"]) == (["read", "edit", "write"], None)
+    assert (imports["modes"], imports["scope"]) == (["edit", "write"], None)
+    read = {"tool_name": "Read", "tool_input": {"file_path": str(workspace.parent / "state/p-data/demo/a.json")},
+            "cwd": CWD}
+    assert "filesystem.deny[2]" in hook.decide(read, table, "claude")
+    read["tool_input"]["file_path"] = str(workspace.parent / "state/p-data/imports/a.json")
+    assert hook.decide(read, table, "claude") is None
+
+
+def test_a_state_glob_of_a_project_without_state_adds_no_rule(workspace, home):
+    workspace.write_text(workspace.read_text(encoding="utf-8").replace("    state: state/p-data\n", ""),
+                         encoding="utf-8")
+    commit(workspace.parent / "projects" / "p", {"policies/hard-deny.yaml": STATE_POLICY})
+    table = compose(workspace, home)
+    assert not [r for r in table["filesystem"] if "/demo/" in r["glob"] or "${" in r["glob"]]
+
+
+def test_a_state_glob_in_the_workspace_policy_fails_closed(workspace, home):
+    policy = workspace.parent / "policies" / "hard-deny.yaml"
+    policy.write_text(ROOT_POLICY.replace('    - glob: "~/.ssh/**"\n', '    - glob: "${state}/x/**"\n'),
+                      encoding="utf-8")
+    with pytest.raises(hook_state.Failure) as failure:
+        compose(workspace, home)
+    assert failure.value.token == "POLICY_INVALID"
+    assert "only a project policy's glob may start with ${state}/" in failure.value.detail

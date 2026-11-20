@@ -1,1 +1,1 @@
-{"exit_code": 1, "output_contains": ["DRIFT live-claude (", "live-codex (", "no single atc hard-deny block", "STOP DRIFT: ", "hint: regenerate"]}
+{"exit_code": 1, "output_contains": ["DRIFT 2 files", "  .claude/settings.json differs from policies/hard-deny.yaml", "  scripts/git-hooks/pre-commit differs from policies/hard-deny.yaml"]}

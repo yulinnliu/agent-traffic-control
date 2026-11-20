@@ -6,8 +6,8 @@ when it installed `atc` from a tag. An editable development install (`uv run atc
 install without a recorded commit have no installed release to compare. The workspace root is never compared: it
 pins no revision, its `main` is the governance itself. Guarded are the commands that run the task flow under the
 project's contract, their `--check` rehearsals included: `task create`, `update`, `resume` and `close`, `test ID`
-(but `--clean`, `--list` and `--private`), `integrate` and `push`. Everything else stays usable: `doctor`,
-`guard`, `task list` read; `sync` is the fix; `init`, `add`, `remove` manage the map.
+(but `--clean`, `--list` and `--private`), `policy render`, `integrate` and `push`. Everything else stays usable:
+`doctor`, `guard`, `task list` read; `sync` is the fix; `init`, `add`, `remove` manage the map.
 """
 
 from __future__ import annotations
@@ -116,10 +116,13 @@ def guarded(command: str, rest: list[str]) -> bool:
         return bool(head) and head[0] in TASK_GUARDED
     if command == "test":
         return not any(arg in TEST_EXEMPT for arg in head)
+    if command == "policy":
+        return head[:1] == ["render"]
     return command in ("integrate", "push")
 
 
-PARSERS = {"task": "task_records", "test": "task_tests", "integrate": "git_integrate", "push": "push"}
+PARSERS = {"task": "task_records", "test": "task_tests", "policy": "policy_render", "integrate": "git_integrate",
+           "push": "push"}
 
 
 def parsed(command: str, head: list[str]):

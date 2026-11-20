@@ -1,0 +1,1 @@
+{"exit_code": 1, "output_contains": ["STOP POLICY_INVALID: 1 problems", "unresolved-token: filesystem.deny[1] \"data/${state}/**\": only a project policy's glob may start with ${state}/"]}

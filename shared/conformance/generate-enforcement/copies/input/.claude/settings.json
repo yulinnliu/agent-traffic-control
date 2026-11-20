@@ -1,0 +1,13 @@
+﻿{
+    "includeCoAuthoredBy": false,
+    "permissions": {
+        "allow": [
+            "Bash(git status:*)"
+        ],
+        "deny": [
+            "Bash(rm:*)"
+        ],
+        "defaultMode": "default"
+    },
+    "hooks": {}
+}

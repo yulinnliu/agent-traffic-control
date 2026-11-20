@@ -1,0 +1,16 @@
+{
+  "includeCoAuthoredBy": false,
+  "permissions": {
+    "allow": [
+      "Bash(git status:*)"
+    ],
+    "deny": [
+      "Bash(git push --force:*)",
+      "PowerShell(git push --force *)",
+      "Read(**/.env)",
+      "Edit(**/.env)"
+    ],
+    "defaultMode": "default"
+  },
+  "hooks": {}
+}

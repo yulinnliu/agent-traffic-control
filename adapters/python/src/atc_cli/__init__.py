@@ -6,6 +6,7 @@ Agent Traffic Control: governed task lifecycle for agent-written changes.
 Task lifecycle:
   task        create / update / list / resume / close a task
   test        run a task's tests, mutants or integration candidate
+  policy      render a project task's enforcement files from its hard-deny policy
   integrate   fast-forward main to a task's reviewed tip
   push        push integrated main to origin after checking every commit
 
@@ -38,6 +39,7 @@ SCRIPTS = Path(__file__).resolve().parent / "scripts"
 COMMANDS = {
     "task": "task_records",
     "test": "task_tests",
+    "policy": "policy_render",
     "integrate": "git_integrate",
     "push": "push",
     "init": "bootstrap",
@@ -62,7 +64,7 @@ GUARD_EXEMPT = ("doctor",)
 # Commands that act on the working directory when no workspace is found: `init` creates one there, `doctor`
 # reports that it is missing.
 ROOTLESS = ("init", "doctor")
-GROUPED = ("task",)
+GROUPED = ("task", "policy")
 # The checkout the guard reads; None guards the resolved root. Tests name one.
 GUARDED_CHECKOUT: Path | None = None
 

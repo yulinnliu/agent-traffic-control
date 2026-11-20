@@ -812,44 +812,40 @@ def canonical_frontmatter(source: Path) -> dict[str, dict]:
     return canonical
 
 
-def check_project_enforcement(project_path: Path, label: str) -> None:
-    """A project with policies/hard-deny.yaml commits generated/enforcement/ rendered from it."""
+def check_project_enforcement(project_path: Path, label: str, name: str) -> None:
+    """A project with policies/hard-deny.yaml commits generated/enforcement/ and its copies rendered from it
+    (`atc policy render`)."""
     if not (project_path / "policies" / "hard-deny.yaml").is_file():
         return
-    import generate_enforcement
-    import policies
+    import policy_render
+    from cli_conventions import Refusal
     try:
-        hard = policies.load(project_path / "policies")["hard-deny"]
-    except policies.PolicyError as exc:
+        drift = policy_render.render(project_path, check=True)
+    except policy_render.Problems as exc:
         for problem in exc.problems:
             fail(f"{label}: {problem}")
         return
-    problems = generate_enforcement.unresolved_tokens(hard)
-    for problem in problems:
-        fail(f"{label}: {problem}")
-    if problems:
+    except Refusal as refusal:
+        fail(f"{label}: {refusal.detail}")
         return
-    drift = generate_enforcement.drift(generate_enforcement.render(hard), project_path / "generated" / "enforcement")
     if drift:
-        fail(f"{label}: generated/enforcement/ differs from policies/hard-deny.yaml: {', '.join(drift)} — run atc-maintain guard")
+        fail(f"{label}: {', '.join(drift)}: not the render of policies/hard-deny.yaml — run atc policy render "
+             f"<task ID> in a task for {name}")
 
 
-def report_machine_local(project_path: Path, label: str, workspace_yaml: Path) -> None:
-    """Report, never fail: `.claude/settings.local.json` carries the state-root deny `atc-maintain guard` renders."""
-    import generate_enforcement
-    try:
-        roots = generate_enforcement.state_roots(workspace_yaml)
-    except ValueError:
-        return  # load_and_check_workspace_yaml already failed on workspace_root
-    if not roots:
+def report_state_rules(project_path: Path, label: str, name: str, entry: dict) -> None:
+    """Report, never fail: a `${state}/` rule of a project the map gives no state root, which the hook skips."""
+    if isinstance(entry.get("state"), str) and entry["state"].strip():
         return
-    target = project_path / ".claude" / "settings.local.json"
-    expected = json.loads(generate_enforcement.local_settings(roots))["permissions"]["deny"]
-    current = generate_enforcement.machine_local(generate_enforcement.deny_entries(target), keep=True)
-    if not current:
-        print(f"sync --check: {label}: machine-local state deny missing from .claude/settings.local.json; run atc-maintain guard --local-out and merge")
-    elif current != expected:
-        print(f"sync --check: {label}: machine-local state deny in .claude/settings.local.json differs from {workspace_yaml.name}; run atc-maintain guard --local-out and merge")
+    import policies
+    try:
+        hard = policies.load(project_path / "policies").get("hard-deny")
+    except (OSError, policies.PolicyError):
+        return  # check_project_enforcement fails on it
+    for index, (glob, _) in enumerate(policies.filesystem_rules(hard or {})):
+        if policies.is_state_glob(glob):
+            print(f"sync --check: {label}: filesystem.deny[{index}] names ${{state}} but workspace.yaml gives "
+                  f"{name} no state; the hook skips it")
 
 
 def report_hook(workspace_yaml: Path) -> None:
@@ -1090,8 +1086,8 @@ def check_projects(canonical: dict[str, dict], project_checkouts: dict[str, Path
             check_atc_dir(project_path, label=label, source=source)
             check_tracked(project_path, label, synced, source)
             check_project_integration_verifier(project_path, label=label)
-            check_project_enforcement(project_path, label=f"{label}.enforcement")
-            report_machine_local(project_path, f"{label}.machine-local", real_workspace_yaml)
+            check_project_enforcement(project_path, f"{label}.enforcement", name)
+            report_state_rules(project_path, f"{label}.enforcement", name, entry)
             check_adapter_tree(project_path, synced, label=label, required=baseline_skills(synced), source=source,
                                tool_dirs=selected_tools.get(name, TOOL_DIRS))
             prefixes[label] = check_task_records(project_path, label=label)

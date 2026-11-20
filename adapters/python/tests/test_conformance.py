@@ -25,7 +25,7 @@ SCRIPTS = Path(__file__).resolve().parents[1] / "src" / "atc_cli" / "scripts"
 TOOLS = {
     "validate-adapters": [str(SCRIPTS / "validate_workspace.py")],
     "load-policies": [str(SCRIPTS / "policies.py")],
-    "generate-enforcement": [str(SCRIPTS / "generate_enforcement.py")],
+    "generate-enforcement": [str(SCRIPTS / "policy_render.py")],
     "pretooluse-hook": [str(SCRIPTS / "pretooluse_hook.py")],
     "task-records": ["-m", "atc_cli.maintain", "task"],
     "root-resolution": ["-m", "atc_cli"],
@@ -74,10 +74,12 @@ def test_conformance_case(command: list[str], case: Path, tmp_path: Path) -> Non
     assert run.returncode == expected["exit_code"], output
     for needle in expected.get("output_contains", []):
         assert needle in output, f"missing {needle!r} in:\n{output}"
+    for needle in expected.get("output_lacks", []):
+        assert needle not in output, f"unexpected {needle!r} in:\n{output}"
     for golden in sorted((case / "expected").rglob("*")):
         if golden.is_dir() or golden.name == "result.json":
             continue
         rel = golden.relative_to(case / "expected")
-        produced = out_dir / rel
+        produced = (input_dir if expected.get("produced_in") == "input" else out_dir) / rel
         assert produced.is_file(), f"{rel} was not produced"
         assert _normalise(produced.read_text(encoding="utf-8")) == _normalise(golden.read_text(encoding="utf-8")), rel

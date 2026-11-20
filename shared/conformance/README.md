@@ -14,7 +14,8 @@ Each case is a directory:
   input/        files the tool reads: a repo skeleton, a policy file, an adapter
   args.json     command-line arguments as a JSON array
   expected/
-    result.json {"exit_code": int, "output_contains": [str, ...]}
+    result.json {"exit_code": int, "output_contains": [str, ...]}, optionally "output_lacks"
+                and "produced_in"
     ...         any files the tool must produce, compared after line-ending normalisation
 ```
 
@@ -23,17 +24,19 @@ that copy with `ATC_ROOT` unset, and
 substitutes three placeholders in `args.json`: `{input}` (the copy),
 `{out}` (an empty directory for produced files) and `{root}` (the checkout
 holding `shared/`). Every string in `output_contains` must occur in the
-combined stdout and stderr. Every file under `expected/` other than
-`result.json` must be produced at the same relative path under `{out}`.
+combined stdout and stderr, and no string in `output_lacks` may. Every file
+under `expected/` other than `result.json` must be produced at the same
+relative path under `{out}`, or under `{input}` when `produced_in` is
+`"input"` (a tool that writes into the tree it renders).
 Cases never depend on absolute paths, the host operating system or network
 access.
 
 | Tool | Directory | Verdict vocabulary |
 | --- | --- | --- |
 | adapter validation | `validate-adapters/` | `all checks passed`, or one line per failure |
-| policy loading | `load-policies/` | `OK <kinds>`, `PROBLEMS N found`, `schema-violation`, `preset-regrants-hard-deny`, `approval-overlaps-hard-deny`, `duplicate-glob` |
-| enforcement generation | `generate-enforcement/` | `GENERATED enforcement configs`, `CURRENT enforcement configs`, `DRIFT` (files and `live-claude`/`live-codex`/`live-hook`), `unresolved-token`, plus golden files per harness |
-| PreToolUse hook | `pretooluse-hook/` | a deny decision (`"permissionDecision": "deny"`) naming the rule, the refused path, the write target `the hook cannot resolve`, or `the PreToolUse hook could not decide`; the payload is `input/payload.json`, passed as `--payload` |
+| policy loading | `load-policies/` | `OK <kinds>`, `PROBLEMS N found`, `schema-violation`, `preset-regrants-hard-deny`, `approval-overlaps-hard-deny`, `duplicate-glob`, `unresolved-token` (a `${state}/` glob passes outside the workspace policy) |
+| enforcement rendering | `generate-enforcement/` | the tree form of `atc policy render` (`policy_render.py DIR [--check] [-v]`): `RENDERED N files`, `CURRENT enforcement files`, `DRIFT N files` with one line per file, `STOP POLICY_INVALID` with `unresolved-token`, plus golden files under `generated/enforcement/` and the copies |
+| PreToolUse hook | `pretooluse-hook/` | a deny decision (`"permissionDecision": "deny"`) naming the rule, the refused path, the write target `the hook cannot resolve`, or `the PreToolUse hook could not decide`, or no decision (`output_lacks`); the payload is `input/payload.json`, passed as `--payload` |
 | task record check | `task-records/` | `OK <dir>`, `invalid-yaml`, `schema-violation`, `id-mismatch`, `no-declaration`, `no-prefix-line`, `invalid-prefix`, `tests-none-undecided` |
 | root resolution | `root-resolution/` | `STOP WORKSPACE_NOT_FOUND` outside any workspace; a directory holding only `workspace.yaml` is one (`CLI.md` § Root resolution) |
 

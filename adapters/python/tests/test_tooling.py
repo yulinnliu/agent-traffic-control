@@ -538,9 +538,11 @@ def test_project_enforcement_must_match_its_policy(tmp_path: Path, tmp_path_fact
     assert sync_project.run("sync", [("demo", project)], root) == 0
     assert check_registered_projects(root, monkeypatch) == []
     write(project / "policies/hard-deny.yaml", "version: 1\ncapabilities:\n  deny: []\nfilesystem:\n  deny:\n    - \"**/.env\"\n")
-    assert any("projects.demo.enforcement: generated/enforcement/ differs" in f for f in check_registered_projects(root, monkeypatch))
-    import generate_enforcement
-    assert generate_enforcement.main(["--policies", str(project / "policies"), "--out", str(project / "generated/enforcement")]) == 0
+    assert any(f.startswith("projects.demo.enforcement: generated/enforcement/claude-code/settings.json, ")
+               and "run atc policy render <task ID> in a task for demo" in f
+               for f in check_registered_projects(root, monkeypatch))
+    import policy_render
+    assert policy_render.render(project, check=False)
     assert check_registered_projects(root, monkeypatch) == []
     write(project / "policies/hard-deny.yaml", "version: 1\ncapabilities:\n  deny: []\nfilesystem:\n  deny:\n    - \"${DATA}/**\"\n")
     assert any("unresolved-token" in f for f in check_registered_projects(root, monkeypatch))

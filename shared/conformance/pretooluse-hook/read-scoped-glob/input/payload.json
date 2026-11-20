@@ -1,0 +1,7 @@
+{
+  "tool_name": "Read",
+  "tool_input": {
+    "file_path": "C:\\ws\\repo\\sub\\.env"
+  },
+  "cwd": "C:\\ws\\repo"
+}

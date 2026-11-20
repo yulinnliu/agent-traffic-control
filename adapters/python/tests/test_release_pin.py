@@ -113,6 +113,8 @@ GUARDED = [
     ("test", "DEMO-0001"),
     ("test", "DEMO-0001", "--mutants", "m.json"),
     ("test", "DEMO-0001", "--candidate"),
+    ("policy", "render", "DEMO-0001"),
+    ("policy", "render", "DEMO-0001", "--check"),
     ("integrate", "DEMO-0001"),
     ("integrate", "DEMO-0001", "--check"),
     ("push", "demo"),
@@ -136,6 +138,7 @@ EXEMPT = [
     ("task", "list"), ("task", "list", "DEMO-0001"),
     ("test", "DEMO-0001", "--clean"), ("test", "--list", "DEMO-0001"), ("test", "--private", "--", "x"),
     ("task", "update", "DEMO-0001", "--help"), ("integrate", "-h"), ("push", "demo", "--help"),
+    ("policy", "render", "DEMO-0001", "--help"),
 ]
 
 
@@ -149,7 +152,8 @@ def test_reading_fixing_and_map_commands_stay_usable_under_a_mismatch(ws: Ws, ca
                                   ("task", "update", "ATC-0001", "--decision", "DEMO-0001"),
                                   ("task", "update", "ATC-0001", "--title", "DEMO-0001"),
                                   ("task", "update", "--title", "DEMO-0001", "ATC-0001"),
-                                  ("test", "ATC-0001", "--", "-k", "DEMO-0001")], ids=" ".join)
+                                  ("test", "ATC-0001", "--", "-k", "DEMO-0001"),
+                                  ("policy", "render", "ATC-0001")], ids=" ".join)
 def test_the_workspace_root_is_never_compared(ws: Ws, call: tuple[str, ...]) -> None:
     assert ws.check(*call) is None
 

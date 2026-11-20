@@ -5,8 +5,9 @@ Reads the hook payload on stdin (or --payload) and the table: with --workspace, 
 map and each repository's `main` and caches (`hook_state`); with --table, that file as it is. Then prints one
 deny decision or nothing. Command rules match every simple command of a Bash or PowerShell call after
 normalisation; file rules, the write roots and the hook's own files bind the paths a call writes, and a write
-target the call's text does not resolve is refused; a top-level `cd` into a worktrees root is refused (Claude
-Code only). The payload is read as UTF-8 bytes. An error of the hook itself denies the call.
+target the call's text does not resolve is refused; file rules denying `read` bind the path a Read, Grep or Glob
+call names; a top-level `cd` into a worktrees root is refused (Claude Code only). The payload is read as UTF-8
+bytes. An error of the hook itself denies the call.
 Standard library only: docs/ENFORCEMENT.md § PreToolUse hook.
 """
 
@@ -39,7 +40,10 @@ REPAIR = "atc doctor"
 # Interpreter start-up before STARTED counts against the harness's timeout too.
 STARTUP_ALLOWANCE = 0.3
 FILE_TOOLS = {"Edit", "Write", "NotebookEdit"}
+READ_TOOLS = {"Read", "Grep", "Glob"}
 WRITE_MODES = {"edit", "write"}
+READ_MODES = {"read"}
+GLOB_MAGIC = re.compile(r"[*?\[{]")
 
 WRAPPERS = {"command", "exec", "builtin", "nohup", "time", "then", "do", "else", "elif", "if", "while", "until",
             "!", "{", "&", "."}
@@ -319,16 +323,11 @@ def _rule_regex(glob: str) -> re.Pattern[str]:
     return re.compile(pattern, re.IGNORECASE)
 
 
-def path_denial(table: dict, target: str, path: str) -> str | None:
-    """Why writing `path` (case-folded, long, absolute) is refused, or None."""
-    for protected in table["protected"]:
-        if g.within(path, protected):
-            return (f"Refused: {target} is part of the PreToolUse hook (its state, its engine or an input the "
-                    f"table is composed from, such as the workspace map) or of the installed atc; the Owner "
-                    f"changes it from their own terminal (`atc guard --install`/`--reset`, `uv tool install`).")
+def rule_denial(table: dict, target: str, path: str, modes: set[str]) -> str | None:
+    """Why `path` (case-folded, long, absolute) is refused by a filesystem rule denying one of ``modes``, or None."""
     slash = path.replace("\\", "/")
     for rule in table["filesystem"]:
-        if not WRITE_MODES & set(rule.get("modes", [])):
+        if not modes & set(rule.get("modes", [])):
             continue
         regex = _rule_regex(rule["glob"])
         scopes = rule.get("scope")
@@ -346,6 +345,19 @@ def path_denial(table: dict, target: str, path: str) -> str | None:
         if hit:
             return (f"Refused: {target} matches hard-deny rule `{rule['id']}` ({rule.get('source', 'policy')}). "
                     f"{rule.get('reason', '')}".rstrip())
+    return None
+
+
+def path_denial(table: dict, target: str, path: str) -> str | None:
+    """Why writing `path` (case-folded, long, absolute) is refused, or None."""
+    for protected in table["protected"]:
+        if g.within(path, protected):
+            return (f"Refused: {target} is part of the PreToolUse hook (its state, its engine or an input the "
+                    f"table is composed from, such as the workspace map) or of the installed atc; the Owner "
+                    f"changes it from their own terminal (`atc guard --install`/`--reset`, `uv tool install`).")
+    reason = rule_denial(table, target, path, WRITE_MODES)
+    if reason:
+        return reason
     if not any(g.within(path, root) for root in table["write_roots"]):
         return (f"Refused: {target} is outside the directories an agent may write to "
                 f"({', '.join(table['write_roots'])}). Put scratch copies, basetemps and test output under "
@@ -370,6 +382,42 @@ def write_denial(table: dict, targets: list[str], cwd: str) -> str | None:
     return None
 
 
+def read_targets(tool: str, tool_input: dict) -> list[str]:
+    """The paths a Read, Grep or Glob call names: `file_path`, `path`, and the literal directory an absolute or
+    `path`-relative Glob `pattern` starts with."""
+    if tool == "Read":
+        found = tool_input.get("file_path")
+        return [found] if isinstance(found, str) and found else []
+    targets: list[str] = []
+    path = tool_input.get("path")
+    if isinstance(path, str) and path:
+        targets.append(path)
+    pattern = tool_input.get("pattern")
+    if tool == "Glob" and isinstance(pattern, str) and pattern:
+        magic = GLOB_MAGIC.search(pattern)
+        literal = pattern[:magic.start()] if magic else pattern
+        literal = literal[:max(literal.replace("\\", "/").rfind("/"), 0)] if magic else literal
+        if literal and (ntpath.isabs(literal) or literal.startswith("/")):
+            targets.append(literal)
+        elif literal and isinstance(path, str) and path:
+            targets.append(ntpath.join(path, literal))
+    return targets
+
+
+def read_denial(table: dict, targets: list[str], cwd: str) -> str | None:
+    """Why reading one of ``targets`` is refused; a target the hook cannot resolve is let through."""
+    for target in targets:
+        try:
+            path = w.resolve(target, cwd)
+        except w.Unresolved:
+            continue
+        if path is not None:
+            reason = rule_denial(table, g.plain(target), path, READ_MODES)
+            if reason:
+                return reason
+    return None
+
+
 def cd_denial(table: dict, tool: str, text: str, cwd: str) -> str | None:
     targets = g.bash_targets(text) if tool == "Bash" else g.pwsh_targets(text)
     for target in targets:
@@ -387,6 +435,8 @@ def decide(payload: dict, table: dict, harness: str) -> str | None:
     if tool in FILE_TOOLS:
         target = tool_input.get("file_path") or tool_input.get("notebook_path") or ""
         return write_denial(table, [target], cwd) if target else None
+    if tool in READ_TOOLS:
+        return read_denial(table, read_targets(tool, tool_input), cwd)
     if tool == "apply_patch":
         patch = tool_input.get("command") or tool_input.get("patch") or tool_input.get("input") or ""
         return write_denial(table, w.patch_writes(patch if isinstance(patch, str) else "\n".join(patch)), cwd)

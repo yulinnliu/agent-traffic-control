@@ -1,0 +1,13 @@
+version: 1
+capabilities:
+  deny: []
+filesystem:
+  deny:
+    - "**/.env"
+    - glob: "${state}/demo-authorizations/**"
+      reason: an agent reading or writing one would authorize itself
+    - glob: "${state}/imports/**"
+      modes: [write, edit]
+      reason: written only by the Owner's commands
+commands:
+  deny: []

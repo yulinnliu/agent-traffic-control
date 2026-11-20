@@ -1,0 +1,7 @@
+{
+  "tool_name": "Read",
+  "tool_input": {
+    "file_path": "C:\\ws\\state\\p-data\\demo\\a.json"
+  },
+  "cwd": "C:\\ws\\repo"
+}

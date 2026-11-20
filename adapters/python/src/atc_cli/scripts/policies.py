@@ -4,13 +4,15 @@
 A permission preset that grants a capability or a write path hard deny denies for edit or write is refused
 (`preset-regrants-hard-deny`), as is an approval-required id that hard deny already makes impossible
 (`approval-overlaps-hard-deny`) and a glob listed twice in `filesystem.deny` (`duplicate-glob`). A loader
-that proceeds past a problem would turn a policy file into prose; this one fails closed.
+that proceeds past a problem would turn a policy file into prose; this one fails closed. `check` also refuses a
+`${...}` token in a filesystem glob (`unresolved-token`), except a project policy's leading `${state}/`.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -20,6 +22,10 @@ from jsonschema import Draft202012Validator
 SCHEMAS = Path(__file__).resolve().parents[1] / "schemas"  # the packaged copy of shared/policies/schemas
 KINDS = ("hard-deny", "approval-required", "permission-presets", "escalation")
 MODES = ("read", "edit", "write")
+TOKEN = re.compile(r"\$\{([^}]*)\}")
+# A project policy's glob may start with it: that project's state root in workspace.yaml (docs/ENFORCEMENT.md
+# § State token).
+STATE_TOKEN = "${state}/"
 
 
 def filesystem_rules(hard: dict) -> list[tuple[str, tuple[str, ...]]]:
@@ -32,6 +38,30 @@ def filesystem_rules(hard: dict) -> list[tuple[str, tuple[str, ...]]]:
             modes = set(entry.get("modes", MODES))
             rules.append((entry["glob"], tuple(m for m in MODES if m in modes)))
     return rules
+
+
+def is_state_glob(glob: str) -> bool:
+    """A project policy's glob rooted at its state root: a leading `${state}/` and no other token."""
+    return glob.startswith(STATE_TOKEN) and not TOKEN.search(glob[len(STATE_TOKEN):])
+
+
+def unresolved_tokens(hard: dict, project: bool) -> list[str]:
+    """`unresolved-token` problems: a `${...}` token no output resolves; a project policy's leading `${state}/`
+    resolves."""
+    problems = []
+    for index, (glob, _) in enumerate(filesystem_rules(hard)):
+        if project and is_state_glob(glob):
+            continue
+        for name in TOKEN.findall(glob):
+            where = ("only a project policy's glob may start with ${state}/" if name == "state"
+                     else f"Claude Code has no form for ${{{name}}}")
+            problems.append(f'unresolved-token: filesystem.deny[{index}] "{glob}": {where}')
+    return problems
+
+
+def workspace_policy(directory: Path) -> bool:
+    """Whether ``directory`` is the workspace policy: `policies/` of a checkout holding `atc-manifest.yaml`."""
+    return (Path(directory).resolve().parent / "atc-manifest.yaml").is_file()
 
 
 class PolicyError(Exception):
@@ -135,7 +165,8 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
     check = sub.add_parser("check", allow_abbrev=False, help="validate a policy directory", **cli_conventions.form(
         "Validate the policy files in DIR: hard-deny.yaml, approval-required.yaml, permission-presets.yaml,\n"
-        "escalation.yaml. Prints `OK <kinds>`, or `PROBLEMS N found` and one problem per line.",
+        "escalation.yaml. Prints `OK <kinds>`, or `PROBLEMS N found` and one problem per line. A filesystem glob\n"
+        "may hold no ${...} token, except a leading ${state}/ outside the workspace policy.",
         exit="0 ok; 1 problems found, or no policy file in DIR; 2 usage error",
         see="README.md § Commands"))
     check.add_argument("directory", type=Path, metavar="DIR", help="the policy directory to check")
@@ -163,6 +194,10 @@ def main(argv: list[str] | None = None) -> int:
         return report("PROBLEMS", list(exc.problems), [])
     if not loaded:
         return report("PROBLEMS", [f"no policy files found in {args.directory}"], [])
+    if "hard-deny" in loaded:
+        problems = unresolved_tokens(loaded["hard-deny"], project=not workspace_policy(args.directory))
+        if problems:
+            return report("PROBLEMS", [f"hard-deny.yaml: {p}" for p in problems], [])
     return report("OK", [], sorted(loaded))
 
 

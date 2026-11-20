@@ -62,7 +62,7 @@
     "pathGlob": {
       "type": "string",
       "minLength": 1,
-      "description": "Glob relative to the executing checkout, or rooted at ~. Enforcement generation refuses a ${...} token: no harness output can resolve it."
+      "description": "Glob relative to the executing checkout, rooted at ~, or, in a project's policy, rooted at ${state}/ (that project's state root in workspace.yaml). Any other ${...} token is refused: no output can resolve it."
     },
     "filesystemRule": {
       "description": "A bare glob denies every access mode; the object form names a subset of modes and a reason.",

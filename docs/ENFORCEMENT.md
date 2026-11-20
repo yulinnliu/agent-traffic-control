@@ -6,8 +6,8 @@ reads the policy and writes that configuration, deterministically, so a
 project commits the output and its CI diffs it. If the generated file and the
 policy disagree, the policy wins and the file is regenerated.
 
-Reference implementation: `adapters/python/src/atc_cli/scripts/generate_enforcement.py`
-(`atc-maintain guard`). Golden outputs: `shared/conformance/generate-enforcement/`.
+A project renders them with `atc policy render ID` (`policy_render.py` on
+`generate_enforcement.render`). Golden outputs: `shared/conformance/generate-enforcement/`.
 
 ## Outputs
 
@@ -15,7 +15,21 @@ Reference implementation: `adapters/python/src/atc_cli/scripts/generate_enforcem
 | --- | --- | --- |
 | `claude-code/settings.json` | a project's `.claude/settings.json`, key `permissions.deny` | `commands.deny`, `filesystem.deny` |
 | `codex/hard-deny.rules` | the block between the markers, spliced at the top of `~/.codex/rules/default.rules` | `commands.deny` |
-| `git-hooks/pre-commit` | a project's `core.hooksPath` directory | `filesystem.deny` |
+| `git-hooks/pre-commit` | a project's `core.hooksPath` directory, `scripts/git-hooks/` | `filesystem.deny` |
+
+`atc policy render ID [--check] [-v]` renders a project task's
+`policies/hard-deny.yaml` into `generated/enforcement/` in the task's
+worktree, and updates the copies the project keeps when they exist: the
+`permissions.deny` list of `.claude/settings.json`, its other keys and their
+order kept, and `scripts/git-hooks/pre-commit`. A copy that does not exist is
+not created. The writer runs it in the task and commits the result with the
+policy change; `--check` writes nothing and exits 1 with `DRIFT <n> files`
+and one line per file. It prints `RENDERED <n> files` or
+`CURRENT enforcement files`, and stops with `POLICY_INVALID` (one line per
+problem), `NO_POLICY`, `SETTINGS_INVALID` (a copy that is not a JSON object;
+nothing is written), `NO_WORKTREE`, or `ROOT_POLICY` for a task of the
+workspace root, whose policy only the hook composes. It is a task-flow
+command under the release pin (`shared/conformance/CLI.md` § Release pin).
 
 Capability ids (`capabilities.deny`) have no harness-native form; they bind
 through review, project CI and the runtime adapter.
@@ -32,49 +46,30 @@ an object `{glob, modes, reason}` whose `modes` is a non-empty subset of
 policy error `duplicate-glob`. A permission preset re-grants a denied path
 only when that path's modes include `edit` or `write`.
 
-Globs are repository-relative or rooted at `~`. A glob holding a `${...}`
-token is refused with `unresolved-token`, naming the entry, and the generator
-writes nothing: Claude Code has no form for the token, so the rule would look
-like protection without being any. Paths that only the workspace map can name,
-such as a project's state directory, come from the machine-local segment
-below.
+Globs are repository-relative, rooted at `~`, or, in a project's policy,
+rooted at `${state}/` (§ State token). Any other `${...}` token is refused
+with `unresolved-token`, naming the entry, and nothing is written: Claude
+Code has no form for the token, so the rule would look like protection
+without being any. `atc-maintain policies check` reports the same problem.
 
-## Machine-local segment
+## State token
 
-`--workspace <workspace.yaml>` adds a deny the policy cannot carry: every
-registered project's `state` root, resolved against `workspace_root` to an
-absolute path. `atc-maintain guard` passes `--workspace` itself when the checkout
-root holds `workspace.yaml`. A project without `state`, or no map at all,
-leaves every output and check exactly as without the option.
+A project's policy names a path under its own state directory as
+`${state}/<rest>`: `${state}` is that project's `state` root in
+`workspace.yaml`, resolved against `workspace_root`. Only a leading
+`${state}/` resolves; the token elsewhere in a glob, or in the workspace
+policy, which has no single state root, is `unresolved-token`.
 
-| File | Consumer | Entries |
-| --- | --- | --- |
-| `claude-code/settings.local.json` under `--local-out` | merged into a project's untracked `.claude/settings.local.json`, key `permissions.deny` | `Edit(<state>/**)`, per root in map order |
+A `${state}/` rule reaches the PreToolUse hook only. The committed outputs
+hold no absolute path, so `claude-code/settings.json` leaves the rule out
+and `git-hooks/pre-commit` lists it as not git-enforced. The hook resolves it
+from the map on every composition, so a map change or a policy change on
+`main` takes effect without a merge or an Owner command. A project the map
+gives no `state` gets no rule from it, and `atc sync --check` reports the
+rule.
 
-Paths use Claude Code's absolute form: `/srv/x` becomes `//srv/x`, and a
-Windows path `C:/Users/x` becomes `//c/Users/x`. That `//` prefix marks the
-segment: policy globs never take it, so a live deny list splits into a policy
-segment and a machine-local segment without any other marker. The output
-holds absolute paths, so `--local-out` must lie outside `--out`;
-`generated/enforcement/` never receives it.
-
-Only `Edit` is rendered. Claude Code checks path rules only for `Edit(path)`
-and `Read(path)`; `Write(path)`, `NotebookEdit(path)` and `MultiEdit(path)`
-rules are accepted but never match, and an `Edit` deny already covers
-`Write` and `NotebookEdit` (see "Write(path), NotebookEdit(path), and
-Glob(path) rules never match" in <https://code.claude.com/docs/en/permissions>).
-
-On Windows, Claude Code loads `.claude/settings.local.json` from the current
-working directory, not the repository root, so a session inside a worktree
-does not read the copy at the project root. To cover worktrees, merge the
-same deny entries into the user-level `~/.claude/settings.json`;
-`--live-claude-local` compares against whichever file it is given.
-
-Only the file tools are covered. A command deny is an argv prefix, which
-cannot name a path argument in every position, a relative path, or a shell
-redirection, so `rm`, `mv` and `>` into a state root stay outside this
-segment; the PreToolUse hook covers them from the command text. For the same reason Codex, whose rules are argv prefixes only, gets
-no machine-local block.
+Every state root also carries the hook's own edit and write deny
+(§ PreToolUse hook, Table, item 3), whatever the project's policy says.
 
 ## Mapping
 
@@ -142,8 +137,8 @@ environment variable for them. It composes its table from, in order:
    `workspace_root` and `worktrees/root/*`;
 2. each registered project's `policies/hard-deny.yaml` at its
    `refs/heads/main`; its repository-relative globs apply under its `repo`
-   and its `worktrees/*`. A project whose `main` holds none adds no policy
-   rule;
+   and its `worktrees/*`, and its `${state}/` globs under its state root
+   (§ State token). A project whose `main` holds none adds no policy rule;
 3. the workspace map: each `state` root (an edit/write deny), the
    `worktrees` roots, and the write roots: `workspace_root` plus each
    `agent_write_roots` entry, with `%VAR%`, `$VAR` and `~` expanded.
@@ -233,6 +228,12 @@ PowerShell, and a write target either reading refuses refuses the call. Codex `a
 **Paths.** A file tool's path, an `apply_patch` target, and each write target
 of a shell call is refused when it lies in a protected path, matches a
 filesystem rule denying `edit` or `write`, or lies outside every write root.
+
+**Reads.** In Claude Code, the path a `Read` call names (`file_path`), the
+`path` of a `Grep` or `Glob` call, and the literal directory an absolute or
+`path`-relative `Glob` pattern starts with are refused when they match a
+filesystem rule denying `read`. Reads take no write root and no protected
+path. A path the hook cannot resolve is let through.
 
 The shell check guards against accidental writes outside the roots by
 ordinary commands; it is not a sandbox against deliberate evasion. It reads
@@ -330,6 +331,11 @@ multi-letter drive is refused.
 
 Known limits, which the hook allows:
 
+- A search rooted above a read-denied directory (`Grep` over a parent) is
+  checked at its own path, not at the directories it descends into. Reads
+  by a shell command (`cat`, `Get-Content`) are not read, and Codex has no
+  read tool to check.
+
 - Paths are compared lexically: a write through a symbolic link or junction
   that already exists under a root is checked at the link's path.
 - Files a program names in its own options or writes on its own (`git diff
@@ -391,7 +397,7 @@ the retired guards (`worktree_cd_guard.py`, `write_scope_guard.py`) with:
 
 | Harness | Matcher | Command |
 | --- | --- | --- |
-| Claude Code | `Bash\|PowerShell\|Edit\|Write\|NotebookEdit` | `atc hook --harness claude --workspace "<map>" --home "<home>" --atc-home "<atc-home>"` |
+| Claude Code | `Bash\|PowerShell\|Edit\|Write\|NotebookEdit\|Read\|Grep\|Glob` | `atc hook --harness claude --workspace "<map>" --home "<home>" --atc-home "<atc-home>"` |
 | Codex | `Bash\|apply_patch` | `atc hook --harness codex --workspace "<map>" --home "<home>" --atc-home "<atc-home>"` |
 
 `<home>` is the Owner's home directory and `<atc-home>` is `<home>/.atc`. An entry whose values differ from those the Owner's terminal
@@ -434,27 +440,24 @@ value of those that take one, so `uv --quiet tool install x` matches
 
 ## Drift
 
-`--check` regenerates in memory and exits 1, printing `drift:` and the
-differing files, when a file under `--out` differs. With `--check`, three
-options also compare the installed copies, each after line-ending
-normalisation:
+`atc policy render ID --check` compares `generated/enforcement/` and the
+copies with the policy's render, after line-ending normalisation, and for
+`.claude/settings.json` only its `permissions.deny` list. A consuming project
+runs the same comparison in CI against its committed copy.
+
+`atc-maintain guard --check`, with `--workspace`, compares installed copies of
+the hook with a fresh compose from each repository's `main`:
 
 | Option | Compares |
 | --- | --- |
-| `--live-claude PATH` | the file's `permissions.deny` list, in order; other settings are ignored; with a machine-local segment, only the policy segment |
-| `--live-claude-local PATH` | the machine-local segment of the file's `permissions.deny` list, in order, against the `--workspace` render |
-| `--live-codex PATH` | the `# BEGIN atc hard-deny` ... `# END atc hard-deny` block, markers included; a file without exactly one block drifts |
-| `--live-hook PATH` | the whole hook file |
-| `--live-hook-table PATH` | the whole PreToolUse hook table, against a fresh compose from each repository's `main` (needs `--workspace`) |
+| `--live-hook-table PATH` | the whole PreToolUse hook table |
 | `--live-claude-hooks PATH` | the PreToolUse entries of a Claude settings file that run the engine or a retired guard: exactly the rendered entry |
 | `--live-codex-hooks PATH` | the same for a Codex `hooks.json` |
 
-`--check` compares content only, never file modes. A consuming project runs
-it in CI against its committed copy, and `atc sync --check` fails a
-project whose `generated/enforcement/` differs from its
+`--check` compares content only, never file modes. `atc sync --check` fails
+a project whose `generated/enforcement/` or kept copies differ from its
 `policies/hard-deny.yaml`, so the enforcement surface changes only through a
 reviewed diff of the policy. It also reports, without failing or writing, a
-project whose `.claude/settings.local.json` lacks the machine-local segment
-or holds one that differs from the map, and an installed hook table or entry
-that differs from a fresh compose; `atc guard` and `atc doctor` list the same as its
-`pretooluse hook` check.
+`${state}/` rule of a project the map gives no `state`, and an installed hook
+table or entry that differs from a fresh compose; `atc guard` and
+`atc doctor` list the same as its `pretooluse hook` check.

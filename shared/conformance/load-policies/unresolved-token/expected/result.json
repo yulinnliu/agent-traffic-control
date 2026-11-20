@@ -1,0 +1,1 @@
+{"exit_code": 1, "output_contains": ["hard-deny.yaml: unresolved-token: filesystem.deny[1] \"${DATA}/**\": Claude Code has no form for ${DATA}", "PROBLEMS 1 found"]}

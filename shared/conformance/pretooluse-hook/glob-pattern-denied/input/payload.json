@@ -1,0 +1,7 @@
+{
+  "tool_name": "Glob",
+  "tool_input": {
+    "pattern": "C:/ws/state/p-data/demo/**/*.json"
+  },
+  "cwd": "C:\\ws\\repo"
+}
