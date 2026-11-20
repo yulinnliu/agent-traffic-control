@@ -1,0 +1,19 @@
+task_id: ATC-0072
+title: atc integrate resolves each ref and reads each blob once per invocation
+repository: yulinnliu/agent-traffic-control
+base_sha: 944b63c55344ad4ec173c0f8ff1d3d37aea3d752
+scope: 'docs/design/ATC-0071.md § 4.2.1 measured that `atc integrate` (git_preflight and git_integrate) makes 76.5% of the root suite''s remaining git time by resolving the same refs and reading the same blobs again within one invocation, about 10% of the suite. This task makes one invocation resolve each ref and read each blob once, through one mechanism, so the real `atc integrate` gets faster too. The deliberate re-reads that detect another process moving main (git_integrate.py around :1178 and :1205 at 944b63c) stay uncached and outside the expected gain. First step, design: list each repeated query and which ones may be reused, how a reuse is invalidated when the invocation itself writes a ref, and the expected gain, in docs/design/<ID>.md; implementation follows after the Owner rules on the design. The change measures the gain with the same timing evidence as ATC-0071. It does not release.'
+tests: strict
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: 944b63c55344ad4ec173c0f8ff1d3d37aea3d752
+branch: claude+ATC-0072
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
+decisions:
+- 'Owner 2026-11-20 「記入佇列」: the § 4.2.1 product change is its own task (ATC-0071 decisions).'
+- 'Owner 2026-11-20 「開那個 atc integrate 的產品 task」: open it now.'
