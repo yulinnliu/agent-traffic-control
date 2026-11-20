@@ -1,0 +1,20 @@
+task_id: ATC-0078
+title: Project-side guard regeneration and machine-local state deny
+repository: yulinnliu/agent-traffic-control
+base_sha: 23aeba537d9fdf493ec2ebf1eb7e6c027079f9db
+scope: 'Design first (atc-review "Writer: the design step"), committed as `docs/design/ATC-0078.md`; implementation follows as later steps of this task only after the Owner rules on the design. Two queued items with one mechanism: 1. A project that changes its own hard-deny policy must regenerate its enforcement files (hami-quant `AGENTS.md:148`), but `atc-maintain guard` runs only in an ATC worktree (docs/design/ATC-0068.md § 13, last bullet). Design a user-facing `atc` command (or an `atc sync` step) a project uses for this. 2. The machine-local state read/edit deny. `adapters/python/src/atc_cli/scripts/generate_enforcement.py` already resolves `${...}` state roots from workspace.yaml into a machine-local `settings.local.json` under `--local-out` (docs/ENFORCEMENT.md table row for `--local-out`), and `atc sync --check` (`validate_workspace.py:850-852`) reports that the deny in each project''s `.claude/settings.local.json` is missing (rin-vn) or differs from workspace.yaml (hq, hqt, heartopia,
+  ria), with the fix only through `atc-maintain guard --local-out` plus a hand merge. Policy globs cannot hold `${...}`, and HQT-0035 hardcodes `~/Hami/state/...` in a project policy. Design how a project gets that deny generated and merged without a maintainer command and without a hardcoded host path. The design states, for each: the command surface and its output tokens (shared/conformance/CLI.md conventions), who runs it (agent or Owner; `.claude/settings.local.json` is a permissions file, so name the exact actor and whether it needs an Owner-run command), how the merge into an untracked `settings.local.json` preserves entries it does not own, what `atc sync --check` reports afterwards, the conformance and test changes, and any governance text that would need to change (name the section; do not edit it). End with "Decisions for the Owner" as numbered questions, each with options and a recommended one. Read first: docs/ENFORCEMENT.md, generate_enforcement.py, validate_workspace.py around
+  the sync --check machine-local lines, the sync path in `adapters/python/src/atc_cli/scripts/sync_project.py`, docs/design/ATC-0068.md § 13, hami-quant `AGENTS.md` around line 148 and HQT-0035''s record in projects/hami-quant-trading/.atc/tasks/ (read-only). Out of scope: editing shared/governance/ (no Owner authority yet), any project repository, any real `.claude/settings*.json`, anything under `authorizations/`. Implementation waits on the Owner''s ruling.'
+tests: standard
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: 23aeba537d9fdf493ec2ebf1eb7e6c027079f9db
+branch: claude+ATC-0078
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
+decisions:
+- 'Owner 2026-11-20 「合併開設計單」: one design task covering the project-side guard command (ATC-0068 design § 13) and P7''s machine-local state deny generated from workspace.yaml.'
