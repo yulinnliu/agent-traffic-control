@@ -1,8 +1,8 @@
 task_id: ATC-0070
-title: The lint stage runs --all-files when a range changes a lint input
+title: The lint stage checks the whole tree at every entry
 repository: yulinnliu/agent-traffic-control
 base_sha: 38432a7924a6731b30c77a9a159550e86bfbee99
-scope: When a range changes a lint stage input, the lint stage runs `pre-commit run --all-files` instead of `--from-ref --to-ref`. The inputs are `.pre-commit-config.yaml` and `.atc/lint/**` in a project, `shared/lint/**` at the workspace root. Today the template excludes `.atc/`, so a changed rule file never re-lints the existing files until CI's all-files job. The same task settles a sync that changes `.atc/lint/**`, which bypasses the verifier (docs/design/ATC-0062.md § 3 and § 6 decision 1). It lands before any project adopts the lint stage. The change updates shared/conformance, the docs that describe the lint stage, and the tests. It does not release.
+scope: Every lint stage entry (the verifier, atc test ID, --lint, --candidate) lints the whole tree, so a changed lint rule, from a topic or from atc sync, re-checks every file at the next run; the commit hook and CI stay as they are (docs/design/ATC-0070.md). Updates shared/conformance, the docs describing the lint stage, and the tests. It does not release.
 tests: strict
 governance_source: yulinnliu/agent-traffic-control
 governance_revision: 38432a7924a6731b30c77a9a159550e86bfbee99
@@ -17,3 +17,7 @@ authority:
 decisions:
 - 'Owner 2026-11-18 「同意」: the lint stage scope is its own task, not part of ATC-0065.'
 - 'Owner 2026-11-20 「開 ATC-0070，現在做」: open it now, after atc 0.9.0.'
+- 'Scope before this update: When a range changes a lint stage input, the lint stage runs `pre-commit run --all-files` instead of `--from-ref --to-ref`. The inputs are `.pre-commit-config.yaml` and `.atc/lint/**` in a project, `shared/lint/**` at the workspace root. Today the template excludes `.atc/`, so a changed rule file never re-lints the existing files until CI''s all-files job. The same task settles a sync that changes `.atc/lint/**`, which bypasses the verifier (docs/design/ATC-0062.md § 3 and § 6 decision 1). It lands before any project adopts the lint stage. The change updates shared/conformance, the docs that describe the lint stage, and the tests. It does not release.'
+- 'Owner 2026-11-20: lint scope is the whole tree at every entry, not the range trigger (design ruling 1).'
+- 'Owner 2026-11-20: atc sync prints no NOTE when it changes .atc/lint/** (design ruling 2).'
+- 'Owner 2026-11-20: the writer''s repeated atc test ID also lints the whole tree (design ruling 3).'
