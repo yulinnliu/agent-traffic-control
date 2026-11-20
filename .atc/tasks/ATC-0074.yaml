@@ -1,0 +1,23 @@
+task_id: ATC-0074
+title: Release atc 0.10.0
+repository: yulinnliu/agent-traffic-control
+base_sha: f16e464ab1cf2f08d8ee9f2b4942b730bbee8774
+scope: 'Batch release of atc 0.10.0 and atc-testkit 0.17.0. It carries ATC-0070 to ATC-0073, which is everything integrated on main since v0.9.0 (38432a7). Follow `docs/development/RELEASING.md`. - **Prepare.** In the worktree, from `adapters/python`, run `uv run --locked atc-maintain release prepare 0.10.0 --testkit 0.17.0`. Pass `--min-atc` only if testkit 0.17.0 writes or reads something an older atc cannot handle; either way the notes state the `min_atc` value and why. - **Release notes.** Fill `docs/releases/v0.10.0.md` per RELEASING.md § Release notes until `atc-maintain release check` passes with no `TODO(release)` left. - **Breaking section, complete.** List every changed or removed command behaviour, flag, output token, exit code, record field, skill contract and governance rule, each with its replacement and its task. Check each task''s record and diff, not only its title. Known candidates to confirm against the code: - ATC-0070: the lint stage checks the whole tree at every entry
+  (`atc test ID` lints the whole tree too; sync prints no NOTE). - ATC-0072: one git memo per `atc integrate` and `atc test --candidate` invocation; drift re-reads stay uncached. - ATC-0073: under a non-Python toolchain the verifier reads no input set and its report''s `inputs` is null. - ATC-0071 and ATC-0073 test-only changes (tests/git_history.py) are not user-facing; say so in one line at most. - **Each atc-testkit change:** say whether a project upgrade is required or skippable. Projects pin 0.15.0. Name what a project gains by upgrading, including that projects adopt the shared lint stage only on a testkit that carries ATC-0070. - **Upgrade, for the host:** the install precondition that no `atc test` or verifier is running (`atc doctor` `ATC_ENV_IN_USE`), `uv tool install --force` from the tag (`docs/WORKFLOW.md` § Installing a release), `atc guard --install` if the hook table changed, `atc sync`, `atc doctor`. - **Upgrade, for projects:** re-sync on 0.10.0, then upgrade the vendored
+  testkit per `docs/TESTKIT.md` § Upgrading a project''s testkit, run through Hami-Coordinator. The tag, its push, the install and each project''s re-sync are the Owner''s steps after integration, not this task''s.'
+tests: strict
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: f16e464ab1cf2f08d8ee9f2b4942b730bbee8774
+branch: claude+ATC-0074
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
+decisions:
+- 'Owner 2026-11-20 「合單，做完再發」: the release follows ATC-0073.'
+- 'Owner 2026-11-20 「0.10.0 / 0.17.0」: atc 0.9.0 -> 0.10.0, atc-testkit 0.16.0 -> 0.17.0.'
+- Release notes describe the final state and what a user must change. They name no competitor and claim nothing the code does not do.
+- No code changes beyond version strings and their pinned tests. A defect found while writing the notes is reported to the coordinator, not fixed here.
