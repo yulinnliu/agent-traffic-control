@@ -21,3 +21,5 @@ decisions:
 - 'Owner 2026-11-20: § 4.2 caller measurement is this task''s next step; a product change it leads to gets its own task.'
 - 'Owner 2026-11-20: no in-process CLI change (§ 5).'
 - 'Owner 2026-11-20: the test_doctor_environment live-process failure goes to the workspace queue, outside this task.'
+- 'Owner 2026-11-20: the product change of § 4.2.1 (reuse refs and blobs within one atc integrate) goes to the workspace queue, its own task later.'
+- 'Owner 2026-11-20: integrate after the § 4.2.1 step; the remaining files of § 4.1 go to the queue.'
