@@ -17,3 +17,7 @@ authority:
 decisions:
 - 'Owner 2026-11-20 「記入佇列」: the § 4.2.1 product change is its own task (ATC-0071 decisions).'
 - 'Owner 2026-11-20 「開那個 atc integrate 的產品 task」: open it now.'
+- 'Owner 2026-11-20: adopt the § 3 memo (one per invocation, three tiers, integrate incl. --check and test --candidate, invalidated per § 3.3).'
+- 'Owner 2026-11-20: implement at the expected gain of § 4 (~106 s suite lower bound); measure after with the same method.'
+- 'Owner 2026-11-20: batching git queries stays out of this task; decide after the post-implementation measurement.'
+- 'Owner 2026-11-20: commit the measurement plugin under tests/ as opt-in (option A).'
