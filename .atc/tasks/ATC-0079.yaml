@@ -1,0 +1,20 @@
+task_id: ATC-0079
+title: Release atc 0.11.0
+repository: yulinnliu/agent-traffic-control
+base_sha: dd0f61872cedf6d5609498a33399042a6445e390
+scope: 'Release atc 0.11.0. It carries ATC-0076 to ATC-0078, everything integrated on main since v0.10.1 (bb27b19). Follow `docs/development/RELEASING.md`. - **Prepare.** In the worktree, from `adapters/python`, run `uv run --locked atc-maintain release prepare 0.11.0`. atc-testkit stays 0.17.0 (no testkit change since v0.10.1); no `--min-atc`. - **Notes.** Write every `TODO(release)` in `docs/releases/v0.11.0.md` per RELEASING.md § Release notes, from each task''s record and diff: - ATC-0078 (design `docs/design/ATC-0078.md` § 6): the new `atc policy render` command and `${state}` deny globs; the PreToolUse hook now also checks Read, Grep and Glob, so § Upgrade has every host rerun `atc guard --install` after installing; the `atc-maintain guard` options it removed go under the removals in § Breaking (maintainer CLI, outside `atc`''s compatibility range, still listed). - ATC-0076: the carried-over integration command names the reviewed SHA (skills and WORKFLOW.md). - ATC-0077: doc fixes
+  (§ Close-out citations, `key` in the input-evidence record). - § Projects: what a project gains from re-syncing to 0.11.0 (the `atc policy render` route for projects whose policy changes; design § 7 follow-ups are each project''s own task, not this release''s). - `uv run --locked atc-maintain release check` passes on the tip. Out of scope: shared/governance/, any project repository, tagging, pushing, publishing.'
+tests: standard
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: dd0f61872cedf6d5609498a33399042a6445e390
+branch: claude+ATC-0079
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
+decisions:
+- 'Owner 2026-11-20 「開 0.11.0 release 單」: release atc 0.11.0 carrying ATC-0076 to ATC-0078; atc-testkit stays 0.17.0.'
+- Release notes describe the final state and what a user must change; they claim nothing the code does not do.
