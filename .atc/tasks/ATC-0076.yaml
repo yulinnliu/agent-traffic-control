@@ -1,0 +1,21 @@
+task_id: ATC-0076
+title: Carried-over integration command names the reviewed SHA
+repository: yulinnliu/agent-traffic-control
+base_sha: bb27b19811f668f1a0eb6f246058c0f266131b53
+scope: 'After a rebase whose review carries over, `atc integrate <ID> --sha <reviewed SHA>` takes the rebased tip from the task''s branch and records `reviewed` = rebased tip plus `carried_over_from` = reviewed SHA in `integrations.jsonl` and the evidence record (git_integrate.py:1657-1662 and the task path at :1169; adapters/python/tests/test_integrate_moving_main.py:168). `--sha <rebased tip>` instead integrates the tip as a direct approval and records no `carried_over_from`, so the ledger no longer names the SHA the PASS verdict names. Observed in rin-vn on atc 0.10.1 (RIN-0013: reviewed 81470220, rebased 2ffbeee, Owner ran `--sha 2ffbeee…`, ledger line without `carried_over_from`). The shared skills tell the coordinator to hand the Owner the command for the rebased tip: shared/skills/atc-coordinator/SKILL.md § Stops "SHA mismatch" (line ~47) and step 5''s carry-over bullet (line ~159-163); shared/skills/atc-review/SKILL.md "Reviewer: the verdict block" (line ~264, "the rebased tip, or
+  for `NO_FF` the reviewed SHA") and "Writer: after a PASS" (line ~290-296). Change them so a carried-over integration''s command names the reviewed SHA, the command `atc integrate` itself resolves to the rebased tip, and the coordinator''s completion check compares the ledger line''s `reviewed` with the rebased tip and its `carried_over_from` with the reviewed SHA. Keep the writer''s duty to report the rebased tip. Check every other text that names the SHA of a carried-over command (docs/WORKFLOW.md § near "carries the approval over", docs/TASKS.md, shared/conformance/, `atc integrate -h`) and make them state the same rule; render the managed copies with `atc-maintain sync --root` and run `atc-maintain validate`. Out of scope: shared/governance/ (no Owner authority for that topic; GIT_WORKFLOW.md names no SHA form for a carry-over, so it needs no change; if you find governance text that contradicts the rule, report it instead of editing), and code changes. If the rule needs a code or CLI
+  help change, stop and report to the coordinator.'
+tests: none
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: bb27b19811f668f1a0eb6f246058c0f266131b53
+branch: claude+ATC-0076
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
+decisions:
+- 'Owner 2026-11-20 「開單修文件」: fix the skill and doc wording; the command for a carried-over integration names the reviewed SHA. No code change.'
+- 'Owner 2026-11-20: tests none, text-only change; the reviewer reads the diff.'
