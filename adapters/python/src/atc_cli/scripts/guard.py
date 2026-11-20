@@ -3,8 +3,8 @@
 Owner's, `--install` it on this host or `--reset` the table to the current inputs (docs/ENFORCEMENT.md
 § PreToolUse hook).
 
-The hook composes its own table from the workspace map and each repository's `main`; the generator's other
-outputs are `atc-maintain guard`.
+The hook composes its own table from the workspace map and each repository's `main`; a project's committed
+enforcement files are `atc policy render`.
 """
 
 from __future__ import annotations

@@ -16,13 +16,13 @@ pytestmark = pytest.mark.skipif(CODEX is None, reason="Codex CLI not installed")
 
 
 def _check(argv: list[str]) -> subprocess.CompletedProcess:
-    rules = CASE / "expected/codex/hard-deny.rules"
+    rules = CASE / "expected/generated/enforcement/codex/hard-deny.rules"
     return subprocess.run([CODEX, "execpolicy", "check", "--rules", str(rules), *argv],
                           capture_output=True, text=True, encoding="utf-8", timeout=60)
 
 
 def test_every_denied_prefix_is_forbidden():
-    policy = yaml.safe_load((CASE / "input/hard-deny.yaml").read_text(encoding="utf-8"))
+    policy = yaml.safe_load((CASE / "input/policies/hard-deny.yaml").read_text(encoding="utf-8"))
     for command in policy["commands"]["deny"]:
         result = _check([*command["argv_prefix"], "extra-arg"])
         assert result.returncode == 0, result.stderr

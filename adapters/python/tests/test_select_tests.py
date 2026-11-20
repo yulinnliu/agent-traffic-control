@@ -357,7 +357,7 @@ def test_an_unmapped_path_falls_back_to_the_full_suite(graph, path):
 
 
 def test_shared_paths_select_the_tests_that_read_their_area(graph):
-    selected = chosen(graph, "shared/conformance/generate-enforcement/example-policies/hard-deny.yaml")
+    selected = chosen(graph, "shared/conformance/generate-enforcement/example-policies/input/policies/hard-deny.yaml")
     assert {"tests/test_conformance.py", "tests/test_codex_rules.py", "tests/test_generate_enforcement.py"} <= set(selected)
     assert "tests/test_testkit_release.py" not in selected
 

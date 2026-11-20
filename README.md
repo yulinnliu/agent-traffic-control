@@ -33,10 +33,10 @@ reading the rules:
   task ID into the worktree's git lock reason. `atc task resume` refuses a
   worktree another session holds unless it is explicitly rebound, and
   `atc task close` refuses one that is dirty or not merged into `main`.
-- **Hard denies are harness configuration, not prose.** The maintainer
-  generator (`atc-maintain guard`) produces Claude Code's `permissions.deny`,
-  a Codex rules block and a git pre-commit hook from one `hard-deny.yaml`,
-  and `--check` reports drift. A PreToolUse hook composes its table from
+- **Hard denies are harness configuration, not prose.** A project task's
+  `atc policy render` produces Claude Code's `permissions.deny`, a Codex
+  rules block and a git pre-commit hook from one `hard-deny.yaml`, and
+  `--check` reports drift. A PreToolUse hook composes its table from
   the policies on each repository's `main`, and the Owner's one-time
   `atc guard --install` puts its entry in place; once installed, the harness
   refuses the denied action.
