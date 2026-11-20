@@ -228,6 +228,9 @@ def _classify(project: Project, commit: str) -> int:
     return 0
 
 
+PYTHON = "python"  # the toolchain whose stages use input evidence
+
+
 class _Reuse:
     """The stages' input evidence: each stage runs only the files no record covers, and the files a passed stage
     ran are recorded after the final-state check (docs/TESTKIT.md § Input evidence)."""
@@ -351,10 +354,9 @@ class _Checks:
     def stages(self, pytest_paths: list[str], cwd: Path | None = None) -> None:
         project = self.project
         cwd = project.root if cwd is None else cwd
-        python = self.isolated.toolchain.name == "python"
-        if self.reuse is not None and not python:
+        if self.isolated.toolchain.name != PYTHON:
             print(f"input evidence: not used by the {self.isolated.toolchain.name} toolchain", flush=True)
-        reuse = self.reuse if python else None
+        reuse = self.reuse
         self.report_checks()
 
         def env_for(stage: stages.Stage) -> dict[str, str]:
@@ -519,7 +521,7 @@ def main(project: Project, environ: Mapping[str, str] | None = None, run: stages
                                          data_roots=project.data_root_variables, toolchain=toolchain)
         clock = elapsed.Clock.create(elapsed.task_of(environ), sha, CLOCK_COMMAND, stages.pool_directory(environ),
                                      environ, project.root)
-        reuse = _Reuse.create(project, work, sha, environ)
+        reuse = _Reuse.create(project, work, sha, environ) if toolchain.name == PYTHON else None
         checks = _Checks(project, work, isolated, run, workers, budget, clock, reuse)
         if project.select is None:
             doc_only, pytest_paths = _root_checks(project, checks, paths)

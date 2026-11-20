@@ -659,8 +659,9 @@ The integration verifier, before each pytest stage of a candidate, runs only
 the files no record covers, printing `<stage>: REUSED <n> files, RUN <m> files`;
 a stage every file of which is covered does not run. After the final-state
 rows pass it records each file the stages ran whose every test passed. A
-non-Python toolchain runs its stages whole after printing
-`input evidence: not used by the <toolchain> toolchain`.
+non-Python toolchain reads no input set: it runs its stages whole after
+printing `input evidence: not used by the <toolchain> toolchain`, and its
+verification report's `inputs` is `null`.
 
 `atc test ID` records too, when it runs the related tests or `--all`, not an
 explicit run of pytest arguments, and the tree equals its commit before and

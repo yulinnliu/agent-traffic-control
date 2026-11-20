@@ -708,18 +708,23 @@ def test_a_toolchain_other_than_python_runs_its_stages_with_no_input_evidence(
 
 
 @pytest.mark.integration
-def test_a_toolchain_other_than_python_with_no_input_set_prints_only_that_evidence_is_off(
-        candidate: Candidate, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+def test_a_toolchain_other_than_python_reads_no_input_set_and_reports_none(
+        candidate: Candidate, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str]) -> None:
     candidate.advance()
+    read: list[str] = []
 
-    def unreadable(_project: Project, commit: str) -> list[str]:
-        raise subprocess.CalledProcessError(128, ["git", "ls-tree", commit])
-    monkeypatch.setattr(verifier, "excluded_paths", unreadable)
+    def reading(_project: Project, commit: str) -> list[str]:
+        read.append(commit)
+        return []
+    monkeypatch.setattr(verifier, "excluded_paths", reading)
+    report = tmp_path / "report.json"
     other = dataclasses.replace(python_toolchain.TOOLCHAIN, name="other")
     project = root_form(candidate.root, toolchain=other, test_paths=lambda paths: ["tests/test_x.py"])
-    assert verifier.main(project, candidate.env(), Recorder()) == 0
+    assert verifier.main(project, candidate.env(ATC_VERIFICATION_REPORT=str(report)), Recorder()) == 0
     noted = [line for line in capsys.readouterr().out.splitlines() if "input evidence" in line]
-    assert len(noted) == 1 and noted[0].startswith("input evidence: off (CalledProcessError: "), noted
+    assert noted == [NOT_USED] and read == [], (noted, read)
+    assert json.loads(report.read_text(encoding="utf-8"))["inputs"] is None
 
 
 @pytest.mark.integration
