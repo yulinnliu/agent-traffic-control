@@ -124,6 +124,50 @@ def test_sync_targets_the_installed_release(tmp_path: Path, tmp_path_factory: py
     assert release_pin.mismatch(demo, release, root) is None
 
 
+def test_a_release_that_changes_no_synced_file_moves_the_lock(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory,
+                                                              capsys: pytest.CaptureFixture[str],
+                                                              monkeypatch: pytest.MonkeyPatch) -> None:
+    """The atc 0.10.0 case: the installed release renders every synced file as the previous one did, so only the
+    lock moves; `--check` reports it, sync commits it alone and the release pin then matches."""
+    import release_pin
+    from types import SimpleNamespace
+    root, project = committed_workspace(tmp_path, tmp_path_factory)
+    monkeypatch.setattr(sync_project, "installed_release", lambda: None)
+    assert sync_project.main(["demo"], root=root) == 0
+    previous = git_out(root, "rev-parse", f"{RELEASE}^{{commit}}")
+    released = commit_root(root, "tool-only")
+    run_git(root, "tag", "v0.0.2")
+    release = release_pin.Release(released, "v0.0.2", "file:///C:/hosts/governance")
+    monkeypatch.setattr(sync_project, "installed_release", lambda: release)
+    demo = SimpleNamespace(name="demo", repo=str(project))
+    assert release_pin.pin(demo) == previous
+    assert release_pin.mismatch(demo, release, root).token == "RELEASE_MISMATCH"
+    before = git_out(project, "rev-parse", "HEAD")
+    capsys.readouterr()
+    assert sync_project.main(["demo", "--check", "--verbose"], root=root) == 1
+    out = capsys.readouterr().out
+    assert "demo ~1\n  ~ .atc/atc.lock\n" in out
+    assert git_out(project, "rev-parse", "HEAD") == before
+    assert sync_project.main(["demo"], root=root) == 0
+    head = git_out(project, "rev-parse", "HEAD")
+    assert git_out(project, "diff", "--name-only", before, head) == ".atc/atc.lock"
+    assert git_out(project, "log", "-1", "--format=%s") == f"chore(governance): sync from unknown v0.0.2 ({released[:7]})"
+    assert release_pin.mismatch(demo, release, root) is None
+    assert sync_project.main(["demo", "--check"], root=root) == 0
+    assert capsys.readouterr().out.startswith(f"demo ~1 commit {head[:7]}\ndemo current\n")
+
+
+def test_the_checkout_as_it_stands_moves_the_lock_only_with_a_file(tmp_path: Path,
+                                                                   tmp_path_factory: pytest.TempPathFactory) -> None:
+    """doctor compares a project with the checkout's HEAD, which runs ahead of the release the lock pins: a lock that
+    differs from it with every file current is no drift."""
+    root, project = committed_workspace(tmp_path, tmp_path_factory)
+    assert sync_project.main(["demo"], root=root) == 0
+    commit_root(root, "tool-only")
+    [lock] = [item for item in sync_project.build_plan(project, root) if item.path == project / ".atc/atc.lock"]
+    assert (lock.action, lock.detail) == ("skip", "ATC lock is current")
+
+
 def test_the_installed_release_is_the_one_atc_records(monkeypatch: pytest.MonkeyPatch) -> None:
     import release_pin
     monkeypatch.setattr(release_pin, "direct_url", lambda: {

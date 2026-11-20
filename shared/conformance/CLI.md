@@ -46,7 +46,8 @@ records the installed commit, stops a task-flow command
 `--private`, `integrate`, `push`, with or without `--check`) on a registered
 project whose `.atc/atc.lock` does not pin that release's commit, with
 `STOP RELEASE_MISMATCH` and a hint: `atc sync <project>`, which then targets
-the installed release, when the pin is behind it or missing; the Owner's
+the installed release and moves the pin to it even when no synced file
+changes, when the pin is behind it or missing; the Owner's
 `uv tool install` of the pinned release when the pin is ahead of it. The
 workspace root is never compared, and an install that records no commit
 (an editable development install) compares nothing (`docs/WORKFLOW.md`

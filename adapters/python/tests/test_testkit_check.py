@@ -134,7 +134,7 @@ def test_onboarding_reports_testkit_drift_without_rewriting_project_config(repos
     (repository/'CLAUDE.md').write_text('project-owned guidance')
     monkeypatch.setattr(sync_project,'canonical_skills',lambda root:{})
     monkeypatch.setattr(sync_project,'atc_plan',lambda project,root,found=None:[])
-    monkeypatch.setattr(sync_project,'lock_plan',lambda project,root,changed,revision,repo=None:sync_project.PlanItem('skip',project/'.atc/atc.lock','lock current'))
+    monkeypatch.setattr(sync_project,'lock_plan',lambda project,root,changed,revision,repo=None,follow=False:sync_project.PlanItem('skip',project/'.atc/atc.lock','lock current'))
     monkeypatch.setattr(sync_project,'pointer_plan',lambda project,line:sync_project.PlanItem('skip',project/'AGENTS.md','pointer current'))
     import manifest
     found=manifest.parse((sync_project.ROOT/manifest.FILE).read_text(encoding='utf-8'))

@@ -303,7 +303,8 @@ A release acts only on projects whose `.atc/atc.lock` pins it. While a
 project pins another revision, or none, the commands that run the task flow
 under its contract stop with `STOP RELEASE_MISMATCH` and a hint. A project
 behind the installed release, or with no lock, takes `atc sync <project>`:
-sync with no `--revision` targets the installed release, not the latest tag.
+sync with no `--revision` targets the installed release, not the latest tag,
+and moves the lock to it even when no synced file changes.
 A project ahead of it, which sync never moves back without `--revision`,
 takes the Owner's `uv tool install` of the release it pins. These are
 `task create`, `update`, `resume` and `close`, `test ID` (but `--clean`,

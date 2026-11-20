@@ -64,13 +64,16 @@ class PlanItem:
 @dataclass(frozen=True)
 class Target:
     """What sync renders and locks: ``tree`` holds the sources of ``revision``, read from the Git repository
-    ``repo`` (the tree itself when None); ``manifest`` is the tree's, loaded once."""
+    ``repo`` (the tree itself when None); ``manifest`` is the tree's, loaded once. ``exported`` marks a target
+    read from the content repository (`exported_target`), whose revision the lock follows whenever it differs;
+    the checkout as it stands (`checkout_target`) moves the lock only with a file it changes."""
     tree: Path
     revision: str
     tag: str | None = None
     named: bool = False
     manifest: mf.Manifest | None = None
     repo: Path | None = None
+    exported: bool = False
 
     def delivery(self) -> mf.Manifest:
         return self.manifest or mf.load(self.tree)
@@ -215,10 +218,11 @@ def create_only_plan(project_path: Path, root: Path, found: mf.Manifest, scope: 
     return plan
 
 
-def lock_plan(project_path: Path, root: Path, changed: bool, revision: str, repo: Path | None = None) -> PlanItem:
-    """`.atc/atc.lock` moves to the sync target ``revision`` when sync changes any file it writes
-    (GIT_WORKFLOW.md § Lock advancement); a lock outside the history of ``repo``'s `main` (the content
-    repository; ``root`` by default) moves too."""
+def lock_plan(project_path: Path, root: Path, changed: bool, revision: str, repo: Path | None = None,
+              follow: bool = False) -> PlanItem:
+    """`.atc/atc.lock` moves to the sync target ``revision`` when sync changes any file it writes, or with
+    ``follow`` whenever its revision differs (docs/LAYOUT.md § `.atc/atc.lock`); a lock outside the history of
+    ``repo``'s `main` (the content repository; ``root`` by default) moves too."""
     path = project_path / validator.ATC_LOCK
     source = governance_source(root)
     content = validator.render_lock(source, revision)
@@ -227,6 +231,8 @@ def lock_plan(project_path: Path, root: Path, changed: bool, revision: str, repo
         return PlanItem("create", path, "ATC lock", content)
     if changed or lock["source"] != source:
         return PlanItem("update", path, "ATC lock moves to the synced revision", content)
+    if follow and lock["revision"] != revision:
+        return PlanItem("update", path, "ATC lock moves to the sync target revision", content)
     if validator.main_state(repo or root, lock["revision"]) == "stale":
         return PlanItem("update", path, "ATC lock revision is not in the history of main", content)
     return PlanItem("skip", path, "ATC lock is current")
@@ -289,7 +295,7 @@ def build_plan(project_path: Path, root: Path = ROOT, target: Target | None = No
     plan.extend(orphan_plan(project_path, set(canonical), tool_dirs))
     if not atc_collision:
         changed = any(item.action in ("create", "update", "prune") for item in plan)
-        plan.append(lock_plan(project_path, root, changed, target.revision, target.repo))
+        plan.append(lock_plan(project_path, root, changed, target.revision, target.repo, target.exported))
     return plan
 
 
@@ -699,7 +705,7 @@ def exported_target(root: Path, revision: str | None, *, fetch: bool = True) -> 
             mf.check_version(found, running_version())
         except mf.ManifestError as exc:
             raise SyncStop(exc.token, f"{commit[:12]}: {exc.detail}") from None
-        yield Target(tree, commit, tag, named, found, repo)
+        yield Target(tree, commit, tag, named, found, repo, exported=True)
 
 
 def behind_lock(project_path: Path, root: Path, target: Target) -> str | None:

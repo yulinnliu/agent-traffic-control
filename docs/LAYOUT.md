@@ -161,12 +161,12 @@ elsewhere it renders the `workspace` items.
   project never moves ahead of the tool; else the highest
   `vMAJOR.MINOR.PATCH` tag in the history of ATC `main`. `main`, its history
   and the tags are those of the content repository (§ The manifest). Sync
-  writes the lock with the target as `revision` when the lock is missing,
-  when its `source` differs from the governance repository, when sync changes
-  any file it writes into the repository, or when the recorded revision is
-  not in the history of ATC `main`. When the locked revision is ahead of the
-  target release, sync writes nothing into that repository until a later
-  release or a named `--revision`. `scripts/link-skills.sh` installs the
+  writes the lock with the target as `revision` whenever the recorded
+  revision differs from the target, even when every file it writes is
+  current, and when the lock is missing or its `source` differs from the
+  governance repository; such a sync commit holds the lock alone. When the
+  locked revision is ahead of the target release, sync writes nothing into
+  that repository until a later release or a named `--revision`. `scripts/link-skills.sh` installs the
   checkout it runs from, at its `HEAD`; it reads the lock without parsing
   it, so it also rewrites a lock with an empty `revision`, and checks the
   recorded revision against that `HEAD`. `atc sync --check` checks that this
