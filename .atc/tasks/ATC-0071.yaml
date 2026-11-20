@@ -17,3 +17,7 @@ authority:
 decisions:
 - 'Owner 2026-11-16: queued as P6, test-suite speed, measure first.'
 - 'Owner 2026-11-20 「P6」: open it now.'
+- 'Owner 2026-11-20: adopt § 4.1, a shared fast-import fixture helper with in-session copies, as this task''s implementation, in § 2.4 order.'
+- 'Owner 2026-11-20: § 4.2 caller measurement is this task''s next step; a product change it leads to gets its own task.'
+- 'Owner 2026-11-20: no in-process CLI change (§ 5).'
+- 'Owner 2026-11-20: the test_doctor_environment live-process failure goes to the workspace queue, outside this task.'
