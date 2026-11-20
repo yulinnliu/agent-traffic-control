@@ -67,6 +67,15 @@ def test_a_branch_from_start_leaves_head_index_and_tree_alone(tmp_path: Path, en
     assert git(repo, env, "rev-parse", "topic~1") == tip and later != tip
 
 
+def test_only_the_first_of_several_commits_starts_from_start(tmp_path: Path, env: dict[str, str]) -> None:
+    repo = tmp_path / "repo"
+    [base] = git_history.new_repository(repo, [Commit({"a.txt": "a\n"}, "base")], env=env)
+    first, second = git_history.import_commits(repo, "topic", [Commit({"a.txt": "1\n"}, "one"),
+                                                               Commit({"a.txt": "2\n"}, "two")], start="main", env=env)
+    assert git(repo, env, "rev-parse", "topic", "topic~1", "topic~2") == f"{second}\n{first}\n{base}"
+    assert git(repo, env, "rev-list", "--count", "topic") == "3"
+
+
 def test_no_commits_set_the_branch_to_start_and_need_one(tmp_path: Path, env: dict[str, str]) -> None:
     repo = tmp_path / "repo"
     [base] = git_history.new_repository(repo, [Commit({"a.txt": "a\n"}, "base")], env=env)
