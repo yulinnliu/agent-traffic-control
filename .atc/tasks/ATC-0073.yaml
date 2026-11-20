@@ -1,0 +1,20 @@
+task_id: ATC-0073
+title: 'Root test debt: fixture repositories, the doctor process test, three review leftovers'
+repository: yulinnliu/agent-traffic-control
+base_sha: 435ca39930e5770230929a848bd4281e5616a843
+scope: 'Three pieces of test debt in the workspace root, done before the next release: 1. Fixture repositories. ATC-0071 moved the 9 slowest test files to `adapters/python/tests/git_history.py` (one `git fast-import` per history shape, copied within a session). About 15 other test files still build their git repositories per test with one git process per step. Move every test file that builds a fixture repository to the helper, unless the test exercises the git commands themselves; list the files moved and any left with the reason. Measure the gain the same way as ATC-0071 (the opt-in git-call plugin committed by ATC-0072 under tests/). 2. `test_doctor_environment.py::test_a_live_process_running_from_the_environment_is_found` failed once in ATC-0071''s 4-worker run: doctor still reported WARN 10 s after the child was killed and waited. Find whether the test or `atc doctor` is wrong first; a doctor defect is a behaviour fix, stated as such in the report. 3. Review leftovers from earlier tasks:
+  - under a non-Python toolchain the verifier still reads the input set (`_Reuse.create` in verifier.py) and still writes `reuse.report()` though no stage used it (ATC-0066 review): skip both; - tests/test_select_tests.py asserts a whole-repo property with the real repository as fixture (ATC-0054 review): give it a synthetic import graph; - no test reproduces PID reuse in the worker-pool ancestor walk (ATC-0063 review): add one. No design step; each piece is reported with its result. The change does not release; the release follows it.'
+tests: strict
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: 435ca39930e5770230929a848bd4281e5616a843
+branch: claude+ATC-0073
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
+decisions:
+- 'Owner 2026-11-20 「記入佇列」: the remaining fixture-repository files are queued from ATC-0071, and so is the doctor test failure.'
+- 'Owner 2026-11-20 「合單，做完再發」: the three pieces are one task, done before the release that carries ATC-0070 to ATC-0072.'
