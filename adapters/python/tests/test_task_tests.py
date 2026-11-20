@@ -144,11 +144,11 @@ def test_all_runs_the_full_suite(workspace: Workspace, calls: dict[str, list]) -
 def test_pytest_arguments_after_dashes_are_an_explicit_run_with_no_related_selection(
         workspace: Workspace, calls: dict[str, list], given: list[str]) -> None:
     """docs/TESTKIT.md § Commands, step 2: the arguments after -- are exactly what pytest gets, --all or not; the
-    lint stage still covers the task's changes."""
+    lint stage still runs over the whole tree."""
     assert workspace.run(TASK, *given, "--", "tests/test_value.py", "-q") == 0
     [argv] = calls["run"]
     assert option(argv, "--label") == "explicit" and "--related" not in argv
-    assert option(argv, "--lint") == workspace.base
+    assert "--lint" in argv
     assert argv[argv.index("--"):] == ["--", "tests/test_value.py", "-q"]
 
 

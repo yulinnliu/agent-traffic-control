@@ -419,16 +419,16 @@ def _write_report(environ: Mapping[str, str], project: Project, pytest_paths: li
         print(f"verification report: {path}", flush=True)
 
 
-def _lint(checks: _Checks, root: Path, base: str, sha: str) -> None:
-    """The lint stage over the range, in the candidate's own environment (docs/TESTKIT.md § Lint stage); a
-    candidate without its config has not adopted it."""
+def _lint(checks: _Checks, root: Path) -> None:
+    """The lint stage over the whole candidate tree, in the candidate's own environment (docs/TESTKIT.md § Lint
+    stage); a candidate without its config has not adopted it."""
     if not lint.configured(root):
         print(lint.not_configured_line(root), flush=True)
         return
-    checks.row(_Row(lint.TOKEN, tuple(lint.range_argv(sys.executable, base, sha))), "lint")
+    checks.row(_Row(lint.TOKEN, tuple(lint.tree_argv(sys.executable))), "lint")
 
 
-def _consumer_checks(project: Project, checks: _Checks, base: str, sha: str, paths: list[str],
+def _consumer_checks(project: Project, checks: _Checks, base: str, paths: list[str],
                      consumer_selection: Selection) -> bool:
     """The rows from the selection to the stages, for a project that carries the testkit; whether documentation-only."""
     pytest_paths = consumer_selection.pytest_paths()
@@ -443,7 +443,7 @@ def _consumer_checks(project: Project, checks: _Checks, base: str, sha: str, pat
           f"repository-wide collection: {'check' if collect else 'skip'}", flush=True)
     checks.static((check for check in project.checks if check.first), paths)
     checks.row(_Row("UV_LOCK_CHECK_FAILED", checks.isolated.toolchain.lock_check_argv))
-    _lint(checks, project.root, base, sha)
+    _lint(checks, project.root)
     if doc_only:
         return doc_only
     checks.row(_Row("TESTKIT_CONTRACT_FAILED", (sys.executable, "-m", "atc_testkit.check", "--installed")))
@@ -465,8 +465,7 @@ def _root_reasons(project: Project, paths: list[str]) -> Sequence[str]:
         return ()
 
 
-def _root_checks(project: Project, checks: _Checks, base: str, sha: str,
-                 paths: list[str]) -> tuple[bool, list[str] | None]:
+def _root_checks(project: Project, checks: _Checks, paths: list[str]) -> tuple[bool, list[str] | None]:
     """The root form: its static checks, then the stages over its selection unless the range is documentation-only;
     whether it was, and the pytest paths the stages ran."""
     doc_only = project.documentation_only(paths)
@@ -480,7 +479,7 @@ def _root_checks(project: Project, checks: _Checks, base: str, sha: str,
     checks.select(elapsed.DOCUMENTATION_ONLY if doc_only else elapsed.kind_of(pytest_paths),
                   _root_reasons(project, paths) if pytest_paths == [] else (), len(paths))
     checks.static((check for check in project.checks if check.first), paths)
-    _lint(checks, project.root, base, sha)
+    _lint(checks, project.root)
     checks.static((check for check in project.checks if not check.first), paths)
     if pytest_paths is not None:
         checks.stages(pytest_paths, project.root / project.tests_dir)
@@ -523,9 +522,9 @@ def main(project: Project, environ: Mapping[str, str] | None = None, run: stages
         reuse = _Reuse.create(project, work, sha, environ)
         checks = _Checks(project, work, isolated, run, workers, budget, clock, reuse)
         if project.select is None:
-            doc_only, pytest_paths = _root_checks(project, checks, base, sha, paths)
+            doc_only, pytest_paths = _root_checks(project, checks, paths)
         else:
-            doc_only = _consumer_checks(project, checks, base, sha, paths, chosen)
+            doc_only = _consumer_checks(project, checks, base, paths, chosen)
         checks.report_checks()
         check_final_state(project.root, sha)
         if reuse is not None:

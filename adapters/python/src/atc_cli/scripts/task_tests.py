@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """`atc test`: a task's tests in isolation (docs/TESTKIT.md § Commands).
 
-`atc test ID` runs the lint stage and then the tests related to the task's changes since its record's `base_sha`
+`atc test ID` runs the lint stage over the whole tree and then the tests related to the task's changes since its record's `base_sha`
 in the task's own worktree, or exactly the pytest arguments after `--`; `--lint` runs the lint stage alone; `--sha` runs either in an export of that commit, `--mutants` judges a mutant list there, and
 `--candidate` verifies the candidate `atc integrate ID` would build. Every run happens in a registered
 scratch named after the task, and every run prunes stale scratch entries first.
@@ -41,12 +41,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="atc test", allow_abbrev=False, **cli_conventions.form(
         "Run a task's tests in isolation, its output kept in a log.",
         "atc test ID [--sha SHA] [--all] [-v] [-- PYTEST_ARG...]\n"
-        "    the lint stage over the files changed since the task's base_sha, then the tests related to them\n"
+        "    the lint stage over the whole tree, then the tests related to the files changed since the task's\n"
+        "    base_sha\n"
         "    (--all: the full suite; PYTEST_ARGs: exactly those, with no related selection, --all or not), in\n"
         "    the task's worktree, or with --sha in an export of SHA (scratch ID-SHA7, its environment built\n"
         "    once); a lint failure runs no test\n"
         "atc test ID --lint [--sha SHA]\n"
-        "    the lint stage alone: the repository's .pre-commit-config.yaml over those files\n"
+        "    the lint stage alone: the repository's .pre-commit-config.yaml over every file of the tree\n"
         "atc test ID --mutants FILE [--sha SHA] [-- TEST...]\n"
         "    apply each mutant of FILE alone to an export of SHA (default: the branch tip) and run its tests:\n"
         "    the TESTs after --, else of the tests the tree's selector picks for its edited paths plus its own\n"
@@ -188,8 +189,7 @@ def run_tests(task: Task, args: argparse.Namespace, pytest_args: list[str], envi
     label = "explicit" if pytest_args else "all" if args.all else "related"
     argv = ["--scratch", name, "--task", task.id, "--tree", str(directory), "--label", label,
             *timeout_of(directory), *(["--progress"] if args.verbose else [])]
-    if task.base:
-        argv += ["--lint", task.base]
+    argv += ["--lint"]
     # The tree's own verifier classifies its commit's input set (docs/TESTKIT.md § Input evidence).
     argv_file = verifier_argv_file(repository_top(Path(directory), None if args.sha else task.worktree))
     if argv_file is not None:

@@ -21,11 +21,11 @@ rules bind it as they bind a project's verifier.
 - Its own rows carry its own tokens: after the ancestry rows it reads the
   range, and a range Git cannot read refuses with `RANGE_UNREADABLE`; its
   static checks follow, then the stages.
-- Static checks: the lint stage over the range. The root's
+- Static checks: the lint stage over every file of the candidate. The root's
   `.pre-commit-config.yaml` holds its workspace checks as `local` hooks
   (`atc-maintain validate`, `atc-maintain policies check`), with the drift
   checks and the link check; the `python-adapter` job in
-  `.github/workflows/validate.yml` runs the same list over every file.
+  `.github/workflows/validate.yml` runs the same list.
 - Selection: in place of the job's full run of the stages, `test_paths`
   maps the range through `select_tests.py` (`adapters/python/README.md`
   § Selected tests) to the pytest paths the stages run in `tests_dir`: `[]`

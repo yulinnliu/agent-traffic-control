@@ -117,7 +117,7 @@ def test_full_range_runs_the_roots_checks_in_order(candidate: Candidate, atc_tmp
     assert captured.out.splitlines()[0] == "classification: full"
     assert captured.out.splitlines()[-1] == f"integration verification: PASS {sha}"
     adapter = candidate.root / iv.ADAPTER_DIR
-    assert candidate.calls[0][:2] == (lint.range_argv(sys.executable, candidate.main, sha), candidate.root)
+    assert candidate.calls[0][:2] == (lint.tree_argv(sys.executable), candidate.root)
     assert candidate.started()[1:] == ["parallel", "serial", "interactive"]
     for argv, cwd, env, _private in candidate.calls[1:]:
         assert cwd == adapter and argv[1:4] == [*STAGE_RUNNER, "-q"]

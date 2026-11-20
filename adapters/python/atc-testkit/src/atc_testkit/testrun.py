@@ -1076,8 +1076,8 @@ def run(argv: Sequence[str], environ: MutableMapping[str, str] | None = None) ->
     parser.add_argument("--related", metavar="SHA",
                         help="run only the changed test files and the test files that import a changed module "
                              "directly, for the paths changed since SHA")
-    parser.add_argument("--lint", metavar="SHA",
-                        help="first run the lint stage over the files changed since SHA; a failure ends the run")
+    parser.add_argument("--lint", action="store_true",
+                        help="first run the lint stage over the whole tree; a failure ends the run")
     parser.add_argument("--lint-only", action="store_true", help="run the lint stage of --lint and no test")
     parser.add_argument("--verifier-argv", metavar="FILE",
                         help="the project's verifier argv file, which classifies the input set; with it a clean run "
@@ -1086,7 +1086,7 @@ def run(argv: Sequence[str], environ: MutableMapping[str, str] | None = None) ->
     parser.add_argument("--timeout", type=float, metavar="SECONDS", help="seconds before the run is ended and reported as TIMEOUT")
     parser.add_argument("--progress", action="store_true", help="also stream pytest's output to the console")
     args = parser.parse_args(argv)
-    if args.lint_only and (args.lint is None or pytest_arguments or args.related):
+    if args.lint_only and (not args.lint or pytest_arguments or args.related):
         parser.error("--lint-only takes --lint and no tests")
     check_task(args.task)
     environ = os.environ if environ is None else environ
@@ -1111,7 +1111,7 @@ def run(argv: Sequence[str], environ: MutableMapping[str, str] | None = None) ->
     private = isolate(tree, place, python, environ)
     child = child_environment(tree, place, environ)
     if args.lint:
-        code = run_lint(tree, place, python, changed_paths(tree, args.lint, row), child)
+        code = run_lint(tree, place, python, child)
         if code or args.lint_only:
             return code
     items = None
@@ -1314,26 +1314,22 @@ def repository_top(tree: Path, place: Path) -> Path:
     return Path(found[0]) if found else place / checkout.TREE
 
 
-def run_lint(tree: Path, place: Path, python: str, paths: Sequence[str], env: Mapping[str, str]) -> int:
-    """The lint stage over ``paths`` (docs/TESTKIT.md § Lint stage): 0 when it passes, has no file or is not
-    adopted, else 1."""
+def run_lint(tree: Path, place: Path, python: str, env: Mapping[str, str]) -> int:
+    """The lint stage over the whole tree (docs/TESTKIT.md § Lint stage): 0 when it passes or is not adopted,
+    else 1."""
     top = repository_top(tree, place)
     if not lint.configured(top):
         print(lint.not_configured_line(top), flush=True)
         return 0
-    files = lint.existing(top, paths)
-    if not files:
-        print("LINT no changed file", flush=True)
-        return 0
     (place / RUNS).mkdir(exist_ok=True)
     log = place / RUNS / f"{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}-{LINT_LABEL}.log"
-    code = lint.run_paths(top, place, python, files, env, log)
+    code = lint.run_tree(top, place, python, env, log)
     if code == 0:
-        print(f"LINT PASS {len(files)} files; log {log}", flush=True)
+        print(f"LINT PASS every file; log {log}", flush=True)
         return 0
     for line in log.read_text(encoding="utf-8", errors="replace").splitlines()[-TAIL_LINES:]:
         print(line, flush=True)
-    print(f"STOP {lint.TOKEN}: pre-commit exited {code} on {len(files)} files; log {log}", flush=True)
+    print(f"STOP {lint.TOKEN}: pre-commit exited {code}; log {log}", flush=True)
     return 1
 
 

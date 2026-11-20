@@ -3,8 +3,8 @@
 The root's data for the verifier skeleton (docs/development/TESTING.md § The workspace root's verifier),
 imported from the candidate's own tree: the environment ``scripts/integration-verify.json`` builds from ``uv.lock``
 under the candidate's ignored ``adapters/python/.venv/`` installs ``atc_testkit`` from there. The skeleton runs the
-lint stage (``.pre-commit-config.yaml``, which holds ``atc-maintain validate`` and ``policies check``) over the
-integration range, then the testkit's stages over ``select_tests.py``'s selection of it; the full suite runs in a
+lint stage (``.pre-commit-config.yaml``, which holds ``atc-maintain validate`` and ``policies check``) over every
+file of the candidate, then the testkit's stages over ``select_tests.py``'s selection of it; the full suite runs in a
 dispatched CI run.
 
     uv run --quiet --locked --project adapters/python python adapters/python/scripts/integration_verify.py

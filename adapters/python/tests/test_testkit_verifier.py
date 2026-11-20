@@ -212,7 +212,7 @@ def test_each_shared_check_refuses_with_its_token(candidate: Candidate, capsys: 
 
 
 def test_the_checks_run_in_the_order_of_the_table(candidate: Candidate, atc_tmp: Path) -> None:
-    sha = candidate.advance("tests/test_x.py")
+    candidate.advance("tests/test_x.py")
     checks = (StaticCheck("before", "BEFORE_FAILED", ("before-tool",), first=True),
               StaticCheck("after", "AFTER_FAILED", ("after-tool",)))
     recorder = Recorder()
@@ -222,7 +222,7 @@ def test_the_checks_run_in_the_order_of_the_table(candidate: Candidate, atc_tmp:
                              "pytest-parallel.log", "pytest-serial.log", "pytest-interactive.log"]
     assert [call[0] for call in recorder.calls][1] == ["uv", "lock", "--check"]
     assert recorder.calls[2][0] == [sys.executable, "-m", "pre_commit", "run", "--show-diff-on-failure", "--color",
-                                    "never", "--from-ref", candidate.main, "--to-ref", sha]
+                                    "never", "--all-files"]
     assert recorder.calls[3][0][-3:] == ["-m", "atc_testkit.check", "--installed"]
 
 

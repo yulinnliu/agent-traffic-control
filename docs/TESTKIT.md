@@ -505,16 +505,17 @@ project's rules. The verifier counts a managed path as documentation-only
 
 The lint stage runs the repository's `.pre-commit-config.yaml` through
 pre-commit before any test: the static rules that read files and syntax
-trees and run no product code. One list serves every entry:
+trees and run no product code. One list serves every entry, and every entry
+but the commit hook runs it over every file of the tree, so a rule that
+changed, in a topic or by `atc sync`, checks the files it did not touch at
+the next run:
 
-- the commit hook pre-commit installs;
-- `atc test ID`, over the files changed since the task's `base_sha` and the
-  untracked ones, before its tests, and `atc test ID --lint` alone
-  (§ Commands);
-- the integration verifier, over the range
-  (`pre-commit run --from-ref <ATC_EXPECTED_MAIN_SHA> --to-ref <ATC_INTEGRATION_SHA>`),
-  with the token `LINT_FAILED` (§ Integration verifier);
-- the CI job, over every file.
+- the commit hook pre-commit installs, over the staged files;
+- `atc test ID`, before its tests, and `atc test ID --lint` alone
+  (§ Commands), over every file of the tree, untracked ones included;
+- the integration verifier (`pre-commit run --all-files` in the
+  candidate), with the token `LINT_FAILED` (§ Integration verifier);
+- the CI job.
 
 Its rules:
 
@@ -544,14 +545,27 @@ Its rules:
   in lower case, and wording that may narrate a change (`previously`,
   `used to be`, `no longer`).
 - A failure ends the run before pytest. `atc test` prints pre-commit's last
-  lines, then `STOP LINT_FAILED: pre-commit exited <code> on <n> files; log
-  <path>`, and exits 1; the log is `<scratch>/runs/<UTC time>-lint.log`. A
-  run whose changed paths name no existing file prints `LINT no changed
-  file` and goes on.
+  lines, then `STOP LINT_FAILED: pre-commit exited <code>; log <path>`, and
+  exits 1; the log is `<scratch>/runs/<UTC time>-lint.log`. A pass prints
+  `LINT PASS every file; log <path>`.
+- In a task's worktree, `--all-files` reads the files an index names, and
+  the worktree's own index omits its untracked files. The run copies that
+  index to `<scratch>/lint.index`, adds every file to the copy with
+  `git add -A`, which hashes only the files that differ from it, and runs
+  pre-commit with `GIT_INDEX_FILE` naming the copy; it deletes the copy when
+  pre-commit ends. The worktree's own index is never written. Every hook
+  inherits `GIT_INDEX_FILE`, so a hook that reads the index through Git sees
+  the copy, untracked files included; a hook that removes the `GIT_*`
+  variables, such as the link check `atc_testkit.docs --tracked`, reads the
+  worktree's own index and skips them until they are added.
 - An export (`--sha`) is no Git working tree, and pre-commit runs only in
   one: the run gives the export a Git directory `<scratch>/lint.git` holding
   an index of its files, and removes it with the export's `.git` pointer
   file when pre-commit ends, so the tree is again the export of its commit.
+- After `atc sync` delivers stricter rules, every topic of that project
+  whose tree still holds a file they reject fails the lint stage, at
+  `atc test` and at the verifier, until a commit on `main` fixes the file;
+  the lint stage has no bypass.
 - `atc sync` delivers the shared rules to a project's `.atc/lint/`
   (`ruff.toml`, `markdownlint.jsonc`, `vale.ini` with `vale/ATC/`) and
   keeps them current; the project's
@@ -587,7 +601,7 @@ this order:
 | The selection for that range can be computed | `SELECTION_FAILED` |
 | The project's static checks that run first | the project's tokens |
 | The toolchain's lock check, `uv lock --check` | `UV_LOCK_CHECK_FAILED` |
-| The lint stage over the range, when the candidate holds `.pre-commit-config.yaml` (§ Lint stage) | `LINT_FAILED` |
+| The lint stage over every file, when the candidate holds `.pre-commit-config.yaml` (§ Lint stage) | `LINT_FAILED` |
 | `python -m atc_testkit.check --installed` | `TESTKIT_CONTRACT_FAILED` |
 | Repository-wide collection, when the range changes a test, test helper, fixture or `conftest.py` | `COLLECTION_FAILED` |
 | The project's other static checks | the project's tokens |
@@ -894,9 +908,8 @@ scratch entries. In order:
    `HOME` and `USERPROFILE` name `<scratch>/home`, the uv, Python and ruff
    caches are those under `~/.atc/cache`, and the project's credential
    variables are removed. The data-root variables keep `<scratch>/qdr`.
-   The lint stage then runs over the changed paths step 2 lists, when the
-   record has a `base_sha`; a failure ends the command with exit 1 before
-   any test.
+   The lint stage then runs over every file of the tree (§ Lint stage); a
+   failure ends the command with exit 1 before any test.
 6. Run pytest with `PYTHONUNBUFFERED=1`, `-q`, `-p no:cacheprovider`,
    `--basetemp <scratch>/bt` and, when xdist is installed, the run's worker
    option, its output written as it arrives to
@@ -928,8 +941,8 @@ from then; a wait past its limit stops it with `WORKER_WAIT_TIMEOUT` (exit
 ### `atc test ID --lint [--sha SHA]`
 
 The lint stage alone (§ Lint stage), in the task's worktree or with `--sha`
-in the export of `SHA`, over the files changed since the record's
-`base_sha`: steps 1 to 5 of the run above, then the lint stage, and no test.
+in the export of `SHA`, over every file of the tree: steps 1 to 5 of the
+run above, which end with the lint stage, and no test.
 It takes no tests and no `--all`. Exit 0 when it passes or prints `LINT_NOT_CONFIGURED`, 1 on
 `LINT_FAILED`. A reviewer runs it before reading the diff (atc-review
 skill).

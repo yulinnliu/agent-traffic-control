@@ -139,7 +139,7 @@ def test_a_repository_without_the_lint_config_runs_its_tests_after_the_lint_stag
         subprocess.run(["git", "-C", str(tree), *args], check=True, capture_output=True, env=git_env)
     (tree / "tests/test_more.py").write_text("def test_more():\n    assert True\n", encoding="utf-8")
     run = run_command("run", "--scratch", "s", "--task", TASK, "--tree", str(tree), "--python", sys.executable,
-                      "--lint", "HEAD", "--", "-n", "0", "tests")
+                      "--lint", "--", "-n", "0", "tests")
     lines = run.stdout.splitlines()
     assert run.returncode == 0, run.stdout + run.stderr
     assert any(line.startswith(f"{lint.NOT_CONFIGURED}: no .pre-commit-config.yaml at ") for line in lines), lines
