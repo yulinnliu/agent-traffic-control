@@ -160,16 +160,47 @@ def test_a_load_beyond_an_import_statement_is_found(source, loaded):
     assert loaded_names(source) == loaded
 
 
-def test_a_declared_data_name_is_never_loaded_by_its_file(graph):
-    """A file that starts to load a name it declares as data, by an import statement, a dynamic import or a ``-m``
-    argument, makes its declaration wrong: drop it from `DATA_NAMES`."""
+def declared_loads(graph: select_tests.Graph) -> list[str]:
+    """Each wrong `DATA_NAMES` declaration of ``graph``: a declaring file that is no module, or one that loads a name
+    it declares, by an import statement, a dynamic import or a ``-m`` argument."""
+    wrong = []
     for file, names in select_tests.DATA_NAMES.items():
         modules = [m for m in graph.modules.values() if m.path.rsplit("/", 1)[-1] == file]
-        assert modules, f"{file} declares data names but is no module of the graph"
+        if not modules:
+            wrong.append(f"{file} declares data names but is no module of the graph")
         for module in modules:
             loads = module.imports | loaded_names((graph.workspace / module.path).read_text(encoding="utf-8"))
             loaded = {name for name in names if any(i == name or i.startswith(f"{name}.") for i in loads)}
-            assert not loaded, f"{module.path} loads {sorted(loaded)}, which DATA_NAMES declares as data"
+            if loaded:
+                wrong.append(f"{module.path} loads {sorted(loaded)}, which DATA_NAMES declares as data")
+    return wrong
+
+
+def test_a_declaration_whose_file_loads_the_name_or_is_no_module_is_wrong(tmp_path, monkeypatch):
+    declared = frozenset({"target"})
+    monkeypatch.setattr(select_tests, "DATA_NAMES", {
+        "table.py": declared, "imported.py": declared, "dynamic.py": declared, "option.py": declared,
+        "submodule.py": declared, "absent.py": declared})
+    graph = small_graph(tmp_path, monkeypatch, {
+        "tests/conftest.py": "", "scripts/target.py": "",
+        "scripts/table.py": "TABLE = {'target': 'atc'}\n",
+        "scripts/imported.py": "TABLE = {'target': 'atc'}\n\ndef run():\n    import target\n",
+        "scripts/dynamic.py": "import importlib\nTABLE = {'target': 'atc'}\nimportlib.import_module('target')\n",
+        "scripts/option.py": "ARGV = ['python', '-m', 'target']\n",
+        "scripts/submodule.py": "COMMAND = 'python -m target.cli'\n",
+    })
+    assert declared_loads(graph) == [
+        f"{ADAPTER}/scripts/imported.py loads ['target'], which DATA_NAMES declares as data",
+        f"{ADAPTER}/scripts/dynamic.py loads ['target'], which DATA_NAMES declares as data",
+        f"{ADAPTER}/scripts/option.py loads ['target'], which DATA_NAMES declares as data",
+        f"{ADAPTER}/scripts/submodule.py loads ['target'], which DATA_NAMES declares as data",
+        "absent.py declares data names but is no module of the graph"]
+
+
+def test_a_declared_data_name_is_never_loaded_by_its_file(graph):
+    """A file that starts to load a name it declares as data makes its declaration wrong: drop it from
+    `DATA_NAMES`."""
+    assert declared_loads(graph) == []
 
 
 def test_the_hook_names_the_cli_as_data(graph, monkeypatch):

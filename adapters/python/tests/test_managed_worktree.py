@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 
+import git_history
 import managed_worktree as hw
 
 pytestmark = pytest.mark.integration
@@ -24,11 +25,16 @@ CLAUDE = {"CLAUDECODE": "1"}
 LOCK = f"claude:{TASK}"
 
 
-def run_git(repo: Path, *args: str, check: bool = True) -> str:
+def git_env() -> dict[str, str]:
+    """The environment of the test's git calls: a fixed identity and no user or system configuration."""
     env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
     env.update(GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@example.com", GIT_COMMITTER_NAME="t",
                GIT_COMMITTER_EMAIL="t@example.com", GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull)
-    return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, env=env,
+    return env
+
+
+def run_git(repo: Path, *args: str, check: bool = True) -> str:
+    return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, env=git_env(),
                           check=check).stdout.strip()
 
 
@@ -69,13 +75,15 @@ class Workspace:
         return hw.branch_present(str(self.repo), branch) is True
 
 
+def built_project(repo: Path) -> None:
+    """The project repository: one commit of one file."""
+    git_history.new_repository(repo, [git_history.Commit({"a.txt": "a\n"}, "edit a.txt")], env=git_env())
+
+
 @pytest.fixture
-def ws(tmp_path: Path) -> Workspace:
+def ws(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory) -> Workspace:
     root = tmp_path / "workspace"
-    repo = root / "projects" / PROJECT
-    repo.mkdir(parents=True)
-    run_git(repo, "init", "-q", "-b", "main")
-    commit(repo, "a.txt", "a\n")
+    git_history.copied(tmp_path_factory, "managed-worktree", root / "projects" / PROJECT, built_project)
     write_map(root)
     home = tmp_path / "home"
     home.mkdir()

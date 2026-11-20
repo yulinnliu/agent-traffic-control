@@ -42,12 +42,15 @@ def test_a_process_from_the_environment_is_named_with_its_command(tmp_path: Path
 
 @pytest.mark.integration
 def test_a_live_process_running_from_the_environment_is_found(tmp_path: Path) -> None:
-    """The host's own process list: a child whose command line runs a file of the environment is in use."""
+    """The host's own process list: a child whose command line runs a file of the environment is in use.
+
+    The child is the base interpreter, one process: a venv's launcher starts the interpreter as a second process
+    naming the same file, which killing and waiting for the launcher does not wait for."""
     prefix = tmp_path / "environment"
     script = prefix / "Scripts" / "hold.py"
     script.parent.mkdir(parents=True)
     script.write_text("import time\ntime.sleep(60)\n", encoding="utf-8")
-    process = children.start([sys.executable, str(script)], stdin=subprocess.DEVNULL)
+    process = children.start([sys._base_executable, str(script)], stdin=subprocess.DEVNULL)
     try:
         deadline = time.monotonic() + 10
         while (found := doctor.environment_checks(prefix))[0].status == "READY" and time.monotonic() < deadline:

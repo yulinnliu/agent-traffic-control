@@ -12,6 +12,7 @@ import threading
 
 import pytest
 
+import git_history
 from atc_testkit import checkout, scratch
 
 pytestmark = pytest.mark.integration
@@ -23,7 +24,8 @@ def git(repo: Path, *args: str) -> str:
 
 
 @pytest.fixture()
-def source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, str]:
+def source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+           tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, str]:
     """A repository whose commit holds a project at the top and one under ``sub``; the commit's full SHA."""
     for key in [key for key in os.environ if key.startswith("GIT_")]:
         monkeypatch.delenv(key)
@@ -32,6 +34,10 @@ def source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, str]:
                        "GIT_CONFIG_GLOBAL": os.devnull}.items():
         monkeypatch.setenv(key, value)
     repo = tmp_path / "source"
+    return repo, git_history.copied(tmp_path_factory, "checkout-source", repo, built_source)
+
+
+def built_source(repo: Path) -> str:
     (repo / "sub").mkdir(parents=True)
     git(repo, "init", "-q", "-b", "main")
     (repo / "pyproject.toml").write_text('[project]\nname = "top"\n', encoding="utf-8")
@@ -40,7 +46,7 @@ def source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, str]:
     (repo / "sub/uv.lock").write_text("lock\n", encoding="utf-8")
     git(repo, "add", ".")
     git(repo, "commit", "-q", "-m", "x")
-    return repo, git(repo, "rev-parse", "HEAD")
+    return git(repo, "rev-parse", "HEAD")
 
 
 class Sync:

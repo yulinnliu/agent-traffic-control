@@ -10,7 +10,8 @@ from pathlib import Path
 
 import pytest
 
-from atc_testkit import elapsed, evidence, gate, inputs, selection, stages
+import git_history
+from atc_testkit import elapsed, evidence, gate, inputs, selection, stages, workers
 from atc_testkit.project import Project, StaticCheck
 
 ZERO = "0" * 40
@@ -52,9 +53,16 @@ class Recorder:
 
 
 @pytest.fixture()
-def repo(tmp_path: Path, atc_tmp: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def repo(tmp_path: Path, atc_tmp: Path, monkeypatch: pytest.MonkeyPatch,
+         tmp_path_factory: pytest.TempPathFactory) -> Path:
     root = tmp_path / "repo"
-    root.mkdir()
+    git_history.copied(tmp_path_factory, "gate-repo", root, built_repo)
+    # a pool of its own: the stage-time records of another test's run of an identical commit stay out of this one's
+    monkeypatch.setenv(workers.POOL_DIRECTORY, str(tmp_path / "pool"))
+    return root
+
+
+def built_repo(root: Path) -> None:
     git(root, "init", "-q", "-b", "main")
     (root / "base.md").write_text("x\n", encoding="utf-8")
     (root / ".gitignore").write_text(".tmp/\n", encoding="utf-8")
@@ -62,7 +70,6 @@ def repo(tmp_path: Path, atc_tmp: Path, monkeypatch: pytest.MonkeyPatch) -> Path
     (root / "scripts/integration-verify.json").write_text(json.dumps(ARGV), encoding="utf-8")
     git(root, "add", ".")
     git(root, "commit", "-q", "-m", "base")
-    return root
 
 
 def commit(root: Path, name: str) -> str:

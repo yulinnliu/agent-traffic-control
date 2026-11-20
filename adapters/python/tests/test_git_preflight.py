@@ -7,17 +7,23 @@ from pathlib import Path
 
 import pytest
 
+import git_history
 import git_preflight as gp
 
 
-def run_git(repo: Path, *args: str) -> str:
+def git_env() -> dict[str, str]:
+    """The environment of the test's git calls: a fixed identity and no user or system configuration."""
     env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
     env.update(
         GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@example.com",
         GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@example.com",
         GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull,
     )
-    result = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, env=env, check=True)
+    return env
+
+
+def run_git(repo: Path, *args: str) -> str:
+    result = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, env=git_env(), check=True)
     return result.stdout.strip()
 
 
@@ -28,13 +34,16 @@ def commit(repo: Path, path: str, content: str) -> str:
     return run_git(repo, "rev-parse", "HEAD")
 
 
+def built_repo(root: Path) -> None:
+    """The repository on main with two commits, one file each."""
+    git_history.new_repository(root, [git_history.Commit({"a.txt": "a\n"}, "edit a.txt"),
+                                      git_history.Commit({"b.txt": "b\n"}, "edit b.txt")], env=git_env())
+
+
 @pytest.fixture
-def repo(tmp_path: Path) -> Path:
+def repo(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory) -> Path:
     root = tmp_path / "repo"
-    root.mkdir()
-    run_git(root, "init", "-q", "-b", "main")
-    commit(root, "a.txt", "a\n")
-    commit(root, "b.txt", "b\n")
+    git_history.copied(tmp_path_factory, "git-preflight", root, built_repo)
     return root
 
 

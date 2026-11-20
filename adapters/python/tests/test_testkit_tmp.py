@@ -12,6 +12,7 @@ import sys
 
 import pytest
 
+import git_history
 from atc_testkit import isolation, locations, owner, scratch
 
 
@@ -605,15 +606,18 @@ def git(cwd: Path, *args: str) -> str:
 
 
 @pytest.fixture()
-def repository(tmp_path: Path) -> Path:
+def repository(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory) -> Path:
     root = tmp_path / "repo"
-    root.mkdir()
+    git_history.copied(tmp_path_factory, "tmp-repository", root, built_repository)
+    return root
+
+
+def built_repository(root: Path) -> None:
     git(root, "init", "-q", "-b", "main")
     write(root / "a.txt")
     (root / ".gitignore").write_text(".venv/\n", encoding="utf-8")
     git(root, "add", ".")
     git(root, "commit", "-q", "-m", "x")
-    return root
 
 
 def test_prune_removes_a_candidate_through_its_repository(repository: Path, atc_tmp: Path) -> None:

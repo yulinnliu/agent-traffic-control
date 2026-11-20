@@ -8,6 +8,7 @@ import subprocess
 
 import pytest
 
+import git_history
 import release_check as release
 
 PINNED = {
@@ -54,16 +55,20 @@ def integrate(root: Path, task: str) -> str:
     return commit(root, {f".atc/tasks/{task}.yaml": f"task_id: {task}\n"}, f"chore(tasks): open {task}")
 
 
-@pytest.fixture
-def repo(tmp_path: Path) -> Path:
+def built_repo(built: Path) -> None:
     """A checkout released as v0.8.0 (atc-testkit 0.15.0), then ATC-0002 and ATC-0003 integrated."""
+    git(built, "init", "-q", "-b", "main")
+    commit(built, PINNED, "release 0.8.0")
+    git(built, "tag", "v0.8.0")
+    integrate(built, "ATC-0002")
+    integrate(built, "ATC-0003")
+
+
+@pytest.fixture
+def repo(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """A copy of the session's built checkout (`built_repo`)."""
     root = tmp_path / "atc"
-    root.mkdir()
-    git(root, "init", "-q", "-b", "main")
-    commit(root, PINNED, "release 0.8.0")
-    git(root, "tag", "v0.8.0")
-    integrate(root, "ATC-0002")
-    integrate(root, "ATC-0003")
+    git_history.copied(tmp_path_factory, "release-check-repo", root, built_repo)
     return root
 
 

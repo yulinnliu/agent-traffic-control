@@ -4,13 +4,17 @@ import os
 import shutil
 import subprocess
 import sys
+from functools import partial
 from pathlib import Path
 
 import pytest
 
 import doctor
+import git_history
 import sync_project
 import validate_workspace as validator
+
+IDENTITY = ("-c", "user.name=t", "-c", "user.email=t@example.invalid")
 
 
 # The AGENTS.md section GIT_WORKFLOW.md § Integration verifier source requires of every registered project.
@@ -71,34 +75,51 @@ def user_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return home
 
 
-def make_workspace(tmp_path: Path, *, create_project: bool = True) -> tuple[Path, Path]:
-    root = tmp_path / "workspace"
-    project = root / "projects" / "demo"
-    root.mkdir(parents=True)
+def built_workspace(built: Path, *, create_project: bool, committed: bool) -> None:
+    """The workspace files, without workspace.yaml (it names the workspace's own path, so `make_workspace` writes it
+    after the copy); with ``committed`` the ATC checkout and the project are committed as `commit_workspace` does."""
+    project = built / "projects" / "demo"
     # A real workspace root is a Git repository, and doctor probes it for lock-reason
     # support; without this the probe cannot succeed.
-    run_git(root, "init", "-q", "-b", "main")
+    run_git(built, "init", "-q", "-b", "main")
     if create_project:
         project.mkdir(parents=True)
         write(project / "AGENTS.md", "# AGENTS.md\n\nProject intro.\n\n## What this is\n\nDemo.\n\n" + VERIFICATION_SECTION)
         write(project / "scripts/integration-verify.json", '["python", "-c", "pass"]\n')
-    write(root / "CLAUDE.md", "Read AGENTS.md.\n")
+    write(built / "CLAUDE.md", "Read AGENTS.md.\n")
     for name in MODULES:
-        write(root / "shared/governance" / name, f"# {name}\n")
-    write(root / "shared/governance/INDEX.md", "# INDEX.md\n" + "\n".join(MODULES) + "\n")
-    write(root / "atc-manifest.yaml", MANIFEST)
-    write(root / "shared/conventions/ALERT_MESSAGES.md", "# Alerts\n")
+        write(built / "shared/governance" / name, f"# {name}\n")
+    write(built / "shared/governance/INDEX.md", "# INDEX.md\n" + "\n".join(MODULES) + "\n")
+    write(built / "atc-manifest.yaml", MANIFEST)
+    write(built / "shared/conventions/ALERT_MESSAGES.md", "# Alerts\n")
+    write(built / "shared/templates/PROJECT_AGENTS.md", POINTER + "\n")
+    write(built / "shared/templates/ATC_README.md", BOOTLOADER)
+    write(
+        built / "shared/skills/demo-skill/SKILL.md",
+        "---\nname: demo-skill\ndescription: test skill\nadoption: baseline\n---\n\n# Demo\n",
+    )
+    sync_project.apply_plan(sync_project.root_adapter_plan(built), "sync")
+    if committed:
+        commit_workspace(built, project)
+
+
+def make_workspace(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, *, create_project: bool = True,
+                   committed: bool = False) -> tuple[Path, Path]:
+    """The workspace root and project demo as a copy of the session's build; with ``committed`` as `commit_workspace`
+    leaves them: the ATC checkout tagged RELEASE, the project a repository with one commit."""
+    root = tmp_path / "workspace"
+    project = root / "projects" / "demo"
+    build = partial(built_workspace, create_project=create_project, committed=committed)
+    git_history.copied(tmp_path_factory, f"tooling-workspace-{create_project}-{committed}", root, build)
     write(
         root / "workspace.yaml",
         f"version: 1\nworkspace_root: {root.as_posix()}\ngovernance_checkout: .\nprojects:\n  demo:\n    repo: projects/demo\n    worktrees: worktrees/demo\n    state: state/demo-data\n",
     )
-    write(root / "shared/templates/PROJECT_AGENTS.md", POINTER + "\n")
-    write(root / "shared/templates/ATC_README.md", BOOTLOADER)
-    write(
-        root / "shared/skills/demo-skill/SKILL.md",
-        "---\nname: demo-skill\ndescription: test skill\nadoption: baseline\n---\n\n# Demo\n",
-    )
-    sync_project.apply_plan(sync_project.root_adapter_plan(root), "sync")
+    if committed:
+        # workspace.yaml belongs in the release commit: amend it in and move RELEASE onto the amended commit.
+        run_git(root, "add", "workspace.yaml")
+        run_git(root, *IDENTITY, "commit", "-q", "--amend", "--no-edit")
+        run_git(root, *IDENTITY, "tag", "-f", "-a", "-m", f"atc {RELEASE}", RELEASE)
     return root, project
 
 
@@ -131,22 +152,22 @@ def changed(plan: list[sync_project.PlanItem]) -> list[sync_project.PlanItem]:
     return [item for item in plan if item.action in ("create", "update", "collision")]
 
 
-def test_onboarding_is_idempotent(tmp_path: Path) -> None:
-    root, project = make_workspace(tmp_path)
+def test_onboarding_is_idempotent(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory) -> None:
+    root, project = make_workspace(tmp_path, tmp_path_factory)
     first = sync_project.build_plan(project, root)
     sync_project.apply_plan(first, "sync")
     assert not changed(sync_project.build_plan(project, root))
 
 
-def test_missing_canonical_template_fails_without_project_reference(tmp_path: Path) -> None:
-    root, project = make_workspace(tmp_path)
+def test_missing_canonical_template_fails_without_project_reference(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory) -> None:
+    root, project = make_workspace(tmp_path, tmp_path_factory)
     (root / "shared/templates/PROJECT_AGENTS.md").unlink()
     with pytest.raises(ValueError, match="MANIFEST_SOURCE_MISSING .*project.pointer"):
         sync_project.build_plan(project, root)
 
 
-def test_malformed_workspace_yaml_is_rejected(tmp_path: Path) -> None:
-    root, _ = make_workspace(tmp_path)
+def test_malformed_workspace_yaml_is_rejected(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory) -> None:
+    root, _ = make_workspace(tmp_path, tmp_path_factory)
     write(root / "workspace.yaml", "projects: [not, a, mapping\n")
     with pytest.raises(ValueError, match="not valid YAML"):
         sync_project.load_projects(root)
@@ -175,8 +196,8 @@ def test_worktrees_beside_the_root_worktrees_are_accepted(worktrees: str) -> Non
     assert validator.reserved_root_problem("other", worktrees, "C:/ws") is None
 
 
-def test_workspace_root_mismatch_is_contract_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    root, _ = make_workspace(tmp_path)
+def test_workspace_root_mismatch_is_contract_failure(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    root, _ = make_workspace(tmp_path, tmp_path_factory)
     text = (root / "workspace.yaml").read_text(encoding="utf-8")
     write(root / "workspace.yaml", text.replace(root.as_posix(), (tmp_path / "wrong").as_posix()))
     monkeypatch.setattr(validator, "ROOT", root)
@@ -185,8 +206,8 @@ def test_workspace_root_mismatch_is_contract_failure(tmp_path: Path, monkeypatch
     assert any("does not match this repo's actual location" in failure for failure in validator.FAILURES)
 
 
-def test_unmanaged_collision_is_never_modified(tmp_path: Path) -> None:
-    root, project = make_workspace(tmp_path)
+def test_unmanaged_collision_is_never_modified(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory) -> None:
+    root, project = make_workspace(tmp_path, tmp_path_factory)
     target = project / ".agents/skills/demo-skill/SKILL.md"
     original = "---\nname: demo-skill\ndescription: local\n---\n\n# Local\n"
     write(target, original)
@@ -196,8 +217,8 @@ def test_unmanaged_collision_is_never_modified(tmp_path: Path) -> None:
     assert target.read_text(encoding="utf-8") == original
 
 
-def test_managed_adapter_sync_and_second_sync_zero_diff(tmp_path: Path) -> None:
-    root, project = make_workspace(tmp_path)
+def test_managed_adapter_sync_and_second_sync_zero_diff(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory) -> None:
+    root, project = make_workspace(tmp_path, tmp_path_factory)
     sync_project.apply_plan(sync_project.build_plan(project, root), "sync")
     target = project / ".agents/skills/demo-skill/SKILL.md"
     write(target, managed_adapter("demo-skill") + "\ndrift\n")
@@ -212,24 +233,24 @@ def claude_item(plan: list[sync_project.PlanItem], project: Path) -> sync_projec
     return next(item for item in plan if item.path == project / "CLAUDE.md")
 
 
-def test_missing_claude_entrypoint_is_created_from_workspace_root(tmp_path: Path) -> None:
-    root, project = make_workspace(tmp_path)
+def test_missing_claude_entrypoint_is_created_from_workspace_root(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory) -> None:
+    root, project = make_workspace(tmp_path, tmp_path_factory)
     plan = sync_project.build_plan(project, root)
     assert claude_item(plan, project).action == "create"
     sync_project.apply_plan(plan, "apply")
     assert (project / "CLAUDE.md").read_text(encoding="utf-8") == (root / "CLAUDE.md").read_text(encoding="utf-8")
 
 
-def test_current_claude_entrypoint_is_reported_current(tmp_path: Path) -> None:
-    root, project = make_workspace(tmp_path)
+def test_current_claude_entrypoint_is_reported_current(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory) -> None:
+    root, project = make_workspace(tmp_path, tmp_path_factory)
     (project / "CLAUDE.md").write_bytes(b"Read AGENTS.md.\r\n")
     item = claude_item(sync_project.build_plan(project, root), project)
     assert (item.action, item.detail) == ("skip", "create-only CLAUDE.md is current")
 
 
 @pytest.mark.parametrize("content", ["Read AGENTS.md first.\n", "# Project-owned\n\n@AGENTS.md\n"])
-def test_differing_claude_entrypoint_is_reported_and_never_modified(tmp_path: Path, content: str) -> None:
-    root, project = make_workspace(tmp_path)
+def test_differing_claude_entrypoint_is_reported_and_never_modified(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, content: str) -> None:
+    root, project = make_workspace(tmp_path, tmp_path_factory)
     write(project / "CLAUDE.md", content)
     plan = sync_project.build_plan(project, root)
     item = claude_item(plan, project)
@@ -239,8 +260,8 @@ def test_differing_claude_entrypoint_is_reported_and_never_modified(tmp_path: Pa
     assert (project / "CLAUDE.md").read_text(encoding="utf-8") == content
 
 
-def test_tool_overlay_is_appended_only_to_its_tool(tmp_path: Path) -> None:
-    root, project = make_workspace(tmp_path)
+def test_tool_overlay_is_appended_only_to_its_tool(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory) -> None:
+    root, project = make_workspace(tmp_path, tmp_path_factory)
     write(root / "shared/skills/demo-skill/adapters/codex.md", "## Codex constants\n\n- owner: codex\n")
     assert sync_project.run("sync", [("demo", project)], root) == 0
     codex = (project / ".agents/skills/demo-skill/SKILL.md").read_text(encoding="utf-8")
@@ -253,17 +274,17 @@ def test_tool_overlay_is_appended_only_to_its_tool(tmp_path: Path) -> None:
 
 
 def test_missing_registered_project_is_readiness_not_contract_failure(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    root, _ = make_workspace(tmp_path, create_project=False)
+    root, _ = make_workspace(tmp_path, tmp_path_factory, create_project=False)
     monkeypatch.setattr(validator, "ROOT", root)
     validator.FAILURES.clear()
     validator.check_projects({})
     assert validator.FAILURES == []
 
 
-def test_explicit_candidate_checkout_is_validated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    root, project = make_workspace(tmp_path)
+def test_explicit_candidate_checkout_is_validated(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    root, project = make_workspace(tmp_path, tmp_path_factory)
     sync_project.apply_plan(sync_project.build_plan(project, root), "sync")
     candidate = tmp_path / "candidate-demo"
     shutil.copytree(project, candidate)
@@ -274,8 +295,8 @@ def test_explicit_candidate_checkout_is_validated(tmp_path: Path, monkeypatch: p
 
 
 @pytest.mark.integration
-def test_projects_check_task_records_and_one_prefix_per_repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    root, project = make_workspace(tmp_path)
+def test_projects_check_task_records_and_one_prefix_per_repository(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    root, project = make_workspace(tmp_path, tmp_path_factory)
     sync_project.apply_plan(sync_project.build_plan(project, root), "sync")
     agents = project / "AGENTS.md"
     write(agents, agents.read_text(encoding="utf-8") + "\n## Task records\n\n- Task prefix: ATC\n")
@@ -289,9 +310,9 @@ def test_projects_check_task_records_and_one_prefix_per_repository(tmp_path: Pat
 
 
 @pytest.mark.integration
-def test_validate_reports_a_bad_record_of_the_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+def test_validate_reports_a_bad_record_of_the_root(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch,
                                                    capsys: pytest.CaptureFixture[str]) -> None:
-    root, _ = make_workspace(tmp_path)
+    root, _ = make_workspace(tmp_path, tmp_path_factory)
     write(root / "AGENTS.md", "# AGENTS.md\n\n## Task records\n\n- Task prefix: ATC\n")
     write(root / ".atc" / "tasks" / "ATC-0002.yaml", "task_id: ATC-0001\n")
     monkeypatch.setattr(validator, "ROOT", root)
@@ -304,8 +325,8 @@ def test_validate_reports_a_bad_record_of_the_root(tmp_path: Path, monkeypatch: 
     assert "workspace root: AGENTS.md has no '## Integration verification' section" in out
 
 @pytest.mark.unit
-def test_pointer_line_must_be_current_and_before_the_first_section(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    root, project = make_workspace(tmp_path)
+def test_pointer_line_must_be_current_and_before_the_first_section(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    root, project = make_workspace(tmp_path, tmp_path_factory)
     monkeypatch.setattr(validator, "ROOT", root)
     cases = {
         "# AGENTS.md\n\nIntro.\n\n## What\n": "has no <!-- atc:governance --> pointer line",
@@ -324,8 +345,8 @@ def test_pointer_line_must_be_current_and_before_the_first_section(tmp_path: Pat
 
 
 @pytest.mark.integration
-def test_atc_dir_is_installed_locked_and_checked(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    root, project = make_workspace(tmp_path)
+def test_atc_dir_is_installed_locked_and_checked(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    root, project = make_workspace(tmp_path, tmp_path_factory)
     assert sync_project.run("sync", [("demo", project)], root) == 0
     for module in validator.vendored_governance_modules():
         assert (project / ".atc/governance" / module).read_text(encoding="utf-8") == (root / "shared/governance" / module).read_text(encoding="utf-8")
@@ -350,8 +371,8 @@ def test_atc_dir_is_installed_locked_and_checked(tmp_path: Path, monkeypatch: py
     ('version = 1\nsource = "a/b"\n', "missing 'revision'"),
     ("version = 1\nsource = a/b\n", "not valid TOML"),
 ])
-def test_invalid_lock_fails_validate_and_is_a_sync_collision(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, lock: str, problem: str) -> None:
-    root, project = make_workspace(tmp_path)
+def test_invalid_lock_fails_validate_and_is_a_sync_collision(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch, lock: str, problem: str) -> None:
+    root, project = make_workspace(tmp_path, tmp_path_factory)
     assert sync_project.run("sync", [("demo", project)], root) == 0
     write(project / ".atc/atc.lock", lock)
     assert any(f"projects.demo: .atc/atc.lock: {problem}" in f for f in check_registered_projects(root, monkeypatch))
@@ -362,8 +383,8 @@ def test_invalid_lock_fails_validate_and_is_a_sync_collision(tmp_path: Path, mon
 
 
 @pytest.mark.integration
-def test_lock_with_crlf_line_ends_reads_as_current(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    root, project = make_workspace(tmp_path)
+def test_lock_with_crlf_line_ends_reads_as_current(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    root, project = make_workspace(tmp_path, tmp_path_factory)
     assert sync_project.run("sync", [("demo", project)], root) == 0
     lock = project / ".atc/atc.lock"
     lock.write_bytes(lock.read_bytes().replace(b"\n", b"\r\n"))
@@ -372,8 +393,8 @@ def test_lock_with_crlf_line_ends_reads_as_current(tmp_path: Path, monkeypatch: 
 
 
 @pytest.mark.integration
-def test_stray_file_under_atc_is_reported_and_blocks_the_atc_part(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    root, project = make_workspace(tmp_path)
+def test_stray_file_under_atc_is_reported_and_blocks_the_atc_part(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    root, project = make_workspace(tmp_path, tmp_path_factory)
     assert sync_project.run("sync", [("demo", project)], root) == 0
     write(project / ".atc/notes.md", "mine\n")
     write(project / ".atc/governance/EXTRA.md", "mine\n")
@@ -389,8 +410,8 @@ def test_stray_file_under_atc_is_reported_and_blocks_the_atc_part(tmp_path: Path
 
 
 @pytest.mark.integration
-def test_task_records_under_atc_are_the_projects_and_never_touched(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    root, project = make_workspace(tmp_path)
+def test_task_records_under_atc_are_the_projects_and_never_touched(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    root, project = make_workspace(tmp_path, tmp_path_factory)
     record = project / validator.TASKS_DIR / "DEMO-0001.yaml"
     write(record, "task_id: DEMO-0001\n")
     write(project / validator.TASKS_DIR / "notes/scratch.txt", "x\n")
@@ -402,8 +423,8 @@ def test_task_records_under_atc_are_the_projects_and_never_touched(tmp_path: Pat
 
 
 @pytest.mark.integration
-def test_sync_writes_the_lock_last(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    root, project = make_workspace(tmp_path)
+def test_sync_writes_the_lock_last(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    root, project = make_workspace(tmp_path, tmp_path_factory)
     write(project / "AGENTS.md", "# AGENTS.md\n\nIntro.\n\n## What this is\n\nDemo.\n\n" + VERIFICATION_SECTION)
     write(project / ".atc/governance/CORE.md", "# older\n")
     write(project / validator.TASKS_DIR / "DEMO-0001.yaml", "task_id: DEMO-0001\n")
@@ -421,8 +442,8 @@ def test_sync_writes_the_lock_last(tmp_path: Path, monkeypatch: pytest.MonkeyPat
 
 
 @pytest.mark.integration
-def test_lock_advances_on_a_skill_only_change(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    root, project = make_workspace(tmp_path)
+def test_lock_advances_on_a_skill_only_change(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    root, project = make_workspace(tmp_path, tmp_path_factory)
     commit = ("-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q", "-m")
     run_git(root, "add", "-A")
     run_git(root, *commit, "release")
@@ -441,8 +462,8 @@ def test_lock_advances_on_a_skill_only_change(tmp_path: Path, monkeypatch: pytes
 
 
 @pytest.mark.integration
-def test_lock_outside_main_history_is_stale_and_resynced(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    root, project = make_workspace(tmp_path)
+def test_lock_outside_main_history_is_stale_and_resynced(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    root, project = make_workspace(tmp_path, tmp_path_factory)
     commit = ("-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q", "-m")
 
     def head() -> str:
@@ -477,8 +498,8 @@ def test_lock_outside_main_history_is_stale_and_resynced(tmp_path: Path, monkeyp
 
 
 @pytest.mark.integration
-def test_verification_gate_stops_the_project_before_writing(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    root, project = make_workspace(tmp_path)
+def test_verification_gate_stops_the_project_before_writing(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, capsys: pytest.CaptureFixture[str]) -> None:
+    root, project = make_workspace(tmp_path, tmp_path_factory)
     write(root / "shared/governance/GIT_WORKFLOW.md", "# GIT_WORKFLOW.md\n\n## Integration verifier source\n")
     agents = (project / "AGENTS.md").read_text(encoding="utf-8")
     for text, problem in (
@@ -499,8 +520,8 @@ def test_verification_gate_stops_the_project_before_writing(tmp_path: Path, caps
 
 
 @pytest.mark.unit
-def test_root_atc_holds_only_task_records(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    root, _ = make_workspace(tmp_path)
+def test_root_atc_holds_only_task_records(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    root, _ = make_workspace(tmp_path, tmp_path_factory)
     monkeypatch.setattr(validator, "ROOT", root)
     write(root / validator.TASKS_DIR / "ATC-0001.yaml", "task_id: ATC-0001\n")
     validator.FAILURES.clear()
@@ -512,8 +533,8 @@ def test_root_atc_holds_only_task_records(tmp_path: Path, monkeypatch: pytest.Mo
     validator.FAILURES.clear()
 
 
-def test_project_enforcement_must_match_its_policy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    root, project = make_workspace(tmp_path)
+def test_project_enforcement_must_match_its_policy(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    root, project = make_workspace(tmp_path, tmp_path_factory)
     assert sync_project.run("sync", [("demo", project)], root) == 0
     assert check_registered_projects(root, monkeypatch) == []
     write(project / "policies/hard-deny.yaml", "version: 1\ncapabilities:\n  deny: []\nfilesystem:\n  deny:\n    - \"**/.env\"\n")
@@ -525,8 +546,8 @@ def test_project_enforcement_must_match_its_policy(tmp_path: Path, monkeypatch: 
     assert any("unresolved-token" in f for f in check_registered_projects(root, monkeypatch))
 
 
-def test_registered_project_must_name_an_existing_integration_verifier(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    root, project = make_workspace(tmp_path)
+def test_registered_project_must_name_an_existing_integration_verifier(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    root, project = make_workspace(tmp_path, tmp_path_factory)
     assert sync_project.run("sync", [("demo", project)], root) == 0
     assert check_registered_projects(root, monkeypatch) == []
 
@@ -558,8 +579,8 @@ def test_registered_project_must_name_an_existing_integration_verifier(tmp_path:
 
 
 @pytest.mark.integration
-def test_a_project_agents_md_naming_a_governance_repository_is_rejected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    root, project = make_workspace(tmp_path)
+def test_a_project_agents_md_naming_a_governance_repository_is_rejected(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    root, project = make_workspace(tmp_path, tmp_path_factory)
     write(project / "AGENTS.md", f"# AGENTS.md\n\n{POINTER}\n\nacme/agent-traffic-control\n")
     monkeypatch.setattr(validator, "ROOT", root)
     validator.FAILURES.clear()
@@ -575,8 +596,8 @@ def test_a_project_agents_md_naming_a_governance_repository_is_rejected(tmp_path
     (POINTER + "\n", "Read `.atc/governance/INDEX.md`.\n", "missing the exact governance revision lock (.atc/atc.lock)"),
     (POINTER + "\n", "governance revision in `.atc/atc.lock`.\n", "missing the vendored governance index reference"),
 ])
-def test_templates_must_carry_pointer_and_bootloader_rules(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, pointer: str, readme: str, problem: str) -> None:
-    root, _ = make_workspace(tmp_path)
+def test_templates_must_carry_pointer_and_bootloader_rules(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch, pointer: str, readme: str, problem: str) -> None:
+    root, _ = make_workspace(tmp_path, tmp_path_factory)
     write(root / "shared/templates/PROJECT_AGENTS.md", pointer)
     write(root / "shared/templates/ATC_README.md", readme)
     monkeypatch.setattr(validator, "ROOT", root)
@@ -586,8 +607,8 @@ def test_templates_must_carry_pointer_and_bootloader_rules(tmp_path: Path, monke
     validator.FAILURES.clear()
 
 
-def test_legacy_only_project_bootstrap_is_rejected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    root, project = make_workspace(tmp_path)
+def test_legacy_only_project_bootstrap_is_rejected(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    root, project = make_workspace(tmp_path, tmp_path_factory)
     write(project / "AGENTS.md", "# AGENTS.md\n\nshared/rules/AGENT_DECISION_POLICY.md\n")
     monkeypatch.setattr(validator, "ROOT", root)
     validator.FAILURES.clear()
@@ -598,16 +619,16 @@ def test_legacy_only_project_bootstrap_is_rejected(tmp_path: Path, monkeypatch: 
     assert item.action == "collision"
 
 
-def test_canonical_governance_validation_does_not_require_legacy_redirects(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    root, _ = make_workspace(tmp_path)
+def test_canonical_governance_validation_does_not_require_legacy_redirects(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    root, _ = make_workspace(tmp_path, tmp_path_factory)
     monkeypatch.setattr(validator, "ROOT", root)
     validator.FAILURES.clear()
     validator.check_rules_referenced_in_agents_md()
     assert validator.FAILURES == []
 
 
-def test_unlisted_governance_module_is_rejected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    root, _ = make_workspace(tmp_path)
+def test_unlisted_governance_module_is_rejected(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    root, _ = make_workspace(tmp_path, tmp_path_factory)
     write(root / "shared/governance/UNLISTED.md", "# UNLISTED.md\n")
     monkeypatch.setattr(validator, "ROOT", root)
     validator.FAILURES.clear()
@@ -615,8 +636,8 @@ def test_unlisted_governance_module_is_rejected(tmp_path: Path, monkeypatch: pyt
     assert any("UNLISTED.md: not listed in the governance files of atc-manifest.yaml" in failure for failure in validator.FAILURES)
     validator.FAILURES.clear()
 
-def test_explicit_candidate_checkout_must_exist(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    root, _ = make_workspace(tmp_path)
+def test_explicit_candidate_checkout_must_exist(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    root, _ = make_workspace(tmp_path, tmp_path_factory)
     monkeypatch.setattr(validator, "ROOT", root)
     validator.FAILURES.clear()
     validator.check_projects(validator.load_canonical_skills(), {"demo": tmp_path / "missing"})
@@ -624,8 +645,8 @@ def test_explicit_candidate_checkout_must_exist(tmp_path: Path, monkeypatch: pyt
     validator.FAILURES.clear()
 
 
-def test_unregistered_candidate_checkout_is_rejected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    root, project = make_workspace(tmp_path)
+def test_unregistered_candidate_checkout_is_rejected(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    root, project = make_workspace(tmp_path, tmp_path_factory)
     monkeypatch.setattr(validator, "ROOT", root)
     validator.FAILURES.clear()
     validator.check_projects(validator.load_canonical_skills(), {"other": project})
@@ -633,8 +654,8 @@ def test_unregistered_candidate_checkout_is_rejected(tmp_path: Path, monkeypatch
     validator.FAILURES.clear()
 
 
-def test_doctor_distinguishes_not_initialized_from_error(tmp_path: Path) -> None:
-    root, project = make_workspace(tmp_path)
+def test_doctor_distinguishes_not_initialized_from_error(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory) -> None:
+    root, project = make_workspace(tmp_path, tmp_path_factory)
     sync_project.apply_plan(sync_project.build_plan(project, root), "sync")
     checks = doctor.diagnose(root, {})
     by_name = {check.name: check.status for check in checks}
@@ -643,14 +664,14 @@ def test_doctor_distinguishes_not_initialized_from_error(tmp_path: Path) -> None
     assert by_name["projects.demo.state"] == "NOT_INITIALIZED"
 
 
-def make_env_workspace(tmp_path: Path) -> Path:
-    root, _ = make_workspace(tmp_path, create_project=False)
+def make_env_workspace(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory) -> Path:
+    root, _ = make_workspace(tmp_path, tmp_path_factory, create_project=False)
     write(root / validator.POLICY_RELATIVE, "# INDEX.md\n")
     return root
 
 
-def test_atc_root_override_is_optional_and_checked_when_set(tmp_path: Path) -> None:
-    root = make_env_workspace(tmp_path)
+def test_atc_root_override_is_optional_and_checked_when_set(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory) -> None:
+    root = make_env_workspace(tmp_path, tmp_path_factory)
     assert validator.workspace_env_problems(root, {}) == {}
     assert validator.workspace_env_problems(root, {"ATC_ROOT": str(root)}) == {"ATC_ROOT": None}
     by_name = {check.name: check for check in doctor.diagnose(root, {})}
@@ -660,17 +681,17 @@ def test_atc_root_override_is_optional_and_checked_when_set(tmp_path: Path) -> N
 
 
 @pytest.mark.unit
-def test_atc_root_must_be_the_workspace_directory(tmp_path: Path) -> None:
-    root = make_env_workspace(tmp_path)
+def test_atc_root_must_be_the_workspace_directory(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory) -> None:
+    root = make_env_workspace(tmp_path, tmp_path_factory)
     problems = validator.workspace_env_problems(root, {"ATC_ROOT": str(root / "workspace.yaml")})
     assert "must be the workspace directory" in problems["ATC_ROOT"]
-    other = make_env_workspace(tmp_path / "other")
+    other = make_env_workspace(tmp_path / "other", tmp_path_factory)
     assert validator.workspace_env_problems(root, {"ATC_ROOT": str(other)})["ATC_ROOT"].startswith("resolves to")
 
 
 @pytest.mark.unit
-def test_atc_root_must_hold_workspace_yaml_not_governance(tmp_path: Path) -> None:
-    root, _ = make_workspace(tmp_path, create_project=False)
+def test_atc_root_must_hold_workspace_yaml_not_governance(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory) -> None:
+    root, _ = make_workspace(tmp_path, tmp_path_factory, create_project=False)
     (root / validator.GOVERNANCE_INDEX_RELATIVE).unlink()
     assert validator.workspace_env_problems(root, {"ATC_ROOT": str(root)}) == {"ATC_ROOT": None}
     (root / "workspace.yaml").unlink()
@@ -678,17 +699,17 @@ def test_atc_root_must_hold_workspace_yaml_not_governance(tmp_path: Path) -> Non
     assert "workspace.yaml missing" in problems["ATC_ROOT"]
 
 
-def test_doctor_requires_the_atc_command(tmp_path: Path) -> None:
-    root = make_env_workspace(tmp_path)
+def test_doctor_requires_the_atc_command(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory) -> None:
+    root = make_env_workspace(tmp_path, tmp_path_factory)
     by_name = {check.name: check for check in doctor.diagnose(root, {"PATH": str(tmp_path / "empty")})}
     detail = by_name["atc command"].detail
     assert by_name["atc command"].status == "ERROR"
     assert detail.endswith('uv tool install --force "git+<source>@<tag>#subdirectory=adapters/python"')
 
 
-def test_validator_fails_on_mismatched_atc_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    root = make_env_workspace(tmp_path)
-    other = make_env_workspace(tmp_path / "other")
+def test_validator_fails_on_mismatched_atc_root(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = make_env_workspace(tmp_path, tmp_path_factory)
+    other = make_env_workspace(tmp_path / "other", tmp_path_factory)
     monkeypatch.setattr(validator, "ROOT", root)
     monkeypatch.setenv("ATC_ROOT", str(other))
     validator.FAILURES.clear()
@@ -706,8 +727,8 @@ def check_registered_projects(root: Path, monkeypatch: pytest.MonkeyPatch) -> li
     return failures
 
 
-def test_canonical_skill_requires_a_description(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    root, _ = make_workspace(tmp_path)
+def test_canonical_skill_requires_a_description(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    root, _ = make_workspace(tmp_path, tmp_path_factory)
     write(root / "shared/skills/demo-skill/SKILL.md", "---\nname: demo-skill\nadoption: baseline\n---\n\n# Demo\n")
     monkeypatch.setattr(validator, "ROOT", root)
     validator.FAILURES.clear()
@@ -716,8 +737,8 @@ def test_canonical_skill_requires_a_description(tmp_path: Path, monkeypatch: pyt
     validator.FAILURES.clear()
 
 
-def test_removed_canonical_skill_leaves_an_orphaned_workspace_adapter(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    root, _ = make_workspace(tmp_path)
+def test_removed_canonical_skill_leaves_an_orphaned_workspace_adapter(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    root, _ = make_workspace(tmp_path, tmp_path_factory)
     (root / "shared/skills/demo-skill/SKILL.md").unlink()
     (root / "shared/skills/demo-skill").rmdir()
     monkeypatch.setattr(validator, "ROOT", root)
@@ -727,8 +748,8 @@ def test_removed_canonical_skill_leaves_an_orphaned_workspace_adapter(tmp_path: 
     validator.FAILURES.clear()
 
 
-def test_adapter_from_an_older_release_is_stale_but_still_owned(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    root, project = make_workspace(tmp_path)
+def test_adapter_from_an_older_release_is_stale_but_still_owned(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    root, project = make_workspace(tmp_path, tmp_path_factory)
     sync_project.apply_plan(sync_project.build_plan(project, root), "sync")
     target = project / ".claude/skills/demo-skill/SKILL.md"
     write(target, managed_adapter("demo-skill"))
@@ -739,8 +760,8 @@ def test_adapter_from_an_older_release_is_stale_but_still_owned(tmp_path: Path, 
     assert check_registered_projects(root, monkeypatch) == []
 
 
-def test_supporting_files_are_copied_checked_and_pruned_with_the_adapter(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    root, project = make_workspace(tmp_path)
+def test_supporting_files_are_copied_checked_and_pruned_with_the_adapter(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    root, project = make_workspace(tmp_path, tmp_path_factory)
     write(root / "shared/skills/demo-skill/references/guide.md", "# Guide\n")
     write(root / "shared/skills/demo-skill/adapters/claude.md", "Claude only.\n")
     sync_project.apply_plan(sync_project.root_adapter_plan(root), "sync")
@@ -768,8 +789,8 @@ def test_supporting_files_are_copied_checked_and_pruned_with_the_adapter(tmp_pat
 
 
 @pytest.mark.parametrize("where", ["project", "root"])
-def test_adapter_directory_without_a_managed_skill_md_keeps_its_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, where: str) -> None:
-    root, project = make_workspace(tmp_path)
+def test_adapter_directory_without_a_managed_skill_md_keeps_its_files(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch, where: str) -> None:
+    root, project = make_workspace(tmp_path, tmp_path_factory)
     write(root / "shared/skills/demo-skill/references/guide.md", "# Guide\n")
     base = project if where == "project" else root
     plan_for = (lambda: sync_project.build_plan(project, root)) if where == "project" else (lambda: sync_project.root_adapter_plan(root))
@@ -794,8 +815,8 @@ def test_adapter_directory_without_a_managed_skill_md_keeps_its_files(tmp_path: 
     validator.FAILURES.clear()
 
 
-def test_dangling_skill_md_link_is_a_collision_and_never_written_through(tmp_path: Path) -> None:
-    root, project = make_workspace(tmp_path)
+def test_dangling_skill_md_link_is_a_collision_and_never_written_through(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory) -> None:
+    root, project = make_workspace(tmp_path, tmp_path_factory)
     adapter = project / ".claude/skills/demo-skill"
     adapter.mkdir(parents=True)
     moved = tmp_path / "moved/SKILL.md"
@@ -810,8 +831,8 @@ def test_dangling_skill_md_link_is_a_collision_and_never_written_through(tmp_pat
     assert (adapter / "mine.md").is_file() and (adapter / "SKILL.md").is_symlink() and not moved.parent.exists()
 
 
-def test_supporting_file_must_be_plain_named_utf8_text_and_caches_are_ignored(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    root, project = make_workspace(tmp_path)
+def test_supporting_file_must_be_plain_named_utf8_text_and_caches_are_ignored(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    root, project = make_workspace(tmp_path, tmp_path_factory)
     cache = root / "shared/skills/demo-skill/__pycache__/helper.cpython-313.pyc"
     cache.parent.mkdir(parents=True)
     cache.write_bytes(b"\xff\xfe")
@@ -834,8 +855,8 @@ def test_supporting_file_must_be_plain_named_utf8_text_and_caches_are_ignored(tm
         bad.unlink()
 
 
-def test_registered_project_must_carry_every_baseline_adapter(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    root, project = make_workspace(tmp_path)
+def test_registered_project_must_carry_every_baseline_adapter(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    root, project = make_workspace(tmp_path, tmp_path_factory)
     sync_project.apply_plan(sync_project.build_plan(project, root), "sync")
     assert check_registered_projects(root, monkeypatch) == []
     (project / ".claude/skills/demo-skill/SKILL.md").unlink()
@@ -844,8 +865,8 @@ def test_registered_project_must_carry_every_baseline_adapter(tmp_path: Path, mo
     assert failures == ["projects.demo: .claude/skills/demo-skill/ missing"]
 
 
-def test_registered_project_may_omit_an_optional_skill(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    root, project = make_workspace(tmp_path)
+def test_registered_project_may_omit_an_optional_skill(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    root, project = make_workspace(tmp_path, tmp_path_factory)
     sync_project.apply_plan(sync_project.build_plan(project, root), "sync")
     write(root / "shared/skills/optional-skill/SKILL.md", "---\nname: optional-skill\ndescription: optional\n---\n\n# Optional\n")
     for tool in (".agents", ".claude"):
@@ -853,8 +874,8 @@ def test_registered_project_may_omit_an_optional_skill(tmp_path: Path, monkeypat
     assert check_registered_projects(root, monkeypatch) == []
 
 
-def test_registered_project_adapter_must_match_canonical_description(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    root, project = make_workspace(tmp_path)
+def test_registered_project_adapter_must_match_canonical_description(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    root, project = make_workspace(tmp_path, tmp_path_factory)
     sync_project.apply_plan(sync_project.build_plan(project, root), "sync")
     write(project / ".agents/skills/demo-skill/SKILL.md", managed_adapter("demo-skill", "drifted"))
     failures = check_registered_projects(root, monkeypatch)
@@ -896,8 +917,8 @@ def workspace_root_failures(root: Path, monkeypatch: pytest.MonkeyPatch) -> list
     return failures
 
 
-def test_contract_skill_needs_a_dsh_adapter_too(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    root, _ = make_workspace(tmp_path)
+def test_contract_skill_needs_a_dsh_adapter_too(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    root, _ = make_workspace(tmp_path, tmp_path_factory)
     add_contract_skill(root)
     assert workspace_root_failures(root, monkeypatch) == []
     (root / ".dsh/skills/bound-skill/SKILL.md").unlink()
@@ -906,24 +927,24 @@ def test_contract_skill_needs_a_dsh_adapter_too(tmp_path: Path, monkeypatch: pyt
 
 
 @pytest.mark.unit
-def test_a_skill_without_a_contract_needs_a_dsh_adapter_at_the_root_too(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    root, _ = make_workspace(tmp_path)
+def test_a_skill_without_a_contract_needs_a_dsh_adapter_at_the_root_too(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    root, _ = make_workspace(tmp_path, tmp_path_factory)
     assert workspace_root_failures(root, monkeypatch) == []
     shutil.rmtree(root / ".dsh/skills/demo-skill")
     assert workspace_root_failures(root, monkeypatch) == ["workspace root: .dsh/skills/demo-skill/ missing"]
 
 
 @pytest.mark.parametrize("requires", [2, None])
-def test_adapter_requires_contract_must_match_canonical(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, requires: int | None) -> None:
-    root, _ = make_workspace(tmp_path)
+def test_adapter_requires_contract_must_match_canonical(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch, requires: int | None) -> None:
+    root, _ = make_workspace(tmp_path, tmp_path_factory)
     add_contract_skill(root, requires=requires)
     failures = workspace_root_failures(root, monkeypatch)
     assert len(failures) == 3
     assert all("content drifted from canonical" in failure for failure in failures)
 
 
-def test_bare_contract_key_is_rejected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    root, _ = make_workspace(tmp_path)
+def test_bare_contract_key_is_rejected(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    root, _ = make_workspace(tmp_path, tmp_path_factory)
     add_contract_skill(root)
     canonical_file = root / "shared/skills/bound-skill/SKILL.md"
     canonical_file.write_text(
@@ -940,14 +961,14 @@ def test_bare_contract_key_is_rejected(tmp_path: Path, monkeypatch: pytest.Monke
         assert not validator.declares_contract({"contract": rejected}), rejected
 
 
-def test_orphaned_dsh_adapter_is_flagged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    root, _ = make_workspace(tmp_path)
+def test_orphaned_dsh_adapter_is_flagged(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    root, _ = make_workspace(tmp_path, tmp_path_factory)
     write(root / ".dsh/skills/gone/SKILL.md", managed_adapter("gone"))
     assert any(".dsh/skills/gone/ is a managed adapter" in failure for failure in workspace_root_failures(root, monkeypatch))
 
 
-def test_canonical_description_over_the_catalog_limit_is_rejected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    root, _ = make_workspace(tmp_path)
+def test_canonical_description_over_the_catalog_limit_is_rejected(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    root, _ = make_workspace(tmp_path, tmp_path_factory)
     long = "x" * (validator.MAX_DESCRIPTION + 1)
     write(root / "shared/skills/demo-skill/SKILL.md", f"---\nname: demo-skill\ndescription: {long}\nadoption: baseline\n---\n\n# Demo\n")
     monkeypatch.setattr(validator, "ROOT", root)
@@ -959,8 +980,8 @@ def test_canonical_description_over_the_catalog_limit_is_rejected(tmp_path: Path
 
 @pytest.mark.unit
 @pytest.mark.parametrize("tool_dirs", [validator.TOOL_DIRS, (".claude",), (".agents", ".dsh")], ids=" ".join)
-def test_sync_plans_every_baseline_skill_in_every_selected_tool_dir(tmp_path: Path, tool_dirs: tuple[str, ...]) -> None:
-    root, project = make_workspace(tmp_path)
+def test_sync_plans_every_baseline_skill_in_every_selected_tool_dir(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, tool_dirs: tuple[str, ...]) -> None:
+    root, project = make_workspace(tmp_path, tmp_path_factory)
     add_contract_skill(root)
     text = (root / "shared/skills/bound-skill/SKILL.md").read_text(encoding="utf-8")
     write(root / "shared/skills/bound-skill/SKILL.md", text.replace("contract: 1\n", "contract: 1\nadoption: baseline\n"))
@@ -979,8 +1000,8 @@ def write_cli_stub(root: Path) -> None:
     canonical_cli(root).write_text("import sys\n\nsys.exit(0 if '--help' in sys.argv else 1)\n", encoding="utf-8")
 
 
-def test_doctor_reports_managed_worktree_readiness(tmp_path: Path) -> None:
-    root, _ = make_workspace(tmp_path)
+def test_doctor_reports_managed_worktree_readiness(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory) -> None:
+    root, _ = make_workspace(tmp_path, tmp_path_factory)
     write_cli_stub(root)
     environ = {"CODEX_HOME": str(tmp_path / "codex")}
     by_name = {check.name: check for check in doctor.diagnose(root, environ)}
@@ -1055,8 +1076,8 @@ def test_doctor_starts_and_reports_a_missing_managed_worktree_module(tmp_path: P
 
 
 @pytest.mark.parametrize("tool", [".agents", ".claude", ".dsh"])
-def test_adopted_opt_in_drift_check_sync_and_idempotence(tmp_path: Path, tool: str, capsys: pytest.CaptureFixture[str]) -> None:
-    root, project = make_workspace(tmp_path)
+def test_adopted_opt_in_drift_check_sync_and_idempotence(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, tool: str, capsys: pytest.CaptureFixture[str]) -> None:
+    root, project = make_workspace(tmp_path, tmp_path_factory)
     add_contract_skill(root)
     sync_project.run("sync", [("demo", project)], root)
     target = project / tool / "skills/bound-skill/SKILL.md"
@@ -1077,8 +1098,8 @@ def test_adopted_opt_in_drift_check_sync_and_idempotence(tmp_path: Path, tool: s
     assert not changed(sync_project.build_plan(project, root))
 
 
-def test_unadopted_opt_in_contract_skill_is_not_installed(tmp_path: Path) -> None:
-    root, project = make_workspace(tmp_path)
+def test_unadopted_opt_in_contract_skill_is_not_installed(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory) -> None:
+    root, project = make_workspace(tmp_path, tmp_path_factory)
     add_contract_skill(root)
     assert sync_project.run("sync", [("demo", project)], root) == 0
     for tool in validator.TOOL_DIRS:
@@ -1091,8 +1112,8 @@ def test_unadopted_opt_in_contract_skill_is_not_installed(tmp_path: Path) -> Non
     ("canonical", None), ("canonical", "other-skill"),
     ("name", "other-skill"),
 ])
-def test_adapter_identity_collision_blocks_sync(tmp_path: Path, baseline: bool, field: str, value: str | None) -> None:
-    root, project = make_workspace(tmp_path)
+def test_adapter_identity_collision_blocks_sync(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, baseline: bool, field: str, value: str | None) -> None:
+    root, project = make_workspace(tmp_path, tmp_path_factory)
     add_contract_skill(root)
     canonical = root / "shared/skills/bound-skill/SKILL.md"
     if baseline:
@@ -1109,8 +1130,8 @@ def test_adapter_identity_collision_blocks_sync(tmp_path: Path, baseline: bool, 
 
 
 @pytest.mark.parametrize("baseline", [False, True])
-def test_adapter_line_endings_only_skip_but_content_drift_updates(tmp_path: Path, baseline: bool) -> None:
-    root, project = make_workspace(tmp_path)
+def test_adapter_line_endings_only_skip_but_content_drift_updates(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, baseline: bool) -> None:
+    root, project = make_workspace(tmp_path, tmp_path_factory)
     add_contract_skill(root)
     canonical = root / "shared/skills/bound-skill/SKILL.md"
     if baseline:
@@ -1131,8 +1152,8 @@ def test_adapter_line_endings_only_skip_but_content_drift_updates(tmp_path: Path
 
 
 @pytest.mark.integration
-def test_opt_in_dsh_sync_carries_the_contract_and_the_dsh_overlay(tmp_path: Path) -> None:
-    root, project = make_workspace(tmp_path)
+def test_opt_in_dsh_sync_carries_the_contract_and_the_dsh_overlay(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory) -> None:
+    root, project = make_workspace(tmp_path, tmp_path_factory)
     add_contract_skill(root, tools=())
     write(root / "shared/skills/bound-skill/adapters/dsh.md", "dsh constant.\n")
     write(root / "shared/skills/bound-skill/adapters/claude.md", "Claude constant.\n")
@@ -1149,8 +1170,8 @@ def test_opt_in_dsh_sync_carries_the_contract_and_the_dsh_overlay(tmp_path: Path
 
 
 @pytest.mark.parametrize("original", ["# Local skill\n", "---\n[invalid\n---\n", "---\n- local\n---\n"])
-def test_uncertain_opt_in_metadata_is_collision(tmp_path: Path, original: str) -> None:
-    root, project = make_workspace(tmp_path)
+def test_uncertain_opt_in_metadata_is_collision(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, original: str) -> None:
+    root, project = make_workspace(tmp_path, tmp_path_factory)
     add_contract_skill(root)
     target = project / ".dsh/skills/bound-skill/SKILL.md"
     write(target, original)
@@ -1158,8 +1179,8 @@ def test_uncertain_opt_in_metadata_is_collision(tmp_path: Path, original: str) -
     assert target.read_text(encoding="utf-8") == original
 
 
-def test_root_adapter_with_foreign_identity_is_a_collision(tmp_path: Path) -> None:
-    root, project = make_workspace(tmp_path)
+def test_root_adapter_with_foreign_identity_is_a_collision(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory) -> None:
+    root, project = make_workspace(tmp_path, tmp_path_factory)
     add_contract_skill(root)
     source = root / ".dsh/skills/bound-skill/SKILL.md"
     foreign = contract_adapter(root).replace("canonical: bound-skill", "canonical: other-skill")
@@ -1168,8 +1189,8 @@ def test_root_adapter_with_foreign_identity_is_a_collision(tmp_path: Path) -> No
     assert source.read_text(encoding="utf-8") == foreign
 
 
-def test_root_adapter_sync_renders_invocation_flag_for_claude_only(tmp_path: Path) -> None:
-    root, _ = make_workspace(tmp_path)
+def test_root_adapter_sync_renders_invocation_flag_for_claude_only(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory) -> None:
+    root, _ = make_workspace(tmp_path, tmp_path_factory)
     write(
         root / "shared/skills/demo-skill/SKILL.md",
         "---\nname: demo-skill\ndescription: sharper trigger\nadoption: baseline\ninvocation: user\n---\n\n# Demo\n",
@@ -1191,8 +1212,8 @@ def test_root_adapter_sync_renders_invocation_flag_for_claude_only(tmp_path: Pat
     assert not [item for item in sync_project.root_adapter_plan(root) if item.action != "skip"]
 
 
-def test_run_syncs_root_adapters_before_projects(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    root, project = make_workspace(tmp_path)
+def test_run_syncs_root_adapters_before_projects(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, capsys: pytest.CaptureFixture[str]) -> None:
+    root, project = make_workspace(tmp_path, tmp_path_factory)
     sync_project.apply_plan(sync_project.build_plan(project, root), "sync")
     write(
         root / "shared/skills/demo-skill/SKILL.md",
@@ -1207,8 +1228,8 @@ def test_run_syncs_root_adapters_before_projects(tmp_path: Path, capsys: pytest.
         assert "description: sharper trigger" in text
 
 
-def test_check_mode_reports_root_drift_without_writing(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    root, project = make_workspace(tmp_path)
+def test_check_mode_reports_root_drift_without_writing(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, capsys: pytest.CaptureFixture[str]) -> None:
+    root, project = make_workspace(tmp_path, tmp_path_factory)
     write(
         root / "shared/skills/demo-skill/SKILL.md",
         "---\nname: demo-skill\ndescription: sharper trigger\nadoption: baseline\n---\n\n# Demo\n",
@@ -1219,8 +1240,8 @@ def test_check_mode_reports_root_drift_without_writing(tmp_path: Path, capsys: p
 
 
 @pytest.mark.integration
-def test_sync_check_reads_user_level_copies_from_the_user_home(tmp_path: Path, user_home: Path) -> None:
-    root, _ = make_workspace(tmp_path)
+def test_sync_check_reads_user_level_copies_from_the_user_home(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, user_home: Path) -> None:
+    root, _ = make_workspace(tmp_path, tmp_path_factory)
     assert not any("user-level" in p for p in validator.project_problems(root))
     write(user_home / ".claude/skills/demo-skill/SKILL.md", "# a user-level copy\n")
     found = [p for p in validator.project_problems(root) if "user-level duplicate" in p]

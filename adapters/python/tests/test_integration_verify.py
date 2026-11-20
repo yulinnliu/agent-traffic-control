@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+import git_history
 import integration_verify as iv
 import select_tests
 from atc_testkit import isolation, lint, locations, stages, verifier
@@ -87,21 +88,38 @@ class Candidate:
         return [name(call[0]) for call in self.calls]
 
 
+GIT_SETTINGS = {
+    "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com",
+    "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com",
+    "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
+}
+
+
+def git_env() -> dict[str, str]:
+    """The environment of the candidate's git calls: the identity and configuration of `GIT_SETTINGS`."""
+    env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    env.update(GIT_SETTINGS)
+    return env
+
+
+def built_candidate(root: Path) -> str:
+    """The candidate repository on main: a pre-commit config and one file, with the adapter directory beside them;
+    the SHA of the file's commit. Both files are bytes, as `commit` writes them."""
+    shas = git_history.new_repository(root, [git_history.Commit({".pre-commit-config.yaml": b"repos: []\n"}, "edit"),
+                                             git_history.Commit({"a.txt": b"a\n"}, "edit")], env=git_env())
+    (root / iv.ADAPTER_DIR).mkdir(parents=True)  # no file is tracked there; the tests write the adapter's files
+    return shas[-1]
+
+
 @pytest.fixture
-def candidate(tmp_path: Path, atc_tmp: Path, monkeypatch: pytest.MonkeyPatch) -> Candidate:
+def candidate(tmp_path: Path, atc_tmp: Path, monkeypatch: pytest.MonkeyPatch,
+              tmp_path_factory: pytest.TempPathFactory) -> Candidate:
     for key in [key for key in os.environ if key.startswith("GIT_")]:
         monkeypatch.delenv(key)
-    for key, value in {
-        "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com",
-        "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com",
-        "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
-    }.items():
+    for key, value in GIT_SETTINGS.items():
         monkeypatch.setenv(key, value)
     root = tmp_path / "candidate"
-    (root / iv.ADAPTER_DIR).mkdir(parents=True)
-    run_git(root, "init", "-q", "-b", "main")
-    commit(root, ".pre-commit-config.yaml", "repos: []\n")
-    main = commit(root, "a.txt", "a\n")
+    main = git_history.copied(tmp_path_factory, "integration-verify", root, built_candidate)
     monkeypatch.chdir(root)
     monkeypatch.setattr(iv, "PRODUCT_PREFIXES", ())
     monkeypatch.setattr(iv, "graph", lambda _root: select_tests.Graph(WORKSPACE))

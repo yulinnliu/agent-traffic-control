@@ -12,7 +12,7 @@ import content
 import manifest as mf
 import sync_project
 import validate_workspace as validator
-from test_tooling import MANIFEST, RELEASE, commit_workspace, make_workspace, run_git, user_home, write  # noqa: F401
+from test_tooling import MANIFEST, RELEASE, make_workspace, run_git, user_home, write  # noqa: F401
 
 COMMIT = ("-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q", "-m")
 
@@ -66,11 +66,11 @@ def test_a_manifest_that_breaks_the_format_is_invalid(text: str, detail: str) ->
 
 
 @pytest.mark.unit
-def test_load_refuses_a_tree_without_a_manifest_or_with_a_missing_source(tmp_path: Path) -> None:
+def test_load_refuses_a_tree_without_a_manifest_or_with_a_missing_source(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory) -> None:
     with pytest.raises(mf.ManifestError) as refused:
         mf.load(tmp_path)
     assert refused.value.token == "NO_MANIFEST"
-    root, _ = make_workspace(tmp_path)
+    root, _ = make_workspace(tmp_path, tmp_path_factory)
     (root / "shared/governance/CORE.md").unlink()
     with pytest.raises(mf.ManifestError) as refused:
         mf.load(root)
@@ -88,9 +88,9 @@ def test_min_atc_refuses_an_older_atc() -> None:
 
 
 @pytest.mark.unit
-def test_a_manifest_moves_what_sync_delivers(tmp_path: Path) -> None:
+def test_a_manifest_moves_what_sync_delivers(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory) -> None:
     """The sources and targets are the manifest's, not the tool's."""
-    root, project = make_workspace(tmp_path)
+    root, project = make_workspace(tmp_path, tmp_path_factory)
     write(root / "docs/BOOT.md", "moved bootloader\n")
     write(root / "atc-manifest.yaml", MANIFEST.replace("source: shared/templates/ATC_README.md", "source: docs/BOOT.md")
           .replace("source: CLAUDE.md, target: CLAUDE.md", "source: CLAUDE.md, target: GUIDE.md"))
@@ -137,11 +137,10 @@ def test_the_content_repository_is_the_checkout_or_the_cache(tmp_path: Path) -> 
     assert refused.value.token == "CONTENT_FETCH_FAILED"
 
 
-def remote_workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path, Path]:
+def remote_workspace(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path, Path]:
     """A released ATC repository as the remote of ``governance_source``, and a workspace directory that is not a
     checkout of it: ``(workspace, project, remote)``."""
-    remote, project = make_workspace(tmp_path)
-    commit_workspace(remote, project)
+    remote, project = make_workspace(tmp_path, tmp_path_factory, committed=True)
     workspace = tmp_path / "plain"
     shutil_project = workspace / "projects" / "demo"
     shutil_project.parent.mkdir(parents=True)
@@ -155,8 +154,8 @@ def remote_workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[P
 
 @pytest.mark.integration
 def test_a_workspace_without_a_checkout_syncs_from_the_cache_and_gets_its_workspace_items(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    workspace, project, remote = remote_workspace(tmp_path, monkeypatch)
+        tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    workspace, project, remote = remote_workspace(tmp_path, tmp_path_factory, monkeypatch)
     write(remote / "policies/hard-deny.yaml", "version: 1\nrules: []\n")
     write(remote / "atc-manifest.yaml", MANIFEST + "workspace:\n"
           "  - {id: workspace-policy, source: policies/hard-deny.yaml, target: policies/hard-deny.yaml, mode: create-only}\n"
@@ -175,10 +174,9 @@ def test_a_workspace_without_a_checkout_syncs_from_the_cache_and_gets_its_worksp
 
 
 @pytest.mark.integration
-def test_a_revision_without_a_manifest_is_refused(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_a_revision_without_a_manifest_is_refused(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, capsys: pytest.CaptureFixture[str]) -> None:
     """D5: sync names the refusal and writes nothing."""
-    root, project = make_workspace(tmp_path)
-    commit_workspace(root, project)
+    root, project = make_workspace(tmp_path, tmp_path_factory, committed=True)
     run_git(root, "rm", "-q", "atc-manifest.yaml")
     run_git(root, *COMMIT, "no manifest")
     bare = git_out(root, "rev-parse", "HEAD")
@@ -191,10 +189,9 @@ def test_a_revision_without_a_manifest_is_refused(tmp_path: Path, capsys: pytest
 
 
 @pytest.mark.integration
-def test_a_revision_that_needs_a_newer_atc_is_refused(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_a_revision_that_needs_a_newer_atc_is_refused(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, capsys: pytest.CaptureFixture[str]) -> None:
     """D5: a target whose `min_atc` is above the running atc stops sync before anything is written."""
-    root, project = make_workspace(tmp_path)
-    commit_workspace(root, project)
+    root, project = make_workspace(tmp_path, tmp_path_factory, committed=True)
     manifest = root / "atc-manifest.yaml"
     text = manifest.read_text(encoding="utf-8")
     manifest.write_text(re.sub(r"(?m)^min_atc: .*$", "min_atc: 99.0.0", text), encoding="utf-8", newline="\n")
@@ -208,11 +205,10 @@ def test_a_revision_that_needs_a_newer_atc_is_refused(tmp_path: Path, capsys: py
 
 @pytest.mark.integration
 def test_the_root_adapter_check_renders_from_mains_git_objects_not_the_working_tree(
-        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+        tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, capsys: pytest.CaptureFixture[str]) -> None:
     """Doctor and sync share one check: actual copies from the working tree, expected ones from `main`'s tip."""
     import doctor
-    root, project = make_workspace(tmp_path)
-    commit_workspace(root, project)
+    root, project = make_workspace(tmp_path, tmp_path_factory, committed=True)
     plan, checkout = sync_project.workspace_adapter_plan(root)
     assert checkout and not sync_project.changes(plan)
     assert doctor.root_adapter_check(root).status == "READY"
@@ -231,13 +227,12 @@ def test_the_root_adapter_check_renders_from_mains_git_objects_not_the_working_t
 
 @pytest.mark.integration
 def test_a_governance_checkout_without_governance_checkout_stops_sync_add_and_doctor(
-        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+        tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, capsys: pytest.CaptureFixture[str]) -> None:
     """Fix 1: the workspace directory is a checkout of the governance repository but workspace.yaml does not say
     so; sync, add and doctor stop with GOVERNANCE_CHECKOUT_UNSET and never fall back to a cache of origin."""
     import bootstrap
     import doctor
-    root, project = make_workspace(tmp_path)
-    commit_workspace(root, project)
+    root, project = make_workspace(tmp_path, tmp_path_factory, committed=True)
     path = root / "workspace.yaml"
     path.write_text(path.read_text(encoding="utf-8").replace("governance_checkout: .\n", "")
                     + "governance_source: owner/atc\n", encoding="utf-8")
@@ -265,10 +260,10 @@ def test_a_governance_checkout_without_governance_checkout_stops_sync_add_and_do
 
 
 @pytest.mark.integration
-def test_doctor_reads_the_content_cache_without_fetching(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_doctor_reads_the_content_cache_without_fetching(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
     """Fix 2: doctor changes nothing: with no cache it warns and fetches nothing; with one it reads it as it is."""
     import doctor
-    workspace, project, remote = remote_workspace(tmp_path, monkeypatch)
+    workspace, project, remote = remote_workspace(tmp_path, tmp_path_factory, monkeypatch)
     check = doctor.root_adapter_check(workspace)
     assert check.status == "WARN" and check.detail.startswith("CONTENT_CACHE_MISSING")
     assert not content.cache_dir("owner/atc").exists()
@@ -279,8 +274,8 @@ def test_doctor_reads_the_content_cache_without_fetching(tmp_path: Path, monkeyp
 
 
 @pytest.mark.integration
-def test_a_lock_before_the_manifest_is_a_problem_until_sync(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    root, project = make_workspace(tmp_path)
+def test_a_lock_before_the_manifest_is_a_problem_until_sync(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    root, project = make_workspace(tmp_path, tmp_path_factory)
     (root / "atc-manifest.yaml").rename(tmp_path / "held.yaml")
     write(root / ".gitignore", "projects/\n")
     run_git(root, "add", "-A")

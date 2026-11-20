@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from atc_testkit import locations, stages, testrun, workers
+from atc_testkit import children, locations, stages, testrun, workers
 from atc_testkit.evidence import Stage
 
 GIB = workers.GIB
@@ -196,6 +196,22 @@ def test_ancestors_name_the_parent_first() -> None:
     done = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=60, check=True)
     parent, *chain = map(int, done.stdout.split())
     assert chain[0] == parent and os.getpid() in chain[:2]
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(os.name != "nt", reason="a POSIX parent ID names the live parent")
+@pytest.mark.parametrize(("created", "chain"), [
+    ({10: 300, 20: 200, 30: 100}, [20, 30]),
+    ({10: 300, 20: 200, 30: 250}, [20]),  # 30 ended and its ID went to a process created after 20
+    ({10: 300, 20: 400, 30: 100}, []),  # 20 likewise, so 30 is no ancestor either
+    ({10: 300, 20: 300, 30: 100}, [20, 30]),
+    ({10: 300, 20: None, 30: 100}, []),  # 20 cannot be opened: no proof it is the parent
+])
+def test_the_ancestor_walk_stops_at_a_parent_id_a_later_process_reused(monkeypatch: pytest.MonkeyPatch,
+                                                                       created: dict, chain: list[int]) -> None:
+    monkeypatch.setattr(children, "_windows_parents", lambda: {10: 20, 20: 30, 30: 0})
+    monkeypatch.setattr(children, "_windows_created", created.get)
+    assert children.ancestors(10) == chain
 
 
 @pytest.mark.unit

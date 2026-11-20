@@ -10,6 +10,7 @@ import pytest
 
 import atc_cli
 import build_checkout
+import git_history
 import pretooluse_hook
 from atc_testkit import locations, scratch
 
@@ -43,17 +44,10 @@ class Ws:
         return locations.locate(dict(os.environ)).tmp
 
 
-@pytest.fixture()
-def ws(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Ws:
-    """A workspace with project demo: two commits on main and one on a side branch."""
-    monkeypatch.delenv("ATC_ROOT", raising=False)
-    root = tmp_path / "workspace"
-    root.mkdir()
-    (root / "workspace.yaml").write_text(
-        f"version: 1\nworkspace_root: '{root}'\ngovernance_source: example/governance\nprojects:\n"
-        "  demo:\n    repo: projects/demo\n    worktrees: worktrees/demo\n    state: state/demo-data\n",
-        encoding="utf-8")
-    project = root / "projects" / "demo"
+def built_project(built: Path) -> tuple[str, str]:
+    """Project demo's repository: two commits on main and one on a side branch; returns the commit on main and the
+    commit off it."""
+    project = built / "projects" / "demo"
     project.mkdir(parents=True)
     git(project, "init", "-q", "-b", "main")
     commit(project, "a.txt", "one\n")
@@ -61,7 +55,20 @@ def ws(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Ws:
     git(project, "switch", "-q", "-c", "side")
     off_main = commit(project, "b.txt", "side\n")
     git(project, "switch", "-q", "main")
-    return Ws(root, project, on_main, off_main)
+    return on_main, off_main
+
+
+@pytest.fixture()
+def ws(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> Ws:
+    """A workspace with project demo: two commits on main and one on a side branch."""
+    monkeypatch.delenv("ATC_ROOT", raising=False)
+    root = tmp_path / "workspace"
+    on_main, off_main = git_history.copied(tmp_path_factory, "build-checkout-project", root, built_project)
+    (root / "workspace.yaml").write_text(
+        f"version: 1\nworkspace_root: '{root}'\ngovernance_source: example/governance\nprojects:\n"
+        "  demo:\n    repo: projects/demo\n    worktrees: worktrees/demo\n    state: state/demo-data\n",
+        encoding="utf-8")
+    return Ws(root, root / "projects" / "demo", on_main, off_main)
 
 
 def registered(ws: Ws, path: Path) -> bool:

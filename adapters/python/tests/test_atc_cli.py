@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 import atc_cli
+import git_history
 from atc_cli import maintain
 from atc_testkit import check, gate
 
@@ -198,19 +199,24 @@ def git(repo: Path, *args: str) -> None:
     subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
 
 
+def built_canonical(built: Path) -> None:
+    """The canonical checkout's files: on main with one tracked file, and an untracked workspace.yaml naming itself
+    the governance checkout."""
+    git(built, "init", "-q", "-b", "main")
+    git(built, "config", "user.email", "t@example.invalid")
+    git(built, "config", "user.name", "t")
+    (built / "AGENTS.md").write_text("# root\n", encoding="utf-8")
+    git(built, "add", "AGENTS.md")
+    git(built, "commit", "-q", "-m", "root")
+    (built / "workspace.yaml").write_text("version: 1\ngovernance_checkout: .\n", encoding="utf-8")
+
+
 @pytest.fixture()
-def canonical(tmp_path: Path) -> Path:
+def canonical(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory) -> Path:
     """A canonical checkout: holds workspace.yaml naming itself the governance checkout, its git dir is the common dir,
     on main with one tracked file."""
     checkout = tmp_path / "workspace"
-    checkout.mkdir()
-    git(checkout, "init", "-q", "-b", "main")
-    git(checkout, "config", "user.email", "t@example.invalid")
-    git(checkout, "config", "user.name", "t")
-    (checkout / "AGENTS.md").write_text("# root\n", encoding="utf-8")
-    git(checkout, "add", "AGENTS.md")
-    git(checkout, "commit", "-q", "-m", "root")
-    (checkout / "workspace.yaml").write_text("version: 1\ngovernance_checkout: .\n", encoding="utf-8")
+    git_history.copied(tmp_path_factory, "atc-cli-canonical", checkout, built_canonical)
     return checkout
 
 

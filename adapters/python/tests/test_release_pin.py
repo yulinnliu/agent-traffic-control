@@ -12,6 +12,7 @@ import pytest
 
 import atc_cli
 import doctor
+import git_history
 import release_pin
 
 pytestmark = pytest.mark.integration
@@ -66,30 +67,37 @@ class Ws:
         return release_pin.check(command, list(rest), self.root, release, str(self.root), dict(os.environ))
 
 
+def built_workspace(built: Path) -> tuple[str, str]:
+    """The ATC checkout with releases v0.5.0 and v0.6.0 and project demo's repository pinning v0.5.0, without
+    workspace.yaml (it names the workspace's path and is written after the copy); returns the two release commits."""
+    git(built, "init", "-q", "-b", "main")
+    old = put(built, {"AGENTS.md": "# AGENTS.md\n\n## Task records\n\n- Task prefix: ATC\n",
+                      ".gitignore": "workspace.yaml\nprojects/\nworktrees/\nstate/\n"})
+    git(built, "tag", "v0.5.0")
+    new = put(built, {"README.md": "0.6.0\n"})
+    git(built, "tag", "v0.6.0")
+    (built / "shared" / "governance").mkdir(parents=True)
+    project = built / "projects" / "demo"
+    project.mkdir(parents=True)
+    git(project, "init", "-q", "-b", "main")
+    put(project, {"AGENTS.md": "# AGENTS.md\n\n## Task records\n\n- Task prefix: DEMO\n", ".atc/atc.lock": lock(old)})
+    return old, new
+
+
 @pytest.fixture()
-def ws(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Ws:
+def ws(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> Ws:
     """A root with releases v0.5.0 and v0.6.0, v0.6.0 installed by `uv tool install` from its tag, and project demo
     (prefix DEMO) pinning v0.5.0."""
     home = tmp_path / "home"
     monkeypatch.setenv("USERPROFILE", str(home))
     monkeypatch.setenv("HOME", str(home))
     root = tmp_path / "workspace"
-    root.mkdir()
-    git(root, "init", "-q", "-b", "main")
-    old = put(root, {"AGENTS.md": "# AGENTS.md\n\n## Task records\n\n- Task prefix: ATC\n",
-                     ".gitignore": "workspace.yaml\nprojects/\nworktrees/\nstate/\n"})
-    git(root, "tag", "v0.5.0")
-    new = put(root, {"README.md": "0.6.0\n"})
-    git(root, "tag", "v0.6.0")
-    (root / "shared" / "governance").mkdir(parents=True)
+    old, new = git_history.copied(tmp_path_factory, "release-pin-workspace", root, built_workspace)
     (root / "workspace.yaml").write_text(
         f"version: 1\nworkspace_root: '{root}'\ngovernance_source: example/governance\nprojects:\n"
         "  demo:\n    repo: projects/demo\n    worktrees: worktrees/demo\n    state: state/demo-data\n",
         encoding="utf-8")
     project = root / "projects" / "demo"
-    project.mkdir(parents=True)
-    git(project, "init", "-q", "-b", "main")
-    put(project, {"AGENTS.md": "# AGENTS.md\n\n## Task records\n\n- Task prefix: DEMO\n", ".atc/atc.lock": lock(old)})
     return Ws(root, project, release_pin.installed(record(new)), old, new)
 
 

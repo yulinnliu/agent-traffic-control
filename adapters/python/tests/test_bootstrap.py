@@ -65,8 +65,8 @@ def test_init_without_remote_needs_explicit_source(tmp_path: Path) -> None:
     assert not (root / "workspace.yaml").exists()
 
 
-def test_add_registers_onboards_and_validates(tmp_path: Path) -> None:
-    root, _ = make_workspace(tmp_path, create_project=False)
+def test_add_registers_onboards_and_validates(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory) -> None:
+    root, _ = make_workspace(tmp_path, tmp_path_factory, create_project=False)
     shutil.copyfile(bootstrap.ROOT / "workspace.yaml.example", root / "workspace.yaml.example")
     bootstrap.init(root, "owner/repo", force=True, environ={})
     project = root / "projects" / "second"
@@ -91,8 +91,8 @@ def test_add_registers_onboards_and_validates(tmp_path: Path) -> None:
         assert (project / tool / "skills" / "demo-skill" / "SKILL.md").is_file()
 
 
-def test_add_rejects_non_repository_and_bad_names(tmp_path: Path) -> None:
-    root, _ = make_workspace(tmp_path, create_project=False)
+def test_add_rejects_non_repository_and_bad_names(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory) -> None:
+    root, _ = make_workspace(tmp_path, tmp_path_factory, create_project=False)
     shutil.copyfile(bootstrap.ROOT / "workspace.yaml.example", root / "workspace.yaml.example")
     bootstrap.init(root, "owner/repo", force=True, environ={})
     (root / "projects" / "plain").mkdir(parents=True)
@@ -102,8 +102,8 @@ def test_add_rejects_non_repository_and_bad_names(tmp_path: Path) -> None:
 
 
 @pytest.mark.integration
-def test_add_refuses_the_reserved_root_name_before_writing(tmp_path: Path) -> None:
-    root, _ = make_workspace(tmp_path, create_project=False)
+def test_add_refuses_the_reserved_root_name_before_writing(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory) -> None:
+    root, _ = make_workspace(tmp_path, tmp_path_factory, create_project=False)
     shutil.copyfile(bootstrap.ROOT / "workspace.yaml.example", root / "workspace.yaml.example")
     bootstrap.init(root, "owner/repo", force=True, environ={})
     project = root / "projects" / "root"
@@ -115,8 +115,8 @@ def test_add_refuses_the_reserved_root_name_before_writing(tmp_path: Path) -> No
     assert (root / "workspace.yaml").read_text(encoding="utf-8") == before
 
 
-def test_add_installs_requested_opt_in_adapter(tmp_path: Path) -> None:
-    root, _ = make_workspace(tmp_path, create_project=False)
+def test_add_installs_requested_opt_in_adapter(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory) -> None:
+    root, _ = make_workspace(tmp_path, tmp_path_factory, create_project=False)
     shutil.copyfile(bootstrap.ROOT / "workspace.yaml.example", root / "workspace.yaml.example")
     bootstrap.init(root, "owner/repo", force=True, environ={})
     write(root / "shared/skills/optional-skill/SKILL.md", "---\nname: optional-skill\ndescription: test skill\n---\n\n# Optional\n")
@@ -136,8 +136,8 @@ def test_add_installs_requested_opt_in_adapter(tmp_path: Path) -> None:
         bootstrap.install_opt_in(root, project, ["no-such-skill"])
 
 
-def test_opt_in_install_carries_supporting_files_and_leaves_an_unowned_directory(tmp_path: Path) -> None:
-    root, project = make_workspace(tmp_path)
+def test_opt_in_install_carries_supporting_files_and_leaves_an_unowned_directory(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory) -> None:
+    root, project = make_workspace(tmp_path, tmp_path_factory)
     write(root / "shared/skills/optional-skill/SKILL.md", "---\nname: optional-skill\ndescription: test skill\n---\n\n# Optional\n")
     write(root / "shared/skills/optional-skill/references/guide.md", "# Guide\n")
     write(project / ".agents/skills/optional-skill/notes/mine.md", "mine\n")
@@ -148,8 +148,8 @@ def test_opt_in_install_carries_supporting_files_and_leaves_an_unowned_directory
     assert not (project / ".agents/skills/optional-skill/SKILL.md").exists()
 
 
-def _registered(tmp_path: Path, skill_harness: bool = False) -> tuple[Path, Path]:
-    root, project = make_workspace(tmp_path)
+def _registered(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, skill_harness: bool = False) -> tuple[Path, Path]:
+    root, project = make_workspace(tmp_path, tmp_path_factory)
     if skill_harness:
         path = root / "workspace.yaml"
         path.write_text(path.read_text(encoding="utf-8") + "skill_harnesses:\n  demo: [claude]\n", encoding="utf-8")
@@ -158,8 +158,8 @@ def _registered(tmp_path: Path, skill_harness: bool = False) -> tuple[Path, Path
 
 
 @pytest.mark.unit
-def test_remove_drops_the_entry_and_keeps_the_project_files(tmp_path: Path) -> None:
-    root, project = _registered(tmp_path, skill_harness=True)
+def test_remove_drops_the_entry_and_keeps_the_project_files(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory) -> None:
+    root, project = _registered(tmp_path, tmp_path_factory, skill_harness=True)
     assert bootstrap.remove(root, "demo", check=False, answer=lambda prompt: "y") == 0
     data = yaml.safe_load((root / "workspace.yaml").read_text(encoding="utf-8"))
     assert "demo" not in data["projects"] and "demo" not in (data.get("skill_harnesses") or {})
@@ -168,8 +168,8 @@ def test_remove_drops_the_entry_and_keeps_the_project_files(tmp_path: Path) -> N
 
 
 @pytest.mark.unit
-def test_remove_refuses_while_a_worktree_is_present(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    root, _ = _registered(tmp_path)
+def test_remove_refuses_while_a_worktree_is_present(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, capsys: pytest.CaptureFixture[str]) -> None:
+    root, _ = _registered(tmp_path, tmp_path_factory)
     (root / "worktrees" / "demo" / "claude+ATC-0001").mkdir()
     before = (root / "workspace.yaml").read_text(encoding="utf-8")
     assert bootstrap.remove(root, "demo", check=False, answer=lambda prompt: "y") == 1
@@ -179,8 +179,8 @@ def test_remove_refuses_while_a_worktree_is_present(tmp_path: Path, capsys: pyte
 
 
 @pytest.mark.unit
-def test_remove_check_and_a_declined_answer_change_nothing(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    root, _ = _registered(tmp_path)
+def test_remove_check_and_a_declined_answer_change_nothing(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, capsys: pytest.CaptureFixture[str]) -> None:
+    root, _ = _registered(tmp_path, tmp_path_factory)
     before = (root / "workspace.yaml").read_text(encoding="utf-8")
     assert bootstrap.remove(root, "demo", check=True) == 0
     assert capsys.readouterr().out.startswith("CHECK remove demo")
@@ -190,8 +190,8 @@ def test_remove_check_and_a_declined_answer_change_nothing(tmp_path: Path, capsy
 
 
 @pytest.mark.unit
-def test_remove_names_an_unregistered_project(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    root, _ = _registered(tmp_path)
+def test_remove_names_an_unregistered_project(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, capsys: pytest.CaptureFixture[str]) -> None:
+    root, _ = _registered(tmp_path, tmp_path_factory)
     assert bootstrap.remove(root, "absent", check=True) == 2
     assert capsys.readouterr().err.startswith("ERROR PROJECT_UNKNOWN ")
 
@@ -212,10 +212,10 @@ def test_without_entry_drops_only_a_direct_child_of_the_section(name: str) -> No
 
 
 @pytest.mark.integration
-def test_add_refuses_a_project_whose_main_breaks_the_hook_table(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_add_refuses_a_project_whose_main_breaks_the_hook_table(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, capsys: pytest.CaptureFixture[str]) -> None:
     """`atc add` composes the hook's table with the project before it writes the map (docs/ENFORCEMENT.md
     § PreToolUse hook): a policy on its main that does not load leaves workspace.yaml as it was."""
-    root, _ = make_workspace(tmp_path, create_project=False)
+    root, _ = make_workspace(tmp_path, tmp_path_factory, create_project=False)
     shutil.copyfile(bootstrap.ROOT / "workspace.yaml.example", root / "workspace.yaml.example")
     bootstrap.init(root, "owner/repo", force=True, environ={})
     project = root / "projects" / "broken"

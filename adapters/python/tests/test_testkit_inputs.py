@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+import git_history
 from atc_testkit import evidence, inputs, scratch, stages, testrun, verifier
 from atc_testkit.project import Project
 
@@ -29,8 +30,13 @@ def git(root: Path, *args: str) -> str:
 
 
 @pytest.fixture
-def repository(tmp_path: Path) -> Path:
+def repository(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory) -> Path:
     root = tmp_path / "repo"
+    git_history.copied(tmp_path_factory, "inputs-repository", root, built_repository)
+    return root
+
+
+def built_repository(root: Path) -> None:
     (root / "tests").mkdir(parents=True)
     (root / "tests/test_a.py").write_text("def test_a():\n    pass\n", encoding="utf-8")
     (root / "docs").mkdir()
@@ -38,7 +44,6 @@ def repository(tmp_path: Path) -> Path:
     git(root.parent, "init", "-q", "-b", "main", str(root))
     git(root, "add", ".")
     git(root, "commit", "-q", "-m", "base")
-    return root
 
 
 def commit(root: Path, name: str, text: str) -> str:

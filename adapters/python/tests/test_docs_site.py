@@ -12,6 +12,7 @@ import pytest
 import yaml
 
 import docs_site
+import git_history
 from atc_testkit import docs
 
 CHECKOUT = Path(__file__).resolve().parents[3]
@@ -85,8 +86,14 @@ def test_two_sources_on_one_site_path_stop():
 
 
 @pytest.fixture
-def repo(tmp_path: Path) -> Path:
-    return repository(tmp_path / "repo", {
+def repo(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory) -> Path:
+    root = tmp_path / "repo"
+    git_history.copied(tmp_path_factory, "docs-site-repo", root, built_repo)
+    return root
+
+
+def built_repo(root: Path) -> None:
+    repository(root, {
         "README.md": "# R\n", "LICENSE": "MIT\n", "docs/WORKFLOW.md": "# W\n\n## Steps\n",
         "docs/design/X.md": "# X\n", "docs/assets/a.png": b"png", "adapters/python/pyproject.toml": "",
         "shared/governance/CORE.md": "# C\n"})

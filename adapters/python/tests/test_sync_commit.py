@@ -10,7 +10,7 @@ import pytest
 import git_preflight
 import sync_project
 from integration_slot import IntegrationSlot
-from test_tooling import RELEASE, commit_workspace, make_workspace, run_git, user_home, write  # noqa: F401  (user_home: autouse)
+from test_tooling import RELEASE, make_workspace, run_git, user_home, write  # noqa: F401  (user_home: autouse)
 
 pytestmark = pytest.mark.integration
 
@@ -21,11 +21,9 @@ def git_out(repo: Path, *args: str) -> str:
     return subprocess.check_output(["git", "-C", str(repo), *args], text=True).strip()
 
 
-def committed_workspace(tmp_path: Path) -> tuple[Path, Path]:
+def committed_workspace(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, Path]:
     """The ATC checkout committed on main and the project as its own repository on main."""
-    root, project = make_workspace(tmp_path)
-    commit_workspace(root, project)
-    return root, project
+    return make_workspace(tmp_path, tmp_path_factory, committed=True)
 
 
 def records(project: Path) -> list[dict]:
@@ -33,8 +31,8 @@ def records(project: Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()] if path.exists() else []
 
 
-def test_sync_commits_on_main_and_records_it(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    root, project = committed_workspace(tmp_path)
+def test_sync_commits_on_main_and_records_it(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, capsys: pytest.CaptureFixture[str]) -> None:
+    root, project = committed_workspace(tmp_path, tmp_path_factory)
     before = git_out(project, "rev-parse", "HEAD")
     assert sync_project.main(["demo"], root=root) == 0
     head = git_out(project, "rev-parse", "HEAD")
@@ -61,8 +59,8 @@ def commit_root(root: Path, name: str) -> str:
 
 
 @pytest.mark.parametrize("case", ["at tag", "after tag", "no tag"])
-def test_the_sync_subject_and_record_name_the_target(tmp_path: Path, case: str) -> None:
-    root, project = committed_workspace(tmp_path)
+def test_the_sync_subject_and_record_name_the_target(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, case: str) -> None:
+    root, project = committed_workspace(tmp_path, tmp_path_factory)
     released = git_out(root, "rev-parse", "HEAD")
     run_git(root, "tag", "notes-1")
     if case == "no tag":
@@ -81,8 +79,8 @@ def test_the_sync_subject_and_record_name_the_target(tmp_path: Path, case: str) 
     assert (project / ".atc/atc.lock").read_text(encoding="utf-8").endswith(f'revision = "{head}"\n')
 
 
-def test_sync_renders_the_latest_release_not_the_checkout(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    root, project = committed_workspace(tmp_path)
+def test_sync_renders_the_latest_release_not_the_checkout(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, capsys: pytest.CaptureFixture[str]) -> None:
+    root, project = committed_workspace(tmp_path, tmp_path_factory)
     write(root / "shared/governance/CORE.md", "# CORE.md\n\nv0.0.2\n")
     newer = commit_root(root, "second")
     run_git(root, "tag", "v0.0.9", RELEASE)
@@ -103,13 +101,13 @@ def test_sync_renders_the_latest_release_not_the_checkout(tmp_path: Path, capsys
     assert (project / ".atc/governance/CORE.md").read_text(encoding="utf-8") == "# CORE.md\n\nunreleased\n"
 
 
-def test_sync_targets_the_installed_release(tmp_path: Path, capsys: pytest.CaptureFixture[str],
+def test_sync_targets_the_installed_release(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, capsys: pytest.CaptureFixture[str],
                                                                  monkeypatch: pytest.MonkeyPatch) -> None:
     """An installed release older than the latest tag: sync renders the installed one, which clears the release-pin
     mismatch, so a project never moves ahead of the tool (docs/WORKFLOW.md § Installing a release)."""
     import release_pin
     from types import SimpleNamespace
-    root, project = committed_workspace(tmp_path)
+    root, project = committed_workspace(tmp_path, tmp_path_factory)
     released = git_out(root, "rev-parse", f"{RELEASE}^{{commit}}")
     write(root / "shared/governance/CORE.md", "# CORE.md\n\nnewer\n")
     commit_root(root, "newer")
@@ -136,9 +134,9 @@ def test_the_installed_release_is_the_one_atc_records(monkeypatch: pytest.Monkey
     assert sync_project.installed_release() is None
 
 
-def test_sync_with_no_installed_release_targets_the_latest_tag(tmp_path: Path, capsys: pytest.CaptureFixture[str],
+def test_sync_with_no_installed_release_targets_the_latest_tag(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, capsys: pytest.CaptureFixture[str],
                                                                monkeypatch: pytest.MonkeyPatch) -> None:
-    root, project = committed_workspace(tmp_path)
+    root, project = committed_workspace(tmp_path, tmp_path_factory)
     write(root / "shared/governance/CORE.md", "# CORE.md\n\nnewer\n")
     newer = commit_root(root, "newer")
     run_git(root, "tag", "v0.0.2")
@@ -148,10 +146,10 @@ def test_sync_with_no_installed_release_targets_the_latest_tag(tmp_path: Path, c
     assert "v0.0.2" in git_out(project, "log", "-1", "--format=%s")
 
 
-def test_an_installed_release_off_main_stops_before_any_project(tmp_path: Path, capsys: pytest.CaptureFixture[str],
+def test_an_installed_release_off_main_stops_before_any_project(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, capsys: pytest.CaptureFixture[str],
                                                                  monkeypatch: pytest.MonkeyPatch) -> None:
     import release_pin
-    root, project = committed_workspace(tmp_path)
+    root, project = committed_workspace(tmp_path, tmp_path_factory)
     run_git(root, "checkout", "-q", "-b", "topic")
     side = commit_root(root, "topic")
     run_git(root, "checkout", "-q", "main")
@@ -164,8 +162,8 @@ def test_an_installed_release_off_main_stops_before_any_project(tmp_path: Path, 
     assert not (project / ".atc").exists()
 
 
-def test_a_project_ahead_of_the_latest_release_is_left_alone(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    root, project = committed_workspace(tmp_path)
+def test_a_project_ahead_of_the_latest_release_is_left_alone(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, capsys: pytest.CaptureFixture[str]) -> None:
+    root, project = committed_workspace(tmp_path, tmp_path_factory)
     write(root / "shared/governance/CORE.md", "# CORE.md\n\nahead\n")
     ahead = commit_root(root, "ahead")
     assert sync_project.main(["demo", "--revision", ahead], root=root) == 0
@@ -184,8 +182,8 @@ def test_a_project_ahead_of_the_latest_release_is_left_alone(tmp_path: Path, cap
 
 
 @pytest.mark.parametrize("case", ["no release", "off main", "unknown"])
-def test_an_unresolvable_target_stops_before_any_project(tmp_path: Path, capsys: pytest.CaptureFixture[str], case: str) -> None:
-    root, project = committed_workspace(tmp_path)
+def test_an_unresolvable_target_stops_before_any_project(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, capsys: pytest.CaptureFixture[str], case: str) -> None:
+    root, project = committed_workspace(tmp_path, tmp_path_factory)
     named: list[str] = []
     if case == "no release":
         run_git(root, "tag", "-d", RELEASE)
@@ -208,9 +206,9 @@ def test_an_unresolvable_target_stops_before_any_project(tmp_path: Path, capsys:
     assert not (project / ".atc").exists()
 
 
-def test_the_verification_gate_applies_to_every_target(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_the_verification_gate_applies_to_every_target(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, capsys: pytest.CaptureFixture[str]) -> None:
     """Every revision sync renders carries a manifest and the verifier rule, so the gate is unconditional."""
-    root, project = committed_workspace(tmp_path)
+    root, project = committed_workspace(tmp_path, tmp_path_factory)
     write(project / "AGENTS.md", "# AGENTS.md\n\n## What this is\n\nDemo.\n")
     run_git(project, "commit", "-q", "-am", "no verification section")
     assert sync_project.main(["demo"], root=root) == 1
@@ -218,8 +216,8 @@ def test_the_verification_gate_applies_to_every_target(tmp_path: Path, capsys: p
     assert not (project / ".atc").exists()
 
 
-def test_json_names_the_target(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    root, _ = committed_workspace(tmp_path)
+def test_json_names_the_target(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, capsys: pytest.CaptureFixture[str]) -> None:
+    root, _ = committed_workspace(tmp_path, tmp_path_factory)
     assert sync_project.main(["demo", "--check", "--json"], root=root) == 1
     result = json.loads(capsys.readouterr().out)
     assert result["target"] == {"revision": git_out(root, "rev-parse", f"{RELEASE}^{{commit}}"), "tag": RELEASE, "named": False}
@@ -230,8 +228,8 @@ def test_json_names_the_target(tmp_path: Path, capsys: pytest.CaptureFixture[str
 
 @pytest.mark.parametrize("argv", [["--revision", "not-a-sha"], ["--root", "--revision", "0" * 40],
                                   ["--root", "demo"]])
-def test_revision_takes_a_full_sha_and_root_takes_neither_revision_nor_project(tmp_path: Path, argv: list[str]) -> None:
-    root, _ = committed_workspace(tmp_path)
+def test_revision_takes_a_full_sha_and_root_takes_neither_revision_nor_project(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, argv: list[str]) -> None:
+    root, _ = committed_workspace(tmp_path, tmp_path_factory)
     target = [] if "--root" in argv else ["demo"]
     with pytest.raises(SystemExit) as exit_:
         sync_project.main(["--check", *target, *argv], root=root)
@@ -254,8 +252,8 @@ def test_the_v0_4_0_release_tree_has_no_manifest_so_it_is_not_a_sync_target(tmp_
 
 
 @pytest.mark.parametrize("case", ["dirty", "branch", "busy", "behind"])
-def test_project_precondition_stops_before_writing(tmp_path: Path, capsys: pytest.CaptureFixture[str], case: str) -> None:
-    root, project = committed_workspace(tmp_path)
+def test_project_precondition_stops_before_writing(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, capsys: pytest.CaptureFixture[str], case: str) -> None:
+    root, project = committed_workspace(tmp_path, tmp_path_factory)
     expected = {"dirty": "CHECKOUT_DIRTY", "branch": "NOT_MAIN", "busy": "INTEGRATION_BUSY", "behind": "BEHIND_ORIGIN"}[case]
     slot = None
     if case == "dirty":
@@ -282,8 +280,8 @@ def test_project_precondition_stops_before_writing(tmp_path: Path, capsys: pytes
 
 
 @pytest.mark.parametrize("case", ["topic", "dirty", "adapter"])
-def test_atc_checkout_precondition_stops_every_project(tmp_path: Path, capsys: pytest.CaptureFixture[str], case: str) -> None:
-    root, project = committed_workspace(tmp_path)
+def test_atc_checkout_precondition_stops_every_project(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, capsys: pytest.CaptureFixture[str], case: str) -> None:
+    root, project = committed_workspace(tmp_path, tmp_path_factory)
     expected = {"topic": "ROOT_NOT_MAIN", "dirty": "ROOT_DIRTY", "adapter": "ROOT_ADAPTER_DRIFT"}[case]
     if case == "topic":
         run_git(root, "checkout", "-q", "-b", "topic")
@@ -297,8 +295,8 @@ def test_atc_checkout_precondition_stops_every_project(tmp_path: Path, capsys: p
     assert case != "adapter" or not (root / ".agents/skills/demo-skill/SKILL.md").exists()
 
 
-def test_ignored_synced_files_stop_before_writing(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    root, project = committed_workspace(tmp_path)
+def test_ignored_synced_files_stop_before_writing(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, capsys: pytest.CaptureFixture[str]) -> None:
+    root, project = committed_workspace(tmp_path, tmp_path_factory)
     write(project / ".git/info/exclude", "/.atc/\n/CLAUDE.md\n")
     head = git_out(project, "rev-parse", "HEAD")
     assert sync_project.main(["demo"], root=root) == 1
@@ -329,9 +327,9 @@ def test_a_short_windows_path_still_counts_as_the_top_of_its_checkout(tmp_path: 
 
 
 def test_change_outside_the_synced_files_is_left_uncommitted(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    root, project = committed_workspace(tmp_path)
+    root, project = committed_workspace(tmp_path, tmp_path_factory)
     apply_plan = sync_project.apply_plan
 
     def apply_and_stray(plan, mode):
@@ -346,8 +344,8 @@ def test_change_outside_the_synced_files_is_left_uncommitted(
     assert records(project) == []
 
 
-def test_sync_root_renders_the_topic_checkout_and_commits_nothing(tmp_path: Path) -> None:
-    root, _ = committed_workspace(tmp_path)
+def test_sync_root_renders_the_topic_checkout_and_commits_nothing(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory) -> None:
+    root, _ = committed_workspace(tmp_path, tmp_path_factory)
     run_git(root, "checkout", "-q", "-b", "topic")
     adapter = root / ".agents/skills/demo-skill/SKILL.md"
     adapter.unlink()
@@ -357,8 +355,8 @@ def test_sync_root_renders_the_topic_checkout_and_commits_nothing(tmp_path: Path
     assert git_out(root, "rev-parse", "HEAD") == head
 
 
-def test_the_integration_slot_is_held_while_sync_writes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    root, project = committed_workspace(tmp_path)
+def test_the_integration_slot_is_held_while_sync_writes(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    root, project = committed_workspace(tmp_path, tmp_path_factory)
     apply_plan = sync_project.apply_plan
     held: list[bool] = []
 
@@ -376,9 +374,9 @@ def test_the_integration_slot_is_held_while_sync_writes(tmp_path: Path, monkeypa
 
 
 def test_checkout_dirtied_before_the_slot_is_taken_stops_inside_it(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    root, project = committed_workspace(tmp_path)
+    root, project = committed_workspace(tmp_path, tmp_path_factory)
 
     class DirtyingSlot(IntegrationSlot):
         def acquire(self, blocking: bool = True) -> bool:
@@ -393,8 +391,8 @@ def test_checkout_dirtied_before_the_slot_is_taken_stops_inside_it(
     assert not (project / ".atc/atc.lock").exists()
 
 
-def test_project_that_is_not_its_own_repository_stops(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    root, project = make_workspace(tmp_path)
+def test_project_that_is_not_its_own_repository_stops(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, capsys: pytest.CaptureFixture[str]) -> None:
+    root, project = make_workspace(tmp_path, tmp_path_factory)
     write(root / ".gitignore", "projects/\n")
     run_git(root, "add", "-A")
     run_git(root, *COMMIT, "release")
@@ -406,8 +404,8 @@ def test_project_that_is_not_its_own_repository_stops(tmp_path: Path, capsys: py
     assert not (project / ".atc/atc.lock").exists()
 
 
-def test_root_adapter_collision_stops_every_project(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    root, project = committed_workspace(tmp_path)
+def test_root_adapter_collision_stops_every_project(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, capsys: pytest.CaptureFixture[str]) -> None:
+    root, project = committed_workspace(tmp_path, tmp_path_factory)
     write(root / ".agents/skills/demo-skill/SKILL.md", "---\nname: demo-skill\ndescription: local\n---\n\n# Local\n")
     run_git(root, "add", "-A")
     run_git(root, *COMMIT, "unowned adapter")
@@ -423,8 +421,8 @@ def test_ownership_stops_at_the_directory_boundary(tmp_path: Path) -> None:
     assert not sync_project._within(tmp_path / "skills" / "old-skill-2" / "SKILL.md", owner)
 
 
-def test_push_listing_names_the_sync_source(tmp_path: Path) -> None:
-    root, project = committed_workspace(tmp_path)
+def test_push_listing_names_the_sync_source(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory) -> None:
+    root, project = committed_workspace(tmp_path, tmp_path_factory)
     run_git(project, "update-ref", "refs/remotes/origin/main", "HEAD")
     assert sync_project.main(["demo"], root=root) == 0
     head = git_out(project, "rev-parse", "HEAD")
@@ -437,10 +435,10 @@ def test_push_listing_names_the_sync_source(tmp_path: Path) -> None:
 
 
 def test_validate_fails_on_an_ignored_synced_file_and_notes_an_uncommitted_one(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import validate_workspace as validator
-    root, project = committed_workspace(tmp_path)
+    root, project = committed_workspace(tmp_path, tmp_path_factory)
     assert sync_project.main(["demo"], root=root) == 0
     monkeypatch.setattr(validator, "ROOT", root)
     canonical = sync_project.canonical_skills(root)
@@ -456,9 +454,9 @@ def test_validate_fails_on_an_ignored_synced_file_and_notes_an_uncommitted_one(
     validator.FAILURES.clear()
 
 
-def test_validate_compares_a_project_with_its_locked_release(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_validate_compares_a_project_with_its_locked_release(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
     from test_tooling import check_registered_projects
-    root, project = committed_workspace(tmp_path)
+    root, project = committed_workspace(tmp_path, tmp_path_factory)
     assert sync_project.main(["demo"], root=root) == 0
     write(root / "shared/governance/CORE.md", "# CORE.md\n\nnewer\n")
     write(root / "shared/skills/demo-skill/SKILL.md",

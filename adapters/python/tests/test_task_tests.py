@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+import git_history
 import git_integrate
 import task_tests
 from atc_testkit import checkout, elapsed, locations, scratch, testrun, workers
@@ -28,11 +29,16 @@ TESTKIT = '[project]\nname = "demo"\nversion = "1"\n\n[tool.atc-testkit]\ntimeou
 LOCK = 'version = 1\nsource = "example/governance"\nrevision = "' + "a" * 40 + '"\n'
 
 
-def git(repo: Path, *args: str) -> str:
+def git_env() -> dict[str, str]:
+    """The environment of the test's git calls: a fixed identity and no user or system configuration."""
     env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
     env.update(GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@example.com", GIT_COMMITTER_NAME="t",
                GIT_COMMITTER_EMAIL="t@example.com", GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull)
-    return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, env=env,
+    return env
+
+
+def git(repo: Path, *args: str) -> str:
+    return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, env=git_env(),
                           check=True).stdout.strip()
 
 
@@ -63,25 +69,31 @@ class Workspace:
         return task_tests.main(list(argv), root=self.root, environ=dict(HARNESS, ATC_TMP=os.environ["ATC_TMP"]))
 
 
+def built_workspace(root: Path) -> str:
+    """The workspace root repository, and project `demo`'s repository with its base commit on main; the base SHA.
+    Every file is LF text, as `put` writes it."""
+    env = git_env()
+    git_history.new_repository(root, [git_history.Commit(
+        {"AGENTS.md": b"# AGENTS.md\n", ".gitignore": b"workspace.yaml\nprojects/\nworktrees/\nstate/\n"}, "edit")],
+        env=env)
+    [base] = git_history.new_repository(root / "projects" / "demo", [git_history.Commit({
+        "AGENTS.md": "# AGENTS.md\n\n## Task records\n\n- Task prefix: ATC\n\nProse after the line.\n".encode(),
+        ".atc/atc.lock": LOCK.encode(), "pyproject.toml": TESTKIT.encode(), "src/demo.py": b"X = 1\n",
+        "tests/test_value.py": b"def test_value():\n    assert True\n",
+    }, "edit")], env=env)
+    return base
+
+
 @pytest.fixture()
-def workspace(tmp_path: Path, atc_tmp: Path) -> Workspace:
+def workspace(tmp_path: Path, atc_tmp: Path, tmp_path_factory: pytest.TempPathFactory) -> Workspace:
     """A workspace whose project `demo` declares the prefix ATC, with the task's worktree on its branch."""
     root = tmp_path / "workspace"
-    root.mkdir()
-    git(root, "init", "-q", "-b", "main")
-    put(root, {"AGENTS.md": "# AGENTS.md\n", ".gitignore": "workspace.yaml\nprojects/\nworktrees/\nstate/\n"})
+    base = git_history.copied(tmp_path_factory, "task-tests", root, built_workspace)
     (root / "workspace.yaml").write_text(
         f"version: 1\nworkspace_root: '{root}'\ngovernance_source: example/governance\nprojects:\n"
         "  demo:\n    repo: projects/demo\n    worktrees: worktrees/demo\n    state: state/demo-data\n",
         encoding="utf-8")
     project = root / "projects" / "demo"
-    project.mkdir(parents=True)
-    git(project, "init", "-q", "-b", "main")
-    base = put(project, {
-        "AGENTS.md": "# AGENTS.md\n\n## Task records\n\n- Task prefix: ATC\n\nProse after the line.\n",
-        ".atc/atc.lock": LOCK, "pyproject.toml": TESTKIT, "src/demo.py": "X = 1\n",
-        "tests/test_value.py": "def test_value():\n    assert True\n",
-    })
     worktree = root / "worktrees" / "demo" / BRANCH
     git(project, "worktree", "add", "-q", "-b", BRANCH, str(worktree), "main")
     put(worktree, {".atc/tasks/ATC-0001.yaml": record(base), "src/demo.py": "X = 2\n"}, "open ATC-0001")

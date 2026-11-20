@@ -16,6 +16,7 @@ import yaml
 TESTKIT_SRC = Path(__file__).parents[1] / "atc-testkit/src"
 sys.path.insert(0, str(TESTKIT_SRC))
 
+import git_history
 import git_integrate as gi
 import atc_testkit
 from atc_testkit import evidence as ev
@@ -92,21 +93,33 @@ def task_record(task: str, branch: str) -> str:
     }, sort_keys=False, allow_unicode=True)
 
 
-def build(root: Path) -> Path:
-    root.mkdir()
-    run_git(root, "init", "-q", "-b", "main")
-    commit(root, "uv.lock", "lock 1\n")
-    commit(root, ".python-version", "3.13\n")
-    commit(root, "docs/notes.md", "notes\n")
-    commit(root, ARGV_FILE, json.dumps(verifier_argv()))
-    commit(root, "AGENTS.md", f"# AGENTS.md\n\n## Task records\n\n- Task prefix: ATC\n\n"
-                              f"## Integration verification\n\n- Verifier argv file: {ARGV_FILE}\n")
-    return root
+def git_env() -> dict[str, str]:
+    """The environment the base repository is built in: the identity of `isolate`, no user or system configuration."""
+    env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    env.update({"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com",
+                "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com",
+                "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull})
+    return env
+
+
+def built_repository(root: Path) -> None:
+    """The base repository: one commit each of the lock, the Python version, a note, the verifier argv and AGENTS.md."""
+    git_history.new_repository(root, [
+        git_history.Commit({"uv.lock": "lock 1\n"}, "edit uv.lock"),
+        git_history.Commit({".python-version": "3.13\n"}, "edit .python-version"),
+        git_history.Commit({"docs/notes.md": "notes\n"}, "edit docs/notes.md"),
+        git_history.Commit({ARGV_FILE: json.dumps(verifier_argv())}, f"edit {ARGV_FILE}"),
+        git_history.Commit({"AGENTS.md": f"# AGENTS.md\n\n## Task records\n\n- Task prefix: ATC\n\n"
+                                         f"## Integration verification\n\n- Verifier argv file: {ARGV_FILE}\n"},
+                           "edit AGENTS.md"),
+    ], env=git_env())
 
 
 @pytest.fixture
-def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    return build(isolate(tmp_path, monkeypatch))
+def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory) -> Path:
+    root = isolate(tmp_path, monkeypatch)
+    git_history.copied(tmp_path_factory, "evidence-base", root, built_repository)
+    return root
 
 
 def topic(repo: Path, edits: dict[str, str], branch: str) -> str:
@@ -147,7 +160,8 @@ def record_path(repo: Path, sha: str) -> Path:
 def verified_template(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, str]:
     """A repository after one fast-forward integration whose verifier ran the tests of package a, built once."""
     with pytest.MonkeyPatch.context() as monkeypatch:
-        root = build(isolate(tmp_path_factory.mktemp("verified"), monkeypatch))
+        root = isolate(tmp_path_factory.mktemp("verified"), monkeypatch)
+        git_history.copied(tmp_path_factory, "evidence-base", root, built_repository)
         tip = topic(root, {"packages/a/src/x.py": "x = 1\n"}, "first")
         integrate(root, "first", tip)
     return root, tip

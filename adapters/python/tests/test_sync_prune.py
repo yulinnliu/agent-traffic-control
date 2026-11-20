@@ -15,11 +15,11 @@ from test_tooling import commit_workspace, make_workspace, managed_adapter, run_
 SCRIPTS = Path(__file__).resolve().parents[1] / "src" / "atc_cli" / "scripts"
 
 
-def _orphaned_project(tmp_path: Path) -> tuple[Path, Path]:
+def _orphaned_project(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, Path]:
     """A project carrying a managed adapter whose canonical skill no longer exists,
     plus a project-owned skill directory without any ownership marker, committed
     as sync commits need."""
-    root, project = make_workspace(tmp_path)
+    root, project = make_workspace(tmp_path, tmp_path_factory)
     shutil.copyfile(sync_project.ROOT / "workspace.yaml.example", root / "workspace.yaml.example")
     for tool in (".agents", ".claude"):
         write(project / tool / "skills/old-skill/SKILL.md", managed_adapter("old-skill"))
@@ -55,16 +55,16 @@ def _select(root: Path, tools: str) -> None:
     run_git(root, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q", "-m", "select")
 
 
-def test_plan_reports_orphaned_managed_adapters_only(tmp_path: Path) -> None:
-    root, project = _orphaned_project(tmp_path)
+def test_plan_reports_orphaned_managed_adapters_only(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory) -> None:
+    root, project = _orphaned_project(tmp_path, tmp_path_factory)
     actions = _plan_actions(root, project)
     assert sorted(actions["prune"]) == [".agents/skills/old-skill", ".claude/skills/old-skill"]
     assert not any("local-skill" in p for paths in actions.values() for p in paths)
 
 
 @pytest.mark.unit
-def test_plan_prunes_every_managed_adapter_in_an_unselected_tool_dir(tmp_path: Path) -> None:
-    root, project = _orphaned_project(tmp_path)
+def test_plan_prunes_every_managed_adapter_in_an_unselected_tool_dir(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory) -> None:
+    root, project = _orphaned_project(tmp_path, tmp_path_factory)
     write(project / ".dsh/skills/demo-skill/SKILL.md", managed_adapter("demo-skill"))
     write(project / ".dsh/skills/local-skill/SKILL.md", "---\nname: local-skill\ndescription: mine\n---\n\n# Local\n")
     actions = _plan_actions(root, project, (".claude",))
@@ -75,17 +75,17 @@ def test_plan_prunes_every_managed_adapter_in_an_unselected_tool_dir(tmp_path: P
 
 
 @pytest.mark.integration
-def test_check_lists_the_prunes_and_writes_nothing(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    root, project = _orphaned_project(tmp_path)
+def test_check_lists_the_prunes_and_writes_nothing(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, capsys: pytest.CaptureFixture[str]) -> None:
+    root, project = _orphaned_project(tmp_path, tmp_path_factory)
     assert sync_project.main(["demo", "--check"], root=root) == 1
     assert " -2" in capsys.readouterr().out
     assert (project / ".claude/skills/old-skill/SKILL.md").is_file()
 
 
 @pytest.mark.integration
-def test_sync_prunes_by_default_in_its_commit_and_validator_passes(tmp_path: Path, capsys: pytest.CaptureFixture[str],
+def test_sync_prunes_by_default_in_its_commit_and_validator_passes(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, capsys: pytest.CaptureFixture[str],
                                                                   user_home: Path) -> None:
-    root, project = _orphaned_project(tmp_path)
+    root, project = _orphaned_project(tmp_path, tmp_path_factory)
     assert sync_project.main(["demo"], root=root) == 0
     assert " -2 commit" in capsys.readouterr().out
     assert not (project / ".claude/skills/old-skill").exists()
@@ -99,8 +99,8 @@ def test_sync_prunes_by_default_in_its_commit_and_validator_passes(tmp_path: Pat
 
 
 @pytest.mark.integration
-def test_skill_harnesses_selects_the_tool_dirs_and_validate_agrees(tmp_path: Path, user_home: Path) -> None:
-    root, project = _orphaned_project(tmp_path)
+def test_skill_harnesses_selects_the_tool_dirs_and_validate_agrees(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, user_home: Path) -> None:
+    root, project = _orphaned_project(tmp_path, tmp_path_factory)
     assert sync_project.main(["demo"], root=root) == 0
     assert (project / ".dsh/skills/demo-skill/SKILL.md").is_file()
     _select(root, "[claude, codex]")
@@ -134,9 +134,9 @@ def test_a_skill_harnesses_value_names_tool_dirs_in_their_fixed_order(value: obj
     ("skill_harnesses:\n  demo: [cursor]\n", "skill_harnesses.demo: unknown harness 'cursor'"),
     ("skill_harnesses:\n  demo: [claude, claude]\n", "skill_harnesses.demo lists a harness twice"),
 ], ids=["list", "unregistered", "empty", "string", "unknown", "twice"])
-def test_a_malformed_skill_harnesses_stops_sync_before_it_writes(tmp_path: Path, block: str, problem: str,
+def test_a_malformed_skill_harnesses_stops_sync_before_it_writes(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, block: str, problem: str,
                                                              capsys: pytest.CaptureFixture[str]) -> None:
-    root, project = make_workspace(tmp_path)
+    root, project = make_workspace(tmp_path, tmp_path_factory)
     path = root / "workspace.yaml"
     path.write_text(path.read_text(encoding="utf-8") + block, encoding="utf-8")
     assert sync_project.main(["demo"], root=root) == 2
@@ -145,8 +145,8 @@ def test_a_malformed_skill_harnesses_stops_sync_before_it_writes(tmp_path: Path,
 
 
 @pytest.mark.unit
-def test_skill_harnesses_is_top_level_so_project_entries_keep_their_three_keys(tmp_path: Path) -> None:
-    root, _ = make_workspace(tmp_path)
+def test_skill_harnesses_is_top_level_so_project_entries_keep_their_three_keys(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory) -> None:
+    root, _ = make_workspace(tmp_path, tmp_path_factory)
     path = root / "workspace.yaml"
     path.write_text(path.read_text(encoding="utf-8") + "skill_harnesses:\n  demo: [claude]\n", encoding="utf-8")
     assert sync_project.load_projects(root)["demo"].keys() == {"repo", "worktrees", "state"}
@@ -154,8 +154,8 @@ def test_skill_harnesses_is_top_level_so_project_entries_keep_their_three_keys(t
 
 
 @pytest.mark.unit
-def test_a_project_without_agents_md_gets_a_minimal_one(tmp_path: Path) -> None:
-    root, project = make_workspace(tmp_path)
+def test_a_project_without_agents_md_gets_a_minimal_one(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory) -> None:
+    root, project = make_workspace(tmp_path, tmp_path_factory)
     (project / "AGENTS.md").unlink()
     item = next(i for i in sync_project.build_plan(project, root) if i.path == project / "AGENTS.md")
     assert item.action == "create"
@@ -168,9 +168,9 @@ def test_a_project_without_agents_md_gets_a_minimal_one(tmp_path: Path) -> None:
 
 @pytest.mark.unit
 @pytest.mark.parametrize("original", ["# AGENTS.md\n\nRules without sections.\n", "Rules.", ""], ids=["title", "no newline", "empty"])
-def test_the_pointer_line_is_appended_to_an_agents_md_with_no_section(tmp_path: Path, original: str,
+def test_the_pointer_line_is_appended_to_an_agents_md_with_no_section(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, original: str,
                                                                       monkeypatch: pytest.MonkeyPatch) -> None:
-    root, project = make_workspace(tmp_path)
+    root, project = make_workspace(tmp_path, tmp_path_factory)
     write(project / "AGENTS.md", original)
     item = next(i for i in sync_project.build_plan(project, root) if i.path == project / "AGENTS.md")
     assert item.action == "create"
@@ -185,8 +185,8 @@ def test_the_pointer_line_is_appended_to_an_agents_md_with_no_section(tmp_path: 
 
 
 @pytest.mark.integration
-def test_sync_with_no_project_converges_every_project(tmp_path: Path) -> None:
-    root, project = _orphaned_project(tmp_path)
+def test_sync_with_no_project_converges_every_project(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory) -> None:
+    root, project = _orphaned_project(tmp_path, tmp_path_factory)
     (project / ".claude/skills/demo-skill").mkdir(parents=True, exist_ok=True)
     (project / ".claude/skills/demo-skill/SKILL.md").unlink(missing_ok=True)
     assert sync_project.main([], root=root) == 0
@@ -195,8 +195,8 @@ def test_sync_with_no_project_converges_every_project(tmp_path: Path) -> None:
 
 
 @pytest.mark.integration
-def test_default_output_lists_changes_and_counts_skips_verbose_lists_skips(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    root, _ = _orphaned_project(tmp_path)
+def test_default_output_lists_changes_and_counts_skips_verbose_lists_skips(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, capsys: pytest.CaptureFixture[str]) -> None:
+    root, _ = _orphaned_project(tmp_path, tmp_path_factory)
     sync_project.main(["demo"], root=root)
     capsys.readouterr()
     assert sync_project.main(["demo", "--check"], root=root) == 0
@@ -207,16 +207,16 @@ def test_default_output_lists_changes_and_counts_skips_verbose_lists_skips(tmp_p
 
 
 @pytest.mark.integration
-def test_default_output_still_prints_every_change(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    root, _ = _orphaned_project(tmp_path)
+def test_default_output_still_prints_every_change(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, capsys: pytest.CaptureFixture[str]) -> None:
+    root, _ = _orphaned_project(tmp_path, tmp_path_factory)
     assert sync_project.main(["demo", "--check"], root=root) == 1
     out = capsys.readouterr().out
     assert " -2" in out and "+" in out.splitlines()[0]
 
 
 @pytest.mark.unit
-def test_sync_root_prunes_an_orphaned_managed_adapter_of_the_checkout(tmp_path: Path) -> None:
-    root, _ = make_workspace(tmp_path)
+def test_sync_root_prunes_an_orphaned_managed_adapter_of_the_checkout(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory) -> None:
+    root, _ = make_workspace(tmp_path, tmp_path_factory)
     write(root / ".dsh/skills/old-skill/SKILL.md", managed_adapter("old-skill"))
     plan = sync_project.root_adapter_plan(root)
     assert [item.path for item in plan if item.action == "prune"] == [root / ".dsh/skills/old-skill"]
@@ -225,9 +225,9 @@ def test_sync_root_prunes_an_orphaned_managed_adapter_of_the_checkout(tmp_path: 
 
 
 @pytest.mark.integration
-def test_doctor_reads_each_project_against_its_skill_harnesses(tmp_path: Path) -> None:
+def test_doctor_reads_each_project_against_its_skill_harnesses(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory) -> None:
     import doctor
-    root, project = make_workspace(tmp_path)
+    root, project = make_workspace(tmp_path, tmp_path_factory)
     path = root / "workspace.yaml"
     path.write_text(path.read_text(encoding="utf-8") + "skill_harnesses:\n  demo: [claude]\n", encoding="utf-8")
     sync_project.apply_plan(sync_project.build_plan(project, root, tool_dirs=(".claude",)), "sync")
@@ -237,10 +237,10 @@ def test_doctor_reads_each_project_against_its_skill_harnesses(tmp_path: Path) -
 
 
 @pytest.mark.integration
-def test_bootstrap_add_installs_opt_in_skills_in_the_selected_tool_dirs_only(tmp_path: Path) -> None:
+def test_bootstrap_add_installs_opt_in_skills_in_the_selected_tool_dirs_only(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory) -> None:
     import bootstrap
     from test_tooling import VERIFICATION_SECTION, release_workspace
-    root, _ = make_workspace(tmp_path, create_project=False)
+    root, _ = make_workspace(tmp_path, tmp_path_factory, create_project=False)
     shutil.copyfile(bootstrap.ROOT / "workspace.yaml.example", root / "workspace.yaml.example")
     bootstrap.init(root, "owner/repo", force=True, environ={})
     path = root / "workspace.yaml"
