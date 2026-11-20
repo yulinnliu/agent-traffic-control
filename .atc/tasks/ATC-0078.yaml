@@ -18,3 +18,4 @@ authority:
   deploy: false
 decisions:
 - 'Owner 2026-11-20 「合併開設計單」: one design task covering the project-side guard command (ATC-0068 design § 13) and P7''s machine-local state deny generated from workspace.yaml.'
+- 'Owner 2026-11-20 on docs/design/ATC-0078.md § 8, all recommended: D1-A `atc policy render ID [--check]`; D2-A update the agreed copies when present; D3-A hook only, machine-local segment removed; D4-A hook checks Read|Grep|Glob; D5-A only a leading `${state}/` in a project policy; D6-A remove the `atc-maintain guard` --policies/--out and native --live-* render forms.'
