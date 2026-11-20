@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+import git_history
 import git_integrate as gi
 import git_preflight as gp
 import push
@@ -61,12 +62,10 @@ def put(repo: Path, files: dict[str, str | None], message: str = "edit") -> str:
 
 
 def on_branch(repo: Path, branch: str, files: dict[str, str | None], start: str = "main") -> str:
-    """Commit ``files`` on ``branch`` (created from ``start`` when missing), then return to main."""
+    """Commit ``files`` on ``branch`` (created from ``start`` when missing) without checking it out; its tip."""
     exists = run_git(repo, "branch", "--list", branch)
-    run_git(repo, "switch", "-q", *([branch] if exists else ["-c", branch, start]))
-    tip = put(repo, files, f"edit on {branch}")
-    run_git(repo, "switch", "-q", "main")
-    return tip
+    change = git_history.Commit(files, f"edit on {branch}")
+    return git_history.import_commits(repo, branch, [change], start=branch if exists else start)[-1]
 
 
 @pytest.fixture

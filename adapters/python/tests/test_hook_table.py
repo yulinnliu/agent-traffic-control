@@ -17,6 +17,7 @@ import pytest
 
 import doctor
 import generate_enforcement as ge
+import git_history
 import guard
 import hook_state
 import pretooluse_hook as hook
@@ -88,6 +89,12 @@ def new_repo(path: Path, files: dict[str, str | None] | None = None) -> Path:
     return path
 
 
+def built_projects(built: Path) -> None:
+    """The workspace's project repositories: `p` with its hard-deny policy, `q` empty."""
+    new_repo(built / "p", {"policies/hard-deny.yaml": PROJECT_POLICY})
+    new_repo(built / "q")
+
+
 @pytest.fixture
 def home(tmp_path, monkeypatch) -> Path:
     path = tmp_path / "home"
@@ -107,12 +114,11 @@ MAP = ("version: 1\nworkspace_root: {root}\n"
 
 
 @pytest.fixture
-def workspace(tmp_path, home) -> Path:
+def workspace(tmp_path, home, tmp_path_factory) -> Path:
     root = tmp_path / "ws"
     (root / "policies").mkdir(parents=True)
     (root / "policies" / "hard-deny.yaml").write_text(ROOT_POLICY, encoding="utf-8")
-    new_repo(root / "projects" / "p", {"policies/hard-deny.yaml": PROJECT_POLICY})
-    new_repo(root / "projects" / "q")
+    git_history.copied(tmp_path_factory, "hook-table", root / "projects", built_projects)
     path = root / "workspace.yaml"
     path.write_text(MAP.format(root=root.as_posix()), encoding="utf-8")
     return path

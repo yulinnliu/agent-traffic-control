@@ -13,6 +13,7 @@ import pytest
 
 from atc_testkit import locations
 import atc_cli
+import git_history
 import git_integrate as gi
 import git_preflight as gp
 
@@ -35,7 +36,8 @@ def commit(repo: Path, path: str, content: str) -> str:
 
 
 @pytest.fixture
-def repo(tmp_path: Path, atc_tmp: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def repo(tmp_path: Path, atc_tmp: Path, monkeypatch: pytest.MonkeyPatch,
+         tmp_path_factory: pytest.TempPathFactory) -> Path:
     # The command's own git calls inherit this environment, so the merge
     # commit gets a fixed identity and no user or system config applies.
     for key in [key for key in os.environ if key.startswith("GIT_")]:
@@ -48,12 +50,12 @@ def repo(tmp_path: Path, atc_tmp: Path, monkeypatch: pytest.MonkeyPatch) -> Path
         monkeypatch.setenv(key, value)
     monkeypatch.delenv("ATC_ROOT", raising=False)
     root = tmp_path / "repo"
-    root.mkdir()
+    git_history.copied(tmp_path_factory, "integrate", root, lambda built: git_history.new_repository(built, [
+        git_history.Commit({"a.txt": "a\n"}, "edit a.txt"),
+        git_history.Commit({"b.txt": "b\n"}, "edit b.txt"),
+        git_history.Commit({"verify.json": verify_command(), "AGENTS.md": agents_md()}, "edit AGENTS.md"),
+    ]))
     register(root)
-    run_git(root, "init", "-q", "-b", "main")
-    commit(root, "a.txt", "a\n")
-    commit(root, "b.txt", "b\n")
-    declare_verifier(root, verify_command())
     return root
 
 
@@ -94,27 +96,23 @@ def declare_verifier(repo: Path, argv: str, timeout: str | None = None) -> str:
     """Commit the verification section and argv file `atc integrate` reads from main."""
     (repo / "verify.json").write_text(argv, encoding="utf-8")
     run_git(repo, "add", "--", "verify.json")
+    return commit(repo, "AGENTS.md", agents_md(timeout))
+
+
+def agents_md(timeout: str | None = None) -> str:
+    """The AGENTS.md `declare_verifier` commits: the task prefix and the verification section."""
     lines = "- Verifier argv file: verify.json\n" + (f"- Verifier timeout: {timeout}\n" if timeout else "")
-    return commit(repo, "AGENTS.md", f"# AGENTS.md\n\n## Task records\n\n- Task prefix: {TASK_PREFIX}\n\n"
-                                     f"## Integration verification\n\n{lines}\n## Other\n")
+    return (f"# AGENTS.md\n\n## Task records\n\n- Task prefix: {TASK_PREFIX}\n\n"
+            f"## Integration verification\n\n{lines}\n## Other\n")
 
 
 def topic(repo: Path, edits: dict[str, str], branch: str = "topic") -> str:
-    run_git(repo, "switch", "-q", "-c", branch)
+    """A new ``branch`` from main with one commit per edit, made without checking it out; its tip."""
     # The record rides in the first commit, so a topic keeps one commit per edit.
     record = f".atc/tasks/{task_id(branch)}.yaml"
-    for index, (path, content) in enumerate(edits.items()):
-        (repo / path).parent.mkdir(parents=True, exist_ok=True)
-        (repo / path).write_text(content, encoding="utf-8")
-        run_git(repo, "add", "--", path)
-        if index == 0:
-            (repo / record).parent.mkdir(parents=True, exist_ok=True)
-            (repo / record).write_text(task_record(branch), encoding="utf-8")
-            run_git(repo, "add", "--", record)
-        run_git(repo, "commit", "-q", "-m", f"edit {path}")
-    tip = run_git(repo, "rev-parse", "HEAD")
-    run_git(repo, "switch", "-q", "main")
-    return tip
+    commits = [git_history.Commit({path: content, **({record: task_record(branch)} if index == 0 else {})},
+                                  f"edit {path}") for index, (path, content) in enumerate(edits.items())]
+    return git_history.import_commits(repo, branch, commits, start="main")[-1]
 
 
 def main_tip(repo: Path) -> str:

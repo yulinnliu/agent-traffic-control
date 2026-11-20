@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 import atc_testkit
+import git_history
 import git_integrate as gi
 from atc_testkit import elapsed, lint, python_toolchain, selection, stages, verifier
 from atc_testkit.project import Project, StaticCheck
@@ -93,8 +94,16 @@ class Candidate:
 
 
 @pytest.fixture()
-def candidate(tmp_path: Path, atc_tmp: Path, monkeypatch: pytest.MonkeyPatch) -> Candidate:
+def candidate(tmp_path: Path, atc_tmp: Path, monkeypatch: pytest.MonkeyPatch,
+              tmp_path_factory: pytest.TempPathFactory) -> Candidate:
     root = tmp_path / "candidate"
+    git_history.copied(tmp_path_factory, "verifier-candidate", root, built_candidate)
+    monkeypatch.chdir(root)
+    return Candidate(root)
+
+
+def built_candidate(root: Path) -> None:
+    """A consumer project's one commit: its product package, pytest settings, argv file and lint config."""
     (root / "src/fixture_prod").mkdir(parents=True)
     (root / "tests").mkdir()
     (root / "src/fixture_prod/__init__.py").write_text("", encoding="utf-8")
@@ -104,8 +113,6 @@ def candidate(tmp_path: Path, atc_tmp: Path, monkeypatch: pytest.MonkeyPatch) ->
     git(root, "init", "-q", "-b", "main")
     git(root, "add", ".")
     git(root, "commit", "-q", "-m", "base")
-    monkeypatch.chdir(root)
-    return Candidate(root)
 
 
 def consumer(root: Path, **options) -> Project:
@@ -753,13 +760,22 @@ TASK = "ATC-0001"
 
 
 @pytest.fixture()
-def integration_repo(tmp_path: Path, atc_tmp: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def integration_repo(tmp_path: Path, atc_tmp: Path, monkeypatch: pytest.MonkeyPatch,
+                     tmp_path_factory: pytest.TempPathFactory) -> Path:
     for key in [key for key in os.environ if key.startswith("GIT_")]:
         monkeypatch.delenv(key)
     for key, value in {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com", "GIT_COMMITTER_NAME": "t",
                        "GIT_COMMITTER_EMAIL": "t@example.com"}.items():
         monkeypatch.setenv(key, value)
     root = tmp_path / "repo"
+    git_history.copied(tmp_path_factory, "verifier-integration", root, built_integration_repo)
+    monkeypatch.setattr("tempfile.tempdir", str(tmp_path))
+    return root
+
+
+def built_integration_repo(root: Path) -> None:
+    """A project on main with a topic branch of the task's record and one product change; the topic's tip is in
+    ``.git/atc-test-tip``."""
     (root / "tests").mkdir(parents=True)
     (root / "src/fixture_prod").mkdir(parents=True)
     (root / "src/fixture_prod/__init__.py").write_text("", encoding="utf-8")
@@ -788,9 +804,7 @@ def integration_repo(tmp_path: Path, atc_tmp: Path, monkeypatch: pytest.MonkeyPa
     git(root, "commit", "-q", "-m", "topic")
     tip = git(root, "rev-parse", "HEAD")
     git(root, "switch", "-q", "main")
-    monkeypatch.setattr("tempfile.tempdir", str(tmp_path))
     (root / ".git/atc-test-tip").write_text(tip, encoding="utf-8")
-    return root
 
 
 def workspace_beside(repo: Path) -> Path:

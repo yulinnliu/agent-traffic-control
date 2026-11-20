@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+import git_history
 import task_records
 
 pytestmark = pytest.mark.integration
@@ -25,11 +26,16 @@ TASKS_DIR = ".atc/tasks"  # the record directory; select_tests.py selects this f
 HARNESS = {"CLAUDECODE": "1"}
 
 
-def run_git(repo: Path, *args: str) -> str:
+def git_env() -> dict[str, str]:
+    """The environment of the test's own git calls: a fixed identity and no user or system config."""
     env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
     env.update(GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@example.com", GIT_COMMITTER_NAME="t",
                GIT_COMMITTER_EMAIL="t@example.com", GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull)
-    return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, env=env,
+    return env
+
+
+def run_git(repo: Path, *args: str) -> str:
+    return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, env=git_env(),
                           check=True).stdout.strip()
 
 
@@ -93,21 +99,26 @@ def git_identity(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv(key, value)
 
 
+def built_workspace(built: Path) -> None:
+    """The workspace root repository and its project's, each with one commit of LF files."""
+    env = git_env()
+    git_history.new_repository(built, [git_history.Commit(
+        {"AGENTS.md": agents("ATC").encode(), ".gitignore": b"workspace.yaml\nprojects/\nworktrees/\n"}, "edit")],
+        env=env)
+    git_history.new_repository(built / "projects" / PROJECT, [git_history.Commit(
+        {"AGENTS.md": agents("DEMO").encode(), ".atc/atc.lock": LOCK.encode(), "pyproject.toml": TESTKIT.encode()},
+        "edit")], env=env)
+
+
 @pytest.fixture
-def ws(tmp_path: Path) -> Workspace:
+def ws(tmp_path: Path, tmp_path_factory: pytest.TempPathFactory) -> Workspace:
     root = tmp_path / "workspace"
-    root.mkdir()
-    run_git(root, "init", "-q", "-b", "main")
-    commit(root, {"AGENTS.md": agents("ATC"), ".gitignore": "workspace.yaml\nprojects/\nworktrees/\n"})
+    git_history.copied(tmp_path_factory, "task-records", root, built_workspace)
     (root / "workspace.yaml").write_text(
         f"version: 1\nworkspace_root: '{root}'\ngovernance_source: {GOVERNANCE_SOURCE}\nprojects:\n"
         f"  {PROJECT}:\n    repo: projects/{PROJECT}\n    worktrees: worktrees/{PROJECT}\n    state: state/{PROJECT}-data\n",
         encoding="utf-8")
-    workspace = Workspace(root)
-    workspace.repo.mkdir(parents=True)
-    run_git(workspace.repo, "init", "-q", "-b", "main")
-    commit(workspace.repo, {"AGENTS.md": agents("DEMO"), ".atc/atc.lock": LOCK, "pyproject.toml": TESTKIT})
-    return workspace
+    return Workspace(root)
 
 
 TESTKIT = '[tool.atc-testkit]\ntimeout = 60\n'  # a project with tests: its records take the standard level
