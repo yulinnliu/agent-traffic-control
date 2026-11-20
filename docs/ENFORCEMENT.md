@@ -459,5 +459,7 @@ a project whose `generated/enforcement/` or kept copies differ from its
 `policies/hard-deny.yaml`, so the enforcement surface changes only through a
 reviewed diff of the policy. It also reports, without failing or writing, a
 `${state}/` rule of a project the map gives no `state`, and an installed hook
-table or entry that differs from a fresh compose; `atc guard` and
-`atc doctor` list the same as its `pretooluse hook` check.
+table or entry that differs from a fresh compose, as a `pretooluse hook`
+line; `atc guard` stops with the same refusal, and `atc doctor` lists it
+under its `pretooluse entries`, `pretooluse baseline` and
+`pretooluse table` checks.
