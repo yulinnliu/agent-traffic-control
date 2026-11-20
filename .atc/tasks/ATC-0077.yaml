@@ -1,0 +1,18 @@
+task_id: ATC-0077
+title: Doc follow-ups from ATC-0068's review
+repository: yulinnliu/agent-traffic-control
+base_sha: 72366a9fce1a5f4bea2d3f7b15e8e93a735215c6
+scope: 'Three text-only fixes left over from ATC-0068''s review: - adapters/python/src/atc_cli/scripts/close_out.py:2 and adapters/python/tests/test_close_out.py:1 cite `docs/TASKS.md § Close`; the section is § Close-out. Make both cite `docs/TASKS.md § Close-out`. - shared/conformance/verification-evidence/README.md, the "Record." bullet of the input-evidence section, lists the record''s fields without `key`, which adapters/python/atc-testkit/src/atc_testkit/inputs.py writes (:108) and validates (:117, :143). Add `key` to that field list, consistent with how inputs.py defines it (a hash of the identity and the digest, the same value as `<key>` in the file name). Check that the rest of the field list matches what inputs.py writes and validates, and fix any other gap there. Search the repo (excluding worktrees/) for any other citation of `TASKS.md § Close` without `-out` and fix it the same way. Out of scope: shared/governance/, behaviour and code changes beyond docstrings.'
+tests: none
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: 72366a9fce1a5f4bea2d3f7b15e8e93a735215c6
+branch: claude+ATC-0077
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
+decisions:
+- 'Owner 2026-11-20 「開單，tests none」: text-only change (docstrings and a conformance README); the reviewer reads the diff.'
