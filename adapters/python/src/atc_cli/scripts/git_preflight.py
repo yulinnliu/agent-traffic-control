@@ -12,6 +12,8 @@ remote-tracking refs. A STOP carries the step that resolves it (governance `GIT_
 from __future__ import annotations
 
 import codecs
+import contextlib
+import contextvars
 import json
 import os
 import re
@@ -147,17 +149,130 @@ def git_env(extra_env: dict[str, str] | None = None) -> dict[str, str]:
     return env
 
 
+# The per-invocation memo of `atc integrate` and `atc test --candidate` (docs/design/ATC-0072.md § 3): each
+# read-only query runs once until something may have changed its answer.
+OBJECT, REPOSITORY, REF, READ = "object", "repository", "ref", "read"
+_REV_SUFFIX = re.compile(r"(\^\{(commit|tree)\}|\^[0-9]*|~[0-9]*)*")
+_STDIN_READS = {("cat-file", "--batch"), ("rev-list", "--stdin"), ("diff-tree", "--stdin")}
+_ALWAYS_READ = {"rev-parse", "show", "cat-file", "merge-base", "rev-list", "log", "diff", "ls-tree", "merge-tree",
+                "for-each-ref", "status"}
+# Flags whose answer depends on the refs, the reflog, the index or the working tree whatever the operands are.
+_REF_FLAGS = {"--all", "--branches", "--tags", "--remotes", "--glob", "--exclude", "--reflog", "--walk-reflogs", "-g",
+              "--bisect", "--fork-point", "--indexed-objects", "--cached", "--staged", "--no-index", "--check"}
+
+
+def _object_name(value: str) -> bool:
+    """``value`` names an object by its full ID: ``<sha>``, ``<sha>^{commit}``, ``<sha>^2``, ``<sha>:<path>``,
+    ``<sha>..<sha>``."""
+    if ".." in value:
+        return all(_object_name(side) for side in value.split("..", 1))
+    head = value.split(":", 1)[0]
+    match = FULL_SHA.match(head)
+    return bool(match) and _REV_SUFFIX.fullmatch(head[40:]) is not None
+
+
+def tier(args: tuple[str, ...] | list[str]) -> str | None:
+    """The memo tier of the read-only query ``args``: `OBJECT` when every revision is a full object ID,
+    `REPOSITORY` for the checkout's own paths and remotes, `REF` for what refs and the working tree decide,
+    `READ` for a stdin-fed read the memo neither keeps nor counts as a write; ``None`` for every other
+    command, which the memo treats as a write."""
+    command, rest = (args[0], list(args[1:])) if args else ("", [])
+    if command == "patch-id" or any((command, flag) in _STDIN_READS for flag in rest):
+        return READ
+    if command == "rev-parse" and ("--show-toplevel" in rest or "--git-common-dir" in rest):
+        return REPOSITORY
+    if command == "remote" and not rest:
+        return REPOSITORY
+    if (command, *rest) in (("branch", "--show-current"), ("worktree", "list", "--porcelain")):
+        return REF
+    if command not in _ALWAYS_READ:
+        return None
+    if command in ("for-each-ref", "status") or any(arg.split("=", 1)[0] in _REF_FLAGS for arg in rest):
+        return REF
+    paths = rest.index("--") if "--" in rest else len(rest)
+    revisions = [arg.split("=", 1)[1] if arg.startswith("--merge-base=") else arg
+                 for arg in rest[:paths] if not arg.startswith("-") or arg.startswith("--merge-base=")]
+    revisions = [arg for arg in revisions if not arg.isdigit()]
+    if command == "diff" and len(revisions) < 2 and not any(".." in arg for arg in revisions):
+        return REF  # one side is the index or the working tree
+    return OBJECT if revisions and all(_object_name(arg) for arg in revisions) else REF
+
+
+@dataclass
+class _Memo:
+    entries: dict = field(default_factory=dict)
+    generation: int = 0
+
+    def invalidate(self) -> None:
+        """Drop the `REF` answers: refs, `HEAD`, the index or a worktree may have changed."""
+        self.entries = {key: value for key, value in self.entries.items() if value[0] != REF}
+        self.generation += 1
+
+
+_MEMO: contextvars.ContextVar[_Memo | None] = contextvars.ContextVar("atc_git_memo", default=None)
+
+
+@contextlib.contextmanager
+def memo():
+    """Keep the answers of read-only git queries for the block: one invocation of `atc integrate` or
+    `atc test --candidate`."""
+    token = _MEMO.set(_Memo())
+    try:
+        yield
+    finally:
+        _MEMO.reset(token)
+
+
+def memo_invalidate() -> None:
+    """Forget the `REF` answers; a change made outside `run_git` calls this (docs/design/ATC-0072.md § 3.1)."""
+    current = _MEMO.get()
+    if current is not None:
+        current.invalidate()
+
+
+def _definite(args: tuple[str, ...], returncode: int) -> bool:
+    """Whether an `OBJECT` answer is fixed for good: success, or `--is-ancestor`'s "no" between two objects."""
+    return returncode == 0 or (args[:2] == ("merge-base", "--is-ancestor") and returncode == 1)
+
+
+def run_git(repo: Path, args: tuple[str, ...], env: dict[str, str], execute, *, flavor: str,
+            input: str | None = None, fresh: bool = False) -> subprocess.CompletedProcess:
+    """``execute()``, the git run of a wrapper, through the memo when one is active. ``fresh`` asks git even when
+    the memo holds the answer; ``flavor`` names the wrapper, whose decoding is part of the answer."""
+    current = _MEMO.get()
+    if current is None:
+        return execute()
+    kind = tier(args)
+    if kind in (None, READ):
+        result = execute()
+        if kind is None:
+            current.invalidate()
+        return result
+    key = (flavor, str(repo), args, input, tuple(sorted((k, v) for k, v in env.items() if k.startswith("GIT_"))))
+    if not fresh and key in current.entries:
+        return current.entries[key][1]
+    result = execute()
+    if kind == REPOSITORY and result.returncode != 0:
+        return result
+    if kind == OBJECT and not _definite(args, result.returncode):
+        kind = REF
+    current.entries[key] = (kind, result)
+    return result
+
+
 def git(
     repo: Path, *args: str, check: bool = True, extra_env: dict[str, str] | None = None, input: str | None = None,
+    fresh: bool = False,
 ) -> subprocess.CompletedProcess:
-    result = subprocess.run(
+    env = git_env(extra_env)
+    result = run_git(repo, args, env, lambda: subprocess.run(
         ["git", "-C", str(repo), *args],
         capture_output=True,
         text=True,
         encoding="utf-8",
-        env=git_env(extra_env),
+        env=env,
         input=input,
-    )
+    ), flavor="git_preflight", input=input, fresh=fresh)
     if check and result.returncode != 0:
         raise GitError(f"git {' '.join(args)}: {result.stderr.strip() or result.returncode}")
     return result
@@ -177,11 +292,13 @@ def git_streamed(repo: Path, *args: str, out: TextIO, extra_env: dict[str, str] 
             out.flush()
             written.append(text)
     written.append(decoder.decode(b"", final=True))
-    return process.wait(), "".join(written)
+    code = process.wait()
+    memo_invalidate()  # a streamed command writes (a push, a hook)
+    return code, "".join(written)
 
 
-def rev(repo: Path, ref: str) -> str | None:
-    result = git(repo, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}", check=False)
+def rev(repo: Path, ref: str, fresh: bool = False) -> str | None:
+    result = git(repo, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}", check=False, fresh=fresh)
     return result.stdout.strip() if result.returncode == 0 else None
 
 

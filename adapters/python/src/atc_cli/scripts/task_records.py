@@ -20,6 +20,7 @@ from jsonschema import Draft202012Validator
 
 import cli_conventions
 from cli_conventions import Refusal
+import git_preflight as gp
 import task_section
 
 ROOT = Path(__file__).resolve().parents[5]
@@ -45,8 +46,10 @@ def _env() -> dict[str, str]:
 
 def git(repo: Path, *args: str, check: bool = True, env: dict[str, str] | None = None,
         input: str | None = None) -> subprocess.CompletedProcess:
-    run = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, input=input,
-                         encoding="utf-8", errors="replace", env={**_env(), **(env or {})}, check=False)
+    full_env = {**_env(), **(env or {})}
+    run = gp.run_git(repo, args, full_env, lambda: subprocess.run(
+        ["git", "-C", str(repo), *args], capture_output=True, text=True, input=input, encoding="utf-8",
+        errors="replace", env=full_env, check=False), flavor="task_records", input=input)
     if check and run.returncode != 0:
         raise Refusal("GIT_FAILED", f"git {' '.join(args)} in {repo}: {(run.stderr or '').strip()}",
                       code=cli_conventions.ERROR)
@@ -254,8 +257,7 @@ def taken_numbers(repo: Path, prefix: str) -> set[int]:
             listing = git(repo, "ls-tree", "--name-only", ref, f"{TASKS_DIR}/", check=False).stdout
             stems += [Path(line).name.removesuffix(".yaml") for line in listing.splitlines() if line.endswith(".yaml")]
     stems += worktree_names(repo)
-    import git_preflight
-    stems += [r["task"] for r in git_preflight.read_integrations(repo) if isinstance(r.get("task"), str)]
+    stems += [r["task"] for r in gp.read_integrations(repo) if isinstance(r.get("task"), str)]
     return {int(m.group(1)) for stem in stems for m in pattern.finditer(stem)}
 
 
@@ -573,8 +575,7 @@ def tasks(name: str, repo: Path) -> list[dict]:
     if git(repo, "rev-parse", "--verify", "--quiet", f"refs/heads/{MAIN}", check=False).returncode != 0:
         raise Refusal("NO_MAIN", f"{repo} has no {MAIN} branch", None, cli_conventions.ERROR)
     branches = local_branches(repo)
-    import git_preflight
-    integrations = git_preflight.read_integrations(repo)
+    integrations = gp.read_integrations(repo)
     invalid: list[str] = []
     rows = []
     for task_id, copies in sorted(ref_copies(repo, branches, invalid, tags=True).items()):

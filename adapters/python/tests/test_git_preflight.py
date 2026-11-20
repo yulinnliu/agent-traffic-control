@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import os
 import subprocess
 from pathlib import Path
@@ -187,3 +188,248 @@ def test_every_stop_names_its_next_step(repo: Path) -> None:
     lines = gp.render(gp.merge_preflight(repo, "topic", tip)).splitlines()
     assert lines[0] == "STOP CHECKOUT_DIRTY: the integration checkout has uncommitted changes to tracked files: b.txt"
     assert lines[1] == "hint: have the owner of the listed paths commit or remove them, then run again"
+
+
+# The per-invocation memo (docs/design/ATC-0072.md § 3)
+
+SHA_A = "a" * 40
+SHA_B = "b" * 40
+
+
+@pytest.fixture
+def ran(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, ...]]:
+    """The argv after `-C <repo>` of every git process started from now on."""
+    calls: list[tuple[str, ...]] = []
+    real = subprocess.run
+
+    def counting(argv, *args, **kwargs):
+        if argv and argv[0] == "git":
+            calls.append(tuple(argv[3:] if argv[1:2] == ["-C"] else argv[1:]))
+        return real(argv, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", counting)
+    return calls
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(("args", "expected"), [
+    (("rev-parse", "--verify", "--quiet", f"{SHA_A}^{{commit}}"), gp.OBJECT),
+    (("rev-parse", "--verify", "--quiet", f"{SHA_A}^{{tree}}"), gp.OBJECT),
+    (("rev-parse", f"{SHA_A}^1", f"{SHA_A}^2"), gp.OBJECT),
+    (("show", f"{SHA_A}:.atc/tasks/ATC-0001.yaml"), gp.OBJECT),
+    (("cat-file", "-p", f"{SHA_A}:vendor/atc-testkit.json"), gp.OBJECT),
+    (("merge-base", SHA_A, SHA_B), gp.OBJECT),
+    (("merge-base", "--is-ancestor", SHA_A, SHA_B), gp.OBJECT),
+    (("rev-list", "--count", f"{SHA_A}..{SHA_B}"), gp.OBJECT),
+    (("rev-list", "--parents", "-n", "1", SHA_A), gp.OBJECT),
+    (("log", "--reverse", "--format=%H %s", f"{SHA_A}..{SHA_B}"), gp.OBJECT),
+    (("diff", "--name-only", "--no-renames", "-z", SHA_A, SHA_B), gp.OBJECT),
+    (("ls-tree", "-z", SHA_A, "--", ".atc/tasks/"), gp.OBJECT),
+    (("merge-tree", "--write-tree", "--name-only", f"--merge-base={SHA_A}^", SHA_A, SHA_B), gp.OBJECT),
+    (("rev-parse", "--verify", "--quiet", "main^{commit}"), gp.REF),
+    (("rev-parse", "--verify", "--quiet", f"{SHA_A}a^{{commit}}"), gp.REF),
+    (("show", "refs/heads/main:AGENTS.md"), gp.REF),
+    (("merge-base", "main", SHA_A), gp.REF),
+    (("merge-tree", "--write-tree", f"--merge-base={SHA_A}^", "main", SHA_B), gp.REF),
+    (("diff", "--check", SHA_A, SHA_B), gp.REF),
+    (("rev-parse", f"--disambiguate={SHA_A[:12]}"), gp.REF),
+    (("diff", "--name-only", f"{SHA_A}..{SHA_B}"), gp.OBJECT),
+    (("diff", SHA_A), gp.REF),
+    (("diff", "--quiet", SHA_A, "--", "a.txt"), gp.REF),
+    (("diff", "--cached", "--name-only", SHA_A), gp.REF),
+    (("diff", "--cached", SHA_A, SHA_B), gp.REF),
+    (("diff", "--no-index", SHA_A, SHA_B), gp.REF),
+    (("diff", "--name-only"), gp.REF),
+    (("rev-list", SHA_A, "--not", "--all"), gp.REF),
+    (("rev-list", SHA_A, "--not", "--branches=topic*"), gp.REF),
+    (("log", "--all", SHA_A), gp.REF),
+    (("log", "-g", SHA_A), gp.REF),
+    (("log", "--glob=refs/atc/*", SHA_A), gp.REF),
+    (("rev-list", "--count", SHA_A, "--exclude=refs/x", "--tags"), gp.REF),
+    (("merge-base", "--fork-point", SHA_A, SHA_B), gp.REF),
+    (("log", "-1", "--format=%H"), gp.REF),
+    (("rev-list", "--count"), gp.REF),
+    (("for-each-ref", "--format=%(refname)", "refs/atc/integration-candidates"), gp.REF),
+    (("status", "--porcelain", "--untracked-files=no"), gp.REF),
+    (("branch", "--show-current"), gp.REF),
+    (("worktree", "list", "--porcelain"), gp.REF),
+    (("rev-parse", "--show-toplevel"), gp.REPOSITORY),
+    (("rev-parse", "--path-format=absolute", "--git-common-dir"), gp.REPOSITORY),
+    (("rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir"), gp.REPOSITORY),
+    (("remote",), gp.REPOSITORY),
+    (("cat-file", "--batch"), gp.READ),
+    (("rev-list", "--ignore-missing", "--stdin"), gp.READ),
+    (("diff-tree", "--stdin", "-p"), gp.READ),
+    (("patch-id", "--stable"), gp.READ),
+    (("update-ref", "refs/x", SHA_A), None),
+    (("merge", "--ff-only", SHA_A), None),
+    (("fetch", "--quiet", "origin"), None),
+    (("worktree", "add", "--detach", "x", SHA_A), None),
+    (("branch", "-f", "topic", SHA_A), None),
+    (("commit-tree", SHA_A, "-p", SHA_B, "-m", "m"), None),
+    (("remote", "add", "origin", "x"), None),
+])
+def test_the_memo_tier_of_each_form(args: tuple[str, ...], expected: str | None) -> None:
+    assert gp.tier(args) == expected
+
+
+@pytest.mark.integration
+def test_without_a_memo_every_query_runs(repo: Path, ran: list) -> None:
+    gp.rev(repo, "main")
+    gp.rev(repo, "main")
+    assert len(ran) == 2
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("query", [
+    lambda repo: gp.rev(repo, gp.rev(repo, "main")),
+    lambda repo: gp.git(repo, "rev-parse", "--show-toplevel"),
+    lambda repo: gp.rev(repo, "main"),
+])
+def test_a_memo_runs_each_query_once(repo: Path, ran: list, query) -> None:
+    with gp.memo():
+        first = query(repo)
+        count = len(ran)
+        assert query(repo) == first
+    assert len(ran) == count
+
+
+@pytest.mark.integration
+def test_the_memo_ends_with_its_block(repo: Path, ran: list) -> None:
+    with gp.memo():
+        gp.rev(repo, "main")
+    gp.rev(repo, "main")
+    assert len(ran) == 2
+
+
+@pytest.mark.integration
+def test_a_write_drops_the_ref_answers_and_keeps_the_others(repo: Path, ran: list) -> None:
+    main = run_git(repo, "rev-parse", "main")
+    with gp.memo():
+        gp.rev(repo, "main")
+        gp.rev(repo, main)
+        gp.git(repo, "rev-parse", "--show-toplevel")
+        gp.git(repo, "tag", "marker")
+        ran.clear()
+        gp.rev(repo, "main")
+        gp.rev(repo, main)
+        gp.git(repo, "rev-parse", "--show-toplevel")
+    assert ran == [("rev-parse", "--verify", "--quiet", "main^{commit}")]
+
+
+@pytest.mark.integration
+def test_a_streamed_command_drops_the_ref_answers(repo: Path, ran: list) -> None:
+    with gp.memo():
+        gp.rev(repo, "main")
+        gp.git_streamed(repo, "tag", "marker", out=io.StringIO())
+        ran.clear()
+        gp.rev(repo, "main")
+    assert len(ran) == 1
+
+
+@pytest.mark.integration
+def test_a_stdin_read_runs_every_time(repo: Path, ran: list) -> None:
+    main = run_git(repo, "rev-parse", "main")
+    ran.clear()
+    with gp.memo():
+        gp.rev(repo, "main")
+        gp.git(repo, "cat-file", "--batch", input=f"{main}\n")
+        gp.git(repo, "cat-file", "--batch", input=f"{main}\n")
+        gp.rev(repo, "main")
+    assert len(ran) == 3
+
+
+@pytest.mark.integration
+def test_memo_invalidate_drops_the_ref_answers(repo: Path, ran: list) -> None:
+    gp.memo_invalidate()  # no memo: nothing to drop
+    with gp.memo():
+        gp.rev(repo, "main")
+        gp.memo_invalidate()
+        gp.rev(repo, "main")
+    assert len(ran) == 2
+
+
+@pytest.mark.integration
+def test_a_missing_object_is_asked_again_after_a_write(repo: Path, ran: list) -> None:
+    with gp.memo():
+        assert gp.rev(repo, SHA_A) is None
+        assert gp.rev(repo, SHA_A) is None
+        assert len(ran) == 1
+        gp.git(repo, "tag", "marker")
+        gp.rev(repo, SHA_A)
+    assert len(ran) == 3
+
+
+@pytest.mark.integration
+def test_an_is_ancestor_no_is_kept_across_a_write(repo: Path, ran: list) -> None:
+    first = run_git(repo, "rev-parse", "main~1")
+    main = run_git(repo, "rev-parse", "main")
+    with gp.memo():
+        assert gp.is_ancestor(repo, main, first) is False
+        gp.git(repo, "tag", "marker")
+        ran.clear()
+        assert gp.is_ancestor(repo, main, first) is False
+    assert ran == []
+
+
+@pytest.mark.integration
+def test_a_fresh_read_asks_git_and_keeps_its_answer(repo: Path, ran: list) -> None:
+    with gp.memo():
+        before = gp.rev(repo, "main")
+        after = commit(repo, "c.txt", "c\n")
+        assert gp.rev(repo, "main") == before
+        assert gp.rev(repo, "main", fresh=True) == after
+        ran.clear()
+        assert gp.rev(repo, "main") == after
+    assert ran == []
+
+
+@pytest.mark.integration
+def test_a_different_git_environment_is_a_different_answer(repo: Path, ran: list) -> None:
+    with gp.memo():
+        gp.git(repo, "rev-parse", "--show-toplevel")
+        gp.git(repo, "rev-parse", "--show-toplevel", extra_env={"GIT_TRACE": "0"})
+    assert len(ran) == 2
+
+
+@pytest.mark.integration
+def test_a_failed_repository_query_is_asked_again(tmp_path: Path, ran: list) -> None:
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    ceiling = {"GIT_CEILING_DIRECTORIES": str(tmp_path)}
+    with gp.memo():
+        assert gp.git(outside, "rev-parse", "--show-toplevel", check=False, extra_env=ceiling).returncode
+        assert gp.git(outside, "rev-parse", "--show-toplevel", check=False, extra_env=ceiling).returncode
+    assert len(ran) == 2
+
+
+@pytest.mark.integration
+def test_the_other_git_wrappers_share_the_memo(repo: Path, ran: list) -> None:
+    import integration_slot
+    import task_records
+    with gp.memo():
+        task_records.main_prefix(repo)
+        task_records.main_prefix(repo)
+        integration_slot.common_dir(repo)
+        integration_slot.common_dir(repo)
+        assert len(ran) == 2
+        task_records.git(repo, "tag", "marker")
+        task_records.main_prefix(repo)
+    assert len(ran) == 4
+
+
+@pytest.mark.integration
+@pytest.mark.filterwarnings("ignore::pytest.PytestUnhandledThreadExceptionWarning")  # Windows decodes in a thread
+def test_each_wrapper_keeps_its_own_decoding(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import task_records
+    (repo / "bin").write_bytes(b"\xff\n")
+    blob = run_git(repo, "hash-object", "-w", "bin")
+    for name in [key for key in os.environ if key.startswith("GIT_")]:
+        monkeypatch.delenv(name)  # both wrappers then pass the same git environment
+    with gp.memo():
+        assert task_records.git(repo, "show", blob).stdout == "�\n"
+        try:
+            strict = gp.git(repo, "show", blob).stdout
+        except UnicodeDecodeError:
+            strict = None
+    assert strict != "�\n"

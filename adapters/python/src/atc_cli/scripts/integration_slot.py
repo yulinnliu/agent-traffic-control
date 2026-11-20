@@ -9,6 +9,8 @@ import threading
 import time
 from pathlib import Path
 
+import git_preflight as gp
+
 if os.name == "nt":
     import msvcrt
 else:
@@ -21,10 +23,10 @@ _LOCAL_LOCKS_GUARD = threading.Lock()
 def _git(repo: Path, *args: str) -> str:
     env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
     env["GIT_OPTIONAL_LOCKS"] = "0"
-    result = subprocess.run(
+    result = gp.run_git(repo, args, env, lambda: subprocess.run(
         ["git", "-C", str(repo), *args],
         capture_output=True, text=True, encoding="utf-8", env=env,
-    )
+    ), flavor="integration_slot")
     if result.returncode:
         raise RuntimeError(f"git {' '.join(args)} failed: {result.stderr.strip()}")
     return result.stdout.strip()

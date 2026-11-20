@@ -213,6 +213,7 @@ def _remove_candidate(repo: Path, candidate_dir: Path) -> str | None:
         try:
             scratch.forget_worktree(Path(_git_ok(repo, "rev-parse", "--path-format=absolute", "--git-common-dir")),
                                     candidate_dir)
+            gp.memo_invalidate()  # the worktree records changed outside git
         except (GitError, OSError) as error:
             return f"candidate worktree record retained for {candidate_dir}: {error}"
     owner.marker(candidate_dir).unlink(missing_ok=True)
@@ -767,6 +768,7 @@ def _verify_candidate(
         live = _start_verifier_log(verifier_log(candidate_dir), argv, candidate_dir)
         returncode, stdout, stderr, warning = _run_verifier(argv, candidate_dir, env, timeout, captures, wait_file,
                                                             live, echo)
+        gp.memo_invalidate()  # the verifier is another process and may change the candidate or its refs
         queued = host_workers.wait_total(wait_file)
     finally:
         wait_file.unlink(missing_ok=True)
@@ -1115,6 +1117,7 @@ def integrate(t: Target, steps: cli_conventions.Steps | None = None) -> tuple[in
     integrates)."""
     repo, main, branch, reviewed = t.repo, t.main, t.branch, t.reviewed
     with IntegrationSlot(repo):
+        gp.memo_invalidate()  # the run reads the refs as of the slot, not as `resolve` read them
         main_tip_for_refs = rev(repo, main)
         stale_candidate_refs = []
         for line in git(repo, "for-each-ref", "--format=%(refname) %(objectname)", CANDIDATE_REFS).stdout.splitlines():
@@ -1175,7 +1178,7 @@ def integrate(t: Target, steps: cli_conventions.Steps | None = None) -> tuple[in
             return STOP_BEFORE_CANDIDATE, {**result, "refusal": stop(
                 "REF_DRIFT", f"{main} moved from {t.main_tip}, whose verification section was read, to {main_before}; main unchanged",
             )}
-        if rev(repo, main) != main_before or rev(repo, "HEAD") != main_before:
+        if rev(repo, main, fresh=True) != main_before or rev(repo, "HEAD", fresh=True) != main_before:
             _done(steps, "preflight", "REF_DRIFT")
             return STOP_BEFORE_CANDIDATE, {**result, "refusal": stop("REF_DRIFT", f"{main} moved after preflight; main unchanged")}
 
@@ -1200,11 +1203,11 @@ def integrate(t: Target, steps: cli_conventions.Steps | None = None) -> tuple[in
 
                 with _step(steps, "fast-forward") as moved:
                     # Final source and target checks are inside the cooperative slot.
-                    if rev(repo, branch) != source_before or source_before != reviewed:
+                    if rev(repo, branch, fresh=True) != source_before or source_before != reviewed:
                         raise stop("REF_DRIFT", "source tip changed after candidate verification; main unchanged", after_candidate=True)
-                    if rev(repo, main) != main_before or rev(repo, "HEAD") != main_before:
+                    if rev(repo, main, fresh=True) != main_before or rev(repo, "HEAD", fresh=True) != main_before:
                         raise stop("REF_DRIFT", f"{main} drifted after candidate verification; main unchanged", after_candidate=True)
-                    if git(repo, "status", "--porcelain", "--untracked-files=no").stdout.strip():
+                    if git(repo, "status", "--porcelain", "--untracked-files=no", fresh=True).stdout.strip():
                         raise stop("REF_DRIFT", "integration checkout became dirty; main unchanged", after_candidate=True)
 
                     candidate_ref = f"{CANDIDATE_REFS}/{candidate_sha}"
@@ -1854,6 +1857,7 @@ def diff_check_warning(repo: Path, main: str, reviewed: str) -> str | None:
 
 def check(t: Target, as_json: bool) -> int:
     payload = {"command": "integrate", "check": True, "resolved": {**asdict(t), "repo": str(t.repo)}}
+    gp.memo_invalidate()  # the run reads the refs anew, not as `resolve` read them
     recovered = _recover_interrupted_update(t.repo, t.main, t.branch, t.reviewed, t.binding, [], check=True)
     if recovered is not None:
         code, result = recovered
@@ -1945,7 +1949,7 @@ def main(argv: list[str] | None = None, root: Path = hw.ROOT, cwd: str | None = 
     except Refused as refusal:
         print("\n".join(refusal.lines()), file=sys.stderr)
         return refusal.code
-    with _human_streams(args.json):
+    with _human_streams(args.json), gp.memo():
         return _main(args, root, cwd)
 
 
@@ -2006,6 +2010,7 @@ def verify(t: Target, as_json: bool, steps: cli_conventions.Steps | None = None)
     """`atc test ID --candidate`: preflight as `--check` does, then `build_and_verify` with no slot; ``steps`` reports
     each step on stderr."""
     payload = {"command": "test", "resolved": {**asdict(t), "repo": str(t.repo)}}
+    gp.memo_invalidate()  # the run reads the refs anew, not as `resolve` read them
     if t.branch is None:
         _print_refusal(
             stop("ALREADY_MERGED", f"the reviewed SHA {t.reviewed} is already reachable from {t.main}; nothing to verify"),
@@ -2069,7 +2074,7 @@ def run_candidate(task: str, sha: str | None, root: Path = hw.ROOT, cwd: str | N
                   as_json: bool = False) -> int:
     """`atc test ID --candidate [--sha SHA]`: the candidate `atc integrate ID` would build, verified without the
     Integration Slot, a ref update or authority; the SHA defaults to the branch tip the record names."""
-    with _human_streams(as_json):
+    with _human_streams(as_json), gp.memo():
         try:
             locations.enter()
             steps = cli_conventions.Steps("")
