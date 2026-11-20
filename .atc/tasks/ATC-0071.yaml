@@ -1,0 +1,19 @@
+task_id: ATC-0071
+title: Measure where the root test suite's time goes
+repository: yulinnliu/agent-traffic-control
+base_sha: 41ba36f144f627dbc10437b5d9a063f25cf83727
+scope: 'The root suite runs 510 tests in 431 s, about 0.85 s per test. The suspected cause is the start of each `atc` subprocess through uv and Python, which no one has measured. First step, design: measure where the time goes (per-test durations, the share spent starting `atc` subprocesses against in-process work, fixture setup such as git repo creation), and commit the numbers and a proposal as docs/design/<ID>.md. If the subprocess start is confirmed as the main cost, the proposal is that tests call the CLI in-process where they do not test the process boundary itself. The implementation follows as later steps of this task only after the Owner rules on the design. The change does not release.'
+tests: strict
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: 41ba36f144f627dbc10437b5d9a063f25cf83727
+branch: claude+ATC-0071
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
+decisions:
+- 'Owner 2026-11-16: queued as P6, test-suite speed, measure first.'
+- 'Owner 2026-11-20 「P6」: open it now.'
