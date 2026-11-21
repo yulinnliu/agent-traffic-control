@@ -620,17 +620,19 @@ def test_a_scratch_registered_to_one_task_refuses_another(atc_tmp: Path, tmp_pat
 def test_check_lists_unregistered_scratches_named_for_the_task_for_consent_and_keeps_them(
         done, atc_tmp: Path, capsys: pytest.CaptureFixture[str]) -> None:
     ws, topic, environ = done
-    for name in (f"{TASK.lower()}-review", TASK, f"{TASK}0", "DEMO-0002-review"):
+    for name in (f"{TASK.lower()}-review", TASK, f"{TASK}0", "DEMO-0002-review", "demo0001-probe", "DEMO_0001",
+                 "DEMO_00010", f"{TASK}-1abc"):
         (atc_tmp / name / "bt").mkdir(parents=True)
     (atc_tmp / f"{TASK}-file").write_text("x", encoding="utf-8")
     code, payload, err = close(ws, environ, capsys, ws.root, "--check")
     consent = sorted(item["path"] for item in payload["items"] if item["outcome"] == "CONSENT")
     assert code == 0, (payload, err)
-    assert consent == sorted(str(atc_tmp / name) for name in (TASK, f"{TASK.lower()}-review"))
+    assert consent == sorted(str(atc_tmp / name) for name in (
+        TASK, f"{TASK.lower()}-review", "demo0001-probe", "DEMO_0001", f"{TASK}-1abc"))
     assert outcomes(payload)[str(atc_tmp / "mine")][0] == "DELETE"
-    assert payload["counts"]["consent"] == 2
+    assert payload["counts"]["consent"] == 5
     code, payload, err = close(ws, environ, capsys, ws.root)
-    assert code == 0 and payload["counts"]["consent"] == 2, (payload, err)
+    assert code == 0 and payload["counts"]["consent"] == 5, (payload, err)
     assert (atc_tmp / f"{TASK.lower()}-review").is_dir() and (atc_tmp / TASK).is_dir()
     assert not (atc_tmp / "mine").exists()
 

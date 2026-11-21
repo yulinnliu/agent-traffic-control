@@ -180,8 +180,11 @@ working directory's.
    `atc test ID --clean` deletes them. Every command that creates a scratch
    writes the task into the scratch's line (`ATC_HOME.md` § Scratch
    registry). A directory under `<tmp>` whose name starts with the task ID,
-   any case, followed by the end of the name or a character other than a
-   digit, and that is not among those scratches, prints
+   both compared without case and with `-` and `_` skipped, where the
+   name's own character right after that match is the end of the name or
+   not a digit (`hqt0062-probe`, `HQT_0062`, `HQT-0062-1bfe51e` for
+   `HQT-0062`, not `HQT-00621`), and that is not among those scratches,
+   prints
    `CONSENT <path> (...)`: the close never deletes it, and the Owner decides.
    Such lines change no exit code, and the summary line adds
    `, <n> need the Owner's consent` when there are any; under `--json` each

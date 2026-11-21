@@ -96,17 +96,28 @@ def task_scratches(tmp: Path, task: str, worktree: Path | None) -> list[str]:
 
 
 def unregistered_scratches(tmp: Path, task: str, taken: list[str]) -> list[Path]:
-    """The directories under ``tmp`` named for ``task`` (its ID, any case, then the end or a character other than a
-    digit) that are not among ``taken``."""
-    prefix = task.lower()
+    """The directories under ``tmp`` named for ``task`` (``_named_for``) that are not among ``taken``."""
     try:
         children = sorted(tmp.iterdir())
     except OSError:
         return []
     return [child for child in children
-            if child.is_dir() and child.name.lower().startswith(prefix)
-            and not child.name[len(prefix):len(prefix) + 1].isdigit()
+            if child.is_dir() and _named_for(child.name, task)
             and not any(locations.same_path(child, path) for path in taken)]
+
+
+def _named_for(name: str, task: str) -> bool:
+    """Whether ``name`` starts with ``task``, both compared without case and with ``-`` and ``_`` skipped, and the
+    name's own character after that match is the end or not a digit."""
+    wanted = [char for char in task.lower() if char not in "-_"]
+    index = 0
+    for char in wanted:
+        while index < len(name) and name[index] in "-_":
+            index += 1
+        if index == len(name) or name[index].lower() != char:
+            return False
+        index += 1
+    return not name[index:index + 1].isdigit()
 
 
 REPORT_NAME = re.compile(r"(?P<task>.+?)-(?P<sha>[0-9a-f]{7,40})(?P<review>-review)?\.md")

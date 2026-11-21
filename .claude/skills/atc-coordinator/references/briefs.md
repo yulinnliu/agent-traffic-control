@@ -42,6 +42,10 @@ Work rules:
   - No version bump unless shared/conformance/CLI.md requires it.
   - Commands for the Owner are plain `atc ...` lines, one per command, with
     no environment prefix (governance GIT_WORKFLOW.md § Owner-run commands).
+  - Ad-hoc probe files (scripts, plugins, measurement output) go in your
+    session's own scratchpad, never in the worktree and never in a
+    directory made by hand under `<tmp>` (atc-review "Writer: the step
+    report").
   - Finish as atc-review "Writer: the step report" step 5: one line, the
     report's path and the tip's full 40-character SHA. The report file is
     `~/.atc/reports/<ID>-<full 40-character SHA>.md`, never the notes
