@@ -1,0 +1,19 @@
+task_id: ATC-0080
+title: Close-out finds hand-named scratches; writer probes in the scratchpad
+repository: yulinnliu/agent-traffic-control
+base_sha: 986446d94af976119ce051b7b3053fdf35533ac1
+scope: '- `atc task close` and `atc task close --check` list a directory under `<tmp>` as named for the task when its name, compared without case and with `-` and `_` removed, starts with the task ID compared the same way and the next character is not a digit (so `hqt0062-probe` and `HQT_0062` match `HQT-0062`; `HQT-00621` does not). The listing stays a consent item that deletes nothing. Code in `adapters/python/src/atc_cli/scripts/close_out.py` `unregistered_scratches`, tests in `adapters/python/tests/test_close_out.py`, and the rule wherever docs state it (`docs/TASKS.md` § Close-out and any other place that describes the match). - The writer brief in `shared/skills/atc-coordinator/references/briefs.md` gains a work rule: ad-hoc probe files (scripts, plugins, measurement output) go in the session''s own scratchpad, never in the worktree and never in a directory made by hand under `<tmp>`. Render with `atc-maintain sync --root` and run `validate`.'
+tests: standard
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: 986446d94af976119ce051b7b3053fdf35533ac1
+branch: claude+ATC-0080
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
+decisions:
+- 'Owner, 2026-11-21: open the task for proposals 2 (wider name match in close-out) and 3 (writer brief text); proposal 1 (a command that registers a hand-made scratch, or `atc test` running a user command in a scratch) is not done.'
+- The stale `atc tmp` names reported against `shared/skills/atc-review/SKILL.md` do not exist on `main`; no change there.
