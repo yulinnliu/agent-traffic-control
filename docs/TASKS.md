@@ -59,7 +59,11 @@ may fail a task whose diff exceeds its level. CI after the push still runs.
 | `strict` | changes to guards (refusal, deletion, authority, safety boundary, data integrity): `standard` plus `atc test ID --mutants FILE`, written and run by the reviewer from the guard list in the writer's step report |
 
 A project with `atc-testkit` defaults to `standard`; a project without it
-takes only `none`.
+defaults to `none` and takes only `none`. There `atc task create` and
+`update` refuse another level with `STOP TESTS_UNAVAILABLE`. The hint for a
+level from `--tests` is `pass --tests none`; for a level from the `--file`
+brief's `## Tests`, the refusal names that section and the file, and the hint
+is to remove the section or set it to `none`.
 
 ## Authority on `main`
 

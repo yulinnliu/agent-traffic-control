@@ -190,6 +190,36 @@ def test_create_without_a_testkit_records_tests_none_with_its_reason(ws: Workspa
     assert task_records.problems(created(ws)) == []
 
 
+@pytest.mark.parametrize("command", ["create", "update"])
+@pytest.mark.parametrize("flag, from_brief", [((), True), (("--tests", "strict"), False)])
+def test_a_refused_level_names_the_source_that_gave_it(ws: Workspace, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+                                                       command: str, flag: tuple, from_brief: bool) -> None:
+    run_git(ws.repo, "rm", "-q", "--", "pyproject.toml")
+    run_git(ws.repo, "commit", "-q", "-m", "no testkit")
+    if command == "update":
+        assert ws.cli(capsys, "create", "widget", "--scope", "s", cwd=ws.repo)[0] == 0
+    brief = tmp_path / "brief.md"
+    brief.write_text("# widget\n\n## Tests\n\nstandard\n", encoding="utf-8")
+    target = ["DEMO-0001"] if command == "update" else []
+    status, _, err = ws.cli(capsys, command, *target, "--file", str(brief), *flag, cwd=ws.repo)
+    assert status == 1 and "STOP TESTS_UNAVAILABLE:" in err
+    assert (f"the brief's ## Tests names standard ({brief})" in err) == from_brief
+    assert ("remove the brief's ## Tests section or set it to none" in err) == from_brief
+    assert ("pass --tests none" in err) != from_brief
+
+
+def test_create_takes_a_brief_without_tests_as_none(ws: Workspace, tmp_path: Path,
+                                                   capsys: pytest.CaptureFixture[str]) -> None:
+    run_git(ws.repo, "rm", "-q", "--", "pyproject.toml")
+    run_git(ws.repo, "commit", "-q", "-m", "no testkit")
+    brief = tmp_path / "brief.md"
+    brief.write_text("# widget\n\n## Scope\n\ns\n", encoding="utf-8")
+    status, _, err = ws.cli(capsys, "create", "--file", str(brief), cwd=ws.repo)
+    assert status == 0, err
+    data = yaml.safe_load((created(ws) / TASKS_DIR / "DEMO-0001.yaml").read_text(encoding="utf-8"))
+    assert data["tests"] == "none"
+
+
 def test_create_takes_the_repository_from_origin(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
     run_git(ws.repo, "remote", "add", "origin", "git@github.com:example/demo.git")
     assert ws.cli(capsys, "create", "widget", "--scope", "s", "--project", PROJECT, cwd=ws.repo)[0] == 0

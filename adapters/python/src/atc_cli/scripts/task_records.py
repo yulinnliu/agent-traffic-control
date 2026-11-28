@@ -346,11 +346,15 @@ def read_task_file(path: Path) -> dict:
     return fields
 
 
-def check_tests_level(level: str, decisions: list, testkit: bool, task: str = "<ID>") -> None:
-    """A project with the testkit takes every level, `none` only with a decision line; one without takes none."""
+def check_tests_level(level: str, decisions: list, testkit: bool, task: str = "<ID>",
+                      brief: Path | None = None) -> None:
+    """A project with the testkit takes every level, `none` only with a decision line; one without takes none.
+    ``brief`` is the `--file` whose `## Tests` gave ``level``."""
     if not testkit and level != "none":
-        raise Refusal("TESTS_UNAVAILABLE", "the project has no [tool.atc-testkit]; its tasks take tests: none",
-                      "pass --tests none")
+        source = f"; the brief's ## Tests names {level} ({brief})" if brief is not None else ""
+        raise Refusal("TESTS_UNAVAILABLE", f"the project has no [tool.atc-testkit]; its tasks take tests: none{source}",
+                      "remove the brief's ## Tests section or set it to none" if brief is not None
+                      else "pass --tests none")
     if testkit and level == "none" and not decisions:
         raise Refusal("TESTS_NONE_UNDECIDED", "tests: none needs the Owner's decision line in the record",
                       f"add it: atc task update {task} --tests none --decision \"<the Owner's words>\"")
@@ -381,7 +385,7 @@ def create(root: Path, environ: dict[str, str], cwd: str, title: str | None, sco
                       f"add a '{task_section.HEADING}' section with 'Task prefix: <PREFIX>'")
     testkit = test_directory(repo) is not None
     level = tests or fields.get("tests") or ("standard" if testkit else "none")
-    check_tests_level(level, decisions, testkit)
+    check_tests_level(level, decisions, testkit, brief=file if not tests and "tests" in fields else None)
     if not testkit and not decisions:
         decisions = [NO_TESTKIT_DECISION]
     numbers = taken_numbers(repo, prefix)
@@ -473,7 +477,7 @@ def update(root: Path, environ: dict[str, str], task_id: str, title: str | None,
         record["tests"], changed = new_tests, [*changed, "tests"]
     if new_tests:
         check_tests_level(new_tests, record.get("decisions", []), test_directory(Path(worktree["worktree"])) is not None,
-                          task_id)
+                          task_id, brief=file if not tests and "tests" in fields else None)
     if not changed:
         raise Refusal("NOTHING_TO_UPDATE", f"the options change nothing in the record of {task_id}",
                       "pass --title, --scope, --tests, --decision or --file")
