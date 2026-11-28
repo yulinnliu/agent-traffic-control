@@ -1,0 +1,18 @@
+task_id: ATC-0085
+title: atc task create defaults to tests none in a project without the testkit
+repository: yulinnliu/agent-traffic-control
+base_sha: 20acd5f36f108a9bdcb01bbfa717f69dc3a7fd2d
+scope: In a project without `[tool.atc-testkit]`, `atc task create` without `--tests` picks a testkit level and then refuses with `TESTS_UNAVAILABLE` (`adapters/python/src/atc_cli/scripts/task_records.py` `check_tests_level`); rin-vn hit it 5 times. When `--tests` is not given and the project has no testkit, the level is `none` (which needs no Owner decision line there). An explicit other level still refuses as today. Update `docs/TASKS.md` and the CLI help where they state the default, and the tests or conformance cases that cover it.
+tests: standard
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: 20acd5f36f108a9bdcb01bbfa717f69dc3a7fd2d
+branch: claude+ATC-0085
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
+decisions:
+- 'Owner 2026-11-28: from Rin-Coordinator''s retro; default the level to `none` instead of rewording the hint, which already says `pass --tests none`.'
