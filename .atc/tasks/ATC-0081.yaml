@@ -1,0 +1,19 @@
+task_id: ATC-0081
+title: ATC-0023 prior-art citation no longer names a local-only file
+repository: yulinnliu/agent-traffic-control
+base_sha: b8ba15236cd4ec48af550173270e6c31420fbe81
+scope: '`docs/design/ATC-0023.md` § 6 cites `.agents/handoffs/2d-test-workers-prior-art.md`, a gitignored local-only note that has since moved into the handoff archive. Reword that one line so the design record cites no local-only file; the § 6 table already carries the note''s conclusions. No other change.'
+tests: none
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: b8ba15236cd4ec48af550173270e6c31420fbe81
+branch: claude+ATC-0081
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
+decisions:
+- 'Owner 2026-11-28: reword the citation rather than point it at the archive path or leave it; a tracked doc never depends on a file under the gitignored `.agents/handoffs/`.'
+- 'Owner 2026-11-28: tests none, documentation-only one-line change.'
