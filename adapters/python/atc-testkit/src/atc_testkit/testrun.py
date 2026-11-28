@@ -19,8 +19,8 @@ import threading
 import time
 import xml.etree.ElementTree as ElementTree
 
-from . import checkout, config, dependents, desktop, elapsed, evidence, inputs, isolation, lines, lint, locations, \
-    python_toolchain, scratch, stages
+from . import checkout, config, dependents, desktop, elapsed, evidence, import_edge, inputs, isolation, lines, lint, \
+    locations, python_toolchain, scratch, stages
 from . import timing
 from . import toolchain as toolchains
 from . import workers as host_workers
@@ -1013,10 +1013,12 @@ def _count(python: str, tree: Path, place: Path, environ: Mapping[str, str], pri
     return stages.collected_items(command, tree, environ)
 
 
-def touched(tree: Path, python: str, paths: Sequence[str], environ: Mapping[str, str]) -> list[str]:
+def touched(tree: Path, python: str, paths: Sequence[str], environ: Mapping[str, str]) -> import_edge.Edge:
     """The test paths the declared selector prints for ``--direct`` (changed test files and the test files that
-    import a changed module directly); a selector without ``--direct`` gives the changed test files of the tree."""
-    selector = config.tool_table(tree).get(SELECTOR_KEY)
+    import a changed module directly); a selector that fails gives the changed test files of the tree, and a tree
+    with no ``selector`` key the default import edge (docs/TESTKIT.md § Default import edge)."""
+    table = config.tool_table(tree)
+    selector = table.get(SELECTOR_KEY)
     if isinstance(selector, list) and selector and all(isinstance(item, str) for item in selector) and paths:
         done = _capture([python, *selector, *paths, DIRECT_OPTION], tree, environ, False, None)
         try:
@@ -1024,15 +1026,12 @@ def touched(tree: Path, python: str, paths: Sequence[str], environ: Mapping[str,
         except ValueError:
             chosen = None
         if isinstance(chosen, list) and all(isinstance(item, str) for item in chosen):
-            return chosen
+            return import_edge.Edge(chosen)
     prefix = (_git_lines(tree, "rev-parse", "--show-prefix") or [""])[0]
-    tests = []
-    for path in paths:
-        relative = path[len(prefix):] if path.startswith(prefix) else None
-        name = PurePosixPath(path).name
-        if relative and name.startswith("test_") and name.endswith(".py") and (tree / relative).is_file():
-            tests.append(relative)
-    return tests
+    relative = [path[len(prefix):] for path in paths if path.startswith(prefix) and path[len(prefix):]]
+    if SELECTOR_KEY not in table:
+        return import_edge.direct(tree, relative)
+    return import_edge.Edge(import_edge.changed_tests(tree, relative))
 
 
 def declared_dependents(tree: Path, top: Path) -> dependents.Dependents:
@@ -1141,12 +1140,15 @@ def run(argv: Sequence[str], environ: MutableMapping[str, str] | None = None) ->
     items = None
     source = RunSource.of(tree, place, row) if args.verifier_argv and not pytest_arguments else None
     if paths is not None:
-        chosen, notes = with_declared(touched(tree, python, paths, child), paths, declared)
+        picked = touched(tree, python, paths, child)
+        if picked.notes:
+            print(*picked.notes, sep="\n", flush=True)
+        chosen, notes = with_declared(picked.tests, paths, declared) if not picked.full else ([], [])
         if notes:
             selected = (elapsed.RELATED, f"{len(paths)} changed paths, {len(notes)} declared")
             print(*notes, sep="\n", flush=True)
-        head = f"RELATED {args.related}: {len(paths)} changed paths, {len(chosen)} test paths"
-        if not chosen:
+        head = f"RELATED {args.related}: {len(paths)} changed paths, {'all' if picked.full else len(chosen)} test paths"
+        if not chosen and not picked.full:
             print(head, "NO_TESTS no test selected", sep="\n", flush=True)
             return 0
         print(head, flush=True)

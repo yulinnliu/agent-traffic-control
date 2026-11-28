@@ -546,6 +546,44 @@ table of the test directory's `pyproject.toml`:
   `atc test ID --mutants` does not read them: a declared test that reads a
   file's text would fail on every edit and count as the mutant's killer.
 
+## Default import edge
+
+A test directory whose `[tool.atc-testkit]` has no `selector` key gets the
+import edge from the testkit itself, for `atc test ID`'s related run and the
+mutant selection of `atc test ID --mutants` (§ Commands). It reads files with
+`ast` and imports no project code. Paths are those of `atc test ID` step 2
+less the test directory's prefix; a path outside it adds nothing.
+
+- **Modules.** A changed `.py` path names a module under the deepest root
+  that holds it: the test directory's `packages/*/src` and `src`, and the
+  directories its `[tool.pytest.ini_options]` `pythonpath` lists inside it.
+  `__init__.py` names its package. A removed file names its module too. A
+  changed `.py` file beside a `test_*.py` in a directory with no
+  `__init__.py` is also a helper module, named by its stem, for the test
+  files of that directory alone. Other files name none; declared
+  dependents cover them (§ Declared dependents).
+- **Test files.** Every `test_*.py` of the test directory, outside
+  directories whose names start with `.` or `_` and `node_modules`, at any
+  depth. Every import counts, inside functions too: `import a.b.c` and
+  `from a.b import c` give `a`, `a.b` and `a.b.c`. A relative import is
+  resolved when the file's directory holds `__init__.py`. `from P import X`
+  also gives the module `P/__init__.py` takes `X` from by `from .m import X`
+  or `from P.m import X`, one hop, explicit names only. A test file that does
+  not parse under the testkit's interpreter is selected with the line
+  `UNPARSED <test path>`.
+- **Selection.** The changed test files, and the test files whose names
+  hold a changed module, one edge and no closure. A changed `conftest.py`
+  below the test directory selects its directory, and a selected path below
+  it is dropped; a module a `conftest.py` imports or names in
+  `pytest_plugins` counts as that `conftest.py`. A changed `conftest.py` at
+  the test directory itself runs the full suite: pytest gets no path, as
+  under `--all`, with the line `FULL conftest.py at the tree root`, and the
+  `RELATED` line reads `all test paths`.
+- The run prints `SELECTOR default import edge` before these lines. A
+  declared `selector` takes precedence; one that fails gives the changed test
+  files. The mutant selection takes the test paths alone: a mutant whose
+  edits select the full suite gets no test from the edge.
+
 ## Lint stage
 
 The lint stage runs the repository's `.pre-commit-config.yaml` through
@@ -920,7 +958,9 @@ scratch entries. In order:
    `git diff --name-only <base_sha>` and the untracked files of the tree's
    working tree, relative to its top; for an export, the diff from
    `<base_sha>` to the exported commit. A selector that fails with `--direct`
-   gives the changed test files of the tree. The declared dependents the
+   gives the changed test files of the tree; a tree with no `selector` key
+   gets the testkit's default import edge and its lines
+   (§ Default import edge). The declared dependents the
    changed paths select join them (§ Declared dependents), each one the
    selector did not print with the line
    `DECLARED <test path> <- <first changed path it matched>`, plus
@@ -1006,8 +1046,9 @@ Applies each mutant of `FILE` alone to the export of `SHA` (the branch tip
 when `--sha` is absent) in the scratch `<ID>-<sha7>`, through the isolation of
 `atc test ID`. The judging tests are the `TEST...` after `--`, which judge
 every mutant. Without them, each mutant is judged by the tests the tree's
-`selector` picks with `--direct` for the paths its edits name (§ Commands,
-`atc test ID` step 2), without the declared dependents
+`selector` picks with `--direct` for the paths its edits name, or the
+default import edge without one (§ Commands, `atc test ID` step 2;
+§ Default import edge), without the declared dependents
 (§ Declared dependents), followed by its own `tests`; a mutant that gets none
 stops the command with `NO_TESTS` before the baseline. That list goes to
 `<scratch>/mutants-selected.json` with each mutant's `tests` filled in, and
@@ -1214,7 +1255,7 @@ In `[tool.atc-testkit]`; the first seven keys are required:
 | `ci_platforms` | the CI platform matrix |
 | `ci_init` | the CI runner's initialization function, as `module:function` |
 | `ignore` | `--ignore` paths appended to a stage, under `nt` and `posix` |
-| `selector` | the argv of the command the related-test selection of `atc test ID` runs; with `--direct` after the changed paths it prints only the changed test files and the test files one import from a changed module, which `atc test ID` runs with the declared dependents (§ Commands) |
+| `selector` | the argv of the command the related-test selection of `atc test ID` runs; with `--direct` after the changed paths it prints only the changed test files and the test files one import from a changed module, which `atc test ID` runs with the declared dependents (§ Commands); without it the testkit's default import edge serves (§ Default import edge) |
 | `dependents` | a table of test files or directories, each with the path patterns of the files it reads without importing them (§ Declared dependents) |
 | `toolchain` | the toolchain's name, `python` when absent (§ Toolchain) |
 | `worker_memory_mib` | the memory one test worker is counted to need, an integer from 1 to 65536; when absent, the project's recorded cost on a host, else 256 (§ Stages); any other value stops a run with `ATC_CONFIG_INVALID` (exit 9) |

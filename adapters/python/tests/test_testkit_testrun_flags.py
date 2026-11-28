@@ -8,9 +8,10 @@ from pathlib import Path
 
 import pytest
 
-from atc_testkit import scratch, testrun
+from atc_testkit import import_edge, scratch, testrun
 
 PASSING = "def test_value():\n    assert True\n"
+NO_SELECTOR = '[project]\nname = "flagged"\nversion = "1"\n[tool.atc-testkit]\n'
 SELECTOR = ("import json, sys\n"
             "print('noise')\n"
             "print(json.dumps(['tests/test_value.py'] if any(p.startswith('src/') for p in sys.argv[1:]) else []))\n")
@@ -198,8 +199,40 @@ def test_without_a_working_selector_related_runs_the_changed_test_files(tree: Pa
     (tree / "tests/test_value.py").write_text(PASSING + "\n", encoding="utf-8")
     run = run_command("--scratch", "f9", "--tree", str(tree), "--python", sys.executable, "--related", "HEAD")
     assert run.returncode == 0, run.stdout + run.stderr
-    assert run.stdout.splitlines()[0] == "RELATED HEAD: 2 changed paths, 1 test paths"
+    default = [import_edge.DEFAULT_NOTE] if pyproject is not None else []
+    assert run.stdout.splitlines()[:len(default) + 1] == [*default, "RELATED HEAD: 2 changed paths, 1 test paths"]
     assert summary_line(run).startswith("PASS 1 passed; log: ")
+
+
+@pytest.mark.integration
+def test_without_a_selector_related_runs_the_test_files_that_import_a_changed_module(tree: Path,
+                                                                                    atc_tmp: Path) -> None:
+    """docs/TESTKIT.md § Default import edge: the failing ``test_other.py`` imports nothing and stays out."""
+    (tree / "pyproject.toml").write_text(NO_SELECTOR, encoding="utf-8")
+    (tree / "tests/test_imports.py").write_text("from flagged_pkg import X\n\n\ndef test_x():\n    assert X == 5\n",
+                                                encoding="utf-8")
+    git(tree, "init", "-q", "-b", "main")
+    git(tree, "add", ".")
+    git(tree, "commit", "-q", "-m", "x")
+    (tree / "src/flagged_pkg/__init__.py").write_text("X = 5\n", encoding="utf-8")
+    run = run_command("--scratch", "f15", "--tree", str(tree), "--python", sys.executable, "--related", "HEAD")
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert run.stdout.splitlines()[:2] == [import_edge.DEFAULT_NOTE, "RELATED HEAD: 1 changed paths, 1 test paths"]
+    assert summary_line(run).startswith("PASS 1 passed; log: ")
+
+
+@pytest.mark.integration
+def test_without_a_selector_a_changed_root_conftest_runs_the_full_suite(tree: Path, atc_tmp: Path) -> None:
+    (tree / "pyproject.toml").write_text(NO_SELECTOR, encoding="utf-8")
+    git(tree, "init", "-q", "-b", "main")
+    git(tree, "add", ".")
+    git(tree, "commit", "-q", "-m", "x")
+    (tree / "conftest.py").write_text("X = 1\n", encoding="utf-8")
+    run = run_command("--scratch", "f16", "--tree", str(tree), "--python", sys.executable, "--related", "HEAD")
+    assert run.returncode == 1, run.stdout + run.stderr
+    assert run.stdout.splitlines()[:3] == [import_edge.DEFAULT_NOTE, import_edge.FULL_NOTE,
+                                           "RELATED HEAD: 1 changed paths, all test paths"]
+    assert summary_line(run).startswith("FAIL 1 failed, 1 passed; failed: tests/test_other.py::test_other; ")
 
 
 def declaring(tree: Path, table: str, *, selector: bool = True) -> None:
@@ -224,8 +257,10 @@ def test_related_adds_the_declared_dependents_of_the_changed_paths(tree: Path, a
     (tree / "data/b.txt").write_text("changed\n", encoding="utf-8")
     run = run_command("--scratch", "f12", "--tree", str(tree), "--python", sys.executable, "--related", "HEAD")
     assert run.returncode == 0, run.stdout + run.stderr
-    assert run.stdout.splitlines()[:2] == ["DECLARED tests/test_reader.py <- data/a.txt (+1 more)",
-                                           "RELATED HEAD: 2 changed paths, 1 test paths"]
+    default = [] if selector else [import_edge.DEFAULT_NOTE]
+    assert run.stdout.splitlines()[:len(default) + 2] == [*default,
+                                                          "DECLARED tests/test_reader.py <- data/a.txt (+1 more)",
+                                                          "RELATED HEAD: 2 changed paths, 1 test paths"]
     assert summary_line(run).startswith("PASS 1 passed; log: ")
 
 

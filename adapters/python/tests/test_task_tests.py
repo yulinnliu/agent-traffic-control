@@ -249,8 +249,20 @@ def test_a_mutant_its_selection_and_own_tests_leave_without_tests_stops_before_t
     listing = write_mutants(tmp_path, [{"label": "b", "edits": TEST_EDIT}, {"label": "a", "edits": DEMO_EDIT}])
     assert workspace.run(TASK, "--mutants", str(listing)) == 1
     err = capsys.readouterr().err
-    assert err.startswith("STOP NO_TESTS: no test judges the mutant a: the selector picks none for src/demo.py")
+    assert err.startswith("STOP NO_TESTS: no test judges the mutant a: the selection picks none for src/demo.py")
     assert calls["mutants"] == []
+
+
+def test_without_a_selector_a_mutant_is_judged_by_the_test_files_that_import_its_module(
+        workspace: Workspace, calls: dict[str, list], tmp_path: Path) -> None:
+    """docs/TESTKIT.md § Default import edge: a tree with no ``selector`` gives a mutant of ``src/demo.py`` the
+    test files that import ``demo``."""
+    put(workspace.worktree, {"tests/test_demo.py": "import demo\n\n\ndef test_demo():\n    assert demo.X == 2\n"},
+        "test demo")
+    listing = write_mutants(tmp_path, [{"label": "a", "edits": DEMO_EDIT}])
+    assert workspace.run(TASK, "--mutants", str(listing)) == 0
+    [(_argv, entries)] = calls["mutants"]
+    assert entries[0]["tests"] == ["tests/test_demo.py"]
 
 
 def test_tests_after_dashes_judge_every_mutant_from_the_given_file(

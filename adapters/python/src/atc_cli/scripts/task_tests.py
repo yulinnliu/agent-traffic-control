@@ -214,10 +214,11 @@ def selected_mutants(entries: list[dict], directory: Path, place: Path,
     chosen: list[str] = []
     for entry in entries:
         paths = sorted({edit["path"] for edit in entry["edits"]})
-        picked = [t if prefix == "." else f"{prefix}/{t}" for t in testrun.touched(directory, python, paths, environ)]
+        edge = testrun.touched(directory, python, paths, environ)
+        picked = [t if prefix == "." else f"{prefix}/{t}" for t in edge.tests]
         entry["tests"] = list(dict.fromkeys([*picked, *entry.get("tests", ())]))
         if not entry["tests"]:
-            raise Refusal("NO_TESTS", f"no test judges the mutant {entry['label']}: the selector picks none for "
+            raise Refusal("NO_TESTS", f"no test judges the mutant {entry['label']}: the selection picks none for "
                                       f"{', '.join(paths)} and it names no tests", "name the judging tests after -- "
                                                                                     "or in the mutant's tests")
         chosen += entry["tests"]
