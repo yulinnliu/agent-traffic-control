@@ -6,7 +6,7 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
-from . import managed
+from . import dependents as declarations, managed
 from .git import BaselineDelta
 
 
@@ -65,6 +65,26 @@ class Selection:
     full: bool = False
     test_dirs: set[str] = field(default_factory=set)
     reasons: list[str] = field(default_factory=list)
+    declared: dict[str, list[str]] = field(default_factory=dict)
+
+    def declare(self, hits: Mapping[str, Iterable[str]]) -> None:
+        """Add the declared dependents ``hits`` names, each with the changed paths that selected it
+        (docs/TESTKIT.md § Declared dependents). They join the paths this selection's own ``pytest_paths`` gives,
+        a subclass's included, after any rewrite of its groups."""
+        if "pytest_paths" not in self.__dict__:
+            own = self.pytest_paths
+
+            def pytest_paths() -> list[str] | None:
+                paths = own()
+                if paths == []:
+                    return []
+                return declarations.merge(paths or [], self.declared)[0] or None
+
+            self.pytest_paths = pytest_paths
+        for test, paths in hits.items():
+            paths = list(paths)
+            self.declared.setdefault(test, []).extend(paths)
+            self.reasons.extend(f"{path}: declared dependent {test}" for path in paths)
 
     def add(self, path: str, dirs: Iterable[str], why: str) -> None:
         selected = set(dirs)
@@ -82,7 +102,8 @@ class Selection:
         self.reasons.append(f"{path}: {why} -> full suite")
 
     def pytest_paths(self) -> list[str] | None:
-        """Explicit paths, [] for the default suite, or None for no test inputs."""
+        """Explicit paths, [] for the default suite, or None for no test inputs (``declare`` adds the declared
+        dependents to them)."""
         self._validate_groups(self.test_dirs)
         if self.full or set(self.test_order) <= self.test_dirs:
             return []

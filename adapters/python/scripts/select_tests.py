@@ -10,7 +10,8 @@ root. Selection is by test file and reads the static structure of the code:
   module too: it selects itself and the test files that import it.
 - A test file that reads a directory or file of this checkout the graph cannot
   see (a glob, a copy, a script reading its own checkout) is declared in
-  `DIRECTORY_READERS` and runs for a change to that entry or below it.
+  `[tool.atc-testkit.dependents]` of `pyproject.toml` and runs for a change a
+  pattern of it names (docs/TESTKIT.md § Declared dependents).
 - A guarded path (`GUARDED`: `shared/governance/`, `shared/skills/`, the
   rendered `.claude/skills/`, `.agents/skills/` and `.dsh/skills/`, and every
   Markdown file outside `shared/` and outside a `.venv` environment) selects
@@ -56,6 +57,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
+from atc_testkit import dependents
 from atc_testkit.selection import Selection, string_literals
 
 ADAPTER_DIR = Path(__file__).resolve().parents[1]
@@ -88,9 +90,6 @@ SOURCE_ROOTS = {
 SHARED = "shared"
 TASK_RECORDS = ".atc/tasks"
 SCRIPTS = f"{ADAPTER}/scripts"
-CLI_SRC = f"{ADAPTER}/src/atc_cli"
-TESTKIT_SRC = f"{ADAPTER}/atc-testkit/src/atc_testkit"
-TESTKIT_README = f"{ADAPTER}/atc-testkit/README.md"
 # The root's own guidance, skills and rendered copies, and Markdown outside `shared/`: only their
 # declared readers select for them. Markdown under another `shared/<area>/` keeps its area's rule.
 TOP_MARKDOWN = "*.md"  # every Markdown file at the workspace root
@@ -103,25 +102,12 @@ SCRIPT_READS = (
     "shared/governance", "shared/skills", ".claude/skills", ".agents/skills", ".dsh/skills", TOP_MARKDOWN,
     "shared/templates",
 )
-# Test files that read a directory or file of this checkout the graph cannot
-# see: a glob, a copy, a digest, a guarded path, or a script that reads them.
-# Each runs for a change to an entry or below it; `tests/root_reads.py` fails
-# a session whose test files read a guarded path undeclared.
-DIRECTORY_READERS = {
-    f"{TESTS}/test_testkit_tmp.py": (TESTKIT_SRC,),
-    f"{TESTS}/test_testkit_release.py": (TESTKIT_SRC, TESTKIT_README),
-    f"{TESTS}/test_testkit_evidence.py": (TESTKIT_README,),
-    f"{TESTS}/test_select_tests.py": (SCRIPTS, CLI_SRC, TESTKIT_SRC, TESTS),
-    f"{TESTS}/test_tooling.py": ("shared/skills", ".dsh/skills"),
-    f"{TESTS}/test_manifest_content.py": ("atc-manifest.yaml",),
-    f"{TESTS}/test_integration_verify.py": ("AGENTS.md",),
-    # Builds with this checkout's site configuration and compares the Pages workflow's paths with the hook's.
-    f"{TESTS}/test_docs_site.py": ("site", ".github/workflows/pages.yml", ".pre-commit-config.yaml"),
-    f"{TESTS}/test_shell_install.py": SCRIPT_READS,
-    f"{TESTS}/test_packaged_schemas.py": ("shared/policies/schemas", f"{CLI_SRC}/schemas"),
-    # Builds and installs the wheels in a subprocess: any packaged module or the policy it composes.
-    f"{TESTS}/test_wheel_install.py": (CLI_SRC, TESTKIT_SRC, "policies/hard-deny.yaml"),
-}
+def directory_readers(workspace: Path = WORKSPACE) -> dict[str, tuple[str, ...]]:
+    """The test files and directories `[tool.atc-testkit.dependents]` declares, relative to ``workspace``, each with
+    the patterns of what it reads; `tests/root_reads.py` fails a session whose test files read a guarded path
+    undeclared."""
+    declared = dependents.load(workspace / ADAPTER, workspace)
+    return {f"{ADAPTER}/{test}": patterns for test, patterns in declared.entries.items()}
 
 
 def covers(entry: str, path: str) -> bool:
@@ -205,7 +191,13 @@ class Graph:
         self.edges = {name: self._edges(module) for name, module in self.modules.items()}
         self.load_set = self._load_set()
         self.reach = {test: self._closure(self.by_path[test].name) for test in self.tests}
-        undeclared = set(DIRECTORY_READERS) - set(self.tests)
+        self.readers: dict[str, tuple[str, ...]] = {}
+        undeclared = []
+        for key, patterns in directory_readers(workspace).items():
+            covered = [test for test in self.tests if test == key or test.startswith(f"{key}/")]
+            undeclared += [] if covered else [key]
+            for test in covered:
+                self.readers[test] = (*self.readers.get(test, ()), *patterns)
         if undeclared:
             raise ValueError(f"declared directory readers are not test files: {sorted(undeclared)}")
 
@@ -289,7 +281,7 @@ def classify(path: str, selection: TestSelection, graph: Graph) -> None:
     if path in FULL_FILES:
         selection.widen(path, "collection, dependency or marker input of every test")
         return
-    readers = {test for test, entries in DIRECTORY_READERS.items() if any(covers(e, path) for e in entries)}
+    readers = {test for test, patterns in graph.readers.items() if any(dependents.matches(p, path) for p in patterns)}
     if any(covers(entry, path) for entry in GUARDED):
         if pure.suffix.lower() != ".md" and not path.endswith("/") and not (graph.workspace / path).is_dir():
             readers |= graph.naming((pure.name,))

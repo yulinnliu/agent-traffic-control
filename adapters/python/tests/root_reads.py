@@ -1,7 +1,7 @@
 """The guard of declared readers: a test file that reads a guarded path of the checkout undeclared fails the session.
 
 `scripts/select_tests.py` selects for a guarded path only the test files
-`DIRECTORY_READERS` declares, so an undeclared reader would be missed; this
+`[tool.atc-testkit.dependents]` declares, so an undeclared reader would be missed; this
 plugin records, through one audit hook per process and by test file, every
 file open, directory listing, glob and copy under a guarded path, and counts a
 child command that runs the checkout's `scripts/*.sh` as a read of every path
@@ -19,6 +19,7 @@ from pathlib import Path
 
 import pytest
 
+from atc_testkit import dependents
 import select_tests
 
 TOKEN = "ROOT_READ_UNDECLARED"
@@ -74,7 +75,7 @@ class RootReads:
 
     @classmethod
     def for_checkout(cls) -> RootReads:
-        return cls(select_tests.WORKSPACE, select_tests.GUARDED, select_tests.DIRECTORY_READERS,
+        return cls(select_tests.WORKSPACE, select_tests.GUARDED, select_tests.directory_readers(),
                    select_tests.SCRIPT_READS)
 
     def audit(self, event: str, args: tuple) -> None:
@@ -115,8 +116,9 @@ class RootReads:
     def undeclared(self) -> dict[str, list[str]]:
         found = {}
         for test, paths in sorted(self.reads.items()):
-            declared = self.readers.get(test, ())
-            missing = sorted(p for p in paths if not any(select_tests.covers(entry, p) for entry in declared))
+            declared = [entry for key, entries in self.readers.items() if test == key or test.startswith(f"{key}/")
+                        for entry in entries]
+            missing = sorted(p for p in paths if not any(dependents.matches(entry, p) for entry in declared))
             if missing:
                 found[test] = missing
         return found
@@ -150,7 +152,8 @@ class RootReads:
         self.failure.extend(getattr(node, "workeroutput", {}).get(WORKER_KEY, ()))
 
     def pytest_sessionfinish(self, session: pytest.Session) -> None:
-        self.failure.extend(f"{TOKEN}: {test} reads {', '.join(paths)}; declare it in select_tests.DIRECTORY_READERS"
+        self.failure.extend(f"{TOKEN}: {test} reads {', '.join(paths)}; declare it in [tool.atc-testkit.dependents] "
+                            "of adapters/python/pyproject.toml"
                             for test, paths in self.undeclared().items())
         if hasattr(session.config, "workerinput"):
             session.config.workeroutput[WORKER_KEY] = list(self.failure)

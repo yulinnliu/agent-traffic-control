@@ -86,3 +86,13 @@ def test_a_declared_reader_and_a_read_of_an_environment_pass(checkout: Path, tes
     result = run(checkout, test)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "ROOT_READ_UNDECLARED" not in result.stdout
+
+
+def test_a_directory_key_declares_the_reads_of_every_test_file_below_it(tmp_path: Path) -> None:
+    import root_reads
+    guard = root_reads.RootReads(tmp_path, ("shared/skills", "shared/governance"), {"tests/sub": ("shared/skills",)}, ())
+    guard.reads = {"tests/sub/test_a.py": {"shared/skills/demo/skill.md"},
+                   "tests/subway/test_b.py": {"shared/skills/demo/skill.md"},
+                   "tests/sub/test_c.py": {"shared/governance/core.md"}}
+    assert guard.undeclared() == {"tests/sub/test_c.py": ["shared/governance/core.md"],
+                                  "tests/subway/test_b.py": ["shared/skills/demo/skill.md"]}

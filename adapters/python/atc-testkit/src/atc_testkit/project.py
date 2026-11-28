@@ -5,13 +5,14 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import config, stages, toolchain as toolchains
+from . import config, dependents, locations, stages, toolchain as toolchains
 from .evidence import Stage
 from .git import BaselineDelta
 from .selection import Selection
 from .toolchain import Toolchain
 
 Select = Callable[[Sequence[str], Mapping[str, BaselineDelta] | None], Selection]
+DECLARES = "atc_declares_dependents"  # marks a select that already adds the declared dependents
 
 
 def always(_paths: Sequence[str] | None) -> bool:
@@ -69,6 +70,29 @@ class Project:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "table", config.tool_table(self.root))
+        if self.select is not None and not getattr(self.select, DECLARES, False):
+            object.__setattr__(self, "select", self._with_declared(self.select))
+
+    def _with_declared(self, select: Select) -> Select:
+        """``select`` with the declared dependents of the changed paths added (docs/TESTKIT.md § Declared
+        dependents), the declaration read and checked once, at the first selection; ``root`` is the repository
+        top the changed paths are relative to, as everywhere the gate and the verifier read them."""
+        loaded: list[dependents.Dependents] = []
+
+        def selected(paths: Sequence[str], baseline_deltas: Mapping[str, BaselineDelta] | None) -> Selection:
+            if not loaded:
+                try:
+                    loaded.append(dependents.load(self.root, self.root))
+                except dependents.DependentsInvalid as error:
+                    raise locations.Refusal(stages.CONFIG_INVALID,
+                                            f"{self.root / 'pyproject.toml'}: [tool.atc-testkit] {error}",
+                                            stages.CONFIG_EXIT) from None
+            selection = select(paths, baseline_deltas)
+            selection.declare(loaded[0].select(paths))
+            return selection
+
+        setattr(selected, DECLARES, True)
+        return selected
 
     def _data(self, value: tuple[str, ...] | None, key: str) -> tuple[str, ...]:
         return tuple(self.table.get(key, ())) if value is None else value

@@ -76,6 +76,8 @@ def _data_problems(root: Path, project: dict, config: dict, workflow: dict,
         problems.append(f'[tool.atc-testkit] toolchain must be one of {", ".join(TOOLCHAINS)}')
     if 'ci_init' in config and not (isinstance(config['ci_init'], str) and INITIALIZATION.fullmatch(config['ci_init'])):
         problems.append('[tool.atc-testkit] ci_init must be module:function')
+    from atc_testkit import dependents
+    problems.extend(f'[tool.atc-testkit] {problem}' for problem in dependents.problems(root, root))
     if isinstance(config.get('unmarked_baseline'), str) and not _inside(root, config['unmarked_baseline']).is_file():
         problems.append(f'unmarked baseline is missing: {config["unmarked_baseline"]}')
     if config.get('slow_ci_job') not in workflow['jobs']:

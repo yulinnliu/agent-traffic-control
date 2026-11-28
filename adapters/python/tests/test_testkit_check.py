@@ -276,6 +276,17 @@ ignore = { posix = ["tests/x.py"], nt = [] }'''), encoding='utf-8')
 
 
 @pytest.mark.unit
+def test_the_declared_dependents_are_checked_with_the_contract(repository):
+    path = repository / 'pyproject.toml'
+    path.write_text(path.read_text(encoding='utf-8')
+                    + '[tool.atc-testkit.dependents]\n"tests/test_case.py" = ["scripts/*.py"]\n', encoding='utf-8')
+    assert repository_problems(repository) == []
+    path.write_text(path.read_text(encoding='utf-8').replace('"scripts/*.py"', '"scripts/gone_*.py"'), encoding='utf-8')
+    assert repository_problems(repository) == [
+        '[tool.atc-testkit] dependents: tests/test_case.py: scripts/gone_*.py: matches no file']
+
+
+@pytest.mark.unit
 def test_the_checker_reads_only_the_atc_testkit_record(repository):
     (repository / 'vendor/atc-testkit.json').rename(repository / 'vendor/hami-testkit.json')
     problems = repository_problems(repository)

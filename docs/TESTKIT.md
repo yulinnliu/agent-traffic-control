@@ -415,7 +415,8 @@ place.
   - `selection` (`full`, `related`, `explicit`, `none` or
     `documentation-only`) and `selection_reason`: for `full`, the first
     path reason that widened it, with `(+<n> more)`; for `related`,
-    `<n> changed paths`; for `explicit`, what named the tests.
+    `<n> changed paths`, and `<n> changed paths, <d> declared` when `atc test ID`
+    printed `<d>` `DECLARED` lines; for `explicit`, what named the tests.
   - `reused_files` and `run_files` on a stage that input evidence split
     (§ Input evidence), else `null`.
   - `sha` is the commit tested: for `atc test ID`, the export's commit, else
@@ -500,6 +501,50 @@ reads it. `SelectionPolicy.root` names the repository whose skill copies are
 read; without it only the path rules apply, and a skill copy follows the
 project's rules. The verifier counts a managed path as documentation-only
 (governance `VERIFICATION.md` § Documentation-only verification).
+
+## Declared dependents
+
+A test that reads a file without importing it (a glob over scripts, a
+file's text, a directory listing, a child process) sits on no import edge,
+so the project declares it in the optional `[tool.atc-testkit.dependents]`
+table of the test directory's `pyproject.toml`:
+
+```toml
+[tool.atc-testkit.dependents]
+"scripts/tests/test_mutation_targets.py" = ["scripts/verify_*_mutations.py", "packages/*/src/**/*.py"]
+```
+
+- A key is a `test_*.py` file or a directory holding one, relative to the
+  test directory, as pytest receives it. Its value is a non-empty list of
+  path patterns relative to the repository top, as the changed paths of
+  `atc test ID` step 2 are: the files that test reads.
+- A pattern is `/`-separated and case-sensitive. `*` is any run of
+  characters within a segment, `?` one character, and a `**` segment any
+  number of segments. A pattern with neither `*` nor `?` names itself and
+  everything below it. A pattern is not empty, does not start with `/`, and
+  holds no `\`, `[`, `]`, no drive, no empty, `.` or `..` segment, and no
+  `**` inside a longer segment.
+- A key one of whose patterns matches a changed path is selected. A
+  declaration adds no closure: a declared test brings in no test that
+  imports it. A selected path below another selected directory is dropped.
+- The declaration is checked before any test runs. Each problem below stops
+  `atc test ID` (every form), the gate and the verifier with
+  `ATC_CONFIG_INVALID` (exit 9), naming the first problem and how many
+  more. The testkit contract check (`atc_testkit.check`) reports each one:
+  - `dependents: <key>: not a list of path patterns`
+  - `dependents: <key>: no such test file or directory`
+  - `dependents: <key>: <pattern>: invalid pattern`
+  - `dependents: <key>: <pattern>: matches no file`, for a pattern no file
+    or directory under the repository top matches, so a rename that leaves
+    a declaration behind stops the next run.
+- `atc test ID` adds the declared tests to its related run (§ Commands).
+  Every `select` a `Project` carries adds them to its selection, so the
+  pre-push gate and the verifier run them, after the paths the project's
+  own selection gives, once a `Selection` subclass has rewritten its groups;
+  a full-suite selection is unchanged. Each adds the reason
+  `<path>: declared dependent <key>`. The mutant selection of
+  `atc test ID --mutants` does not read them: a declared test that reads a
+  file's text would fail on every edit and count as the mutant's killer.
 
 ## Lint stage
 
@@ -836,8 +881,9 @@ command of the root's `AGENTS.md`.
 
 One isolated pytest run for the task `ID` after the lint stage
 (§ Lint stage), its output kept in a log. By default it runs the related tests, the test files changed since the record's
-`base_sha` and the test files that import a changed module directly, one edge
-and no closure, in the task's worktree, in the scratch `<ID>`
+`base_sha`, the test files that import a changed module directly, one edge
+and no closure, and the declared dependents of the changed paths
+(§ Declared dependents), in the task's worktree, in the scratch `<ID>`
 (`ATC_HOME.md` § Test scratch). `--sha SHA` runs them in an export of `SHA`,
 in the scratch `<ID>-<sha7>`, whose environment is built once; `--all` runs
 the full suite. Pytest arguments after `--` make an explicit run: pytest gets
@@ -861,8 +907,10 @@ scratch entries. In order:
    (`ATC_HOME.md` § Scratch registry) with the task, and after that its
    directory and `qdr`; a scratch whose line names another task stops with
    `SCRATCH_TASK_MISMATCH`, and one that cannot be made with
-   `SCRATCH_NOT_CREATED`. So a refusal before the line leaves no directory,
-   and a later one leaves the scratch registered.
+   `SCRATCH_NOT_CREATED`. Then the tree's `[tool.atc-testkit.dependents]` is
+   checked, in every form: `ATC_CONFIG_INVALID` (§ Declared dependents). So a
+   refusal before the line leaves no directory, and a later one leaves the
+   scratch registered.
 2. Unless `--all` or pytest arguments are given, the related tests come
    from the tree's `[tool.atc-testkit]` `selector`, a list of strings: the
    argv of a command that takes changed paths as arguments and, with `--direct` after them,
@@ -872,7 +920,11 @@ scratch entries. In order:
    `git diff --name-only <base_sha>` and the untracked files of the tree's
    working tree, relative to its top; for an export, the diff from
    `<base_sha>` to the exported commit. A selector that fails with `--direct`
-   gives the changed test files of the tree. The line
+   gives the changed test files of the tree. The declared dependents the
+   changed paths select join them (§ Declared dependents), each one the
+   selector did not print with the line
+   `DECLARED <test path> <- <first changed path it matched>`, plus
+   ` (+<m> more)` when it matched more. The line
    `RELATED <base>: <n> changed paths, <k> test paths` follows; with
    none selected, `NO_TESTS no test selected` ends the command with exit 0.
    Pytest arguments after `--` select nothing: pytest gets exactly those
@@ -955,7 +1007,8 @@ when `--sha` is absent) in the scratch `<ID>-<sha7>`, through the isolation of
 `atc test ID`. The judging tests are the `TEST...` after `--`, which judge
 every mutant. Without them, each mutant is judged by the tests the tree's
 `selector` picks with `--direct` for the paths its edits name (§ Commands,
-`atc test ID` step 2), followed by its own `tests`; a mutant that gets none
+`atc test ID` step 2), without the declared dependents
+(§ Declared dependents), followed by its own `tests`; a mutant that gets none
 stops the command with `NO_TESTS` before the baseline. That list goes to
 `<scratch>/mutants-selected.json` with each mutant's `tests` filled in, and
 the baseline runs their union, never the task's related tests. Each run is pytest with `-x` and a
@@ -1161,7 +1214,8 @@ In `[tool.atc-testkit]`; the first seven keys are required:
 | `ci_platforms` | the CI platform matrix |
 | `ci_init` | the CI runner's initialization function, as `module:function` |
 | `ignore` | `--ignore` paths appended to a stage, under `nt` and `posix` |
-| `selector` | the argv of the command the related-test selection of `atc test ID` runs; with `--direct` after the changed paths it prints only the changed test files and the test files one import from a changed module, which `atc test ID` runs (§ Commands) |
+| `selector` | the argv of the command the related-test selection of `atc test ID` runs; with `--direct` after the changed paths it prints only the changed test files and the test files one import from a changed module, which `atc test ID` runs with the declared dependents (§ Commands) |
+| `dependents` | a table of test files or directories, each with the path patterns of the files it reads without importing them (§ Declared dependents) |
 | `toolchain` | the toolchain's name, `python` when absent (§ Toolchain) |
 | `worker_memory_mib` | the memory one test worker is counted to need, an integer from 1 to 65536; when absent, the project's recorded cost on a host, else 256 (§ Stages); any other value stops a run with `ATC_CONFIG_INVALID` (exit 9) |
 

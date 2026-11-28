@@ -202,6 +202,54 @@ def test_without_a_working_selector_related_runs_the_changed_test_files(tree: Pa
     assert summary_line(run).startswith("PASS 1 passed; log: ")
 
 
+def declaring(tree: Path, table: str, *, selector: bool = True) -> None:
+    """The tree with a test that reads ``data/`` and ``table`` as its ``[tool.atc-testkit.dependents]``."""
+    (tree / "data").mkdir()
+    (tree / "data/a.txt").write_text("a\n", encoding="utf-8")
+    (tree / "data/b.txt").write_text("b\n", encoding="utf-8")
+    (tree / "tests/test_reader.py").write_text(PASSING, encoding="utf-8")
+    (tree / "pyproject.toml").write_text('[project]\nname = "flagged"\nversion = "1"\n[tool.atc-testkit]\n'
+                                         + ('selector = ["sel.py"]\n' if selector else "")
+                                         + f"[tool.atc-testkit.dependents]\n{table}", encoding="utf-8")
+    git(tree, "init", "-q", "-b", "main")
+    git(tree, "add", ".")
+    git(tree, "commit", "-q", "-m", "x")
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("selector", [True, False])
+def test_related_adds_the_declared_dependents_of_the_changed_paths(tree: Path, atc_tmp: Path, selector: bool) -> None:
+    declaring(tree, '"tests/test_reader.py" = ["data/*.txt"]\n', selector=selector)
+    (tree / "data/a.txt").write_text("changed\n", encoding="utf-8")
+    (tree / "data/b.txt").write_text("changed\n", encoding="utf-8")
+    run = run_command("--scratch", "f12", "--tree", str(tree), "--python", sys.executable, "--related", "HEAD")
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert run.stdout.splitlines()[:2] == ["DECLARED tests/test_reader.py <- data/a.txt (+1 more)",
+                                           "RELATED HEAD: 2 changed paths, 1 test paths"]
+    assert summary_line(run).startswith("PASS 1 passed; log: ")
+
+
+@pytest.mark.integration
+def test_a_declared_test_the_selector_already_chose_prints_no_declared_line(tree: Path, atc_tmp: Path) -> None:
+    declaring(tree, '"tests/test_value.py" = ["src"]\n')
+    (tree / "src/flagged_pkg/__init__.py").write_text("X = 4\n", encoding="utf-8")
+    run = run_command("--scratch", "f13", "--tree", str(tree), "--python", sys.executable, "--related", "HEAD")
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert run.stdout.splitlines()[0] == "RELATED HEAD: 1 changed paths, 1 test paths"
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("form", [("--related", "HEAD"), ("--", "tests/test_value.py"), ()])
+def test_a_stale_declaration_stops_every_form_before_any_test(tree: Path, atc_tmp: Path, form: tuple[str, ...]) -> None:
+    declaring(tree, '"tests/test_reader.py" = ["data/gone_*.txt"]\n')
+    run = run_command("--scratch", "f14", "--tree", str(tree), "--python", sys.executable, *form)
+    assert run.returncode == 9, run.stdout + run.stderr
+    assert run.stderr.startswith("ATC_CONFIG_INVALID ")
+    assert run.stderr.rstrip().endswith("[tool.atc-testkit] dependents: tests/test_reader.py: data/gone_*.txt: "
+                                        "matches no file")
+    assert run.stdout == "" and not (atc_tmp / "f14" / testrun.RUNS).exists()
+
+
 @pytest.mark.integration
 def test_a_base_the_tree_does_not_know_is_refused(tree: Path, atc_tmp: Path) -> None:
     git(tree, "init", "-q", "-b", "main")

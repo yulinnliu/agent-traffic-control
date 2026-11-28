@@ -19,7 +19,7 @@ import threading
 import time
 import xml.etree.ElementTree as ElementTree
 
-from . import checkout, config, desktop, elapsed, evidence, inputs, isolation, lines, lint, locations, \
+from . import checkout, config, dependents, desktop, elapsed, evidence, inputs, isolation, lines, lint, locations, \
     python_toolchain, scratch, stages
 from . import timing
 from . import toolchain as toolchains
@@ -1035,6 +1035,29 @@ def touched(tree: Path, python: str, paths: Sequence[str], environ: Mapping[str,
     return tests
 
 
+def declared_dependents(tree: Path, top: Path) -> dependents.Dependents:
+    """``tree``'s ``[tool.atc-testkit.dependents]``; a declaration that breaks § Declared dependents is refused with
+    ``ATC_CONFIG_INVALID``."""
+    try:
+        return dependents.load(tree, top)
+    except dependents.DependentsInvalid as error:
+        raise Refusal(stages.CONFIG_INVALID, f"{tree / 'pyproject.toml'}: [tool.atc-testkit] {error}",
+                      stages.CONFIG_EXIT) from None
+
+
+def with_declared(chosen: Sequence[str], paths: Sequence[str],
+                  declared: dependents.Dependents) -> tuple[list[str], list[str]]:
+    """The selector's test paths with the declared dependents ``paths`` select, and one ``DECLARED`` line per test
+    path the declaration added."""
+    hits = declared.select(paths)
+    merged, added = dependents.merge(chosen, hits)
+    notes = []
+    for test in added:
+        more = len(hits[test]) - 1
+        notes.append(f"DECLARED {test} <- {hits[test][0]}" + (f" (+{more} more)" if more else ""))
+    return merged, notes
+
+
 def summary(result: Result | None, log: Path) -> tuple[str, int]:
     """The one console line after a run and the command's exit code; ``None`` is an interrupted wait."""
     if result is None:
@@ -1074,8 +1097,8 @@ def run(argv: Sequence[str], environ: MutableMapping[str, str] | None = None) ->
                         help="the task the scratch belongs to, for example ATC-0008; a scratch registered to another "
                              "task is refused")
     parser.add_argument("--related", metavar="SHA",
-                        help="run only the changed test files and the test files that import a changed module "
-                             "directly, for the paths changed since SHA")
+                        help="run only the changed test files, the test files that import a changed module "
+                             "directly and the declared dependents, for the paths changed since SHA")
     parser.add_argument("--lint", action="store_true",
                         help="first run the lint stage over the whole tree; a failure ends the run")
     parser.add_argument("--lint-only", action="store_true", help="run the lint stage of --lint and no test")
@@ -1100,6 +1123,7 @@ def run(argv: Sequence[str], environ: MutableMapping[str, str] | None = None) ->
         raise Refusal("TREE_NOT_FOUND", f"the scratch {place.name} names no tree; pass --tree")
     python = resolve_python(args.python) if args.python else toolchains.for_tree(tree).interpreter(tree)
     claim_scratch(root, place, tree, args.task)
+    declared = declared_dependents(tree, repository_top(tree, place))
     paths = changed_paths(tree, args.related, row) if args.related else None
     if paths is not None:
         selected = (elapsed.RELATED, f"{len(paths)} changed paths")
@@ -1117,7 +1141,10 @@ def run(argv: Sequence[str], environ: MutableMapping[str, str] | None = None) ->
     items = None
     source = RunSource.of(tree, place, row) if args.verifier_argv and not pytest_arguments else None
     if paths is not None:
-        chosen = touched(tree, python, paths, child)
+        chosen, notes = with_declared(touched(tree, python, paths, child), paths, declared)
+        if notes:
+            selected = (elapsed.RELATED, f"{len(paths)} changed paths, {len(notes)} declared")
+            print(*notes, sep="\n", flush=True)
         head = f"RELATED {args.related}: {len(paths)} changed paths, {len(chosen)} test paths"
         if not chosen:
             print(head, "NO_TESTS no test selected", sep="\n", flush=True)

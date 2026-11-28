@@ -46,9 +46,15 @@ def test_a_testkit_module_selects_the_tests_that_scan_the_whole_package(graph):
 
 
 def test_a_declared_reader_must_be_a_test_file(monkeypatch):
-    monkeypatch.setitem(select_tests.DIRECTORY_READERS, f"{ADAPTER}/tests/test_missing.py", (select_tests.SCRIPTS,))
+    monkeypatch.setattr(select_tests, "directory_readers",
+                        lambda workspace: {f"{ADAPTER}/tests/test_missing.py": (select_tests.SCRIPTS,)})
     with pytest.raises(ValueError, match="test_missing.py"):
         select_tests.Graph()
+
+
+def test_the_declared_readers_are_the_pyproject_dependents_table(graph):
+    assert graph.readers[f"{ADAPTER}/tests/test_integration_verify.py"] == ("AGENTS.md",)
+    assert "*.md" in graph.readers[f"{ADAPTER}/tests/test_shell_install.py"]
 
 
 def test_a_test_file_selects_itself_and_the_test_files_that_import_it(graph):
@@ -77,7 +83,7 @@ def test_the_selector_and_its_guard_select_the_full_suite(graph):
 
 def small_graph(tmp_path, monkeypatch, files: dict[str, str]) -> select_tests.Graph:
     """A graph of a workspace holding only ``files``, given relative to the adapter."""
-    monkeypatch.setattr(select_tests, "DIRECTORY_READERS", {})
+    monkeypatch.setattr(select_tests, "directory_readers", lambda workspace: {})
     for rel, text in {"atc-testkit/src/atc_testkit/plugin.py": "", **files}.items():
         (tmp_path / ADAPTER / rel).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / ADAPTER / rel).write_text(text, encoding="utf-8")
@@ -234,20 +240,21 @@ def test_a_guarded_path_selects_its_declared_readers_only(graph, path, readers):
 
 
 def test_a_root_file_entry_selects_its_reader_and_nothing_beside_it(graph, monkeypatch):
-    monkeypatch.setattr(select_tests, "DIRECTORY_READERS", {f"{ADAPTER}/tests/test_integration_verify.py": ("AGENTS.md",)})
+    monkeypatch.setattr(graph, "readers", {f"{ADAPTER}/tests/test_integration_verify.py": ("AGENTS.md",)})
     assert chosen(graph, "AGENTS.md") == ["tests/test_integration_verify.py"]
     assert select_tests.covers("AGENTS.md", "AGENTS.md") and not select_tests.covers("AGENTS.md", "AGENTS.mdx")
 
 
-@pytest.mark.parametrize(("entry", "path"), [
-    ("shared/skills", "Shared/Skills/atc-review/SKILL.md"),
-    ("shared/skills/", "shared/skills/atc-review/SKILL.md"),
-    (r"shared\skills", "shared/skills/atc-review/SKILL.md"),
-    ("AGENTS.md", "agents.md"),
+@pytest.mark.parametrize(("path", "selected"), [
+    ("shared/skills/atc-review/SKILL.md", True),
+    (r"shared\skills\atc-review\SKILL.md", True),
+    ("shared/skills/", True),
+    ("Shared/Skills/atc-review/SKILL.md", False),
+    ("shared/skillset/x.md", False),
 ])
-def test_an_entry_matches_whatever_its_case_separators_and_trailing_slash(graph, monkeypatch, entry, path):
-    monkeypatch.setattr(select_tests, "DIRECTORY_READERS", {f"{ADAPTER}/tests/test_tooling.py": (entry,)})
-    assert chosen(graph, path) == ["tests/test_tooling.py"]
+def test_a_declared_pattern_matches_any_separator_in_its_own_case(graph, monkeypatch, path, selected):
+    monkeypatch.setattr(graph, "readers", {f"{ADAPTER}/tests/test_tooling.py": ("shared/skills",)})
+    assert ("tests/test_tooling.py" in (chosen(graph, path) or [])) is selected
 
 
 def test_a_rename_selects_for_the_old_and_the_new_path(graph):
@@ -328,7 +335,7 @@ def test_a_guarded_directory_selects_its_declared_readers_only(graph, path):
 
 
 def test_a_guarded_path_no_declared_test_reads_selects_by_kind(graph, monkeypatch):
-    monkeypatch.setattr(select_tests, "DIRECTORY_READERS", {})
+    monkeypatch.setattr(graph, "readers", {})
     assert chosen(graph, "shared/skills/atc-review/SKILL.md") is None
     assert chosen(graph, ".agents/skills/atc-review/no_test_names_this.py") == []
 
