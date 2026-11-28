@@ -1,0 +1,20 @@
+task_id: ATC-0087
+title: Release atc 0.12.0
+repository: yulinnliu/agent-traffic-control
+base_sha: 5f085e4db3406400fd83d22d3cf9660c0c9edd4b
+scope: 'Release atc 0.12.0 with atc-testkit 0.18.0, carrying everything integrated on main since v0.11.0 (986446d): ATC-0080 and ATC-0082 to ATC-0086, plus whatever else `prepare` lists. Follow `docs/development/RELEASING.md`. - **Prepare.** In the worktree, from `adapters/python`, run `uv run --locked atc-maintain release prepare 0.12.0 --testkit 0.18.0`, adding `--min-atc` only if the new testkit needs an atc newer than the current `min_atc` (the notes'' `min_atc` sentence says why either way). - **Notes.** Write every `TODO(release)` in `docs/releases/v0.12.0.md` per RELEASING.md § Release notes, using each task''s record, diff and design doc. Items to cover: - ATC-0084 (`docs/design/ATC-0084.md`): `[tool.atc-testkit.dependents]`, merged with `--direct`, and the refusal of a stale pattern. - ATC-0086 (`docs/design/ATC-0086.md`): the default import edge used when no `selector` is declared. - Both go into the `## atc-testkit 0.18.0` table, with required/skippable for each. They are required
+  for hami-quant-trading, whose ledger tests are missed without them. - ATC-0085: the TESTS_UNAVAILABLE hint wording. - ATC-0080, ATC-0082 and ATC-0083: close-out and skill text. - § Breaking is complete, or states that there is none. - § Projects gives the delta for projects that pin testkit 0.15.0. - **Check.** `uv run --locked atc-maintain release check` passes on the tip. Out of scope: shared/governance/, any project repository, tagging, pushing, publishing.'
+tests: standard
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: 5f085e4db3406400fd83d22d3cf9660c0c9edd4b
+branch: claude+ATC-0087
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
+decisions:
+- 'Owner 2026-11-28 「準備 release」 and version choice: atc 0.12.0, atc-testkit 0.18.0; `min_atc` per the writer''s finding, reviewed.'
+- Release notes describe the final state and what a user must change; they claim nothing the code does not do.
