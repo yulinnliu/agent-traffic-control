@@ -1,0 +1,19 @@
+task_id: ATC-0083
+title: Close-out sends archive_session alone and resends it once on the hook refusal
+repository: yulinnliu/agent-traffic-control
+base_sha: 9476f3177c4c18232336ed3ea159750680b2bbb3
+scope: 'In the Claude desktop app the first `archive_session` call at close-out is refused once: a hook adds a `session` field after auto mode reviewed the input, and any other call in the same message is refused with it. Add to `shared/skills/atc-coordinator/adapters/claude.md`, in the close-out archive constant, that `archive_session` goes in a message of its own and, when that refusal comes, is resent once with exactly the input the refusal quotes. Re-render the managed copies with `atc-maintain sync --root` and run `validate`.'
+tests: none
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: 9476f3177c4c18232336ed3ea159750680b2bbb3
+branch: claude+ATC-0083
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
+decisions:
+- 'Owner 2026-11-28: open this task from RIA-Owner''s retro (every first archive_session refused once; a SendMessage in the same message was refused too); the wording is the writer''s.'
+- 'Owner 2026-11-28: tests none; skill-text change checked by `sync --root` and `validate`.'
