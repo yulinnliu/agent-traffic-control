@@ -1,0 +1,19 @@
+task_id: ATC-0086
+title: Related tests get a default import edge in a project without a selector
+repository: yulinnliu/agent-traffic-control
+base_sha: 6cf47224b4194230bbf4d754f9e84e18d4a72043
+scope: 'A project whose `[tool.atc-testkit]` declares no `selector` gets no import edge in `atc test ID` related selection: only the changed test files and the declared dependents (ATC-0084) run (`docs/TESTKIT.md` § Commands, `atc test ID` step 2). hami-quant-trading is such a project; HQT-0077''s ledger tests (test_check_signals.py, test_runtime_ingest.py) import the changed `hami_quant_trading_signals.ledger` directly and were still not selected (`docs/design/ATC-0084.md` § 5, § 9 D6). Design and specify a testkit default `--direct` used when no `selector` is declared: map each changed path under the tree''s source roots (`packages/*/src`, `src`) to its module and select the test files that import it (scanned with `ast`, no project code imported), keeping related runs small; then implement it in atc-testkit with its conformance or tests and docs. A project''s own `selector` keeps precedence. Writing an HQT selector or declarations is Hami-Coordinator''s, not this task.'
+tests: standard
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: 6cf47224b4194230bbf4d754f9e84e18d4a72043
+branch: claude+ATC-0086
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
+decisions:
+- 'Owner 2026-11-28: ATC-0084 D6 option A, a separate ATC task for a testkit default import-edge `--direct` in projects without a `selector`.'
+- 'The task starts with the writer''s design step (atc-review "Writer: the design step"), design doc `docs/design/<this task ID>.md`; implementation waits for the Owner''s rulings.'
