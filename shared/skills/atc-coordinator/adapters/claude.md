@@ -21,8 +21,10 @@
 - Subscribe to the writer's idle notice where the harness offers it,
   instead of polling.
 - Sessions are archived at close-out (step 6) through the session
-  management tools, and each reviewer subagent of the task is stopped there
-  with TaskStop, after its last re-review.
+  management tools, and each reviewer subagent of the task that is still
+  running or waiting is stopped there with TaskStop, after its last
+  re-review. A TaskStop that answers "No task found" or "is not running"
+  means it already ended: go on.
 - After a task's close-out and archive, when this session's context is
   about 200K tokens or more, the report to the Owner ends by suggesting
   they run `/compact`, which only the Owner can run. Never mid-task.
