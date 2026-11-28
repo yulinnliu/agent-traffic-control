@@ -17,3 +17,4 @@ authority:
 decisions:
 - 'Owner 2026-11-28: ATC-0084 D6 option A, a separate ATC task for a testkit default import-edge `--direct` in projects without a `selector`.'
 - 'The task starts with the writer''s design step (atc-review "Writer: the design step"), design doc `docs/design/<this task ID>.md`; implementation waits for the Owner''s rulings.'
+- 'Owner 2026-11-28, ruled one by one: design docs/design/ATC-0086.md § 8, all option A: D1 the default applies only when no selector key is declared; D2 module roots are the source roots, pytest pythonpath and test-directory helpers; D3 resolve __init__.py re-exports one hop, explicit names only; D4 a changed subdirectory conftest.py selects its directory, the tree-root one runs the full suite; D5 mutant selection uses the default; D6 the root select_tests keeps its own import parsing.'
