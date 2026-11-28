@@ -263,7 +263,10 @@ For a status question, read `atc task list --all`.
   management tools, and each reviewer subagent of the task that is still
   running or waiting is stopped there with TaskStop, after its last
   re-review. A TaskStop that answers "No task found" or "is not running"
-  means it already ended: go on.
+  means it already ended: go on. Each `archive_session` goes in a message of
+  its own, with no other tool call beside it. On the refusal "a hook changed
+  this call's input after auto mode reviewed it", resend it once with exactly
+  the input the refusal quotes.
 - After a task's close-out and archive, when this session's context is
   about 200K tokens or more, the report to the Owner ends by suggesting
   they run `/compact`, which only the Owner can run. Never mid-task.
