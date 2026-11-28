@@ -1,0 +1,19 @@
+task_id: ATC-0082
+title: Close-out stops only a reviewer subagent that is still running
+repository: yulinnliu/agent-traffic-control
+base_sha: 244407d4331d5ddccb4ee59403ca400f374693a3
+scope: The `atc-coordinator` skill's close-out step tells the coordinator to stop each reviewer subagent of the task with TaskStop. A reviewer subagent that finished its last review has already left the background list, so the call only fails ("No task found", "is not running"). Reword `shared/skills/atc-coordinator/SKILL.md` step 6 (the "Stop each reviewer subagent" item) and `shared/skills/atc-coordinator/adapters/claude.md` (the close-out TaskStop line) so only a reviewer subagent the background list still shows as running or waiting is stopped, and a TaskStop that answers it already ended needs nothing more. Re-render the managed copies with `atc-maintain sync --root` and run `validate`.
+tests: none
+governance_source: yulinnliu/agent-traffic-control
+governance_revision: 244407d4331d5ddccb4ee59403ca400f374693a3
+branch: claude+ATC-0082
+authority:
+  edit: true
+  commit: true
+  push_topic: false
+  integrate_main: false
+  push_main: false
+  deploy: false
+decisions:
+- 'Owner 2026-11-28: open this task from Rin-Coordinator''s retro (120 TaskStop calls at close-out, about 107 failed because the subagent had already ended); the wording is the writer''s.'
+- 'Owner 2026-11-28: tests none; skill-text change checked by `sync --root` and `validate`.'
